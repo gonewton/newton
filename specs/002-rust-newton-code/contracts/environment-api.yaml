@@ -1,0 +1,248 @@
+openapi: 3.0.3
+info:
+  title: Newton Loop Environment Variables API
+  description: Environment variable interface specification for Newton Loop tool integration
+  version: 1.0.0
+
+servers:
+  - url: 'environment://newton-loop'
+    description: Newton Loop environment variable interface
+
+paths:
+  /core-variables:
+    get:
+      summary: Core environment variables provided to all tools
+      description: Environment variables available to evaluator, advisor, and executor tools
+      operationId: getCoreEnvironment
+      responses:
+        '200':
+          description: Core environment variables
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  NEWTON_WORKSPACE_PATH:
+                    type: string
+                    description: Absolute path to workspace root directory
+                    example: "/home/user/projects/optimization-workspace"
+                  NEWTON_EXECUTION_ID:
+                    type: string
+                    description: Unique execution identifier (UUID format)
+                    example: "abc123-def456-ghi789"
+                  NEWTON_ITERATION_NUMBER:
+                    type: string
+                    description: Current iteration number (starting from 1)
+                    example: "1"
+
+  /iteration-variables:
+    get:
+      summary: Iteration-specific environment variables
+      description: Additional environment variables provided during iteration execution
+      operationId: getIterationEnvironment
+      responses:
+        '200':
+          description: Iteration-specific environment variables
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  NEWTON_ITERATION_DIR:
+                    type: string
+                    description: Path to current iteration artifacts directory
+                    example: "/workspace/artifacts/iter-1"
+                  NEWTON_EVALUATOR_DIR:
+                    type: string
+                    description: Directory for evaluator output artifacts
+                    example: "/workspace/artifacts/iter-1/evaluator"
+                  NEWTON_ADVISOR_DIR:
+                    type: string
+                    description: Directory for advisor output artifacts
+                    example: "/workspace/artifacts/iter-1/advisor"
+                  NEWTON_EXECUTOR_DIR:
+                    type: string
+                    description: Directory for executor output artifacts
+                    example: "/workspace/artifacts/iter-1/executor"
+                  NEWTON_SCORE_FILE:
+                    type: string
+                    description: File path where evaluator must write numeric score (0-1)
+                    example: "/workspace/artifacts/score.txt"
+
+  /tool-outputs:
+    post:
+      summary: Tool output specifications
+      description: Expected outputs and file formats for each tool type
+      operationId: specifyToolOutputs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/EvaluatorOutput'
+                - $ref: '#/components/schemas/AdvisorOutput'
+                - $ref: '#/components/schemas/ExecutorOutput'
+      responses:
+        '200':
+          description: Tool output accepted
+        '400':
+          description: Invalid tool output format
+
+components:
+  schemas:
+    EvaluatorOutput:
+      type: object
+      required:
+        - score
+      properties:
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Solution quality score (0-1, higher is better)
+          example: 0.85
+        metadata:
+          type: object
+          description: Optional evaluation metadata
+          additionalProperties: true
+          example:
+            confidence: 0.9
+            metrics:
+              accuracy: 0.92
+              loss: 0.15
+      description: Evaluator tool output specification
+
+    AdvisorOutput:
+      type: object
+      required:
+        - recommendations
+      properties:
+        recommendations:
+          type: array
+          items:
+            type: object
+            required:
+              - action
+              - target
+            properties:
+              action:
+                type: string
+                enum: [modify, create, delete, rename]
+                description: Recommended action type
+              target:
+                type: string
+                description: File or component to modify
+              changes:
+                type: object
+                description: Specific changes to apply
+                additionalProperties: true
+              rationale:
+                type: string
+                description: Explanation for the recommendation
+          description: List of improvement recommendations
+        priority:
+          type: string
+          enum: [high, medium, low]
+          description: Overall priority of recommendations
+          default: medium
+      description: Advisor tool output specification
+
+    ExecutorOutput:
+      type: object
+      properties:
+        applied_changes:
+          type: array
+          items:
+            type: object
+            required:
+              - action
+              - target
+            properties:
+              action:
+                type: string
+                enum: [modified, created, deleted, renamed]
+                description: Action that was performed
+              target:
+                type: string
+                description: File or component that was changed
+              success:
+                type: boolean
+                description: Whether the change was applied successfully
+                default: true
+              details:
+                type: string
+                description: Additional details about the change
+          description: Changes that were successfully applied
+        failed_changes:
+          type: array
+          items:
+            type: object
+            required:
+              - action
+              - target
+              - error
+            properties:
+              action:
+                type: string
+                description: Action that failed
+              target:
+                type: string
+                description: File or component that couldn't be changed
+              error:
+                type: string
+                description: Reason for failure
+          description: Changes that failed to apply
+        summary:
+          type: string
+          description: High-level summary of execution results
+      description: Executor tool output specification
+
+    ToolRequirements:
+      type: object
+      properties:
+        exit_codes:
+          type: object
+          properties:
+            success:
+              type: integer
+              enum: [0]
+              description: Success exit code
+              default: 0
+            failure:
+              type: integer
+              minimum: 1
+              maximum: 255
+              description: Failure exit codes
+          description: Expected exit code behavior
+        input_methods:
+          type: array
+          items:
+            type: string
+            enum: [environment_variables, workspace_files, stdin]
+          description: Acceptable input methods
+          default: [environment_variables, workspace_files]
+        output_methods:
+          type: array
+          items:
+            type: string
+            enum: [environment_variables, files, stdout, stderr]
+          description: Acceptable output methods
+          default: [files, stdout]
+        timeout_behavior:
+          type: string
+          enum: [graceful_exit, partial_output, no_cleanup]
+          description: How tool behaves when timeout occurs
+          default: graceful_exit
+        concurrency_safety:
+          type: boolean
+          description: Whether tool can be run concurrently
+          default: false
+      description: General requirements for all Newton Loop tools
+
+  securitySchemes:
+    environmentAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: Environment-based authentication via NEWTON_* variables

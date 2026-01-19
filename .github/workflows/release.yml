@@ -1,0 +1,158 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive_ext: tar.gz
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            archive_ext: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive_ext: zip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools (for musl target)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Verify version matches tag
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          CARGO_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "Tag version $TAG_VERSION does not match Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+
+      - name: Build release binaries
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Create release archives
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            BINARY_NAME=newton.exe
+          else
+            BINARY_NAME=newton
+          fi
+          cp target/${{ matrix.target }}/release/$BINARY_NAME dist/
+          cd dist
+          ARCHIVE_NAME=newton-${{ matrix.target }}.${{ matrix.archive_ext }}
+          if [ "${{ matrix.archive_ext }}" == "tar.gz" ]; then
+            tar -czf $ARCHIVE_NAME $BINARY_NAME
+          else
+            zip $ARCHIVE_NAME $BINARY_NAME
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: newton-${{ matrix.target }}
+          path: dist/newton-${{ matrix.target }}.${{ matrix.archive_ext }}
+
+  create-release:
+    name: Create GitHub Release
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate release notes
+        run: |
+          echo "# Release v${{ github.ref_name }}" > release-notes.md
+          echo "" >> release-notes.md
+          echo "## Changes" >> release-notes.md
+          echo "" >> release-notes.md
+          # Add more release notes generation logic here if needed
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*
+          body_path: release-notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-package-managers:
+    name: Update Package Managers
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout homebrew-cli
+        uses: actions/checkout@v4
+        with:
+          repository: gonewton/homebrew-cli
+          path: homebrew-cli
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout scoop-bucket
+        uses: actions/checkout@v4
+        with:
+          repository: gonewton/scoop-bucket
+          path: scoop-bucket
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update homebrew formula
+        working-directory: homebrew-cli
+        run: |
+          ./generate_formula.sh newton --version ${{ github.ref_name }}
+
+      - name: Update scoop manifest
+        working-directory: scoop-bucket
+        run: |
+          ./generate_manifest.sh newton --version ${{ github.ref_name }}
+
+      - name: Commit and push homebrew updates
+        working-directory: homebrew-cli
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add Formula/newton.rb
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update newton formula to ${{ github.ref_name }}"
+            git push
+          fi
+
+      - name: Commit and push scoop updates
+        working-directory: scoop-bucket
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add bucket/newton.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update newton manifest to ${{ github.ref_name }}"
+            git push
+          fi

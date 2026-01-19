@@ -1,0 +1,65 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '.github/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+
+jobs:
+  auto-release:
+    name: Auto Release
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip release]') && !contains(github.event.pull_request.labels.*.name, 'no-release')"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if Cargo.toml version changed
+        id: check-version
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          LAST_VERSION=${LAST_TAG#v}
+          CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          if [ "$LAST_VERSION" != "$CURRENT_VERSION" ]; then
+            echo "Version changed from $LAST_VERSION to $CURRENT_VERSION, skipping auto-release"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Version unchanged, proceeding with auto-release"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump patch version
+        if: steps.check-version.outputs.skip == 'false'
+        run: |
+          CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
+          NEW_PATCH=$((patch + 1))
+          NEW_VERSION="$major.$minor.$NEW_PATCH"
+          sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" Cargo.toml
+
+      - name: Commit version bump
+        if: steps.check-version.outputs.skip == 'false'
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add Cargo.toml
+          NEW_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          git commit -m "chore: bump version to $NEW_VERSION"
+
+      - name: Push changes
+        if: steps.check-version.outputs.skip == 'false'
+        run: git push
+
+      - name: Create tag
+        if: steps.check-version.outputs.skip == 'false'
+        run: |
+          NEW_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          git tag "v$NEW_VERSION"
+          git push origin "v$NEW_VERSION"

@@ -1,0 +1,32 @@
+# newton Development Guidelines
+
+Auto-generated from all feature plans. Last updated: 2026-01-19
+
+## Active Technologies
+- Rust (stable toolchain, focus on reliability and performance) + `clap` (CLI parsing), `tokio` (async runtime), `anyhow`/`thiserror` (error handling), `tracing` (structured logging), `serde`/`serde_json` (data serialization), `chrono` (time handling), `uuid` (execution IDs) (002-rust-newton-code)
+- File-based artifacts and workspace state (no database required) (002-rust-newton-code)
+
+- Rust nightly (as specified in rust-toolchain.toml) + clap (CLI), tokio (async), anyhow/thiserror (errors), tracing (logging), serde/serde_json (serialization) (002-rust-newton-code)
+
+## Project Structure
+
+```text
+src/
+tests/
+```
+
+## Commands
+
+cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLOGIES] cargo clippy
+
+## Code Style
+
+Rust nightly (as specified in rust-toolchain.toml): Follow standard conventions
+
+## Recent Changes
+- 002-rust-newton-code: Added Rust (stable toolchain, focus on reliability and performance) + `clap` (CLI parsing), `tokio` (async runtime), `anyhow`/`thiserror` (error handling), `tracing` (structured logging), `serde`/`serde_json` (data serialization), `chrono` (time handling), `uuid` (execution IDs)
+
+- 002-rust-newton-code: Added Rust nightly (as specified in rust-toolchain.toml) + clap (CLI), tokio (async), anyhow/thiserror (errors), tracing (logging), serde/serde_json (serialization)
+
+<!-- MANUAL ADDITIONS START -->
+<!-- MANUAL ADDITIONS END -->
