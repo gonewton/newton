@@ -1,15 +1,17 @@
 use crate::core::entities::*;
-use crate::core::error::{AppError, ErrorReporter, ErrorSeverity};
-use crate::core::types::{ErrorCategory, TestReporter, WorkspaceValidator};
-use crate::utils::serialization::FileSerializer;
+use crate::core::error::{AppError, ErrorReporter};
+use crate::core::types::WorkspaceValidatorTrait;
 
 pub struct WorkspaceManager {
-    validator: Box<dyn WorkspaceValidator>,
+    validator: Box<dyn WorkspaceValidatorTrait>,
     reporter: Box<dyn ErrorReporter>,
 }
 
 impl WorkspaceManager {
-    pub fn new(validator: Box<dyn WorkspaceValidator>, reporter: Box<dyn ErrorReporter>) -> Self {
+    pub fn new(
+        validator: Box<dyn WorkspaceValidatorTrait>,
+        reporter: Box<dyn ErrorReporter>,
+    ) -> Self {
         WorkspaceManager {
             validator,
             reporter,
@@ -62,7 +64,7 @@ impl TestValidator {
     }
 }
 
-impl WorkspaceValidator for TestValidator {
+impl WorkspaceValidatorTrait for TestValidator {
     fn validate_path(
         &self,
         path: &std::path::Path,
@@ -118,7 +120,7 @@ impl WorkspaceValidator for TestValidator {
 
 pub struct TestReporterImpl;
 
-impl TestReporter {
+impl TestReporterImpl {
     pub fn new() -> Self {
         Self
     }

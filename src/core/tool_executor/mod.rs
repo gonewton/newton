@@ -1,6 +1,5 @@
 use crate::core::entities::ExecutionConfiguration;
 use crate::core::error::{AppError, ErrorReporter};
-use crate::core::logger::*;
 use std::collections::HashMap;
 
 pub struct ToolExecutor;

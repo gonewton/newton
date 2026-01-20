@@ -4,8 +4,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-use super::types::*;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationExecution {
     pub id: Uuid,

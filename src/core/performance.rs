@@ -1,4 +1,3 @@
-use crate::Result;
 use std::time::{Duration, Instant};
 
 pub struct PerformanceProfiler {

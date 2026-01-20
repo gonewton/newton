@@ -1,11 +1,9 @@
 use crate::core::entities::*;
 use crate::core::error::{AppError, ErrorReporter};
-use crate::core::logger::*;
-use crate::core::types::{TestReporter, TestValidator, WorkspaceValidator};
 use crate::core::WorkspaceManager;
 use crate::utils::serialization::{FileUtils, Serializer as SerializerTrait};
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 pub struct OptimizationOrchestrator {
     workspace_manager: WorkspaceManager,
@@ -17,7 +15,7 @@ pub struct OptimizationOrchestrator {
 impl OptimizationOrchestrator {
     pub fn new(
         workspace_manager: WorkspaceManager,
-        serializer: Box<dyn SerializerTrait>,
+    serializer: JsonSerializer,
         file_serializer: FileUtils,
         reporter: Box<dyn ErrorReporter>,
     ) -> Self {

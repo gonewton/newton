@@ -10,13 +10,13 @@ pub mod types;
 pub mod workspace;
 
 pub use entities::{
-    ArtifactError, ArtifactMetadata, ErrorCategory, ExecutionStatus, IterationPhase,
+    ArtifactMetadata, ErrorCategory, ExecutionStatus, IterationPhase,
     OptimizationExecution, ToolResult, ToolType, Workspace, WorkspaceStatus,
 };
 pub use error::{AppError, DefaultErrorReporter, ErrorReporter, ErrorSeverity};
 pub use history_recorder::ExecutionHistoryRecorder;
 pub use orchestrator::OptimizationOrchestrator;
-pub use results_processor::{OutputFormat, ResultsProcessor};
 pub use performance::PerformanceProfiler;
+pub use results_processor::{OutputFormat, ResultsProcessor};
 pub use types::*;
 pub use workspace::WorkspaceManager;

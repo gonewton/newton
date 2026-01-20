@@ -1,13 +1,12 @@
 use crate::core::entities::OptimizationExecution;
 use crate::core::error::{AppError, DefaultErrorReporter, ErrorReporter};
-use crate::core::logger::*;
 use crate::utils::serialization::Serializer as SerializerTrait;
 use std::fs;
 use std::path::PathBuf;
 
 pub struct ExecutionHistoryRecorder {
     storage_path: PathBuf,
-    serializer: Box<dyn crate::utils::serialization::Serializer>,
+    serializer: JsonSerializer,
     reporter: Box<dyn ErrorReporter>,
 }
 
@@ -15,7 +14,7 @@ impl ExecutionHistoryRecorder {
     pub fn new(storage_path: PathBuf) -> Self {
         ExecutionHistoryRecorder {
             storage_path,
-            serializer: Box::new(crate::utils::serialization::JsonSerializer),
+            serializer: JsonSerializer,
             reporter: Box::new(DefaultErrorReporter),
         }
     }

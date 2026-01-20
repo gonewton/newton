@@ -1,8 +1,6 @@
 use crate::core::entities::ArtifactMetadata;
 use crate::core::error::AppError;
-use std::collections::HashMap;
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 
 pub trait ArtifactManager {

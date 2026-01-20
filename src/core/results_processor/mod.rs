@@ -1,15 +1,16 @@
-use crate::core::entities::{Iteration, OptimizationExecution, Workspace};
-use crate::core::error::{AppError, DefaultErrorReporter, ErrorReporter};
+use crate::core::entities::OptimizationExecution;
+use crate::core::error::{AppError, ErrorReporter};
+use crate::core::types::{ExecutionStatus, IterationPhase};
 use crate::utils::serialization::Serializer as SerializerTrait;
 use serde::{Deserialize, Serialize};
 
 pub struct ResultsProcessor {
-    serializer: Box<dyn SerializerTrait>,
+    serializer: JsonSerializer,
     reporter: Box<dyn ErrorReporter>,
 }
 
 impl ResultsProcessor {
-    pub fn new(serializer: Box<dyn SerializerTrait>, reporter: Box<dyn ErrorReporter>) -> Self {
+    pub fn new(serializer: JsonSerializer, reporter: Box<dyn ErrorReporter>) -> Self {
         ResultsProcessor {
             serializer,
             reporter,
