@@ -94,3 +94,13 @@ pub enum ReportFormat {
     Text,
     Json,
 }
+
+#[derive(Args)]
+pub struct ErrorArgs {
+    /// ID of the execution to debug errors for
+    pub execution_id: String,
+
+    /// Show full error details and stack traces
+    #[arg(long)]
+    pub verbose: bool,
+}

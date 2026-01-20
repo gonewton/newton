@@ -17,6 +17,7 @@ pub enum Command {
     Step(commands::StepArgs),
     Status(commands::StatusArgs),
     Report(commands::ReportArgs),
+    Error(commands::ErrorArgs),
 }
 
 pub async fn run(args: Args) -> crate::Result<()> {
@@ -25,5 +26,6 @@ pub async fn run(args: Args) -> crate::Result<()> {
         Command::Step(step_args) => commands::step(step_args).await,
         Command::Status(status_args) => commands::status(status_args).await,
         Command::Report(report_args) => commands::report(report_args).await,
+        Command::Error(error_args) => commands::error(error_args).await,
     }
 }

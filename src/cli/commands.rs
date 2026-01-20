@@ -1,6 +1,6 @@
 use crate::Result;
 
-pub use super::args::{ReportArgs, RunArgs, StatusArgs, StepArgs};
+pub use super::args::{ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
 
 pub async fn run(_args: RunArgs) -> Result<()> {
     // TODO: Implement run command
@@ -23,5 +23,11 @@ pub async fn status(_args: StatusArgs) -> Result<()> {
 pub async fn report(_args: ReportArgs) -> Result<()> {
     // TODO: Implement report command
     println!("Report command not yet implemented");
+    Ok(())
+}
+
+pub async fn error(_args: ErrorArgs) -> Result<()> {
+    // TODO: Implement error debugging command
+    println!("Error command not yet implemented");
     Ok(())
 }

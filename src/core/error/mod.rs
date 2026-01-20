@@ -96,6 +96,41 @@ impl From<anyhow::Error> for AppError {
     }
 }
 
+impl AppError {
+    pub fn new(category: ErrorCategory, message: String) -> Self {
+        let severity = match category {
+            ErrorCategory::ValidationError
+            | ErrorCategory::ToolExecutionError
+            | ErrorCategory::TimeoutError
+            | ErrorCategory::ResourceError
+            | ErrorCategory::WorkspaceError
+            | ErrorCategory::IterationError
+            | ErrorCategory::SerializationError
+            | ErrorCategory::IoError => ErrorSeverity::Error,
+            ErrorCategory::InternalError => ErrorSeverity::High,
+            ErrorCategory::Unknown => ErrorSeverity::Medium,
+        };
+        AppError {
+            id: uuid::Uuid::new_v4(),
+            category,
+            severity,
+            code: format!("{:?}", category)
+                .to_uppercase()
+                .replace("ERROR", "")
+                .replace("CATEGORY::", ""),
+            message,
+            context: std::collections::HashMap::new(),
+            recovery_suggestions: vec!["Check logs for details".to_string()],
+            occurred_at: chrono::Utc::now(),
+            stack_trace: None,
+        }
+    }
+
+    pub fn add_context(&mut self, key: &str, value: &str) {
+        self.context.insert(key.to_string(), value.to_string());
+    }
+}
+
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
         AppError {

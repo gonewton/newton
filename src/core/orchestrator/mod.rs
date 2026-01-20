@@ -92,7 +92,8 @@ impl OptimizationOrchestrator {
                 }
             }
 
-            self.reporter.report_info(&format!("Starting iteration {}", current_iteration + 1));
+            self.reporter
+                .report_info(&format!("Starting iteration {}", current_iteration + 1));
 
             let iteration_result = self
                 .run_iteration(&execution, current_iteration, &configuration)
@@ -126,7 +127,8 @@ impl OptimizationOrchestrator {
         execution.status = ExecutionStatus::Completed;
         execution.completed_at = Some(chrono::Utc::now());
 
-        self.reporter.report_info("Optimization completed successfully");
+        self.reporter
+            .report_info("Optimization completed successfully");
         Ok(execution)
     }
 
@@ -161,11 +163,15 @@ impl OptimizationOrchestrator {
             match current_phase {
                 IterationPhase::Evaluator => {
                     if let Some(evaluator_cmd) = &configuration.evaluator_cmd {
-                        match self.execute_tool(evaluator_cmd, configuration, &execution.workspace_path).await {
+                        match self
+                            .execute_tool(evaluator_cmd, configuration, &execution.workspace_path)
+                            .await
+                        {
                             Ok(result) => {
                                 iteration.evaluator_result = Some(result);
                                 if result.success {
-                                    self.reporter.report_info("Evaluator completed successfully");
+                                    self.reporter
+                                        .report_info("Evaluator completed successfully");
                                 } else {
                                     self.reporter.report_error(&AppError::new(
                                         crate::core::types::ErrorCategory::ToolExecutionError,
@@ -189,7 +195,10 @@ impl OptimizationOrchestrator {
                 }
                 IterationPhase::Advisor => {
                     if let Some(advisor_cmd) = &configuration.advisor_cmd {
-                        match self.execute_tool(advisor_cmd, configuration, &execution.workspace_path).await {
+                        match self
+                            .execute_tool(advisor_cmd, configuration, &execution.workspace_path)
+                            .await
+                        {
                             Ok(result) => {
                                 iteration.advisor_result = Some(result);
                                 if result.success {
@@ -217,7 +226,10 @@ impl OptimizationOrchestrator {
                 }
                 IterationPhase::Executor => {
                     if let Some(executor_cmd) = &configuration.executor_cmd {
-                        match self.execute_tool(executor_cmd, configuration, &execution.workspace_path).await {
+                        match self
+                            .execute_tool(executor_cmd, configuration, &execution.workspace_path)
+                            .await
+                        {
                             Ok(result) => {
                                 iteration.executor_result = Some(result);
                                 if result.success {
@@ -268,10 +280,11 @@ impl OptimizationOrchestrator {
         let program = parts[0];
         let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
 
-        self.reporter.report_info(&format!("Executing tool: {}", cmd));
+        self.reporter
+            .report_info(&format!("Executing tool: {}", cmd));
 
         let mut env_vars = std::collections::HashMap::new();
-        
+
         if let Some(eval_cmd) = &configuration.evaluator_cmd {
             env_vars.insert("NEWTON_EVALUATOR_CMD".to_string(), eval_cmd.clone());
         }
@@ -282,19 +295,40 @@ impl OptimizationOrchestrator {
             env_vars.insert("NEWTON_EXECUTOR_CMD".to_string(), exec_cmd.clone());
         }
         if let Some(eval_timeout) = configuration.evaluator_timeout_ms {
-            env_vars.insert("NEWTON_EVALUATOR_TIMEOUT_MS".to_string(), eval_timeout.to_string());
+            env_vars.insert(
+                "NEWTON_EVALUATOR_TIMEOUT_MS".to_string(),
+                eval_timeout.to_string(),
+            );
         }
         if let Some(adv_timeout) = configuration.advisor_timeout_ms {
-            env_vars.insert("NEWTON_ADVISOR_TIMEOUT_MS".to_string(), adv_timeout.to_string());
+            env_vars.insert(
+                "NEWTON_ADVISOR_TIMEOUT_MS".to_string(),
+                adv_timeout.to_string(),
+            );
         }
         if let Some(exec_timeout) = configuration.executor_timeout_ms {
-            env_vars.insert("NEWTON_EXECUTOR_TIMEOUT_MS".to_string(), exec_timeout.to_string());
+            env_vars.insert(
+                "NEWTON_EXECUTOR_TIMEOUT_MS".to_string(),
+                exec_timeout.to_string(),
+            );
         }
-        env_vars.insert("NEWTON_WORKSPACE_PATH".to_string(), workspace_path.display().to_string());
-        env_vars.insert("NEWTON_ITERATION_ID".to_string(), uuid::Uuid::new_v4().to_string());
-        env_vars.insert("NEWTON_EXECUTION_ID".to_string(), uuid::Uuid::new_v4().to_string());
+        env_vars.insert(
+            "NEWTON_WORKSPACE_PATH".to_string(),
+            workspace_path.display().to_string(),
+        );
+        env_vars.insert(
+            "NEWTON_ITERATION_ID".to_string(),
+            uuid::Uuid::new_v4().to_string(),
+        );
+        env_vars.insert(
+            "NEWTON_EXECUTION_ID".to_string(),
+            uuid::Uuid::new_v4().to_string(),
+        );
 
-        let env_vars: Vec<(&str, &str)> = env_vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let env_vars: Vec<(&str, &str)> = env_vars
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
 
         let start_time = Instant::now();
         let output = tokio::process::Command::new(program)
