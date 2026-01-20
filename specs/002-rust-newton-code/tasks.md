@@ -24,13 +24,13 @@
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 Create Cargo.toml with dependencies per research.md
-- [ ] T002 Create rust-toolchain.toml for nightly toolchain
-- [ ] T003 [P] Initialize src/main.rs binary entry point
-- [ ] T004 [P] Create src/lib.rs library interface
-- [ ] T005 [P] Setup directory structure per plan.md (src/cli/, src/core/, etc.)
-- [ ] T006 Configure cargo workspace and member crates if needed
-- [ ] T007 [P] Setup basic test structure (tests/unit/, tests/integration/, tests/cli/)
+- [x] T001 Create Cargo.toml with dependencies per research.md
+- [x] T002 Create rust-toolchain.toml for nightly toolchain
+- [x] T003 [P] Initialize src/main.rs binary entry point
+- [x] T004 [P] Create src/lib.rs library interface
+- [x] T005 [P] Setup directory structure per plan.md (src/cli/, src/core/, etc.)
+- [x] T006 Configure cargo workspace and member crates if needed
+- [x] T007 [P] Setup basic test structure (tests/unit/, tests/integration/, tests/cli/)
 
 ---
 
@@ -40,14 +40,14 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T008 [P] Implement core entities in src/core/entities.rs (OptimizationExecution, Iteration, Workspace, ErrorRecord, ToolResult)
-- [ ] T009 [P] Define enums and types in src/core/types.rs (ExecutionStatus, ErrorCategory, etc.)
-- [ ] T010 [P] Implement error handling infrastructure in src/core/error.rs (thiserror/anyhow integration)
-- [ ] T011 [P] Create workspace management in src/core/workspace.rs (validation, path handling)
-- [ ] T012 [P] Setup tracing/logging infrastructure in src/core/mod.rs
-- [ ] T013 [P] Implement serialization utilities in src/utils/serialization.rs (serde integration)
-- [ ] T014 [P] Create environment variable utilities in src/utils/env.rs (NEWTON_* variable handling)
-- [ ] T015 [P] Setup file I/O utilities in src/utils/files.rs (artifact management)
+- [x] T008 [P] Implement core entities in src/core/entities.rs (OptimizationExecution, Iteration, Workspace, ErrorRecord, ToolResult)
+- [x] T009 [P] Define enums and types in src/core/types.rs (ExecutionStatus, ErrorCategory, etc.)
+- [x] T010 [P] Implement error handling infrastructure in src/core/error.rs (thiserror/anyhow integration)
+- [x] T011 [P] Create workspace management in src/core/workspace.rs (validation, path handling)
+- [x] T012 [P] Setup tracing/logging infrastructure in src/core/mod.rs
+- [x] T013 [P] Implement serialization utilities in src/utils/serialization.rs (serde integration)
+- [x] T014 [P] Create environment variable utilities in src/utils/env.rs (NEWTON_* variable handling)
+- [x] T015 [P] Setup file I/O utilities in src/utils/files.rs (artifact management)
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 

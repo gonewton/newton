@@ -1,0 +1,13 @@
+{
+  "status": "compilation_failed",
+  "timestamp": "2026-01-20T14:58:22Z",
+  "command": "./scripts/run-tests.sh",
+  "exit_code": 1,
+  "test_statistics": {
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0,
+    "passing_percentage": 0
+  }
+}

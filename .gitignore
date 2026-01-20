@@ -1,0 +1,12 @@
+target
+repomix-output.xml
+debug/
+release/
+*.rs.bk
+*.rlib
+*.prof*
+.idea/
+*.log
+.env*
+target
+repomix-output.xml
