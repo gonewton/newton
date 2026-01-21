@@ -1,10 +1,12 @@
-These are strict orders that you MUST follow:
+RULES
 
-R0001 - You must always uses conventional commit messages.
+### These are strict orders that you MUST follow:
 
-There are prohibited operations:
+- You must always uses conventional commit messages.
 
-P0001 - You are prohibited to use --no-verify when commiting
+### There are prohibited operations:
+
+- You are prohibited to use --no-verify when commiting
 
 ## Project Guidelines
 
