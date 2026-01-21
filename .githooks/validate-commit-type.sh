@@ -109,7 +109,7 @@ case "$commit_type" in
     chore)
         # Most permissive - can be anything except source code changes
         # Good for version bumps, dependency updates, config changes
-        if echo "$changed_files" | grep -qE '\.(rs|py|js|ts|go|java|cpp|cxx|cc|c\+\+)$' && ! echo "$changed_files" | grep -qE '^src/|^newton/src/'; then
+        if echo "$changed_files" | grep -qE '\.(rs|py|js|ts|go|java|cpp|cxx|cc|c\+\+)$' && ! echo "$changed_files" | grep -qE '^src/'; then
             echo "⚠️  chore commit includes source code changes - consider using feat/fix/refactor instead"
             echo "💡 This warning doesn't block the commit"
         fi
