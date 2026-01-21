@@ -74,6 +74,6 @@ jobs:
             ${{ runner.os }}-cargo-audit-
 
       - name: Run security audit
-        uses: rustsec/audit-check@v1.3.0
+        uses: actions-rust-lang/audit@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
