@@ -194,8 +194,11 @@ mod tests {
     #[test]
     fn test_error_with_context() {
         let mut error = AppError::new(ErrorCategory::ToolExecutionError, "tool failed");
-        error = error.with_context("iteration 5");
-        assert_eq!(error.context, Some("iteration 5".to_string()));
+        error.add_context("context", "iteration 5");
+        assert_eq!(
+            error.context.get("context"),
+            Some(&"iteration 5".to_string())
+        );
     }
 
     #[test]

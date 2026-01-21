@@ -153,7 +153,7 @@ mod tests {
     fn test_workspace_manager_creation() {
         let manager = WorkspaceManager::new(
             Box::new(TestValidator::new()),
-            Box::new(TestReporter::new()),
+            Box::new(TestReporterImpl::new()),
         );
         assert!(true);
     }
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_test_reporter_creation() {
-        let reporter = TestReporter::new();
+        let reporter = TestReporterImpl::new();
         assert!(true);
     }
 }

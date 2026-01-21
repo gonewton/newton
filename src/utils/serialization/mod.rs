@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_json_serializer_creation() {
-        let serializer = JsonSerializer::default();
+        let serializer = JsonSerializer;
         assert!(true);
     }
 

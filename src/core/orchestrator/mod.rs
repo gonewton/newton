@@ -1,6 +1,7 @@
 use crate::core::entities::*;
 use crate::core::entities::{ExecutionConfiguration, Iteration, ToolMetadata};
-use crate::core::error::{AppError, ErrorReporter};
+use crate::core::error::{AppError, DefaultErrorReporter, ErrorReporter};
+use crate::core::workspace::{TestReporterImpl, TestValidator};
 use crate::core::WorkspaceManager;
 use crate::tools::ToolResult;
 use crate::utils::serialization::{FileUtils, JsonSerializer};
@@ -381,10 +382,10 @@ mod tests {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let manager = WorkspaceManager::new(
             Box::new(TestValidator::new()),
-            Box::new(TestReporter::new()),
+            Box::new(TestReporterImpl::new()),
         );
 
-        let serializer = Box::new(JsonSerializer::default());
+        let serializer = JsonSerializer;
         let file_serializer = FileUtils;
         let reporter = Box::new(DefaultErrorReporter);
 

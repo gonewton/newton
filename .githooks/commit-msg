@@ -15,7 +15,7 @@ echo "==================================="
 # Check conventional commit pattern
 # Pattern: type(scope): description
 if ! echo "$commit_msg" | grep -qE "^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(.+\))?: .{1,}"; then
-    echo "⚠️  Commit message doesn't follow conventional commit format"
+    echo "❌ Commit message doesn't follow conventional commit format"
     echo ""
     echo "Expected format: type(scope): description"
     echo "Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert"
@@ -27,13 +27,8 @@ if ! echo "$commit_msg" | grep -qE "^(feat|fix|docs|style|refactor|test|chore|pe
     echo ""
     echo "Current message: $commit_msg"
     echo ""
-    read -p "Continue anyway? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "❌ Commit aborted. Please fix the commit message."
-        exit 1
-    fi
-    echo "✅ Continuing with non-standard commit message..."
+    echo "❌ Commit rejected. Please use conventional commit format."
+    exit 1
 else
     echo "✅ Commit message follows conventional format"
 fi
