@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Execution status enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ExecutionStatus {
+    #[default]
     Pending,
     Running,
     Completed,
@@ -39,6 +40,7 @@ pub enum ErrorCategory {
     IterationError,
     SerializationError,
     IoError,
+    ArtifactError,
     InternalError,
     Unknown,
 }
@@ -52,10 +54,10 @@ impl std::fmt::Display for ErrorCategory {
 /// Error severity enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ErrorSeverity {
-    Low,
-    Medium,
-    High,
-    Critical,
+    Error,
+    Warning,
+    Info,
+    Debug,
 }
 
 /// Iteration phase enumeration

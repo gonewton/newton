@@ -1,13 +1,15 @@
 use crate::core::entities::*;
+use crate::core::entities::{ExecutionConfiguration, Iteration, ToolMetadata};
 use crate::core::error::{AppError, ErrorReporter};
 use crate::core::WorkspaceManager;
-use crate::utils::serialization::{FileUtils, Serializer as SerializerTrait};
+use crate::tools::ToolResult;
+use crate::utils::serialization::{FileUtils, JsonSerializer};
 use std::path::PathBuf;
 use std::time::Instant;
 
 pub struct OptimizationOrchestrator {
     workspace_manager: WorkspaceManager,
-    serializer: Box<dyn SerializerTrait>,
+    serializer: JsonSerializer,
     file_serializer: FileUtils,
     reporter: Box<dyn ErrorReporter>,
 }
@@ -15,7 +17,7 @@ pub struct OptimizationOrchestrator {
 impl OptimizationOrchestrator {
     pub fn new(
         workspace_manager: WorkspaceManager,
-    serializer: JsonSerializer,
+        serializer: JsonSerializer,
         file_serializer: FileUtils,
         reporter: Box<dyn ErrorReporter>,
     ) -> Self {
@@ -60,7 +62,7 @@ impl OptimizationOrchestrator {
         let start_time = Instant::now();
         let mut max_iterations = configuration.max_iterations.unwrap_or(100);
 
-        if let Some(time_seconds) = configuration.max_time_seconds {
+        if let Some(_time_seconds) = configuration.max_time_seconds {
             max_iterations = max_iterations.min(1000);
         }
 
@@ -166,7 +168,7 @@ impl OptimizationOrchestrator {
                             .await
                         {
                             Ok(result) => {
-                                iteration.evaluator_result = Some(result);
+                                iteration.evaluator_result = Some(result.clone());
                                 if result.success {
                                     self.reporter
                                         .report_info("Evaluator completed successfully");
@@ -198,7 +200,7 @@ impl OptimizationOrchestrator {
                             .await
                         {
                             Ok(result) => {
-                                iteration.advisor_result = Some(result);
+                                iteration.advisor_result = Some(result.clone());
                                 if result.success {
                                     self.reporter.report_info("Advisor completed successfully");
                                 } else {
@@ -229,7 +231,7 @@ impl OptimizationOrchestrator {
                             .await
                         {
                             Ok(result) => {
-                                iteration.executor_result = Some(result);
+                                iteration.executor_result = Some(result.clone());
                                 if result.success {
                                     self.reporter.report_info("Executor completed successfully");
                                     iteration.metadata.phase = IterationPhase::Complete;
@@ -332,7 +334,7 @@ impl OptimizationOrchestrator {
         let output = tokio::process::Command::new(program)
             .args(&args)
             .current_dir(workspace_path)
-            .envs(env_vars)
+            .envs(env_vars.clone())
             .output()
             .await
             .map_err(|e| {
@@ -361,7 +363,10 @@ impl OptimizationOrchestrator {
                 tool_version: None,
                 tool_type: ToolType::Executor,
                 arguments: args,
-                environment_variables: env_vars,
+                environment_variables: env_vars
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
             },
         })
     }

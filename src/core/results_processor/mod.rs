@@ -1,7 +1,7 @@
 use crate::core::entities::OptimizationExecution;
+use crate::core::entities::{ExecutionStatus, IterationPhase};
 use crate::core::error::{AppError, ErrorReporter};
-use crate::core::types::{ExecutionStatus, IterationPhase};
-use crate::utils::serialization::Serializer as SerializerTrait;
+use crate::utils::serialization::JsonSerializer;
 use serde::{Deserialize, Serialize};
 
 pub struct ResultsProcessor {

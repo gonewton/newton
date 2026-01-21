@@ -1,23 +1,46 @@
-use crate::core::types::ErrorCategory;
+use crate::core::types::{ErrorCategory, ErrorSeverity};
+use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Debug)]
 pub struct AppError {
     pub category: ErrorCategory,
-    pub message: String,
-    pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    pub context: Option<String>,
+    pub severity: ErrorSeverity,
     pub code: String,
+    pub message: String,
+    pub context: HashMap<String, String>,
+    pub recovery_suggestions: Vec<String>,
+    pub occurred_at: DateTime<Utc>,
+    pub stack_trace: Option<String>,
+    pub source: Option<anyhow::Error>,
 }
 
 impl AppError {
     pub fn new<T: Into<String>>(category: ErrorCategory, message: T) -> Self {
+        let severity = match category {
+            ErrorCategory::ValidationError
+            | ErrorCategory::ToolExecutionError
+            | ErrorCategory::TimeoutError
+            | ErrorCategory::ResourceError
+            | ErrorCategory::WorkspaceError
+            | ErrorCategory::IterationError
+            | ErrorCategory::SerializationError
+            | ErrorCategory::IoError
+            | ErrorCategory::ArtifactError => ErrorSeverity::Error,
+            ErrorCategory::InternalError => ErrorSeverity::Error,
+            ErrorCategory::Unknown => ErrorSeverity::Info,
+        };
         AppError {
             category,
-            message: message.into(),
-            source: None,
-            context: None,
+            severity,
             code: format!("ERR-{}", uuid::Uuid::new_v4()),
+            message: message.into(),
+            context: HashMap::new(),
+            recovery_suggestions: vec![],
+            occurred_at: chrono::Utc::now(),
+            stack_trace: None,
+            source: None,
         }
     }
 
@@ -27,12 +50,12 @@ impl AppError {
         source: Box<dyn std::error::Error + Send + Sync>,
     ) -> Self {
         let mut error = AppError::new(category, message);
-        error.source = Some(source);
+        error.source = Some(anyhow::anyhow!(source));
         error
     }
 
     pub fn with_context<T: Into<String>>(mut self, context: T) -> Self {
-        self.context = Some(context.into());
+        self.context.insert("context".to_string(), context.into());
         self
     }
 
@@ -42,34 +65,15 @@ impl AppError {
     }
 
     pub fn severity(&self) -> ErrorSeverity {
-        match self.category {
-            ErrorCategory::ValidationError => ErrorSeverity::Error,
-            ErrorCategory::ToolExecutionError => ErrorSeverity::Error,
-            ErrorCategory::TimeoutError => ErrorSeverity::Error,
-            ErrorCategory::ResourceError => ErrorSeverity::Error,
-            ErrorCategory::WorkspaceError => ErrorSeverity::Error,
-            ErrorCategory::IterationError => ErrorSeverity::Error,
-            ErrorCategory::SerializationError => ErrorSeverity::Error,
-            ErrorCategory::IoError => ErrorSeverity::Error,
-            ErrorCategory::InternalError => ErrorSeverity::Error,
-            ErrorCategory::Unknown => ErrorSeverity::Info,
-        }
+        self.severity
     }
 }
 
-#[derive(Debug)]
-pub enum ErrorSeverity {
-    Error,
-    Warning,
-    Info,
-    Debug,
-}
-
-impl fmt::Display for AppError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{}] {}: {}", self.code, self.category, self.message)?;
-        if let Some(ref context) = self.context {
-            write!(f, " (Context: {})", context)?;
+        if !self.context.is_empty() {
+            write!(f, " (Context: {:?})", self.context)?;
         }
         if let Some(ref source) = self.source {
             write!(f, "\nCaused by: {}", source)?;
@@ -83,15 +87,15 @@ impl std::error::Error for AppError {}
 impl From<anyhow::Error> for AppError {
     fn from(e: anyhow::Error) -> Self {
         AppError {
-            id: uuid::Uuid::new_v4(),
             category: ErrorCategory::InternalError,
             severity: ErrorSeverity::Error,
             code: "ANYHOW_ERROR".to_string(),
             message: e.to_string(),
-            context: Default::default(),
+            context: HashMap::new(),
             recovery_suggestions: vec!["Check the error details".to_string()],
-            occurred_at: chrono::Utc::now(),
+            occurred_at: Utc::now(),
             stack_trace: None,
+            source: Some(e),
         }
     }
 }
@@ -105,15 +109,31 @@ impl AppError {
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
         AppError {
-            id: uuid::Uuid::new_v4(),
             category: ErrorCategory::IoError,
             severity: ErrorSeverity::Error,
             code: "IO_ERROR".to_string(),
             message: e.to_string(),
-            context: Default::default(),
+            context: HashMap::new(),
             recovery_suggestions: vec!["Check file permissions and paths".to_string()],
-            occurred_at: chrono::Utc::now(),
+            occurred_at: Utc::now(),
             stack_trace: None,
+            source: Some(anyhow::anyhow!(e)),
+        }
+    }
+}
+
+impl From<crate::core::types::WorkspaceValidationError> for AppError {
+    fn from(e: crate::core::types::WorkspaceValidationError) -> Self {
+        AppError {
+            category: ErrorCategory::WorkspaceError,
+            severity: ErrorSeverity::Error,
+            code: "WORKSPACE_VALIDATION_ERROR".to_string(),
+            message: e.to_string(),
+            context: HashMap::new(),
+            recovery_suggestions: vec!["Check workspace configuration".to_string()],
+            occurred_at: Utc::now(),
+            stack_trace: None,
+            source: Some(anyhow::anyhow!(e)),
         }
     }
 }
@@ -136,8 +156,8 @@ impl DefaultErrorReporter {
 impl ErrorReporter for DefaultErrorReporter {
     fn report_error(&self, error: &AppError) {
         eprintln!("[ERROR] {}: {}", error.code, error.message);
-        if let Some(ref context) = error.context {
-            eprintln!("  Context: {}", context);
+        if !error.context.is_empty() {
+            eprintln!("  Context: {:?}", error.context);
         }
         if let Some(ref source) = error.source {
             eprintln!("  Caused by: {}", source);

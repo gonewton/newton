@@ -1,5 +1,7 @@
-use crate::core::entities::ExecutionConfiguration;
-use crate::core::error::{AppError, ErrorReporter};
+use crate::core::entities::ToolType;
+use crate::core::entities::{ExecutionConfiguration, ToolMetadata};
+use crate::core::error::AppError;
+use crate::tools::ToolResult;
 use std::collections::HashMap;
 
 pub struct ToolExecutor;
@@ -14,12 +16,12 @@ impl ToolExecutor {
         cmd: &str,
         configuration: &ExecutionConfiguration,
         workspace_path: &std::path::PathBuf,
-    ) -> Result<crate::core::entities::ToolResult, AppError> {
+    ) -> Result<ToolResult, AppError> {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
         let program = parts[0];
         let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
 
-        self.report_debug(&format!("Executing tool: {}", cmd));
+        println!("Executing tool: {}", cmd);
 
         let mut env_vars = HashMap::new();
 
@@ -72,7 +74,7 @@ impl ToolExecutor {
         let output = tokio::process::Command::new(program)
             .args(&args)
             .current_dir(workspace_path)
-            .envs(env_vars)
+            .envs(env_vars.clone())
             .output()
             .await
             .map_err(|e| {
@@ -85,7 +87,7 @@ impl ToolExecutor {
 
         let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
-        Ok(crate::core::entities::ToolResult {
+        Ok(ToolResult {
             tool_name: cmd.to_string(),
             exit_code: output.status.code().unwrap_or(-1) as i32,
             execution_time_ms,
@@ -97,11 +99,14 @@ impl ToolExecutor {
             } else {
                 Some("Tool execution failed".to_string())
             },
-            metadata: crate::core::entities::ToolMetadata {
+            metadata: ToolMetadata {
                 tool_version: None,
-                tool_type: crate::core::entities::ToolType::Executor,
+                tool_type: ToolType::Executor,
                 arguments: args,
-                environment_variables: env_vars,
+                environment_variables: env_vars
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
             },
         })
     }

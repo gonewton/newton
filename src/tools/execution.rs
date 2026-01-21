@@ -1,9 +1,4 @@
-use crate::{
-    core::error::AppError,
-    core::types::ErrorCategory,
-    tools::ToolResult,
-    Result,
-};
+use crate::{core::error::AppError, core::types::ErrorCategory, tools::ToolResult, Result};
 use std::collections::HashMap;
 
 pub async fn execute_command(
@@ -45,11 +40,19 @@ pub async fn execute_command(
 
         if success {
             return Ok(ToolResult {
-                success,
+                tool_name: cmd.to_string(),
                 exit_code,
                 execution_time_ms,
                 stdout,
                 stderr,
+                success,
+                error: None,
+                metadata: crate::core::entities::ToolMetadata {
+                    tool_version: None,
+                    tool_type: crate::core::entities::ToolType::Evaluator,
+                    arguments: vec![],
+                    environment_variables: vec![],
+                },
             });
         }
 
@@ -64,10 +67,18 @@ pub async fn execute_command(
 
     // Return failure after retries
     Ok(ToolResult {
-        success: false,
+        tool_name: cmd.to_string(),
         exit_code: -1,
         execution_time_ms: 100,
         stdout: "".to_string(),
         stderr: "Command failed after retries".to_string(),
+        success: false,
+        error: Some("Command failed after retries".to_string()),
+        metadata: crate::core::entities::ToolMetadata {
+            tool_version: None,
+            tool_type: crate::core::entities::ToolType::Evaluator,
+            arguments: vec![],
+            environment_variables: vec![],
+        },
     })
 }

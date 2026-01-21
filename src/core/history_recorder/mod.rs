@@ -1,6 +1,6 @@
 use crate::core::entities::OptimizationExecution;
 use crate::core::error::{AppError, DefaultErrorReporter, ErrorReporter};
-use crate::utils::serialization::Serializer as SerializerTrait;
+use crate::utils::serialization::{JsonSerializer, Serializer};
 use std::fs;
 use std::path::PathBuf;
 
@@ -75,7 +75,7 @@ impl ExecutionHistoryRecorder {
             .with_code("HISTORY-003")
         })?;
 
-        let execution = self.serializer.deserialize(&content)?;
+        let execution = self.serializer.deserialize(content.as_bytes())?;
         self.reporter
             .report_info(&format!("Execution loaded successfully"));
         Ok(execution)

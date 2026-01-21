@@ -6,7 +6,7 @@ authors = ["Newton Loop Framework"]
 
 [dependencies]
 clap = { version = "4.4", features = ["derive", "cargo"] }
-tokio = { version = "1.35", features = ["process", "io-std", "time"] }
+tokio = { version = "1.49", features = ["full"] }
 anyhow = "1.0"
 thiserror = "1.0"
 tracing = "0.1"

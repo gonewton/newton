@@ -1,4 +1,5 @@
 use crate::core::entities::*;
+use crate::core::entities::{Workspace, WorkspaceConfiguration};
 use crate::core::error::{AppError, ErrorReporter};
 use crate::core::types::WorkspaceValidatorTrait;
 
