@@ -28,7 +28,7 @@ impl ExecutionHistoryRecorder {
             .join("executions")
             .join(&execution.execution_id.to_string());
         let state_path = execution_path.join("execution.json");
-        let list_path = self.storage_path.join("executions.jsonl");
+        let _list_path = self.storage_path.join("executions.jsonl");
 
         if let Some(parent) = state_path.parent() {
             fs::create_dir_all(parent).map_err(|e| {

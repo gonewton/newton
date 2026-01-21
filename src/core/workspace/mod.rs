@@ -114,7 +114,7 @@ impl WorkspaceValidatorTrait for TestValidator {
         Ok(())
     }
 
-    fn is_locked(&self, path: &std::path::Path) -> bool {
+    fn is_locked(&self, _path: &std::path::Path) -> bool {
         false
     }
 }
@@ -132,7 +132,7 @@ impl ErrorReporter for TestReporterImpl {
         println!("[ERROR] {}: {}", error.code, error.message);
     }
 
-    fn report_warning(&self, message: &str, context: Option<String>) {
+    fn report_warning(&self, message: &str, _context: Option<String>) {
         println!("[WARNING] {}", message);
     }
 
@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_workspace_manager_creation() {
-        let manager = WorkspaceManager::new(
+        let _manager = WorkspaceManager::new(
             Box::new(TestValidator::new()),
             Box::new(TestReporterImpl::new()),
         );

@@ -1,7 +1,6 @@
 use crate::core::types::{ErrorCategory, ErrorSeverity};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use std::fmt;
 
 #[derive(Debug)]
 pub struct AppError {

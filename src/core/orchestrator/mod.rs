@@ -1,7 +1,6 @@
 use crate::core::entities::*;
 use crate::core::entities::{ExecutionConfiguration, Iteration, ToolMetadata};
-use crate::core::error::{AppError, DefaultErrorReporter, ErrorReporter};
-use crate::core::workspace::{TestReporterImpl, TestValidator};
+use crate::core::error::{AppError, ErrorReporter};
 use crate::core::WorkspaceManager;
 use crate::tools::ToolResult;
 use crate::utils::serialization::{FileUtils, JsonSerializer};
@@ -376,10 +375,12 @@ impl OptimizationOrchestrator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::error::DefaultErrorReporter;
+    use crate::core::workspace::{TestReporterImpl, TestValidator};
 
     #[test]
     fn test_orchestrator_creation() {
-        let temp_dir = tempfile::TempDir::new().unwrap();
+        let _temp_dir = tempfile::TempDir::new().unwrap();
         let manager = WorkspaceManager::new(
             Box::new(TestValidator::new()),
             Box::new(TestReporterImpl::new()),
@@ -389,7 +390,7 @@ mod tests {
         let file_serializer = FileUtils;
         let reporter = Box::new(DefaultErrorReporter);
 
-        let orchestrator =
+        let _orchestrator =
             OptimizationOrchestrator::new(manager, serializer, file_serializer, reporter);
 
         assert!(true);
