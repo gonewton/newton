@@ -152,6 +152,12 @@ impl DefaultErrorReporter {
     }
 }
 
+impl Default for DefaultErrorReporter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ErrorReporter for DefaultErrorReporter {
     fn report_error(&self, error: &AppError) {
         eprintln!("[ERROR] {}: {}", error.code, error.message);

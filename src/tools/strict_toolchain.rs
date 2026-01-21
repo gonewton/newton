@@ -22,3 +22,9 @@ impl StrictToolchainRunner {
         Ok(())
     }
 }
+
+impl Default for StrictToolchainRunner {
+    fn default() -> Self {
+        Self::new()
+    }
+}

@@ -41,6 +41,12 @@ impl PerformanceProfiler {
     }
 }
 
+impl Default for PerformanceProfiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn monitor_memory_usage() -> usize {
     // TODO: Implement actual memory monitoring
     0

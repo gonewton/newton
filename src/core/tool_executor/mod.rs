@@ -111,3 +111,9 @@ impl ToolExecutor {
         })
     }
 }
+
+impl Default for ToolExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}

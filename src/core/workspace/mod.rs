@@ -19,7 +19,7 @@ impl WorkspaceManager {
         }
     }
 
-    pub fn initialize_workspace(&self, path: &std::path::PathBuf) -> Result<Workspace, AppError> {
+    pub fn initialize_workspace(&self, path: &std::path::Path) -> Result<Workspace, AppError> {
         self.reporter
             .report_info(&format!("Initializing workspace at: {:?}", path));
 
@@ -29,7 +29,7 @@ impl WorkspaceManager {
             id: uuid::Uuid::new_v4().to_string(),
             name: "New Workspace".to_string(),
             description: Some("Auto-generated workspace".to_string()),
-            path: path.clone(),
+            path: path.to_path_buf(),
             configuration: WorkspaceConfiguration {
                 name: "New Workspace".to_string(),
                 description: Some("Auto-generated workspace".to_string()),
@@ -49,7 +49,7 @@ impl WorkspaceManager {
         Ok(workspace)
     }
 
-    pub fn validate_workspace(&self, path: &std::path::PathBuf) -> Result<(), AppError> {
+    pub fn validate_workspace(&self, path: &std::path::Path) -> Result<(), AppError> {
         self.validator.validate_path(path)?;
         self.validator.validate_structure(path)?;
         self.validator.validate_configuration(path)?;
@@ -62,6 +62,12 @@ pub struct TestValidator;
 impl TestValidator {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl Default for TestValidator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -127,6 +133,12 @@ impl TestReporterImpl {
     }
 }
 
+impl Default for TestReporterImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ErrorReporter for TestReporterImpl {
     fn report_error(&self, error: &AppError) {
         println!("[ERROR] {}: {}", error.code, error.message);
@@ -155,18 +167,15 @@ mod tests {
             Box::new(TestValidator::new()),
             Box::new(TestReporterImpl::new()),
         );
-        assert!(true);
     }
 
     #[test]
     fn test_test_validator_creation() {
-        let validator = TestValidator::new();
-        assert!(true);
+        let _validator = TestValidator::new();
     }
 
     #[test]
     fn test_test_reporter_creation() {
-        let reporter = TestReporterImpl::new();
-        assert!(true);
+        let _reporter = TestReporterImpl::new();
     }
 }

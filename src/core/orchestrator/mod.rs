@@ -4,7 +4,7 @@ use crate::core::error::{AppError, ErrorReporter};
 use crate::core::WorkspaceManager;
 use crate::tools::ToolResult;
 use crate::utils::serialization::{FileUtils, JsonSerializer};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 pub struct OptimizationOrchestrator {
@@ -29,9 +29,21 @@ impl OptimizationOrchestrator {
         }
     }
 
+    pub fn workspace_manager(&self) -> &WorkspaceManager {
+        &self.workspace_manager
+    }
+
+    pub fn serializer(&self) -> &JsonSerializer {
+        &self.serializer
+    }
+
+    pub fn file_serializer(&self) -> &FileUtils {
+        &self.file_serializer
+    }
+
     pub async fn run_optimization(
         &self,
-        workspace_path: &PathBuf,
+        workspace_path: &Path,
         configuration: ExecutionConfiguration,
     ) -> Result<OptimizationExecution, AppError> {
         self.reporter.report_info("Starting optimization run");
@@ -41,7 +53,7 @@ impl OptimizationOrchestrator {
         let mut execution = OptimizationExecution {
             id: uuid::Uuid::new_v4(),
             workspace_id: "test-workspace".to_string(),
-            workspace_path: workspace_path.clone(),
+            workspace_path: workspace_path.to_path_buf(),
             execution_id,
             status: ExecutionStatus::Running,
             started_at: chrono::Utc::now(),
@@ -392,7 +404,5 @@ mod tests {
 
         let _orchestrator =
             OptimizationOrchestrator::new(manager, serializer, file_serializer, reporter);
-
-        assert!(true);
     }
 }

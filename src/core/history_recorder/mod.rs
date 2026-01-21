@@ -26,7 +26,7 @@ impl ExecutionHistoryRecorder {
         let execution_path = self
             .storage_path
             .join("executions")
-            .join(&execution.execution_id.to_string());
+            .join(execution.execution_id.to_string());
         let state_path = execution_path.join("execution.json");
         let _list_path = self.storage_path.join("executions.jsonl");
 
@@ -49,8 +49,7 @@ impl ExecutionHistoryRecorder {
             .with_code("HISTORY-002")
         })?;
 
-        self.reporter
-            .report_info(&format!("Execution recorded successfully"));
+        self.reporter.report_info("Execution recorded successfully");
         Ok(())
     }
 
@@ -64,10 +63,10 @@ impl ExecutionHistoryRecorder {
         let execution_path = self
             .storage_path
             .join("executions")
-            .join(&execution_id.to_string());
+            .join(execution_id.to_string());
         let state_path = execution_path.join("execution.json");
 
-        let content = fs::read_to_string(&state_path).map_err(|e| {
+        let content = fs::read_to_string(state_path).map_err(|e| {
             AppError::new(
                 crate::core::types::ErrorCategory::IoError,
                 format!("Failed to read execution state: {}", e),
@@ -76,8 +75,7 @@ impl ExecutionHistoryRecorder {
         })?;
 
         let execution = self.serializer.deserialize(content.as_bytes())?;
-        self.reporter
-            .report_info(&format!("Execution loaded successfully"));
+        self.reporter.report_info("Execution loaded successfully");
         Ok(execution)
     }
 }

@@ -31,7 +31,7 @@ impl ArtifactStorageManager {
             .join(execution_id.to_string())
     }
 
-    fn get_artifact_path(&self, execution_id: &uuid::Uuid, artifact_id: uuid::Uuid) -> PathBuf {
+    pub fn get_artifact_path(&self, execution_id: &uuid::Uuid, artifact_id: uuid::Uuid) -> PathBuf {
         self.get_execution_path(execution_id)
             .join("artifacts")
             .join(artifact_id.to_string())
@@ -41,7 +41,7 @@ impl ArtifactStorageManager {
         &self,
         path: &Path,
         content: &[u8],
-        metadata: ArtifactMetadata,
+        _metadata: ArtifactMetadata,
     ) -> Result<(), AppError> {
         if !path.exists() {
             let parent = path.parent().ok_or_else(|| {

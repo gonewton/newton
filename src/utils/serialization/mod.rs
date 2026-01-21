@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fs;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::Path;
 
 pub trait Serializer {
     fn serialize<T: serde::Serialize>(&self, data: &T) -> Result<Vec<u8>>;
@@ -22,15 +22,10 @@ impl Serializer for JsonSerializer {
 }
 
 pub trait FileSerializer {
-    fn save_to_file<T, S: Serializer>(
-        &self,
-        path: &PathBuf,
-        data: &T,
-        serializer: &S,
-    ) -> Result<()>
+    fn save_to_file<T, S: Serializer>(&self, path: &Path, data: &T, serializer: &S) -> Result<()>
     where
         T: Serialize;
-    fn load_from_file<T, S: Serializer>(&self, path: &PathBuf, serializer: &S) -> Result<T>
+    fn load_from_file<T, S: Serializer>(&self, path: &Path, serializer: &S) -> Result<T>
     where
         T: DeserializeOwned;
 }
@@ -38,7 +33,7 @@ pub trait FileSerializer {
 pub struct FileUtils;
 
 impl FileSerializer for FileUtils {
-    fn save_to_file<T, S: Serializer>(&self, path: &PathBuf, data: &T, serializer: &S) -> Result<()>
+    fn save_to_file<T, S: Serializer>(&self, path: &Path, data: &T, serializer: &S) -> Result<()>
     where
         T: serde::Serialize,
     {
@@ -48,7 +43,7 @@ impl FileSerializer for FileUtils {
         Ok(())
     }
 
-    fn load_from_file<T, S: Serializer>(&self, path: &PathBuf, serializer: &S) -> Result<T>
+    fn load_from_file<T, S: Serializer>(&self, path: &Path, serializer: &S) -> Result<T>
     where
         T: DeserializeOwned,
     {
@@ -65,13 +60,11 @@ mod tests {
 
     #[test]
     fn test_json_serializer_creation() {
-        let serializer = JsonSerializer;
-        assert!(true);
+        let _serializer = JsonSerializer;
     }
 
     #[test]
     fn test_file_utils_creation() {
-        let file_utils = FileUtils;
-        assert!(true);
+        let _file_utils = FileUtils;
     }
 }

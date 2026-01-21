@@ -17,6 +17,10 @@ impl ResultsProcessor {
         }
     }
 
+    pub fn serializer(&self) -> &JsonSerializer {
+        &self.serializer
+    }
+
     pub fn generate_report(
         &self,
         execution: &OptimizationExecution,
@@ -62,7 +66,7 @@ impl ResultsProcessor {
                 completed_at.format("%Y-%m-%d %H:%M:%S UTC")
             ));
         }
-        report.push_str("\n");
+        report.push('\n');
 
         if let Some(max_iter) = execution.max_iterations {
             report.push_str(&format!("Max Iterations: {}\n", max_iter));
@@ -220,12 +224,10 @@ impl ResultsProcessor {
         &self,
         execution: &OptimizationExecution,
     ) -> Result<ExecutionStatistics, AppError> {
-        let mut stats = ExecutionStatistics::default();
-
-        stats.execution_id = execution.execution_id;
-        stats.status = execution.status.clone();
-        stats.total_iterations = execution.total_iterations_completed;
-        stats.successful_iterations = execution
+        let execution_id = execution.execution_id;
+        let status = execution.status.clone();
+        let total_iterations = execution.total_iterations_completed;
+        let successful_iterations = execution
             .iterations
             .iter()
             .filter(|i| i.phase == IterationPhase::Complete)
@@ -247,21 +249,33 @@ impl ResultsProcessor {
             }
         }
 
-        stats.total_evaluator_time_ms = total_evaluator_time;
-        stats.total_advisor_time_ms = total_advisor_time;
-        stats.total_executor_time_ms = total_executor_time;
+        let (avg_evaluator_time_ms, avg_advisor_time_ms, avg_executor_time_ms) =
+            if execution.iterations.is_empty() {
+                (0, 0, 0)
+            } else {
+                let len = execution.iterations.len() as u64;
+                (
+                    total_evaluator_time / len,
+                    total_advisor_time / len,
+                    total_executor_time / len,
+                )
+            };
 
-        if execution.iterations.len() > 0 {
-            stats.avg_evaluator_time_ms = total_evaluator_time / execution.iterations.len() as u64;
-            stats.avg_advisor_time_ms = total_advisor_time / execution.iterations.len() as u64;
-            stats.avg_executor_time_ms = total_executor_time / execution.iterations.len() as u64;
-        }
-
-        stats.artifacts_count = execution.artifacts.len();
-        stats.start_time = execution.started_at;
-        stats.end_time = execution.completed_at;
-
-        Ok(stats)
+        Ok(ExecutionStatistics {
+            execution_id,
+            status,
+            total_iterations,
+            successful_iterations,
+            total_evaluator_time_ms: total_evaluator_time,
+            total_advisor_time_ms: total_advisor_time,
+            total_executor_time_ms: total_executor_time,
+            avg_evaluator_time_ms,
+            avg_advisor_time_ms,
+            avg_executor_time_ms,
+            artifacts_count: execution.artifacts.len(),
+            start_time: execution.started_at,
+            end_time: execution.completed_at,
+        })
     }
 }
 

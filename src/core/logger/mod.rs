@@ -9,3 +9,9 @@ impl Tracer {
         println!("[TRACING] {}", message);
     }
 }
+
+impl Default for Tracer {
+    fn default() -> Self {
+        Self::new()
+    }
+}

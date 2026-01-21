@@ -5,6 +5,7 @@ use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[allow(async_fn_in_trait)]
 pub trait Tool {
     async fn execute(&self, env: &HashMap<String, String>) -> Result<ToolResult>;
 }
