@@ -68,7 +68,7 @@ jobs:
           if [ "${{ matrix.archive_ext }}" == "tar.gz" ]; then
             tar -czf $ARCHIVE_NAME $BINARY_NAME
           else
-            zip $ARCHIVE_NAME $BINARY_NAME
+            powershell -Command "Compress-Archive -Path $BINARY_NAME -DestinationPath $ARCHIVE_NAME"
           fi
 
       - name: Upload build artifacts
