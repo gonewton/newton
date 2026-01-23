@@ -111,19 +111,26 @@ jobs:
     needs: create-release
     runs-on: ubuntu-latest
     steps:
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
       - name: Checkout homebrew-cli
         uses: actions/checkout@v4
         with:
           repository: gonewton/homebrew-cli
           path: homebrew-cli
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Checkout scoop-bucket
         uses: actions/checkout@v4
         with:
           repository: gonewton/scoop-bucket
           path: scoop-bucket
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Update homebrew formula
         working-directory: homebrew-cli
