@@ -3,19 +3,6 @@ use crate::core::error::AppError;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub trait ArtifactManager {
-    fn save_artifact(
-        &self,
-        path: &Path,
-        content: &[u8],
-        metadata: ArtifactMetadata,
-    ) -> Result<(), AppError>;
-    fn load_artifact(&self, path: &Path) -> Result<Vec<u8>, AppError>;
-    fn list_artifacts(&self, execution_id: &uuid::Uuid) -> Result<Vec<ArtifactMetadata>, AppError>;
-    fn delete_artifact(&self, artifact_id: uuid::Uuid) -> Result<(), AppError>;
-    fn get_artifact_metadata(&self, artifact_id: uuid::Uuid) -> Result<ArtifactMetadata, AppError>;
-}
-
 pub struct ArtifactStorageManager {
     root_path: PathBuf,
 }
