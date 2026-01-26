@@ -1,6 +1,6 @@
 [package]
-name = "newton-code"
-version = "0.3.6"
+name = "newton"
+version = "0.1.0"
 edition = "2021"
 authors = ["Newton Loop Framework"]
 

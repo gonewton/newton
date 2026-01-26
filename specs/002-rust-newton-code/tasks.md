@@ -258,7 +258,7 @@ cargo nextest run --package cli_tests -- test_status_command
 cargo nextest run --package integration_tests -- test_full_workflow
 
 # Launch all core components for User Story 1 together:
-cargo build --bin newton-code  # CLI
+cargo build --bin newton  # CLI
 cargo test --package core --lib  # Core library tests
 ```
 

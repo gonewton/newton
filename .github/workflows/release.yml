@@ -58,9 +58,9 @@ jobs:
         run: |
           mkdir -p dist
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
-            BINARY_NAME=newton-code.exe
+            BINARY_NAME=newton.exe
           else
-            BINARY_NAME=newton-code
+            BINARY_NAME=newton
           fi
           cp target/${{ matrix.target }}/release/$BINARY_NAME dist/
           cd dist

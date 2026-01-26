@@ -1,5 +1,5 @@
 use clap::Parser;
-use newton_code::Result;
+use newton::Result;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -9,8 +9,8 @@ async fn main() -> Result<()> {
         .init();
 
     // Parse CLI arguments
-    let args = newton_code::cli::Args::parse();
+    let args = newton::cli::Args::parse();
 
     // Run the command
-    newton_code::cli::run(args).await
+    newton::cli::run(args).await
 }

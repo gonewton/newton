@@ -4,7 +4,7 @@ pub mod commands;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "newton-code")]
+#[command(name = "newton")]
 #[command(about = "Newton Loop optimization framework in Rust")]
 pub struct Args {
     #[command(subcommand)]

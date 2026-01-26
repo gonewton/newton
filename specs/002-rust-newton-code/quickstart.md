@@ -20,13 +20,13 @@ The Rust Newton Loop implementation provides 100% API and behavioral compatibili
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd newton-code
+cd newton
 
 # Build with nightly toolchain
 cargo build --release
 
 # Verify installation
-./target/release/newton-code --help
+./target/release/newton --help
 ```
 
 ### Development Setup
@@ -50,7 +50,7 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
 ```bash
 # Execute optimization with explicit CLI tools (strict mode)
-newton-code run /path/to/workspace \
+newton run /path/to/workspace \
   --evaluator-cmd './tools/evaluator.sh' \
   --advisor-cmd './tools/advisor.sh' \
   --executor-cmd './tools/executor.sh' \
@@ -61,24 +61,24 @@ newton-code run /path/to/workspace \
 
 ```bash
 # Monitor running optimization
-newton-code status <execution-id> --workspace /path/to/workspace
+newton status <execution-id> --workspace /path/to/workspace
 ```
 
 ### Generate Report
 
 ```bash
 # Get optimization results
-newton-code report <execution-id> --workspace /path/to/workspace
+newton report <execution-id> --workspace /path/to/workspace
 
 # JSON format for scripting
-newton-code report <execution-id> --workspace /path/to/workspace --format json
+newton report <execution-id> --workspace /path/to/workspace --format json
 ```
 
 ### Single Step Execution
 
 ```bash
 # Execute one iteration cycle
-newton-code step /path/to/workspace --execution-id <optional-id>
+newton step /path/to/workspace --execution-id <optional-id>
 ```
 
 ## Workspace Structure
@@ -191,7 +191,7 @@ EOF
 ```bash
 # Run identical workloads with both versions
 python -m newtonloop.cli run /workspace --evaluator-cmd ./eval --advisor-cmd ./advise --executor-cmd ./execute
-newton-code run /workspace --evaluator-cmd ./eval --advisor-cmd ./advise --executor-cmd ./execute
+newton run /workspace --evaluator-cmd ./eval --advisor-cmd ./advise --executor-cmd ./execute
 
 # Compare outputs
 diff python_output.txt rust_output.txt
@@ -216,20 +216,20 @@ cargo nextest run compatibility
 
 ```bash
 # Logging configuration
-RUST_LOG=newton_code=debug cargo run --bin newton-code -- <args>
+RUST_LOG=newton_code=debug cargo run --bin newton -- <args>
 
 # Disable progress indicators
-NEWTON_NO_PROGRESS=1 newton-code run /workspace <options>
+NEWTON_NO_PROGRESS=1 newton run /workspace <options>
 ```
 
 ### Timeouts and Limits
 
 ```bash
 # Global tool timeout
-newton-code run /workspace --tool-timeout-seconds 60 <other-options>
+newton run /workspace --tool-timeout-seconds 60 <other-options>
 
 # Tool-specific timeouts
-newton-code run /workspace \
+newton run /workspace \
   --evaluator-timeout 30 \
   --advisor-timeout 45 \
   --executor-timeout 60 \
@@ -243,7 +243,7 @@ newton-code run /workspace \
 **Tool execution fails with timeout**
 ```bash
 # Increase timeout
-newton-code run /workspace --tool-timeout-seconds 120 <options>
+newton run /workspace --tool-timeout-seconds 120 <options>
 ```
 
 **Workspace validation errors**
@@ -263,7 +263,7 @@ env | grep NEWTON_
 
 ```bash
 # Enable detailed logging
-RUST_LOG=trace newton-code run /workspace <options>
+RUST_LOG=trace newton run /workspace <options>
 
 # Check execution artifacts
 ls -la /workspace/artifacts/
@@ -277,14 +277,14 @@ cat /workspace/artifacts/iter-1/evaluator/details.md
 ```bash
 # Time comparison (run multiple times for average)
 time python -m newtonloop.cli run /workspace <options>
-time newton-code run /workspace <options>
+time newton run /workspace <options>
 ```
 
 ### Memory Usage
 
 ```bash
 # Monitor memory usage
-/usr/bin/time -v newton-code run /workspace <options>
+/usr/bin/time -v newton run /workspace <options>
 ```
 
 ## Development Workflow
