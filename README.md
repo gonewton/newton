@@ -4,13 +4,15 @@
 
 ## What is Newton Loop?
 
-Newton Loop is an iterative optimization framework for any agentic AI goal that can be well-defined in terms of goals, constraints, and semantic gradients. It orchestrates a three-phase optimization cycle:
+Newton Loop is an iterative optimization framework for any agentic AI goal that can be well-defined in terms of goals and feedback (semantic gradients). It orchestrates a three-phase optimization cycle:
 
 - **Evaluator**: Assesses the current state/solution and provides quality metrics
 - **Advisor**: Generates improvement recommendations based on evaluation
 - **Executor**: Implements the recommended changes to improve the solution
 
-This evaluation-advice-execution loop continues until goals are met, constraints are satisfied, or iteration limits are reached.
+This evaluation-advice-execution loop continues until goals are met or iteration limits are reached.
+
+Instead of just trying the same thing over and over and hoping it gets better, this kind of loop pauses to check how things are going, think about what could improve, and then make targeted changes. Each round learns from the last, so progress is more guided than random. It also keeps track of what worked best so far, which is helpful when goals involve trade-offs or gradual improvements rather than a simple yes/no result. Overall, it feels less like “try again” and more like “let’s see what happened and do a bit better next time,” which makes it a good fit for a wide range of problems.
 
 ## Installation
 
@@ -41,13 +43,6 @@ Improve code quality by reducing cyclomatic complexity in Python files
 while maintaining functionality and test coverage.
 EOF
 
-# Define constraints
-cat > CONSTRAINTS.md << 'EOF'
-- Must preserve existing functionality
-- Test coverage must not decrease below 80%
-- Performance overhead must be less than 10%
-EOF
-
 # Create tools directory
 mkdir -p tools
 ```
@@ -74,7 +69,7 @@ newton run .
 ```
 
 Newton will:
-1. Read GOAL.md and CONSTRAINTS.md
+1. Read GOAL.md
 2. Execute your evaluator tool
 3. Generate recommendations via advisor
 4. Apply changes via executor
@@ -286,7 +281,6 @@ Newton Loop expects the following workspace structure:
 ```
 workspace/
 ├── GOAL.md                 # Optimization objectives
-├── CONSTRAINTS.md          # Problem constraints
 ├── tools/                  # Directory for tool scripts
 │   ├── evaluator.sh        # Evaluation script
 │   ├── advisor.sh          # Advisory script
