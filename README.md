@@ -14,23 +14,17 @@ This evaluation-advice-execution loop continues until goals are met, constraints
 
 ## Installation
 
-### Using Cargo (Recommended)
+### macOS / Linux (Homebrew)
 
 ```bash
-cargo install --path .
+brew install gonewton/tap/newton
 ```
 
-### Download Pre-built Binaries
+### Windows (Scoop)
 
-Pre-built binaries will be available on GitHub releases. Download the appropriate version for your platform and add it to your PATH.
-
-### Build from Source
-
-```bash
-git clone https://github.com/gonewton/newton.git
-cd newton
-cargo build --release
-cargo install --path .
+```powershell
+scoop bucket add gonewton
+scoop install newton
 ```
 
 ## Quick Start
@@ -141,7 +135,7 @@ newton step .
 
 ### `status <execution-id>`
 
-Check the current status of an optimization run.
+Check current status of an optimization run.
 
 **Options:**
 - `--format <format>`: Output format (text, json)
@@ -427,121 +421,6 @@ Reports include detailed statistics:
 - Changes applied per iteration
 - Resource usage metrics
 - Success/failure rates
-
-## Troubleshooting
-
-### Workspace Validation Errors
-
-**Error: "Workspace missing required files"**
-
-**Solution:**
-- Ensure GOAL.md and CONSTRAINTS.md exist in workspace root
-- Verify workspace structure: `ls -la workspace/`
-- Check file permissions: `chmod 644 workspace/GOAL.md`
-
-**Error: "Invalid workspace structure"**
-
-**Solution:**
-- Create the tools directory: `mkdir -p workspace/tools`
-- Ensure all required files are present
-- Verify workspace path is correct
-
-### Tool Execution Failures
-
-**Error: "Evaluator tool failed"**
-
-**Solution:**
-- Check if tool script exists and is executable: `ls -la tools/evaluator.sh`
-- Make script executable: `chmod +x tools/evaluator.sh`
-- Test tool manually: `./tools/evaluator.sh`
-- Verify tool output format matches expectations
-
-**Error: "Advisor tool timed out"**
-
-**Solution:**
-- Increase tool timeout: `newton run . --tool-timeout 300`
-- Profile your advisor tool to identify bottlenecks
-- Optimize advisor algorithm for performance
-- Reduce complexity of evaluation analysis
-
-**Error: "Executor tool failed"**
-
-**Solution:**
-- Review executor log for error messages: `newton error <execution-id>`
-- Verify executor has write permissions to workspace
-- Check solution state file is valid: `cat .newton/state/current_solution.json`
-- Test executor independently with sample inputs
-
-### Resource Limit Issues
-
-**Error: "Memory limit exceeded"**
-
-**Solution:**
-- Reduce memory limit: `newton run . --memory-limit 2G`
-- Optimize tools to use less memory
-- Increase available system memory
-- Profile memory usage with `--verbose` flag
-
-**Error: "Time limit exceeded"**
-
-**Solution:**
-- Adjust timeout values: `newton run . --timeout 7200`
-- Check for inefficient tool implementations
-- Optimize algorithms to reduce computation time
-- Consider breaking problem into smaller optimization tasks
-
-### Understanding Error Messages
-
-Newton Loop provides detailed error messages with context:
-
-**Common Error Prefixes:**
-- `WORKSPACE_ERROR`: Workspace validation failed
-- `TOOL_ERROR`: External tool execution failed
-- `VALIDATION_ERROR`: Post-optimization validation failed
-- `EXECUTION_ERROR`: Core framework execution error
-
-**Recovery Steps:**
-1. Use `newton error <execution-id>` for detailed diagnostics
-2. Review generated artifacts in `.newton/artifacts/`
-3. Check execution logs in `.newton/logs/`
-4. Examine workspace state with `newton status <execution-id>`
-5. Fix identified issues and retry
-
-### Performance Optimization Tips
-
-1. **Benchmark Your Tools**
-   ```bash
-   time ./tools/evaluator.sh
-   time ./tools/advisor.sh
-   time ./tools/executor.sh
-   ```
-
-2. **Monitor Resource Usage**
-   ```bash
-   newton run . --verbose --include-stats
-   ```
-
-3. **Adjust Iteration Limits**
-   - Start with conservative limits
-   - Increase based on performance data
-   - Use early stopping when quality plateaus
-
-4. **Optimize Tool Communication**
-   - Minimize file I/O between tools
-   - Use efficient data formats (JSON, TOML)
-   - Reduce unnecessary state persistence
-
-5. **Enable Debug Mode**
-   ```bash
-   NEWTON_DEBUG=1 newton run .
-   ```
-
-### Getting Help
-
-- Check existing issues on GitHub
-- Review examples in the repository
-- Examine generated artifacts for debugging
-- Use verbose flag for detailed execution information
 
 ## License
 
