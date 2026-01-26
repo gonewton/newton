@@ -10,3 +10,5 @@ release/
 .env*
 target
 repomix-output.xml
+.claude
+.newton
