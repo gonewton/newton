@@ -3,10 +3,14 @@ pub mod commands;
 
 use clap::Parser;
 
+const HELP_TEMPLATE: &str =
+    "{name} {version}\n{about-with-newline}\n{usage-heading} {usage}\n\n{all-args}";
+
 #[derive(Parser)]
 #[command(name = "newton")]
 #[command(version = crate::VERSION)]
 #[command(about = "Newton Loop optimization framework in Rust")]
+#[command(help_template = HELP_TEMPLATE)]
 pub struct Args {
     #[command(subcommand)]
     pub command: Command,

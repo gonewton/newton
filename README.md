@@ -92,9 +92,13 @@ newton error <execution-id>
 
 ```bash
 newton --version
-# newton 0.3.7
+newton 0.3.8
 
-newton --help
+$ newton --help
+newton 0.3.8
+Newton Loop optimization framework in Rust
+
+Usage: newton <COMMAND>
 ```
 
 The help output now includes the same version banner at the top, so you can confirm which release is installed even when scanning command descriptions.

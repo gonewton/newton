@@ -1,5 +1,5 @@
 use assert_cmd::Command;
-use predicates::str::{contains, starts_with};
+use predicates::str::starts_with;
 
 const BIN: &str = "newton";
 
@@ -24,5 +24,5 @@ fn help_output_includes_version_banner() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(contains(version_banner));
+        .stdout(starts_with(version_banner));
 }
