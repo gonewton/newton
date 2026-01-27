@@ -5,6 +5,7 @@ use clap::Parser;
 
 #[derive(Parser)]
 #[command(name = "newton")]
+#[command(version = crate::VERSION)]
 #[command(about = "Newton Loop optimization framework in Rust")]
 pub struct Args {
     #[command(subcommand)]

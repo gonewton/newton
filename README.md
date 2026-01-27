@@ -88,6 +88,17 @@ newton report <execution-id>
 newton error <execution-id>
 ```
 
+### CLI Version & Help
+
+```bash
+newton --version
+# newton 0.3.7
+
+newton --help
+```
+
+The help output now includes the same version banner at the top, so you can confirm which release is installed even when scanning command descriptions.
+
 ## Commands Reference
 
 ### `run <workspace-path>`
