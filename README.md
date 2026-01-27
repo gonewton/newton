@@ -18,14 +18,29 @@ Instead of just trying the same thing over and over and hoping it gets better, t
 
 ### macOS / Linux (Homebrew)
 
+First, tap this repository:
+
 ```bash
-brew install gonewton/tap/newton
+brew tap gonewton/cli
+```
+
+Then install the tools:
+
+```bash
+brew install newton
 ```
 
 ### Windows (Scoop)
 
+First, add this bucket:
+
 ```powershell
-scoop bucket add gonewton
+scoop bucket add gonewton https://github.com/gonewton/scoop-bucket
+```
+
+Then install:
+
+```powershell
 scoop install newton
 ```
 
