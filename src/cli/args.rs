@@ -108,7 +108,7 @@ pub struct ReportArgs {
     pub format: ReportFormat,
 }
 
-#[derive(Clone, clap::ValueEnum)]
+#[derive(Clone, clap::ValueEnum, Debug)]
 pub enum ReportFormat {
     /// Human-readable, Markdown-friendly summary
     Text,

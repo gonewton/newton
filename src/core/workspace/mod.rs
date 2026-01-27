@@ -19,6 +19,13 @@ impl WorkspaceManager {
         }
     }
 
+    pub fn new_default() -> Self {
+        WorkspaceManager {
+            validator: Box::new(TestValidator::new()),
+            reporter: Box::new(crate::core::error::DefaultErrorReporter),
+        }
+    }
+
     pub fn initialize_workspace(&self, path: &std::path::Path) -> Result<Workspace, AppError> {
         self.reporter
             .report_info(&format!("Initializing workspace at: {:?}", path));
@@ -97,12 +104,14 @@ impl WorkspaceValidatorTrait for TestValidator {
         &self,
         path: &std::path::Path,
     ) -> Result<(), crate::core::types::WorkspaceValidationError> {
-        if path.join("config.toml").exists() {
+        // Check for basic workspace structure - either config.toml or problem/ directory
+        if path.join("config.toml").exists() || path.join("problem").exists() {
             Ok(())
         } else {
             Err(
-                crate::core::types::WorkspaceValidationError::ConfigFileMissing {
-                    file: "config.toml".to_string(),
+                crate::core::types::WorkspaceValidationError::InvalidStructure {
+                    message: "Workspace must have either config.toml or problem/ directory"
+                        .to_string(),
                 },
             )
         }
@@ -112,11 +121,22 @@ impl WorkspaceValidatorTrait for TestValidator {
         &self,
         path: &std::path::Path,
     ) -> Result<(), crate::core::types::WorkspaceValidationError> {
+        // For basic validation, just check path exists and basic structure
         if !path.exists() {
             return Err(crate::core::types::WorkspaceValidationError::PathNotFound {
                 path: path.to_string_lossy().to_string(),
             });
         }
+
+        // Check for at least problem directory or solution file
+        if !path.join("problem").exists() && !path.join("solution.json").exists() {
+            return Err(
+                crate::core::types::WorkspaceValidationError::InvalidStructure {
+                    message: "Workspace must have problem/ directory or solution.json".to_string(),
+                },
+            );
+        }
+
         Ok(())
     }
 

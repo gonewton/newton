@@ -1,12 +1,20 @@
 # Research Findings: Rust Newton Loop Implementation
 
-**Date**: 2026-01-19
+**Date**: 2026-01-27 (Updated)
 **Feature**: 002-rust-newton-code
 **Research Focus**: Implementation approaches for 100% compatible Rust port of Newton Loop
 
+## Decision: Rust Version and Toolchain
+
+**Chosen**: Rust 1.93.0 Stable (released January 22, 2026)
+**Rationale**: Latest stable version with all bug fixes and optimizations for CLI applications.
+**Alternatives Considered**:
+- Rust 1.92.x: Previous stable, but lacks latest improvements
+- Rust nightly: Not recommended for production CLI tool due to instability
+
 ## Decision: Async Runtime Selection
 
-**Chosen**: tokio with single-threaded execution
+**Chosen**: tokio 1.49 with single-threaded execution
 **Rationale**: Newton Loop executes tools sequentially without concurrency within a single optimization run. Tokio provides excellent subprocess handling and async I/O, while single-threaded execution ensures deterministic behavior matching Python version.
 **Alternatives Considered**:
 - async-std: More minimal but less ecosystem maturity than tokio
@@ -22,7 +30,7 @@
 
 ## Decision: CLI Argument Parsing
 
-**Chosen**: clap with derive API
+**Chosen**: clap 4.5 with derive API
 **Rationale**: Provides type-safe argument parsing with excellent error messages and help generation. Derive API reduces boilerplate while maintaining flexibility for complex CLI structures.
 **Alternatives Considered**:
 - clap builder API: More verbose but allows runtime configuration
@@ -91,3 +99,47 @@
 **Alternatives Considered**:
 - Flat structure: Violates constitution modularity requirements
 - Domain-driven: Overkill for CLI tool scope
+
+## Decision: Testing Framework
+
+**Chosen**: cargo nextest + insta + assert_cmd
+**Rationale**: cargo nextest provides 3x faster test execution with better parallelization. insta enables snapshot testing for CLI output validation. assert_cmd specializes in CLI testing.
+**Alternatives Considered**:
+- Standard cargo test: Slower and less feature-rich
+- Custom test frameworks: Unnecessary complexity
+
+## Decision: Performance Targets
+
+**Chosen**: Specific performance benchmarks
+**Rationale**: Based on research for external process execution in CLI tools.
+**Targets**:
+- Process spawn overhead: < 10ms cold, < 5ms warm
+- Throughput: 100-500 processes/second
+- Memory usage: Monitor for process leaks
+- Parallelization: 2-4x CPU cores max
+
+## Decision: Dependency Versions
+
+**Chosen**: Latest stable versions as of January 2026
+```toml
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+tokio = { version = "1.49", features = ["full"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+```
+**Rationale**: These versions represent the latest stable releases with proven stability.
+
+## Decision: Compatibility Testing
+
+**Chosen**: Snapshot-based compatibility testing
+**Rationale**: Ensures 100% output compatibility with Python version through automated comparison using insta snapshots.
+**Alternatives Considered**:
+- Manual testing: Too error-prone and time-consuming
+- Property-based testing: Not suitable for exact compatibility validation

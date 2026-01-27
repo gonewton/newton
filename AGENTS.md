@@ -20,3 +20,10 @@ NEWTON-0019 - All CI checks MUST pass before merging
 NEWTON-0020 - Security audits MUST pass without vulnerabilities
 NEWTON-0021 - Code coverage SHOULD be maintained or improved
 NEWTON-0022 - Release builds MUST compile successfully on all target platforms
+
+## Active Technologies
+- Rust 1.93.0 Stable + clap 4.5 (CLI parsing), tokio 1.49 (async runtime), anyhow/thiserror 1.0 (error handling), tracing 0.1 (logging), serde 1.0.228/serde_json 1.0 (serialization), chrono 0.4 (time), uuid 1.0 (execution IDs) (002-rust-newton-code)
+- Files (artifact management, workspace state) (002-rust-newton-code)
+
+## Recent Changes
+- 002-rust-newton-code: Added Rust 1.93.0 Stable + clap 4.5 (CLI parsing), tokio 1.49 (async runtime), anyhow/thiserror 1.0 (error handling), tracing 0.1 (logging), serde 1.0.228/serde_json 1.0 (serialization), chrono 0.4 (time), uuid 1.0 (execution IDs)

@@ -176,7 +176,13 @@ impl OptimizationOrchestrator {
                 IterationPhase::Evaluator => {
                     if let Some(evaluator_cmd) = &configuration.evaluator_cmd {
                         match self
-                            .execute_tool(evaluator_cmd, configuration, &execution.workspace_path)
+                            .execute_tool(
+                                evaluator_cmd,
+                                configuration,
+                                &execution.workspace_path,
+                                execution,
+                                iteration_number,
+                            )
                             .await
                         {
                             Ok(result) => {
@@ -208,7 +214,13 @@ impl OptimizationOrchestrator {
                 IterationPhase::Advisor => {
                     if let Some(advisor_cmd) = &configuration.advisor_cmd {
                         match self
-                            .execute_tool(advisor_cmd, configuration, &execution.workspace_path)
+                            .execute_tool(
+                                advisor_cmd,
+                                configuration,
+                                &execution.workspace_path,
+                                execution,
+                                iteration_number,
+                            )
                             .await
                         {
                             Ok(result) => {
@@ -239,7 +251,13 @@ impl OptimizationOrchestrator {
                 IterationPhase::Executor => {
                     if let Some(executor_cmd) = &configuration.executor_cmd {
                         match self
-                            .execute_tool(executor_cmd, configuration, &execution.workspace_path)
+                            .execute_tool(
+                                executor_cmd,
+                                configuration,
+                                &execution.workspace_path,
+                                execution,
+                                iteration_number,
+                            )
                             .await
                         {
                             Ok(result) => {
@@ -287,6 +305,8 @@ impl OptimizationOrchestrator {
         cmd: &str,
         configuration: &ExecutionConfiguration,
         workspace_path: &PathBuf,
+        execution: &OptimizationExecution,
+        iteration_number: usize,
     ) -> Result<ToolResult, AppError> {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
         let program = parts[0];
@@ -294,6 +314,21 @@ impl OptimizationOrchestrator {
 
         self.reporter
             .report_info(&format!("Executing tool: {}", cmd));
+
+        let iteration_dir = workspace_path
+            .join("artifacts")
+            .join(format!("iter-{}", iteration_number + 1));
+        std::fs::create_dir_all(&iteration_dir)?;
+
+        let evaluator_dir = iteration_dir.join("evaluator");
+        let advisor_dir = iteration_dir.join("advisor");
+        let executor_dir = iteration_dir.join("executor");
+        let score_file = workspace_path.join("artifacts").join("score.txt");
+
+        std::fs::create_dir_all(&evaluator_dir)?;
+        std::fs::create_dir_all(&advisor_dir)?;
+        std::fs::create_dir_all(&executor_dir)?;
+        std::fs::create_dir_all(score_file.parent().unwrap())?;
 
         let mut env_vars = std::collections::HashMap::new();
 
@@ -329,12 +364,32 @@ impl OptimizationOrchestrator {
             workspace_path.display().to_string(),
         );
         env_vars.insert(
-            "NEWTON_ITERATION_ID".to_string(),
-            uuid::Uuid::new_v4().to_string(),
+            "NEWTON_ITERATION_NUMBER".to_string(),
+            (iteration_number + 1).to_string(),
         );
         env_vars.insert(
             "NEWTON_EXECUTION_ID".to_string(),
-            uuid::Uuid::new_v4().to_string(),
+            execution.execution_id.to_string(),
+        );
+        env_vars.insert(
+            "NEWTON_ITERATION_DIR".to_string(),
+            iteration_dir.display().to_string(),
+        );
+        env_vars.insert(
+            "NEWTON_EVALUATOR_DIR".to_string(),
+            evaluator_dir.display().to_string(),
+        );
+        env_vars.insert(
+            "NEWTON_ADVISOR_DIR".to_string(),
+            advisor_dir.display().to_string(),
+        );
+        env_vars.insert(
+            "NEWTON_EXECUTOR_DIR".to_string(),
+            executor_dir.display().to_string(),
+        );
+        env_vars.insert(
+            "NEWTON_SCORE_FILE".to_string(),
+            score_file.display().to_string(),
         );
 
         let env_vars: Vec<(&str, &str)> = env_vars

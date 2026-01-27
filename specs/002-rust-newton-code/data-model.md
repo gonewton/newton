@@ -1,11 +1,11 @@
 # Data Model: Rust Newton Loop Implementation
 
-**Date**: 2026-01-19
+**Date**: 2026-01-27 (Updated)
 **Feature**: 002-rust-newton-code
 
 ## Overview
 
-The Rust Newton Loop implementation maintains identical data entities and validation rules to the Python version for 100% compatibility. All entities are serializable and follow Rust ownership patterns.
+The Rust Newton Loop implementation maintains identical data entities and validation rules to the Python version for 100% compatibility. All entities implement `Serialize`/`Deserialize` from serde and follow Rust ownership patterns with proper error handling.
 
 ## Core Entities
 

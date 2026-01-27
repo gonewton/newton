@@ -1,6 +1,7 @@
 pub mod args;
 pub mod commands;
 
+pub use args::{ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
 use clap::{Parser, Subcommand};
 
 const HELP_TEMPLATE: &str = "\
@@ -30,31 +31,31 @@ pub enum Command {
         long_about = "Run iterates evaluation, advice, and execution phases until convergence or resource caps are hit.",
         after_help = "Example:\n    newton run ./workspace --max-iterations 5"
     )]
-    Run(commands::RunArgs),
+    Run(RunArgs),
     #[command(
-        about = "Advance the loop by one cycle",
-        long_about = "Step performs exactly one evaluation/advice/execution round using the current workspace state.",
+        about = "Advance loop by one cycle",
+        long_about = "Step performs exactly one evaluation/advice/execution round using current workspace state.",
         after_help = "Example:\n    newton step ./workspace --execution-id exec_123"
     )]
-    Step(commands::StepArgs),
+    Step(StepArgs),
     #[command(
         about = "Inspect progress of an execution",
         long_about = "Status queries persisted artifacts for a given execution ID and surfaces current phase, iteration counts, and blockers.",
         after_help = "Example:\n    newton status exec_123 --workspace ./workspace"
     )]
-    Status(commands::StatusArgs),
+    Status(StatusArgs),
     #[command(
         about = "Summarize learnings from an execution",
         long_about = "Report renders structured output (text or JSON) describing performance metrics, recommendations, and anomalies for the requested execution.",
         after_help = "Example:\n    newton report exec_123 --format json"
     )]
-    Report(commands::ReportArgs),
+    Report(ReportArgs),
     #[command(
         about = "Diagnose failures during optimization",
         long_about = "Error traces tool crashes, timeouts, and incompatible artifacts for a specific execution, with optional verbose stack traces.",
         after_help = "Example:\n    newton error exec_123 --verbose"
     )]
-    Error(commands::ErrorArgs),
+    Error(ErrorArgs),
 }
 
 pub async fn run(args: Args) -> crate::Result<()> {
