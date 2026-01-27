@@ -1,16 +1,12 @@
 use crate::{
     cli::args::{ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
-    core::{DefaultErrorReporter, OptimizationOrchestrator, WorkspaceManager},
+    core::{DefaultErrorReporter, OptimizationOrchestrator},
     utils::serialization::{FileUtils, JsonSerializer},
     Result,
 };
 
 pub async fn run(args: RunArgs) -> Result<()> {
     tracing::info!("Starting Newton Loop optimization run");
-
-    // Validate workspace
-    let workspace_manager = WorkspaceManager::new_default();
-    workspace_manager.validate_workspace(&args.path)?;
 
     // Create execution configuration
     let has_evaluator = args.evaluator_cmd.is_some();
@@ -34,8 +30,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
     // Create orchestrator
     let reporter = Box::new(DefaultErrorReporter);
-    let orchestrator =
-        OptimizationOrchestrator::new(workspace_manager, JsonSerializer, FileUtils, reporter);
+    let orchestrator = OptimizationOrchestrator::new(JsonSerializer, FileUtils, reporter);
 
     // Run optimization
     match orchestrator.run_optimization(&args.path, config).await {
@@ -65,10 +60,6 @@ pub async fn run(args: RunArgs) -> Result<()> {
 pub async fn step(args: StepArgs) -> Result<()> {
     tracing::info!("Starting single step execution");
 
-    // Validate workspace
-    let workspace_manager = WorkspaceManager::new_default();
-    workspace_manager.validate_workspace(&args.path)?;
-
     // For step command, run a single iteration
     use crate::core::entities::ExecutionConfiguration as Config;
     let config = Config {
@@ -87,8 +78,7 @@ pub async fn step(args: StepArgs) -> Result<()> {
 
     // Create orchestrator
     let reporter = Box::new(DefaultErrorReporter);
-    let orchestrator =
-        OptimizationOrchestrator::new(workspace_manager, JsonSerializer, FileUtils, reporter);
+    let orchestrator = OptimizationOrchestrator::new(JsonSerializer, FileUtils, reporter);
 
     // Run single iteration
     match orchestrator.run_optimization(&args.path, config).await {

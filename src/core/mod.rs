@@ -12,7 +12,7 @@ pub mod workspace;
 pub use crate::tools::ToolResult;
 pub use entities::{
     ArtifactMetadata, ErrorCategory, ExecutionStatus, IterationPhase, OptimizationExecution,
-    ToolType, Workspace, WorkspaceStatus,
+    ToolType,
 };
 pub use error::{AppError, DefaultErrorReporter, ErrorReporter};
 pub use history_recorder::ExecutionHistoryRecorder;
@@ -20,4 +20,3 @@ pub use orchestrator::OptimizationOrchestrator;
 pub use performance::PerformanceProfiler;
 pub use results_processor::{OutputFormat, ResultsProcessor};
 pub use types::*;
-pub use workspace::WorkspaceManager;

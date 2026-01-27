@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -36,14 +35,6 @@ pub enum ExecutionStatus {
     Failed,
     Cancelled,
     Timeout,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum WorkspaceStatus {
-    Valid,
-    Invalid,
-    Locked,
-    Processing,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -173,36 +164,6 @@ pub struct ToolMetadata {
     pub tool_type: ToolType,
     pub arguments: Vec<String>,
     pub environment_variables: Vec<(String, String)>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Workspace {
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub path: PathBuf,
-    pub configuration: WorkspaceConfiguration,
-    pub template_id: Option<String>,
-    pub status: WorkspaceStatus,
-    pub created_at: i64,
-    pub updated_at: Option<i64>,
-    pub last_used: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkspaceConfiguration {
-    pub name: String,
-    pub description: Option<String>,
-    pub template_id: Option<String>,
-    pub parameters: Vec<Parameter>,
-    pub settings: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Parameter {
-    pub name: String,
-    pub value: String,
-    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

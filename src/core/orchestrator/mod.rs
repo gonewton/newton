@@ -1,14 +1,12 @@
 use crate::core::entities::*;
 use crate::core::entities::{ExecutionConfiguration, Iteration, ToolMetadata};
 use crate::core::error::{AppError, ErrorReporter};
-use crate::core::WorkspaceManager;
 use crate::tools::ToolResult;
 use crate::utils::serialization::{FileUtils, JsonSerializer};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 pub struct OptimizationOrchestrator {
-    workspace_manager: WorkspaceManager,
     serializer: JsonSerializer,
     file_serializer: FileUtils,
     reporter: Box<dyn ErrorReporter>,
@@ -16,21 +14,15 @@ pub struct OptimizationOrchestrator {
 
 impl OptimizationOrchestrator {
     pub fn new(
-        workspace_manager: WorkspaceManager,
         serializer: JsonSerializer,
         file_serializer: FileUtils,
         reporter: Box<dyn ErrorReporter>,
     ) -> Self {
         OptimizationOrchestrator {
-            workspace_manager,
             serializer,
             file_serializer,
             reporter,
         }
-    }
-
-    pub fn workspace_manager(&self) -> &WorkspaceManager {
-        &self.workspace_manager
     }
 
     pub fn serializer(&self) -> &JsonSerializer {
@@ -52,7 +44,7 @@ impl OptimizationOrchestrator {
 
         let mut execution = OptimizationExecution {
             id: uuid::Uuid::new_v4(),
-            workspace_id: "test-workspace".to_string(),
+            workspace_id: execution_id.to_string(),
             workspace_path: workspace_path.to_path_buf(),
             execution_id,
             status: ExecutionStatus::Running,
@@ -443,21 +435,13 @@ impl OptimizationOrchestrator {
 mod tests {
     use super::*;
     use crate::core::error::DefaultErrorReporter;
-    use crate::core::workspace::{TestReporterImpl, TestValidator};
 
     #[test]
     fn test_orchestrator_creation() {
-        let _temp_dir = tempfile::TempDir::new().unwrap();
-        let manager = WorkspaceManager::new(
-            Box::new(TestValidator::new()),
-            Box::new(TestReporterImpl::new()),
-        );
-
         let serializer = JsonSerializer;
         let file_serializer = FileUtils;
         let reporter = Box::new(DefaultErrorReporter);
 
-        let _orchestrator =
-            OptimizationOrchestrator::new(manager, serializer, file_serializer, reporter);
+        let _orchestrator = OptimizationOrchestrator::new(serializer, file_serializer, reporter);
     }
 }

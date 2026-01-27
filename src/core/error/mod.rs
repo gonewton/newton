@@ -121,22 +121,6 @@ impl From<std::io::Error> for AppError {
     }
 }
 
-impl From<crate::core::types::WorkspaceValidationError> for AppError {
-    fn from(e: crate::core::types::WorkspaceValidationError) -> Self {
-        AppError {
-            category: ErrorCategory::WorkspaceError,
-            severity: ErrorSeverity::Error,
-            code: "WORKSPACE_VALIDATION_ERROR".to_string(),
-            message: e.to_string(),
-            context: HashMap::new(),
-            recovery_suggestions: vec!["Check workspace configuration".to_string()],
-            occurred_at: Utc::now(),
-            stack_trace: None,
-            source: Some(anyhow::anyhow!(e)),
-        }
-    }
-}
-
 pub trait ErrorReporter {
     fn report_error(&self, error: &AppError);
     fn report_warning(&self, message: &str, context: Option<String>);
