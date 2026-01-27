@@ -1,9 +1,7 @@
 use crate::{
     cli::args::{ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
-    core::{
-        OptimizationOrchestrator, DefaultErrorReporter, WorkspaceManager,
-    },
-    utils::serialization::{JsonSerializer, FileUtils},
+    core::{DefaultErrorReporter, OptimizationOrchestrator, WorkspaceManager},
+    utils::serialization::{FileUtils, JsonSerializer},
     Result,
 };
 
@@ -14,12 +12,12 @@ pub async fn run(args: RunArgs) -> Result<()> {
     let workspace_manager = WorkspaceManager::new_default();
     workspace_manager.validate_workspace(&args.path)?;
 
-// Create execution configuration
+    // Create execution configuration
     let has_evaluator = args.evaluator_cmd.is_some();
     let has_advisor = args.advisor_cmd.is_some();
     let has_executor = args.executor_cmd.is_some();
-    
-// For step command, run a single iteration
+
+    // For step command, run a single iteration
     let config = crate::core::entities::ExecutionConfiguration {
         evaluator_cmd: args.evaluator_cmd,
         advisor_cmd: args.advisor_cmd,

@@ -7,3 +7,5 @@
 specs
 target
 *.sh
+*.md
+.github
