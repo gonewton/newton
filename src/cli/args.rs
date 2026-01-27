@@ -3,104 +3,126 @@ use std::path::PathBuf;
 
 #[derive(Args)]
 pub struct RunArgs {
-    /// Path to workspace directory
+    /// Workspace containing Newton manifests and artifacts
+    #[arg(value_name = "WORKSPACE")]
     pub path: PathBuf,
 
-    /// Maximum number of optimization iterations
+    /// Cap the loop after this many iterations (default: 10)
     #[arg(long, default_value = "10")]
     pub max_iterations: usize,
 
-    /// Maximum execution time in seconds
+    /// Abort the loop after this wall-clock budget in seconds (default: 300)
     #[arg(long, default_value = "300")]
     pub max_time: u64,
 
-    /// Command to run for evaluation phase (enables strict mode)
-    #[arg(long)]
+    /// Replace the default evaluator tool invocation (strict mode)
+    #[arg(long, value_name = "CMD", help_heading = "Strict Mode Overrides")]
     pub evaluator_cmd: Option<String>,
 
-    /// Command to run for advice phase (enables strict mode)
-    #[arg(long)]
+    /// Replace the default advisor tool invocation (strict mode)
+    #[arg(long, value_name = "CMD", help_heading = "Strict Mode Overrides")]
     pub advisor_cmd: Option<String>,
 
-    /// Command to run for execution phase (enables strict mode)
-    #[arg(long)]
+    /// Replace the default executor tool invocation (strict mode)
+    #[arg(long, value_name = "CMD", help_heading = "Strict Mode Overrides")]
     pub executor_cmd: Option<String>,
 
-    /// Path to evaluator status output file
-    #[arg(long, default_value = "artifacts/evaluator_status.md")]
+    /// Custom location for captured evaluator status artifacts
+    #[arg(
+        long,
+        default_value = "artifacts/evaluator_status.md",
+        value_name = "FILE",
+        help_heading = "Artifact Paths"
+    )]
     pub evaluator_status_file: PathBuf,
 
-    /// Path to advisor recommendations output file
-    #[arg(long, default_value = "artifacts/advisor_recommendations.md")]
+    /// Custom location for advisor recommendation notes
+    #[arg(
+        long,
+        default_value = "artifacts/advisor_recommendations.md",
+        value_name = "FILE",
+        help_heading = "Artifact Paths"
+    )]
     pub advisor_recommendations_file: PathBuf,
 
-    /// Path to executor log output file
-    #[arg(long, default_value = "artifacts/executor_log.md")]
+    /// Custom location for executor streaming logs
+    #[arg(
+        long,
+        default_value = "artifacts/executor_log.md",
+        value_name = "FILE",
+        help_heading = "Artifact Paths"
+    )]
     pub executor_log_file: PathBuf,
 
-    /// Global timeout for tool execution in seconds
-    #[arg(long, default_value = "30")]
+    /// Default timeout applied to every tool (seconds)
+    #[arg(long, default_value = "30", help_heading = "Timeout Overrides")]
     pub tool_timeout_seconds: u64,
 
-    /// Specific timeout for evaluator tool
-    #[arg(long)]
+    /// Override timeout for evaluator tool only (seconds)
+    #[arg(long, value_name = "SECONDS", help_heading = "Timeout Overrides")]
     pub evaluator_timeout: Option<u64>,
 
-    /// Specific timeout for advisor tool
-    #[arg(long)]
+    /// Override timeout for advisor tool only (seconds)
+    #[arg(long, value_name = "SECONDS", help_heading = "Timeout Overrides")]
     pub advisor_timeout: Option<u64>,
 
-    /// Specific timeout for executor tool
-    #[arg(long)]
+    /// Override timeout for executor tool only (seconds)
+    #[arg(long, value_name = "SECONDS", help_heading = "Timeout Overrides")]
     pub executor_timeout: Option<u64>,
 }
 
 #[derive(Args)]
 pub struct StepArgs {
-    /// Path to workspace directory
+    /// Workspace to read/write Newton artifacts from
+    #[arg(value_name = "WORKSPACE")]
     pub path: PathBuf,
 
-    /// Optional execution ID for tracking
-    #[arg(long)]
+    /// Associate the single step with an execution ID for auditing
+    #[arg(long, value_name = "EXECUTION")]
     pub execution_id: Option<String>,
 }
 
 #[derive(Args)]
 pub struct StatusArgs {
-    /// ID of the optimization execution
+    /// Identifier of the execution to inspect
+    #[arg(value_name = "EXECUTION")]
     pub execution_id: String,
 
-    /// Workspace path
-    #[arg(long, default_value = ".")]
+    /// Workspace storing the execution ledger
+    #[arg(long, default_value = ".", value_name = "WORKSPACE")]
     pub workspace: PathBuf,
 }
 
 #[derive(Args)]
 pub struct ReportArgs {
-    /// ID of the optimization execution
+    /// Execution whose insights should be summarized
+    #[arg(value_name = "EXECUTION")]
     pub execution_id: String,
 
-    /// Workspace path
-    #[arg(long, default_value = ".")]
+    /// Workspace storing source artifacts for the report
+    #[arg(long, default_value = ".", value_name = "WORKSPACE")]
     pub workspace: PathBuf,
 
-    /// Report output format
-    #[arg(long, default_value = "text")]
+    /// Emit either terminal-friendly text or machine-readable JSON
+    #[arg(long, default_value = "text", value_name = "FORMAT")]
     pub format: ReportFormat,
 }
 
 #[derive(Clone, clap::ValueEnum)]
 pub enum ReportFormat {
+    /// Human-readable, Markdown-friendly summary
     Text,
+    /// JSON payload suitable for downstream tooling
     Json,
 }
 
 #[derive(Args)]
 pub struct ErrorArgs {
-    /// ID of the execution to debug errors for
+    /// Execution ID whose failures should be analyzed
+    #[arg(value_name = "EXECUTION")]
     pub execution_id: String,
 
-    /// Show full error details and stack traces
+    /// Include stack traces, raw logs, and contextual artifacts
     #[arg(long)]
     pub verbose: bool,
 }
