@@ -191,6 +191,19 @@ impl OptimizationOrchestrator {
                                         "Evaluator tool failed",
                                     ));
                                 }
+
+                                if configuration.verbose {
+                                    if !result.stdout.is_empty() {
+                                        println!("\n=== Evaluator Output ===");
+                                        println!("{}", result.stdout);
+                                        println!("=========================\n");
+                                    }
+                                    if !result.stderr.is_empty() {
+                                        eprintln!("\n=== Evaluator Stderr ===");
+                                        eprintln!("{}", result.stderr);
+                                        eprintln!("==========================\n");
+                                    }
+                                }
                                 current_phase = IterationPhase::Advisor;
                             }
                             Err(e) => {
@@ -228,6 +241,19 @@ impl OptimizationOrchestrator {
                                         "Advisor tool failed",
                                     ));
                                 }
+
+                                if configuration.verbose {
+                                    if !result.stdout.is_empty() {
+                                        println!("\n=== Advisor Output ===");
+                                        println!("{}", result.stdout);
+                                        println!("=======================\n");
+                                    }
+                                    if !result.stderr.is_empty() {
+                                        eprintln!("\n=== Advisor Stderr ===");
+                                        eprintln!("{}", result.stderr);
+                                        eprintln!("======================\n");
+                                    }
+                                }
                                 current_phase = IterationPhase::Executor;
                             }
                             Err(e) => {
@@ -259,7 +285,6 @@ impl OptimizationOrchestrator {
                                     iteration.completed_at = Some(chrono::Utc::now());
                                     iteration.successor_solution =
                                         Some(execution.workspace_path.join("solution.json"));
-                                    break;
                                 } else {
                                     self.reporter.report_error(&AppError::new(
                                         crate::core::types::ErrorCategory::ToolExecutionError,
@@ -270,6 +295,20 @@ impl OptimizationOrchestrator {
                                         "Executor tool failed",
                                     ));
                                 }
+
+                                if configuration.verbose {
+                                    if !result.stdout.is_empty() {
+                                        println!("\n=== Executor Output ===");
+                                        println!("{}", result.stdout);
+                                        println!("========================\n");
+                                    }
+                                    if !result.stderr.is_empty() {
+                                        eprintln!("\n=== Executor Stderr ===");
+                                        eprintln!("{}", result.stderr);
+                                        eprintln!("=========================\n");
+                                    }
+                                }
+                                break;
                             }
                             Err(e) => {
                                 self.reporter.report_error(&e);

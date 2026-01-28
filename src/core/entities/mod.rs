@@ -153,6 +153,8 @@ pub struct ExecutionConfiguration {
     pub max_time_seconds: Option<u64>,
     pub strict_toolchain_mode: bool,
     pub resource_monitoring: bool,
+    /// Enable verbose output for tool execution
+    pub verbose: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
