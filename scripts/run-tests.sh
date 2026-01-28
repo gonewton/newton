@@ -210,9 +210,9 @@ else
   "exit_code": $EXIT_CODE,
   "test_statistics": {
     "total": $TOTAL,
-    "passed": $PASSED,
-    "failed": $FAILED,
-    "skipped": $SKIPPED,
+    "passed": ${PASSED:-0},
+    "failed": ${FAILED:-0},
+    "skipped": ${SKIPPED:-0},
     "passing_percentage": $PASSING_PERCENTAGE
   }
 }
