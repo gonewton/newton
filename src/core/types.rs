@@ -19,16 +19,6 @@ pub enum IterationStatus {
     Failed,
 }
 
-/// Workspace status enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum WorkspaceStatus {
-    Initializing,
-    Ready,
-    Optimizing,
-    Completed,
-    Error,
-}
-
 /// Error category enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ErrorCategory {

@@ -54,7 +54,6 @@ impl ResultsProcessor {
 
         report.push_str("=== Newton Loop Optimization Report ===\n\n");
         report.push_str(&format!("Execution ID: {}\n", execution.execution_id));
-        report.push_str(&format!("Workspace ID: {}\n", execution.workspace_id));
         report.push_str(&format!("Status: {:?}\n", execution.status));
         report.push_str(&format!(
             "Started At: {}\n",

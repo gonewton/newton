@@ -44,7 +44,6 @@ impl OptimizationOrchestrator {
 
         let mut execution = OptimizationExecution {
             id: uuid::Uuid::new_v4(),
-            workspace_id: execution_id.to_string(),
             workspace_path: workspace_path.to_path_buf(),
             execution_id,
             status: ExecutionStatus::Running,

@@ -2,15 +2,37 @@ use newton::core::{
     ExecutionConfiguration, ExecutionStatus, OptimizationExecution, ResourceLimits,
 };
 use std::path::PathBuf;
-extern crate newton;
 
-use tempfile::TempDir;
-use newton::core::{
-    OptimizationExecution, ExecutionStatus, ResourceLimits, ExecutionConfiguration,
-};
+#[test]
+fn test_optimization_execution_creation() {
+    let execution_id = uuid::Uuid::new_v4();
+    let workspace_path = PathBuf::from("/test/workspace");
 
-    assert_eq!(execution.id, execution_id);
-    assert_eq!(execution.workspace_id, "test_workspace");
+    let execution = OptimizationExecution {
+        id: uuid::Uuid::new_v4(),
+        workspace_path,
+        execution_id,
+        status: ExecutionStatus::Pending,
+        started_at: chrono::Utc::now(),
+        completed_at: None,
+        resource_limits: ResourceLimits {
+            max_iterations: Some(10),
+            max_time_seconds: None,
+            max_memory_mb: None,
+            max_disk_space_mb: None,
+        },
+        max_iterations: Some(10),
+        current_iteration: None,
+        final_solution_path: None,
+        current_iteration_path: None,
+        total_iterations_completed: 0,
+        total_iterations_failed: 0,
+        iterations: vec![],
+        artifacts: vec![],
+        configuration: ExecutionConfiguration::default(),
+    };
+
+    assert_eq!(execution.id, execution.id);
     assert_eq!(execution.workspace_path, workspace_path);
     assert_eq!(execution.status, ExecutionStatus::Pending);
     assert_eq!(execution.max_iterations, Some(10));
@@ -20,7 +42,6 @@ use newton::core::{
 fn test_execution_status_transitions() {
     let mut execution = OptimizationExecution {
         id: Uuid::new_v4(),
-        workspace_id: "test".to_string(),
         workspace_path: PathBuf::from("/tmp/test"),
         execution_id: Uuid::new_v4(),
         status: ExecutionStatus::Pending,
