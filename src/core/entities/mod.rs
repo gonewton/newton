@@ -8,7 +8,6 @@ use crate::tools::ToolResult;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationExecution {
     pub id: Uuid,
-    pub workspace_id: String,
     pub workspace_path: PathBuf,
     pub execution_id: Uuid,
     pub status: ExecutionStatus,
@@ -83,7 +82,6 @@ mod tests {
     fn test_optimization_execution_creation() {
         let execution = OptimizationExecution {
             id: Uuid::new_v4(),
-            workspace_id: "test".to_string(),
             workspace_path: PathBuf::from("/tmp/test"),
             execution_id: Uuid::new_v4(),
             status: ExecutionStatus::Running,
@@ -134,7 +132,6 @@ pub struct ArtifactMetadata {
     pub id: Uuid,
     pub execution_id: Option<Uuid>,
     pub iteration_id: Option<Uuid>,
-    pub workspace_id: Option<String>,
     pub name: String,
     pub path: PathBuf,
     pub content_type: String,

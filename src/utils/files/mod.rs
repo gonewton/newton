@@ -83,7 +83,6 @@ impl ArtifactStorageManager {
                             id: artifact_id,
                             execution_id: Some(*execution_id),
                             iteration_id: None,
-                            workspace_id: None,
                             name: file_path
                                 .file_name()
                                 .and_then(|n| n.to_str())
@@ -162,7 +161,6 @@ impl ArtifactStorageManager {
             id: artifact_id,
             execution_id: None,
             iteration_id: None,
-            workspace_id: None,
             name: artifact_path
                 .file_name()
                 .and_then(|n| n.to_str())
