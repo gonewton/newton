@@ -21,10 +21,7 @@ echo "Evaluation completed"
 "#;
     std::fs::write(workspace_path.join("tools/evaluator.sh"), evaluator_script)?;
     
-    let advisor_script = r#"#!/bin/bash
-echo "# Recommendations\n\nImprove solution" > "$NEWTON_ADVISOR_DIR/recommendations.md"
-echo "Advice generated"
-"#;
+    let advisor_script = "#!/bin/bash\necho \"# Recommendations\\n\\nImprove solution\" > \"$NEWTON_ADVISOR_DIR/recommendations.md\"\necho \"Advice generated\"\n";
     std::fs::write(workspace_path.join("tools/advisor.sh"), advisor_script)?;
     
     let executor_script = r#"#!/bin/bash
@@ -62,6 +59,7 @@ async fn test_full_optimization_workflow() -> Result<(), Box<dyn std::error::Err
         global_timeout_ms: Some(60000),
         strict_toolchain_mode: true,
         resource_monitoring: false,
+        verbose: false,
     };
     
     // Create orchestrator and run optimization

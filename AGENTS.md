@@ -20,6 +20,8 @@ NEWTON-0019 - All CI checks MUST pass before merging
 NEWTON-0020 - Security audits MUST pass without vulnerabilities
 NEWTON-0021 - Code coverage SHOULD be maintained or improved
 NEWTON-0022 - Release builds MUST compile successfully on all target platforms
+NEWTON-0023 - You MUST assume git is installed on the user machine and MUST NOT check for git presence
+NEWTON-0024 - You SHOULD NOT adopt an extremely defensive coding style with excessive validation
 
 ## Active Technologies
 - Rust 1.93.0 Stable + clap 4.5 (CLI parsing), tokio 1.49 (async runtime), anyhow/thiserror 1.0 (error handling), tracing 0.1 (logging), serde 1.0.228/serde_json 1.0 (serialization), chrono 0.4 (time), uuid 1.0 (execution IDs) (002-rust-newton-code)

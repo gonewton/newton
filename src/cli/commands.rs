@@ -26,6 +26,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
         global_timeout_ms: Some(args.max_time * 1000),
         strict_toolchain_mode: has_evaluator || has_advisor || has_executor,
         resource_monitoring: false,
+        verbose: args.verbose,
     };
 
     // Create orchestrator
@@ -74,6 +75,7 @@ pub async fn step(args: StepArgs) -> Result<()> {
         global_timeout_ms: Some(300000),
         strict_toolchain_mode: false,
         resource_monitoring: false,
+        verbose: args.verbose,
     };
 
     // Create orchestrator
@@ -107,12 +109,12 @@ pub async fn status(args: StatusArgs) -> Result<()> {
     tracing::info!("Checking execution status: {}", args.execution_id);
 
     // For now, implement basic status checking
-    // In a full implementation, this would read execution state from workspace
+    // In a full implementation, this would read execution state from path
     println!("Execution ID: {}", args.execution_id);
-    println!("Workspace: {}", args.workspace.display());
+    println!("Path: {}", args.path.display());
     println!("Status: Unknown (execution tracking not yet implemented)");
 
-    // TODO: Implement actual status retrieval from workspace artifacts
+    // TODO: Implement actual status retrieval from artifacts
     Ok(())
 }
 
@@ -121,10 +123,10 @@ pub async fn report(args: ReportArgs) -> Result<()> {
 
     // For now, implement basic report generation
     println!("Report for Execution: {}", args.execution_id);
-    println!("Workspace: {}", args.workspace.display());
+    println!("Path: {}", args.path.display());
     println!("Format: {:?}", args.format);
 
-    // TODO: Implement actual report generation from workspace artifacts
+    // TODO: Implement actual report generation from artifacts
     match args.format {
         crate::cli::args::ReportFormat::Text => {
             println!("Text report format not yet implemented");
@@ -143,7 +145,7 @@ pub async fn error(args: ErrorArgs) -> Result<()> {
     println!("Error Analysis for Execution: {}", args.execution_id);
     println!("Verbose: {}", args.verbose);
 
-    // TODO: Implement actual error analysis from workspace artifacts
+    // TODO: Implement actual error analysis from artifacts
     println!("Error analysis not yet implemented");
 
     Ok(())

@@ -1,4 +1,4 @@
-use newton::core::{
+use newton::core::entities::{
     ExecutionConfiguration, ExecutionStatus, OptimizationExecution, ResourceLimits,
 };
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ fn test_optimization_execution_creation() {
 
     let execution = OptimizationExecution {
         id: uuid::Uuid::new_v4(),
-        workspace_path,
+        workspace_path: workspace_path.clone(),
         execution_id,
         status: ExecutionStatus::Pending,
         started_at: chrono::Utc::now(),
@@ -41,9 +41,9 @@ fn test_optimization_execution_creation() {
 #[test]
 fn test_execution_status_transitions() {
     let mut execution = OptimizationExecution {
-        id: Uuid::new_v4(),
+        id: uuid::Uuid::new_v4(),
         workspace_path: PathBuf::from("/tmp/test"),
-        execution_id: Uuid::new_v4(),
+        execution_id: uuid::Uuid::new_v4(),
         status: ExecutionStatus::Pending,
         started_at: chrono::Utc::now(),
         completed_at: None,

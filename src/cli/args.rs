@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 #[derive(Args)]
 pub struct RunArgs {
-    /// Workspace containing Newton manifests and artifacts
-    #[arg(value_name = "WORKSPACE")]
+    /// Path containing Newton manifests and artifacts
+    #[arg(value_name = "PATH")]
     pub path: PathBuf,
 
     /// Cap the loop after this many iterations (default: 10)
@@ -69,17 +69,25 @@ pub struct RunArgs {
     /// Override timeout for executor tool only (seconds)
     #[arg(long, value_name = "SECONDS", help_heading = "Timeout Overrides")]
     pub executor_timeout: Option<u64>,
+
+    /// Enable verbose output to display tool stdout/stderr
+    #[arg(long, help_heading = "Output Options")]
+    pub verbose: bool,
 }
 
 #[derive(Args)]
 pub struct StepArgs {
-    /// Workspace to read/write Newton artifacts from
-    #[arg(value_name = "WORKSPACE")]
+    /// Path to read/write Newton artifacts from
+    #[arg(value_name = "PATH")]
     pub path: PathBuf,
 
     /// Associate the single step with an execution ID for auditing
     #[arg(long, value_name = "EXECUTION")]
     pub execution_id: Option<String>,
+
+    /// Enable verbose output to display tool stdout/stderr
+    #[arg(long, help_heading = "Output Options")]
+    pub verbose: bool,
 }
 
 #[derive(Args)]
@@ -88,9 +96,9 @@ pub struct StatusArgs {
     #[arg(value_name = "EXECUTION")]
     pub execution_id: String,
 
-    /// Workspace storing the execution ledger
-    #[arg(long, default_value = ".", value_name = "WORKSPACE")]
-    pub workspace: PathBuf,
+    /// Path storing the execution ledger
+    #[arg(long, default_value = ".", value_name = "PATH")]
+    pub path: PathBuf,
 }
 
 #[derive(Args)]
@@ -99,9 +107,9 @@ pub struct ReportArgs {
     #[arg(value_name = "EXECUTION")]
     pub execution_id: String,
 
-    /// Workspace storing source artifacts for the report
-    #[arg(long, default_value = ".", value_name = "WORKSPACE")]
-    pub workspace: PathBuf,
+    /// Path storing source artifacts for the report
+    #[arg(long, default_value = ".", value_name = "PATH")]
+    pub path: PathBuf,
 
     /// Emit either terminal-friendly text or machine-readable JSON
     #[arg(long, default_value = "text", value_name = "FORMAT")]
