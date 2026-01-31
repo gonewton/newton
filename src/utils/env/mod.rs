@@ -1,3 +1,5 @@
+//! Environment variable management for Newton execution context.
+
 use crate::core::entities::ToolMetadata;
 use std::collections::HashMap;
 
