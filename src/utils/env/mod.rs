@@ -18,7 +18,7 @@ impl EnvManager {
             execution_id.to_string(),
         );
         env_vars.insert(
-            format!("NEWTON_ITERATION_{}", iteration_number),
+            "NEWTON_ITERATION_NUMBER".to_string(),
             iteration_number.to_string(),
         );
 
@@ -56,14 +56,10 @@ impl EnvManager {
     }
 
     pub fn clear_newton_env_vars() {
-        if let Ok(exe_id) = std::env::var("NEWTON_EXECUTION_ID") {
-            std::env::remove_var(format!("NEWTON_EXECUTION_{}", exe_id.to_uppercase()));
-            std::env::remove_var(format!(
-                "NEWTON_ITERATION_{}",
-                std::env::var("NEWTON_ITERATION_NUMBER").unwrap_or_default()
-            ));
-            std::env::remove_var("NEWTON_EXECUTION_ID");
-            std::env::remove_var("NEWTON_ITERATION_NUMBER");
-        }
+        std::env::remove_var("NEWTON_EXECUTION_ID");
+        std::env::remove_var("NEWTON_ITERATION_NUMBER");
     }
 }
+
+#[cfg(test)]
+mod tests;
