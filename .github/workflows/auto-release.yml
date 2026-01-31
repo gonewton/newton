@@ -57,9 +57,22 @@ jobs:
         if: steps.check-version.outputs.skip == 'false'
         run: git push
 
+      - name: Generate GitHub App Token
+        if: steps.check-version.outputs.skip == 'false'
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: gonewton
+
       - name: Create tag
         if: steps.check-version.outputs.skip == 'false'
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           NEW_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
           git tag "v$NEW_VERSION"
+          # App token triggers Release workflow; GITHUB_TOKEN push does not
+          git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${{ github.repository }}.git"
           git push origin "v$NEW_VERSION"
