@@ -1,66 +1,272 @@
-use newton::tools::{ToolExecution, ToolResult};
-use newton::core::types::ToolType;
+use newton::core::entities::{ExecutionConfiguration, ToolType};
+use newton::core::tool_executor::ToolExecutor;
+use std::path::PathBuf;
+use tempfile::TempDir;
+use tokio_test;
 
-#[test]
-fn test_tool_result_creation() {
-    let result = ToolResult {
-        tool_name: "test_tool".to_string(),
-        exit_code: 0,
-        execution_time_ms: 100,
-        stdout: "success".to_string(),
-        stderr: "".to_string(),
-        success: true,
-        error: None,
-        metadata: newton::core::entities::ToolMetadata {
-            tool_version: Some("1.0".to_string()),
-            tool_type: ToolType::Executor,
-            arguments: vec!["--test".to_string()],
-            environment_variables: vec![("KEY".to_string(), "VALUE".to_string())],
-        },
-    };
-    
-    assert_eq!(result.tool_name, "test_tool");
-    assert_eq!(result.exit_code, 0);
-    assert!(result.success);
+#[tokio::test]
+async fn test_tool_executor_creation() {
+    let executor = ToolExecutor::new();
+    // Should be able to create without error
+    assert!(true);
 }
 
-#[test]
-fn test_tool_result_failure() {
-    let result = ToolResult {
-        tool_name: "test_tool".to_string(),
-        exit_code: 1,
-        execution_time_ms: 100,
-        stdout: "".to_string(),
-        stderr: "error".to_string(),
-        success: false,
-        error: Some("Test error".to_string()),
-        metadata: newton::core::entities::ToolMetadata {
-            tool_version: None,
-            tool_type: ToolType::Executor,
-            arguments: vec![],
-            environment_variables: vec![],
-        },
-    };
-    
-    assert_eq!(result.exit_code, 1);
-    assert!(!result.success);
-    assert!(result.error.is_some());
+#[tokio::test]
+async fn test_tool_executor_default() {
+    let executor = ToolExecutor::default();
+    // Should be able to create using Default trait
+    assert!(true);
 }
 
-#[test]
-fn test_tool_result_with_metadata() {
-    let metadata = newton::core::entities::ToolMetadata {
-        tool_version: Some("2.0".to_string()),
-        tool_type: ToolType::Evaluator,
-        arguments: vec!["--verbose".to_string(), "--output".to_string()],
-        environment_variables: vec![
-            ("PATH".to_string(), "/usr/bin".to_string()),
-            ("HOME".to_string(), "/home/user".to_string()),
-        ],
+#[tokio::test]
+async fn test_execute_simple_command() {
+    let temp_dir = TempDir::new().unwrap();
+    let executor = ToolExecutor::new();
+
+    let config = ExecutionConfiguration {
+        evaluator_cmd: None,
+        advisor_cmd: None,
+        executor_cmd: None,
+        max_iterations: None,
+        max_time_seconds: None,
+        evaluator_timeout_ms: None,
+        advisor_timeout_ms: None,
+        executor_timeout_ms: None,
+        global_timeout_ms: None,
+        strict_toolchain_mode: false,
+        resource_monitoring: false,
+        verbose: false,
     };
-    
-    assert_eq!(metadata.tool_version, Some("2.0".to_string()));
-    assert_eq!(metadata.tool_type, ToolType::Evaluator);
-    assert_eq!(metadata.arguments.len(), 2);
-    assert_eq!(metadata.environment_variables.len(), 2);
+
+    // Use a command that should exist on most systems
+    let result = executor
+        .execute(
+            "echo 'hello world'",
+            &config,
+            &temp_dir.path().to_path_buf(),
+        )
+        .await;
+
+    assert!(result.is_ok());
+    let tool_result = result.unwrap();
+    assert_eq!(tool_result.tool_name, "echo 'hello world'");
+    assert!(tool_result.success);
+    assert!(tool_result.stdout.contains("hello world"));
+}
+
+#[tokio::test]
+async fn test_execute_command_with_args() {
+    let temp_dir = TempDir::new().unwrap();
+    let executor = ToolExecutor::new();
+
+    let config = ExecutionConfiguration {
+        evaluator_cmd: Some("test evaluator".to_string()),
+        advisor_cmd: Some("test advisor".to_string()),
+        executor_cmd: Some("test executor".to_string()),
+        max_iterations: None,
+        max_time_seconds: None,
+        evaluator_timeout_ms: Some(5000),
+        advisor_timeout_ms: Some(5000),
+        executor_timeout_ms: Some(5000),
+        global_timeout_ms: None,
+        strict_toolchain_mode: false,
+        resource_monitoring: false,
+        verbose: false,
+    };
+
+    let result = executor
+        .execute(
+            "echo 'test with args'",
+            &config,
+            &temp_dir.path().to_path_buf(),
+        )
+        .await;
+
+    assert!(result.is_ok());
+    let tool_result = result.unwrap();
+    assert_eq!(tool_result.tool_name, "echo 'test with args'");
+    assert!(tool_result.success);
+
+    // Check that environment variables were set
+    let env_vars = &tool_result.metadata.environment_variables;
+    assert!(env_vars.contains_key("NEWTON_EVALUATOR_CMD"));
+    assert!(env_vars.contains_key("NEWTON_ADVISOR_CMD"));
+    assert!(env_vars.contains_key("NEWTON_EXECUTOR_CMD"));
+    assert!(env_vars.contains_key("NEWTON_EVALUATOR_TIMEOUT_MS"));
+    assert!(env_vars.contains_key("NEWTON_ADVISOR_TIMEOUT_MS"));
+    assert!(env_vars.contains_key("NEWTON_EXECUTOR_TIMEOUT_MS"));
+    assert!(env_vars.contains_key("NEWTON_WORKSPACE_PATH"));
+    assert!(env_vars.contains_key("NEWTON_ITERATION_ID"));
+    assert!(env_vars.contains_key("NEWTON_EXECUTION_ID"));
+}
+
+#[tokio::test]
+async fn test_execute_failing_command() {
+    let temp_dir = TempDir::new().unwrap();
+    let executor = ToolExecutor::new();
+
+    let config = ExecutionConfiguration {
+        evaluator_cmd: None,
+        advisor_cmd: None,
+        executor_cmd: None,
+        max_iterations: None,
+        max_time_seconds: None,
+        evaluator_timeout_ms: None,
+        advisor_timeout_ms: None,
+        executor_timeout_ms: None,
+        global_timeout_ms: None,
+        strict_toolchain_mode: false,
+        resource_monitoring: false,
+        verbose: false,
+    };
+
+    // Use a command that should fail
+    let result = executor
+        .execute("exit 1", &config, &temp_dir.path().to_path_buf())
+        .await;
+
+    assert!(result.is_ok());
+    let tool_result = result.unwrap();
+    assert_eq!(tool_result.tool_name, "exit 1");
+    assert!(!tool_result.success);
+    assert_eq!(tool_result.exit_code, 1);
+    assert!(tool_result.error.is_some());
+}
+
+#[tokio::test]
+async fn test_execute_nonexistent_command() {
+    let temp_dir = TempDir::new().unwrap();
+    let executor = ToolExecutor::new();
+
+    let config = ExecutionConfiguration {
+        evaluator_cmd: None,
+        advisor_cmd: None,
+        executor_cmd: None,
+        max_iterations: None,
+        max_time_seconds: None,
+        evaluator_timeout_ms: None,
+        advisor_timeout_ms: None,
+        executor_timeout_ms: None,
+        global_timeout_ms: None,
+        strict_toolchain_mode: false,
+        resource_monitoring: false,
+        verbose: false,
+    };
+
+    // Use a command that doesn't exist
+    let result = executor
+        .execute(
+            "nonexistent_command_12345",
+            &config,
+            &temp_dir.path().to_path_buf(),
+        )
+        .await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_tool_result_structure() {
+    let temp_dir = TempDir::new().unwrap();
+    let executor = ToolExecutor::new();
+
+    let config = ExecutionConfiguration {
+        evaluator_cmd: None,
+        advisor_cmd: None,
+        executor_cmd: None,
+        max_iterations: None,
+        max_time_seconds: None,
+        evaluator_timeout_ms: None,
+        advisor_timeout_ms: None,
+        executor_timeout_ms: None,
+        global_timeout_ms: None,
+        strict_toolchain_mode: false,
+        resource_monitoring: false,
+        verbose: false,
+    };
+
+    let result = executor
+        .execute("echo 'test'", &config, &temp_dir.path().to_path_buf())
+        .await;
+
+    assert!(result.is_ok());
+    let tool_result = result.unwrap();
+
+    assert_eq!(tool_result.tool_name, "echo 'test'");
+    assert_eq!(tool_result.exit_code, 0);
+    assert!(tool_result.success);
+    assert!(tool_result.error.is_none());
+    assert_eq!(tool_result.metadata.tool_type, ToolType::Executor);
+    assert!(tool_result.execution_time_ms > 0);
+    assert!(!tool_result.stdout.is_empty());
+
+    // Check arguments parsing
+    assert_eq!(tool_result.metadata.arguments.len(), 1); // "test"
+
+    // Check environment variables contain basic required ones
+    let env_vars = &tool_result.metadata.environment_variables;
+    assert!(env_vars.contains_key("NEWTON_WORKSPACE_PATH"));
+    assert_eq!(
+        env_vars.get("NEWTON_WORKSPACE_PATH"),
+        Some(&temp_dir.path().to_string_lossy().to_string())
+    );
+}
+
+#[tokio::test]
+async fn test_environment_variables_comprehensive() {
+    let temp_dir = TempDir::new().unwrap();
+    let executor = ToolExecutor::new();
+
+    let config = ExecutionConfiguration {
+        evaluator_cmd: Some("custom_evaluator".to_string()),
+        advisor_cmd: Some("custom_advisor".to_string()),
+        executor_cmd: Some("custom_executor".to_string()),
+        max_iterations: Some(50),
+        max_time_seconds: Some(600),
+        evaluator_timeout_ms: Some(10000),
+        advisor_timeout_ms: Some(15000),
+        executor_timeout_ms: Some(20000),
+        global_timeout_ms: Some(600000),
+        strict_toolchain_mode: true,
+        resource_monitoring: true,
+        verbose: true,
+    };
+
+    let result = executor
+        .execute("echo 'env test'", &config, &temp_dir.path().to_path_buf())
+        .await;
+
+    assert!(result.is_ok());
+    let tool_result = result.unwrap();
+    let env_vars = &tool_result.metadata.environment_variables;
+
+    // Check all environment variables are set correctly
+    assert_eq!(
+        env_vars.get("NEWTON_EVALUATOR_CMD"),
+        Some(&"custom_evaluator".to_string())
+    );
+    assert_eq!(
+        env_vars.get("NEWTON_ADVISOR_CMD"),
+        Some(&"custom_advisor".to_string())
+    );
+    assert_eq!(
+        env_vars.get("NEWTON_EXECUTOR_CMD"),
+        Some(&"custom_executor".to_string())
+    );
+    assert_eq!(
+        env_vars.get("NEWTON_EVALUATOR_TIMEOUT_MS"),
+        Some(&"10000".to_string())
+    );
+    assert_eq!(
+        env_vars.get("NEWTON_ADVISOR_TIMEOUT_MS"),
+        Some(&"15000".to_string())
+    );
+    assert_eq!(
+        env_vars.get("NEWTON_EXECUTOR_TIMEOUT_MS"),
+        Some(&"20000".to_string())
+    );
+    assert_eq!(
+        env_vars.get("NEWTON_WORKSPACE_PATH"),
+        Some(&temp_dir.path().to_string_lossy().to_string())
+    );
 }
