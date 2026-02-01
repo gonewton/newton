@@ -43,7 +43,7 @@ jobs:
       - name: Verify version matches tag
         shell: bash
         run: |
-          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          TAG_VERSION=${TAG_NAME#v}
           CARGO_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
           if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
             echo "Tag version $TAG_VERSION does not match Cargo.toml version $CARGO_VERSION"
@@ -92,7 +92,7 @@ jobs:
 
       - name: Generate release notes
         run: |
-          echo "# Release v${{ github.ref_name }}" > release-notes.md
+          echo "# Release ${{ env.TAG_NAME }}" > release-notes.md
           echo "" >> release-notes.md
           echo "## Changes" >> release-notes.md
           echo "" >> release-notes.md
@@ -101,6 +101,7 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ env.TAG_NAME }}
           files: artifacts/**/*
           body_path: release-notes.md
         env:
@@ -136,12 +137,12 @@ jobs:
       - name: Update homebrew formula
         working-directory: homebrew-cli
         run: |
-          ./generate_formula.sh newton --version ${{ github.ref_name }}
+          ./generate_formula.sh newton --version ${{ env.TAG_NAME }}
 
       - name: Update scoop manifest
         working-directory: scoop-bucket
         run: |
-          ./generate_manifest.sh newton --version ${{ github.ref_name }}
+          ./generate_manifest.sh newton --version ${{ env.TAG_NAME }}
 
       - name: Commit and push homebrew updates
         working-directory: homebrew-cli
@@ -152,7 +153,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Update newton formula to ${{ github.ref_name }}"
+            git commit -m "Update newton formula to ${{ env.TAG_NAME }}"
             git push
           fi
 
@@ -165,6 +166,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Update newton manifest to ${{ github.ref_name }}"
+            git commit -m "Update newton manifest to ${{ env.TAG_NAME }}"
             git push
           fi

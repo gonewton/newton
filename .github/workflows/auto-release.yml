@@ -9,6 +9,10 @@ on:
       - 'README.md'
       - 'CHANGELOG.md'
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   auto-release:
     name: Auto Release
@@ -73,6 +77,12 @@ jobs:
         run: |
           NEW_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
           git tag "v$NEW_VERSION"
-          # App token triggers Release workflow; GITHUB_TOKEN push does not
+          # App token used so tag exists; tag push from same repo does not trigger Release
           git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${{ github.repository }}.git"
           git push origin "v$NEW_VERSION"
+
+      - name: Trigger Release workflow
+        if: steps.check-version.outputs.skip == 'false'
+        run: |
+          TAG="v$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')"
+          gh workflow run release.yml -f tag="$TAG" --ref main
