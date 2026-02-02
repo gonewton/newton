@@ -1,7 +1,7 @@
 {
   "$schema": "https://repomix.com/schemas/latest/schema.json",
   "input": {
-    "maxFileSize": 52428800
+    "maxFileSize": 5242880
   },
   "output": {
     "filePath": "repomix-output.xml",
@@ -13,7 +13,7 @@
     "removeComments": false,
     "removeEmptyLines": false,
     "compress": false,
-    "topFilesLength": 5,
+    "topFilesLength": 15,
     "showLineNumbers": false,
     "truncateBase64": false,
     "copyToClipboard": false,

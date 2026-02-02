@@ -9,3 +9,4 @@ target
 *.sh
 *.md
 .github
+tests
