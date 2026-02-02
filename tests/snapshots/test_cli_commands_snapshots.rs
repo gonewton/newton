@@ -1,12 +1,13 @@
 #[allow(deprecated)]
 use assert_cmd::cargo_bin;
+use assert_cmd::Command;
 use insta::assert_snapshot;
 
 const BIN: &str = "newton";
 
 #[test]
 fn version_flag_snapshot() {
-    let output = Command::cargo_bin(BIN)
+    let output = assert_cmd::Command::cargo_bin(BIN)
         .expect("binary should build")
         .arg("--version")
         .output()
@@ -20,7 +21,7 @@ fn version_flag_snapshot() {
 
 #[test]
 fn help_flag_snapshot() {
-    let output = Command::cargo_bin(BIN)
+    let output = assert_cmd::Command::cargo_bin(BIN)
         .expect("binary should build")
         .arg("--help")
         .output()
@@ -31,7 +32,7 @@ fn help_flag_snapshot() {
 
 #[test]
 fn run_command_help_snapshot() {
-    let output = Command::cargo_bin(BIN)
+    let output = assert_cmd::Command::cargo_bin(BIN)
         .expect("binary should build")
         .args(["run", "--help"])
         .output()
