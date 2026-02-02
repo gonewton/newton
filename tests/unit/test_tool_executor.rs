@@ -1,20 +1,18 @@
 use newton::core::entities::{ExecutionConfiguration, ToolType};
 use newton::core::tool_executor::ToolExecutor;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use tempfile::TempDir;
-use tokio_test;
 
 #[tokio::test]
 async fn test_tool_executor_creation() {
-    let executor = ToolExecutor::new();
+    let _executor = ToolExecutor::new();
     // Should be able to create without error
     assert!(true);
 }
 
 #[tokio::test]
 async fn test_tool_executor_default() {
-    let executor = ToolExecutor::default();
+    let _executor = ToolExecutor::default();
     // Should be able to create using Default trait
     assert!(true);
 }

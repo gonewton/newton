@@ -6,9 +6,7 @@ use uuid::Uuid;
 #[test]
 fn test_history_recorder_creation() {
     let temp_dir = TempDir::new().unwrap();
-    let recorder = ExecutionHistoryRecorder::new(temp_dir.path().to_path_buf());
-
-    assert!(true);
+    let _recorder = ExecutionHistoryRecorder::new(temp_dir.path().to_path_buf());
 }
 
 #[test]
