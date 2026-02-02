@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use assert_cmd::cargo_bin;
 use insta::assert_snapshot;
 
