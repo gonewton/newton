@@ -1,0 +1,8 @@
+---
+source: tests/snapshots/test_cli_commands_snapshots.rs
+expression: stdout
+---
+Report for Execution: test-exec-123
+Path: .
+Format: Text
+Text report format not yet implemented

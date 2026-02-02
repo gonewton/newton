@@ -1,0 +1,14 @@
+---
+source: tests/snapshots/test_cli_commands_snapshots.rs
+expression: combined_output
+---
+STDOUT:
+[INFO] Starting optimization run
+[INFO] Starting optimization with max 1 iterations
+[INFO] Starting iteration 1
+[INFO] Maximum iterations reached
+[INFO] Optimization completed successfully
+Step completed
+Iteration 0: Complete
+
+STDERR:

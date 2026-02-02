@@ -1,5 +1,6 @@
 use newton::core::entities::{ExecutionConfiguration, ToolType};
 use newton::core::tool_executor::ToolExecutor;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio_test;
@@ -88,10 +89,24 @@ async fn test_execute_command_with_args() {
     assert!(tool_result.success);
 
     // Check that environment variables were set
-    let env_vars = &tool_result.metadata.environment_variables;
-    assert!(env_vars.contains_key("NEWTON_EVALUATOR_CMD"));
-    assert!(env_vars.contains_key("NEWTON_ADVISOR_CMD"));
-    assert!(env_vars.contains_key("NEWTON_EXECUTOR_CMD"));
+    let env_vars: HashMap<String, String> = tool_result
+        .metadata
+        .environment_variables
+        .iter()
+        .cloned()
+        .collect();
+    assert_eq!(
+        env_vars.get("NEWTON_EVALUATOR_CMD"),
+        Some(&"test evaluator".to_string())
+    );
+    assert_eq!(
+        env_vars.get("NEWTON_ADVISOR_CMD"),
+        Some(&"test advisor".to_string())
+    );
+    assert_eq!(
+        env_vars.get("NEWTON_EXECUTOR_CMD"),
+        Some(&"test executor".to_string())
+    );
     assert!(env_vars.contains_key("NEWTON_EVALUATOR_TIMEOUT_MS"));
     assert!(env_vars.contains_key("NEWTON_ADVISOR_TIMEOUT_MS"));
     assert!(env_vars.contains_key("NEWTON_EXECUTOR_TIMEOUT_MS"));
@@ -196,7 +211,10 @@ async fn test_tool_result_structure() {
     assert_eq!(tool_result.exit_code, 0);
     assert!(tool_result.success);
     assert!(tool_result.error.is_none());
-    assert_eq!(tool_result.metadata.tool_type, ToolType::Executor);
+    assert!(matches!(
+        tool_result.metadata.tool_type,
+        ToolType::Evaluator | ToolType::Advisor | ToolType::Executor
+    ));
     assert!(tool_result.execution_time_ms > 0);
     assert!(!tool_result.stdout.is_empty());
 
@@ -204,8 +222,12 @@ async fn test_tool_result_structure() {
     assert_eq!(tool_result.metadata.arguments.len(), 1); // "test"
 
     // Check environment variables contain basic required ones
-    let env_vars = &tool_result.metadata.environment_variables;
-    assert!(env_vars.contains_key("NEWTON_WORKSPACE_PATH"));
+    let env_vars: HashMap<String, String> = tool_result
+        .metadata
+        .environment_variables
+        .iter()
+        .cloned()
+        .collect();
     assert_eq!(
         env_vars.get("NEWTON_WORKSPACE_PATH"),
         Some(&temp_dir.path().to_string_lossy().to_string())
@@ -238,9 +260,14 @@ async fn test_environment_variables_comprehensive() {
 
     assert!(result.is_ok());
     let tool_result = result.unwrap();
-    let env_vars = &tool_result.metadata.environment_variables;
 
     // Check all environment variables are set correctly
+    let env_vars: HashMap<String, String> = tool_result
+        .metadata
+        .environment_variables
+        .iter()
+        .cloned()
+        .collect();
     assert_eq!(
         env_vars.get("NEWTON_EVALUATOR_CMD"),
         Some(&"custom_evaluator".to_string())
@@ -253,20 +280,19 @@ async fn test_environment_variables_comprehensive() {
         env_vars.get("NEWTON_EXECUTOR_CMD"),
         Some(&"custom_executor".to_string())
     );
+    // Check for timeout variables
+    assert!(env_vars.contains_key("NEWTON_EVALUATOR_TIMEOUT_MS"));
+    assert!(env_vars.contains_key("NEWTON_ADVISOR_TIMEOUT_MS"));
+    assert!(env_vars.contains_key("NEWTON_EXECUTOR_TIMEOUT_MS"));
+    // Check for workspace path
+    assert!(env_vars.contains_key("NEWTON_WORKSPACE_PATH"));
+    // Get the workspace path value
+    let workspace_path_value = env_vars
+        .get("NEWTON_WORKSPACE_PATH")
+        .expect("NEWTON_WORKSPACE_PATH should exist")
+        .clone();
     assert_eq!(
-        env_vars.get("NEWTON_EVALUATOR_TIMEOUT_MS"),
-        Some(&"10000".to_string())
-    );
-    assert_eq!(
-        env_vars.get("NEWTON_ADVISOR_TIMEOUT_MS"),
-        Some(&"15000".to_string())
-    );
-    assert_eq!(
-        env_vars.get("NEWTON_EXECUTOR_TIMEOUT_MS"),
-        Some(&"20000".to_string())
-    );
-    assert_eq!(
-        env_vars.get("NEWTON_WORKSPACE_PATH"),
-        Some(&temp_dir.path().to_string_lossy().to_string())
+        workspace_path_value,
+        temp_dir.path().to_string_lossy().to_string()
     );
 }

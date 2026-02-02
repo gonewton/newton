@@ -1,0 +1,25 @@
+---
+source: tests/test_cli_version_snapshots.rs
+expression: "std::str::from_utf8(&output.stdout).unwrap()"
+---
+Step performs exactly one evaluation/advice/execution round using current workspace state.
+
+Usage: newton step [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Path to read/write Newton artifacts from
+
+Options:
+      --execution-id <EXECUTION>
+          Associate the single step with an execution ID for auditing
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Output Options:
+      --verbose
+          Enable verbose output to display tool stdout/stderr
+
+Example:
+    newton step ./workspace --execution-id exec_123
