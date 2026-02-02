@@ -1,7 +1,5 @@
 use assert_cmd::Command;
 use insta::assert_snapshot;
-use predicates::prelude::*;
-use std::fs;
 use tempfile::TempDir;
 
 #[test]
@@ -100,7 +98,7 @@ async fn test_step_execution_output() {
 
 #[tokio::test]
 async fn test_status_command_execution() {
-    let temp_dir = TempDir::new().unwrap();
+    let _temp_dir = TempDir::new().unwrap();
     let execution_id = "test-exec-123";
 
     let mut cmd = Command::cargo_bin("newton").unwrap();
@@ -115,7 +113,7 @@ async fn test_status_command_execution() {
 
 #[tokio::test]
 async fn test_report_command_execution() {
-    let temp_dir = TempDir::new().unwrap();
+    let _temp_dir = TempDir::new().unwrap();
     let execution_id = "test-exec-123";
 
     let mut cmd = Command::cargo_bin("newton").unwrap();
@@ -130,7 +128,7 @@ async fn test_report_command_execution() {
 
 #[tokio::test]
 async fn test_error_command_execution() {
-    let temp_dir = TempDir::new().unwrap();
+    let _temp_dir = TempDir::new().unwrap();
     let execution_id = "test-exec-123";
 
     let mut cmd = Command::cargo_bin("newton").unwrap();
@@ -170,7 +168,7 @@ async fn test_run_command_failure_snapshot() {
 #[test]
 fn test_complex_args_parsing_snapshot() {
     let mut cmd = Command::cargo_bin("newton").unwrap();
-    cmd.args(&[
+    cmd.args([
         "run",
         "--max-iterations",
         "5",
