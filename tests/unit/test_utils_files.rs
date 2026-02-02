@@ -20,7 +20,7 @@ fn test_get_artifact_path() {
 #[test]
 fn test_save_artifact() {
     let temp_dir = TempDir::new().unwrap();
-    let execution_id = Uuid::new_v4();
+    let _execution_id = Uuid::new_v4();
     let manager = ArtifactStorageManager::new(temp_dir.path().to_path_buf());
 
     let artifact_path = temp_dir.path().join("test_artifact.txt");
@@ -48,7 +48,7 @@ fn test_save_artifact() {
 #[test]
 fn test_save_artifact_with_nested_path() {
     let temp_dir = TempDir::new().unwrap();
-    let execution_id = Uuid::new_v4();
+    let _execution_id = Uuid::new_v4();
     let manager = ArtifactStorageManager::new(temp_dir.path().to_path_buf());
 
     let artifact_path = temp_dir.path().join("nested").join("deep").join("test.txt");
@@ -75,7 +75,7 @@ fn test_save_artifact_with_nested_path() {
 #[test]
 fn test_load_artifact() {
     let temp_dir = TempDir::new().unwrap();
-    let execution_id = Uuid::new_v4();
+    let _execution_id = Uuid::new_v4();
     let manager = ArtifactStorageManager::new(temp_dir.path().to_path_buf());
 
     let artifact_path = temp_dir.path().join("test_load.txt");
@@ -92,7 +92,7 @@ fn test_load_artifact() {
 #[test]
 fn test_load_artifact_not_found() {
     let temp_dir = TempDir::new().unwrap();
-    let execution_id = Uuid::new_v4();
+    let _execution_id = Uuid::new_v4();
     let manager = ArtifactStorageManager::new(temp_dir.path().to_path_buf());
 
     let nonexistent_path = temp_dir.path().join("nonexistent.txt");
@@ -103,7 +103,7 @@ fn test_load_artifact_not_found() {
 #[test]
 fn test_list_artifacts_empty() {
     let temp_dir = TempDir::new().unwrap();
-    let execution_id = Uuid::new_v4();
+    let _execution_id = Uuid::new_v4();
     let manager = ArtifactStorageManager::new(temp_dir.path().to_path_buf());
 
     let execution_id = Uuid::new_v4();
@@ -141,7 +141,7 @@ fn test_list_artifacts_with_files() {
 #[test]
 fn test_delete_artifact_not_found() {
     let temp_dir = TempDir::new().unwrap();
-    let execution_id = Uuid::new_v4();
+    let _execution_id = Uuid::new_v4();
     let manager = ArtifactStorageManager::new(temp_dir.path().to_path_buf());
 
     let nonexistent_id = Uuid::new_v4();
@@ -152,7 +152,7 @@ fn test_delete_artifact_not_found() {
 #[test]
 fn test_get_artifact_metadata_not_found() {
     let temp_dir = TempDir::new().unwrap();
-    let execution_id = Uuid::new_v4();
+    let _execution_id = Uuid::new_v4();
     let manager = ArtifactStorageManager::new(temp_dir.path().to_path_buf());
 
     let nonexistent_id = Uuid::new_v4();
