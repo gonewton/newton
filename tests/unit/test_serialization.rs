@@ -101,9 +101,8 @@ fn test_json_serializer_unicode() {
 
 #[test]
 fn test_file_utils_creation() {
-    let file_utils = FileUtils;
-    // Should be able to create without error
-    assert!(true);
+    let _file_utils = FileUtils;
+    // Test that FileUtils can be created without error
 }
 
 #[test]

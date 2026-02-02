@@ -4,10 +4,8 @@ use newton::core::history_recorder::ExecutionHistoryRecorder;
 use newton::core::logger::Tracer;
 use newton::core::orchestrator::OptimizationOrchestrator;
 use newton::core::tool_executor::ToolExecutor;
-use std::path::PathBuf;
-use tempfile::TempDir;
-use tokio_test;
 
+use tempfile::TempDir;
 #[tokio::test]
 async fn test_full_orchestrator_workflow() {
     let temp_dir = TempDir::new().unwrap();
@@ -145,7 +143,7 @@ async fn test_artifact_storage_integration() {
     let artifact1_path = temp_dir
         .path()
         .join("artifacts")
-        .join(&execution_id.to_string())
+        .join(execution_id.to_string())
         .join("artifact1.txt");
     let artifact1_content = b"artifact 1 content";
     let metadata1 = newton::core::entities::ArtifactMetadata {
@@ -255,7 +253,7 @@ async fn test_complete_workflow() {
     let artifact_path = temp_dir
         .path()
         .join("artifacts")
-        .join(&execution.execution_id.to_string())
+        .join(execution.execution_id.to_string())
         .join("workflow_artifact.txt");
     let artifact_content = format!("Execution ID: {}", execution.execution_id);
     let metadata = newton::core::entities::ArtifactMetadata {
