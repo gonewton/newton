@@ -1,8 +1,7 @@
 use newton::core::entities::{ExecutionConfiguration, ExecutionStatus, OptimizationExecution};
-use newton::core::error::{DefaultErrorReporter, ErrorReporter};
+use newton::core::error::DefaultErrorReporter;
 use newton::core::orchestrator::OptimizationOrchestrator;
 use newton::utils::serialization::FileSerializer;
-use newton::utils::serialization::Serializer;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -27,12 +26,12 @@ async fn test_orchestrator_creation() {
 
 #[tokio::test]
 async fn test_orchestrator_run_optimization_minimal() {
-    let temp_dir = TempDir::new().unwrap();
+    let _temp_dir = TempDir::new().unwrap();
     let serializer = newton::utils::serialization::JsonSerializer;
     let file_serializer = newton::utils::serialization::FileUtils;
     let reporter = Box::new(DefaultErrorReporter);
 
-    let orchestrator = OptimizationOrchestrator::new(serializer, file_serializer, reporter);
+    let _orchestrator = OptimizationOrchestrator::new(serializer, file_serializer, reporter);
 
     let config = ExecutionConfiguration {
         evaluator_cmd: None,

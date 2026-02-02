@@ -75,7 +75,7 @@ fn test_tracer_with_unicode() {
 fn test_multiple_tracers() {
     let tracer1 = Tracer::new();
     let tracer2 = Tracer::new();
-    let tracer3 = Tracer::default();
+    let tracer3 = Tracer::new();
 
     // Multiple tracers should work independently
     tracer1.trace("tracer 1");

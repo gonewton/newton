@@ -67,7 +67,7 @@ async fn test_report_command() {
 
 #[tokio::test]
 async fn test_error_command() {
-    let temp_dir = TempDir::new().unwrap();
+    let _temp_dir = TempDir::new().unwrap();
     let args = ErrorArgs {
         execution_id: "test-execution-id".to_string(),
         verbose: false,

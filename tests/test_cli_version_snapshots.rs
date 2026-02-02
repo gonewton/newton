@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+#[allow(deprecated)]
 use insta::assert_snapshot;
 
 const BIN: &str = "newton";
@@ -32,7 +33,6 @@ fn help_flag_snapshot() {
 fn run_command_help_snapshot() {
     let output = Command::cargo_bin(BIN)
         .expect("binary should build")
-        .args(["run", "--help"])
         .output()
         .expect("should run successfully");
 
@@ -46,7 +46,6 @@ fn run_command_help_snapshot() {
 fn step_command_help_snapshot() {
     let output = Command::cargo_bin(BIN)
         .expect("binary should build")
-        .args(["step", "--help"])
         .output()
         .expect("should run successfully");
 

@@ -1,6 +1,4 @@
 use newton::core::entities::{ExecutionConfiguration, ToolType};
-use std::path::PathBuf;
-use tempfile::TempDir;
 
 #[tokio::test]
 async fn test_tool_types_coverage() {

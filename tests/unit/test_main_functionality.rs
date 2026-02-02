@@ -11,7 +11,6 @@ fn test_version_constant() {
 #[test]
 fn test_cli_parsing() {
     // Test that CLI can be parsed (this will use clap's Parser derive)
-    use clap::Parser;
 
     // Test with help argument (this should succeed)
     let result = std::process::Command::new(std::env::current_exe().unwrap())
@@ -42,7 +41,7 @@ fn test_main_dependencies() {
     let _filter = tracing_subscriber::EnvFilter::from_default_env();
 
     // clap should be available
-    let _args: Vec<String> = vec!["test"].iter().map(|s| s.to_string()).collect();
+    let _args: Vec<String> = ["test"].iter().map(|s| s.to_string()).collect();
 
     // tokio should be available
     let _runtime = tokio::runtime::Runtime::new().unwrap();
@@ -71,13 +70,8 @@ fn test_main_function_compilation() {
 
 #[cfg(test)]
 mod integration_tests {
-    use super::*;
-
     #[tokio::test]
     async fn test_cli_run_function() {
-        use clap::Parser;
-        use newton::cli::Args;
-
         // Test that CLI parsing works with different argument combinations
         let test_cases = vec![
             vec!["newton", "--help"],
@@ -98,10 +92,6 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_error_handling_flow() {
-        // Test the error handling flow that would occur in main
-        use newton::cli::run;
-        use newton::cli::Args;
-
         // We can't easily test the actual CLI execution without running the binary,
         // but we can test that the error types are compatible
 
