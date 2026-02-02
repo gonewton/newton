@@ -45,7 +45,7 @@ fn test_main_dependencies() {
     let _args: Vec<String> = vec!["test"].iter().map(|s| s.to_string()).collect();
 
     // tokio should be available
-    let _runtime = tokio::runtime::Handle::current();
+    let _runtime = tokio::runtime::Runtime::new().unwrap();
 }
 
 #[test]
