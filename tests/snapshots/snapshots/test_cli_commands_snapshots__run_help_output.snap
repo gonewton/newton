@@ -1,0 +1,73 @@
+---
+source: tests/snapshots/test_cli_commands_snapshots.rs
+expression: "std::str::from_utf8(&output.stdout).unwrap()"
+---
+Run iterates evaluation, advice, and execution phases until convergence or resource caps are hit.
+
+Usage: newton run [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Path containing Newton manifests and artifacts
+
+Options:
+      --max-iterations <MAX_ITERATIONS>
+          Cap the loop after this many iterations (default: 10)
+          
+          [default: 10]
+
+      --max-time <MAX_TIME>
+          Abort the loop after this wall-clock budget in seconds (default: 300)
+          
+          [default: 300]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Strict Mode Overrides:
+      --evaluator-cmd <CMD>
+          Replace the default evaluator tool invocation (strict mode)
+
+      --advisor-cmd <CMD>
+          Replace the default advisor tool invocation (strict mode)
+
+      --executor-cmd <CMD>
+          Replace the default executor tool invocation (strict mode)
+
+Artifact Paths:
+      --evaluator-status-file <FILE>
+          Custom location for captured evaluator status artifacts
+          
+          [default: artifacts/evaluator_status.md]
+
+      --advisor-recommendations-file <FILE>
+          Custom location for advisor recommendation notes
+          
+          [default: artifacts/advisor_recommendations.md]
+
+      --executor-log-file <FILE>
+          Custom location for executor streaming logs
+          
+          [default: artifacts/executor_log.md]
+
+Timeout Overrides:
+      --tool-timeout-seconds <TOOL_TIMEOUT_SECONDS>
+          Default timeout applied to every tool (seconds)
+          
+          [default: 30]
+
+      --evaluator-timeout <SECONDS>
+          Override timeout for evaluator tool only (seconds)
+
+      --advisor-timeout <SECONDS>
+          Override timeout for advisor tool only (seconds)
+
+      --executor-timeout <SECONDS>
+          Override timeout for executor tool only (seconds)
+
+Output Options:
+      --verbose
+          Enable verbose output to display tool stdout/stderr
+
+Example:
+    newton run ./workspace --max-iterations 5
