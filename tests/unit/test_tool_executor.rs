@@ -137,12 +137,12 @@ async fn test_execute_failing_command() {
 
     // Use a command that should fail
     let result = executor
-        .execute("exit 1", &config, &temp_dir.path().to_path_buf())
+        .execute("/usr/bin/false", &config, &temp_dir.path().to_path_buf())
         .await;
 
     assert!(result.is_ok());
     let tool_result = result.unwrap();
-    assert_eq!(tool_result.tool_name, "exit 1");
+    assert_eq!(tool_result.tool_name, "/usr/bin/false");
     assert!(!tool_result.success);
     assert_eq!(tool_result.exit_code, 1);
     assert!(tool_result.error.is_some());
