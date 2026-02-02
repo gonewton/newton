@@ -29,7 +29,7 @@ fi
 # Run clippy linting
 echo ""
 echo "🔧 Running clippy linting..."
-if cargo clippy -- -D warnings; then
+if cargo clippy --all-targets --all-features -- -D warnings; then
     echo "✅ Clippy checks passed"
 else
     echo "❌ Clippy found issues. Fix the warnings before committing."

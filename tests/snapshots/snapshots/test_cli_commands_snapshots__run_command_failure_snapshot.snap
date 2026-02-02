@@ -1,0 +1,16 @@
+---
+source: tests/snapshots/test_cli_commands_snapshots.rs
+expression: combined_output
+---
+STDOUT:
+[INFO] Starting optimization run
+[INFO] Starting optimization with max 1 iterations
+[INFO] Starting iteration 1
+[INFO] Executing tool: nonexistent_tool_12345
+[2m2026-02-02T01:49:35.048760Z[0m [31mERROR[0m [2mnewton::cli::commands[0m[2m:[0m Optimization failed: [TOOL-001] ToolExecutionError: Failed to execute tool: No such file or directory (os error 2)
+
+STDERR:
+[ERROR] TOOL-001: Failed to execute tool: No such file or directory (os error 2)
+[ERROR] TOOL-001: Failed to execute tool: No such file or directory (os error 2)
+Optimization failed: [TOOL-001] ToolExecutionError: Failed to execute tool: No such file or directory (os error 2)
+Error: [TOOL-001] ToolExecutionError: Failed to execute tool: No such file or directory (os error 2)

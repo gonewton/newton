@@ -1,0 +1,23 @@
+---
+source: tests/snapshots/test_cli_commands_snapshots.rs
+expression: stdout
+---
+Status queries persisted artifacts for a given execution ID and surfaces current phase, iteration counts, and blockers.
+
+Usage: newton status [OPTIONS] <EXECUTION>
+
+Arguments:
+  <EXECUTION>
+          Identifier of the execution to inspect
+
+Options:
+      --path <PATH>
+          Path storing the execution ledger
+          
+          [default: .]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Example:
+    newton status exec_123 --workspace ./workspace

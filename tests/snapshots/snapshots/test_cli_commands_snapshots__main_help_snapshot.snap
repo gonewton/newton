@@ -1,0 +1,23 @@
+---
+source: tests/snapshots/test_cli_commands_snapshots.rs
+expression: stdout
+---
+newton 0.5.3
+Newton Loop optimization framework in Rust
+
+USAGE:
+    newton <COMMAND>
+
+OPTIONS:
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+WORKFLOW COMMANDS:
+  run     Execute a full optimization loop
+  step    Advance loop by one cycle
+  status  Inspect progress of an execution
+  report  Summarize learnings from an execution
+  error   Diagnose failures during optimization
+  help    Print this message or the help of the given subcommand(s)

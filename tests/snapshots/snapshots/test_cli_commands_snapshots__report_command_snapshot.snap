@@ -1,0 +1,32 @@
+---
+source: tests/snapshots/test_cli_commands_snapshots.rs
+expression: stdout
+---
+Report renders structured output (text or JSON) describing performance metrics, recommendations, and anomalies for the requested execution.
+
+Usage: newton report [OPTIONS] <EXECUTION>
+
+Arguments:
+  <EXECUTION>
+          Execution whose insights should be summarized
+
+Options:
+      --path <PATH>
+          Path storing source artifacts for the report
+          
+          [default: .]
+
+      --format <FORMAT>
+          Emit either terminal-friendly text or machine-readable JSON
+
+          Possible values:
+          - text: Human-readable, Markdown-friendly summary
+          - json: JSON payload suitable for downstream tooling
+          
+          [default: text]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Example:
+    newton report exec_123 --format json

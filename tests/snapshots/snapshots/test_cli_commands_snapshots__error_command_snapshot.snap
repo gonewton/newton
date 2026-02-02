@@ -1,0 +1,21 @@
+---
+source: tests/snapshots/test_cli_commands_snapshots.rs
+expression: stdout
+---
+Error traces tool crashes, timeouts, and incompatible artifacts for a specific execution, with optional verbose stack traces.
+
+Usage: newton error [OPTIONS] <EXECUTION>
+
+Arguments:
+  <EXECUTION>
+          Execution ID whose failures should be analyzed
+
+Options:
+      --verbose
+          Include stack traces, raw logs, and contextual artifacts
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Example:
+    newton error exec_123 --verbose
