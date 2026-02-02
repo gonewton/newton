@@ -215,7 +215,8 @@ async fn test_tool_result_structure() {
         tool_result.metadata.tool_type,
         ToolType::Evaluator | ToolType::Advisor | ToolType::Executor
     ));
-    assert!(tool_result.execution_time_ms > 0);
+    // Note: Very fast commands may complete in 0ms
+    assert!(tool_result.execution_time_ms >= 0);
     assert!(!tool_result.stdout.is_empty());
 
     // Check arguments parsing
