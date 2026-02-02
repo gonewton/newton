@@ -32,7 +32,7 @@ fn help_flag_snapshot() {
 fn run_command_help_snapshot() {
     let output = Command::cargo_bin(BIN)
         .expect("binary should build")
-        .args(&["run", "--help"])
+        .args(["run", "--help"])
         .output()
         .expect("should run successfully");
 
@@ -46,7 +46,7 @@ fn run_command_help_snapshot() {
 fn step_command_help_snapshot() {
     let output = Command::cargo_bin(BIN)
         .expect("binary should build")
-        .args(&["step", "--help"])
+        .args(["step", "--help"])
         .output()
         .expect("should run successfully");
 
