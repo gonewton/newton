@@ -13,4 +13,4 @@ repomix-output.xml
 .claude
 .newton
 specs
-tarpaulin-report.html
+tarpaulin-report.html.gitignore

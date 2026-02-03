@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use crate::core::entities::OptimizationExecution;
 use crate::core::error::{AppError, DefaultErrorReporter, ErrorReporter};
 use crate::utils::serialization::{JsonSerializer, Serializer};

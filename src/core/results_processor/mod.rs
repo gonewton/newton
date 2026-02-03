@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use crate::core::entities::OptimizationExecution;
 use crate::core::entities::{ExecutionStatus, IterationPhase};
 use crate::core::error::{AppError, ErrorReporter};
