@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use crate::core::error::AppError;
 
 pub fn validate_path(path: &std::path::Path) -> Result<(), AppError> {

@@ -1,3 +1,5 @@
+#![allow(clippy::unnecessary_cast)]
+
 use crate::core::entities::*;
 use crate::core::entities::{ExecutionConfiguration, Iteration, ToolMetadata};
 use crate::core::error::{AppError, ErrorReporter};

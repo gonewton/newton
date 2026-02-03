@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use crate::core::entities::ArtifactMetadata;
 use crate::core::error::AppError;
 use std::fs;
