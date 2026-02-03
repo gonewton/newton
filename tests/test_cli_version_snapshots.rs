@@ -1,13 +1,9 @@
-use assert_cmd::Command;
-#[allow(deprecated)]
 use insta::assert_snapshot;
-
-const BIN: &str = "newton";
+use std::process::Command;
 
 #[test]
 fn version_flag_snapshot() {
-    let output = Command::cargo_bin(BIN)
-        .expect("binary should build")
+    let output = Command::new(assert_cmd::cargo::cargo_bin!("newton"))
         .arg("--version")
         .output()
         .expect("should run successfully");
@@ -20,8 +16,7 @@ fn version_flag_snapshot() {
 
 #[test]
 fn help_flag_snapshot() {
-    let output = Command::cargo_bin(BIN)
-        .expect("binary should build")
+    let output = Command::new(assert_cmd::cargo::cargo_bin!("newton"))
         .arg("--help")
         .output()
         .expect("should run successfully");
@@ -31,8 +26,7 @@ fn help_flag_snapshot() {
 
 #[test]
 fn run_command_help_snapshot() {
-    let output = Command::cargo_bin(BIN)
-        .expect("binary should build")
+    let output = Command::new(assert_cmd::cargo::cargo_bin!("newton"))
         .output()
         .expect("should run successfully");
 
@@ -44,8 +38,7 @@ fn run_command_help_snapshot() {
 
 #[test]
 fn step_command_help_snapshot() {
-    let output = Command::cargo_bin(BIN)
-        .expect("binary should build")
+    let output = Command::new(assert_cmd::cargo::cargo_bin!("newton"))
         .output()
         .expect("should run successfully");
 
