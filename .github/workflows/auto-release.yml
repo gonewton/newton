@@ -41,9 +41,11 @@ jobs:
 
       - name: Create release branch
         if: steps.check-version.outputs.skip == 'false'
+        id: create-branch
         run: |
           CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
           BRANCH_NAME="auto-release-$CURRENT_VERSION"
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
           git checkout -b "$BRANCH_NAME"
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
@@ -69,29 +71,27 @@ jobs:
       - name: Push release branch
         if: steps.check-version.outputs.skip == 'false'
         run: |
-          CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          BRANCH_NAME="auto-release-$CURRENT_VERSION"
-          git push origin "$BRANCH_NAME"
+          git push origin "${{ steps.create-branch.outputs.branch_name }}"
 
       - name: Create Pull Request
         if: steps.check-version.outputs.skip == 'false'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          BRANCH_NAME="auto-release-$CURRENT_VERSION"
-          PR_TITLE="chore: release v$CURRENT_VERSION"
-          PR_BODY="Automated release for version $CURRENT_VERSION
-          
+          NEW_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          BRANCH_NAME="${{ steps.create-branch.outputs.branch_name }}"
+          PR_TITLE="chore: release v$NEW_VERSION"
+          PR_BODY="Automated release for version $NEW_VERSION
+
           This PR was created by the auto-release workflow.
-          
-          - Bumps version from previous to $CURRENT_VERSION
+
+          - Bumps version from previous to $NEW_VERSION
           - Creates and pushes git tag
-          - Triggers release workflow"
-          
+          - Triggers release workflow
+
           **Changes:**
           - Version bump in Cargo.toml"
-          
+
           gh pr create \
             --title "$PR_TITLE" \
             --body "$PR_BODY" \
