@@ -2,7 +2,7 @@
 source: tests/test_cli_version_snapshots.rs
 expression: "std::str::from_utf8(&output.stdout).unwrap()"
 ---
-newton 0.5.6
+newton 0.5.7
 Newton Loop optimization framework in Rust
 
 USAGE:
