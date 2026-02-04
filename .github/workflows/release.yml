@@ -145,8 +145,10 @@ jobs:
         run: |
           ./generate_manifest.sh newton --version ${{ env.TAG_NAME }}
 
-      - name: Commit and push homebrew updates
+      - name: Create homebrew PR
         working-directory: homebrew-cli
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
@@ -154,12 +156,21 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
+            BRANCH_NAME="update-formula-${{ env.TAG_NAME }}"
+            git checkout -b "$BRANCH_NAME"
             git commit -m "Update newton formula to ${{ env.TAG_NAME }}"
-            git push
+            git push origin "$BRANCH_NAME"
+            gh pr create \
+              --title "Update newton formula to ${{ env.TAG_NAME }}" \
+              --body "Automated update of newton formula to ${{ env.TAG_NAME }}" \
+              --base main \
+              --head "$BRANCH_NAME" || echo "PR may already exist"
           fi
 
-      - name: Commit and push scoop updates
+      - name: Create scoop PR
         working-directory: scoop-bucket
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
@@ -167,6 +178,13 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
+            BRANCH_NAME="update-manifest-${{ env.TAG_NAME }}"
+            git checkout -b "$BRANCH_NAME"
             git commit -m "Update newton manifest to ${{ env.TAG_NAME }}"
-            git push
+            git push origin "$BRANCH_NAME"
+            gh pr create \
+              --title "Update newton manifest to ${{ env.TAG_NAME }}" \
+              --body "Automated update of newton manifest to ${{ env.TAG_NAME }}" \
+              --base main \
+              --head "$BRANCH_NAME" || echo "PR may already exist"
           fi
