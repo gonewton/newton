@@ -112,79 +112,91 @@ jobs:
     name: Update Package Managers
     needs: create-release
     runs-on: ubuntu-latest
+    if: always() && needs.create-release.result == 'success'
+    permissions:
+      contents: write
+
     steps:
-      - name: Generate GitHub App Token
+      - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.GH_APP_ID }}
           private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
-          owner: gonewton
+          repositories: homebrew-cli,scoop-bucket
 
-      - name: Checkout homebrew-cli
+      - name: Authenticate GitHub CLI
+        run: |
+          echo "GH_TOKEN=${{ steps.app-token.outputs.token }}" >> "$GITHUB_ENV"
+          export GH_TOKEN="${{ steps.app-token.outputs.token }}"
+          echo "Token length: ${#GH_TOKEN}"
+          if gh auth status; then
+            echo "✅ GitHub CLI authentication successful"
+          else
+            echo "❌ GitHub CLI authentication failed"
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      - name: Checkout homebrew-cli repo
         uses: actions/checkout@v4
         with:
           repository: gonewton/homebrew-cli
           path: homebrew-cli
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Checkout scoop-bucket
+      - name: Update Homebrew formula
+        run: |
+          cd homebrew-cli
+          chmod +x generate_formula.sh
+          ./generate_formula.sh --version ${TAG_NAME#v}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      - name: Commit and push Homebrew changes
+        run: |
+          cd homebrew-cli
+          VERSION="${TAG_NAME#v}"
+
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "No changes to commit for Homebrew formula"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            git commit -m "chore: update newton to ${TAG_NAME}"
+            git push "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/gonewton/homebrew-cli.git" main
+            echo "✅ Homebrew formula updated to ${TAG_NAME}"
+          fi
+
+      - name: Checkout scoop-bucket repo
         uses: actions/checkout@v4
         with:
           repository: gonewton/scoop-bucket
           path: scoop-bucket
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Update homebrew formula
-        working-directory: homebrew-cli
+      - name: Update Scoop manifest
         run: |
-          ./generate_formula.sh newton --version ${{ env.TAG_NAME }}
-
-      - name: Update scoop manifest
-        working-directory: scoop-bucket
-        run: |
-          ./generate_manifest.sh newton --version ${{ env.TAG_NAME }}
-
-      - name: Create homebrew PR
-        working-directory: homebrew-cli
+          cd scoop-bucket
+          chmod +x generate_manifest.sh
+          ./generate_manifest.sh --version ${TAG_NAME#v}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add Formula/newton.rb
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            BRANCH_NAME="update-formula-${{ env.TAG_NAME }}"
-            git checkout -b "$BRANCH_NAME"
-            git commit -m "Update newton formula to ${{ env.TAG_NAME }}"
-            git push origin "$BRANCH_NAME"
-            gh pr create \
-              --title "Update newton formula to ${{ env.TAG_NAME }}" \
-              --body "Automated update of newton formula to ${{ env.TAG_NAME }}" \
-              --base main \
-              --head "$BRANCH_NAME" || echo "PR may already exist"
-          fi
 
-      - name: Create scoop PR
-        working-directory: scoop-bucket
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+      - name: Commit and push Scoop changes
         run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add bucket/newton.json
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
+          cd scoop-bucket
+          VERSION="${TAG_NAME#v}"
+
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "No changes to commit for Scoop manifest"
           else
-            BRANCH_NAME="update-manifest-${{ env.TAG_NAME }}"
-            git checkout -b "$BRANCH_NAME"
-            git commit -m "Update newton manifest to ${{ env.TAG_NAME }}"
-            git push origin "$BRANCH_NAME"
-            gh pr create \
-              --title "Update newton manifest to ${{ env.TAG_NAME }}" \
-              --body "Automated update of newton manifest to ${{ env.TAG_NAME }}" \
-              --base main \
-              --head "$BRANCH_NAME" || echo "PR may already exist"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            git commit -m "chore: update newton to ${TAG_NAME}"
+            git push "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/gonewton/scoop-bucket.git" main
+            echo "✅ Scoop manifest updated to ${TAG_NAME}"
           fi
