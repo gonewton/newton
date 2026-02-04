@@ -10,6 +10,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  TAG_NAME: ${{ github.ref_name }}
 
 jobs:
   release:
