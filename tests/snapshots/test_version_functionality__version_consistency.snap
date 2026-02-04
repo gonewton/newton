@@ -2,5 +2,5 @@
 source: tests/test_version_functionality.rs
 expression: "format!(\"lib.rs: {}\\ncargo.toml: {}\", VERSION, cargo_version)"
 ---
-lib.rs: 0.5.8
-cargo.toml: 0.5.8
+lib.rs: 0.5.9
+cargo.toml: 0.5.9
