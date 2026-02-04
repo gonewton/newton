@@ -2,4 +2,4 @@
 source: tests/test_version_functionality.rs
 expression: VERSION
 ---
-0.5.5
+0.5.6
