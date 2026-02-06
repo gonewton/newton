@@ -150,7 +150,7 @@ jobs:
         run: |
           cd homebrew-cli
           chmod +x generate_formula.sh
-          ./generate_formula.sh --version ${TAG_NAME#v}
+          ./generate_formula.sh newton --version ${TAG_NAME#v}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
@@ -181,7 +181,7 @@ jobs:
         run: |
           cd scoop-bucket
           chmod +x generate_manifest.sh
-          ./generate_manifest.sh --version ${TAG_NAME#v}
+          ./generate_manifest.sh newton --version ${TAG_NAME#v}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
