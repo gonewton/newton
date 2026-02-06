@@ -1,5 +1,5 @@
 ---
 source: tests/snapshots/test_cli_commands_snapshots.rs
-expression: "std::str::from_utf8(&output.stdout).unwrap()"
+expression: stdout
 ---
-newton 0.5.9
+newton [VERSION]

@@ -8,10 +8,14 @@ fn version_flag_snapshot() {
         .output()
         .expect("should run successfully");
 
-    assert_snapshot!(
-        "version_output",
-        std::str::from_utf8(&output.stdout).unwrap()
-    );
+    let stdout = std::str::from_utf8(&output.stdout).unwrap();
+
+    // Replace version number with placeholder to avoid snapshot invalidation on version changes
+    let normalized = regex::Regex::new(r"\d+\.\d+\.\d+")
+        .unwrap()
+        .replace_all(stdout, "[VERSION]");
+
+    assert_snapshot!("version_output", normalized);
 }
 
 #[test]
@@ -21,7 +25,14 @@ fn help_flag_snapshot() {
         .output()
         .expect("should run successfully");
 
-    assert_snapshot!("help_output", std::str::from_utf8(&output.stdout).unwrap());
+    let stdout = std::str::from_utf8(&output.stdout).unwrap();
+
+    // Replace version number with placeholder to avoid snapshot invalidation on version changes
+    let normalized = regex::Regex::new(r"\d+\.\d+\.\d+")
+        .unwrap()
+        .replace_all(stdout, "[VERSION]");
+
+    assert_snapshot!("help_output", normalized);
 }
 
 #[test]
