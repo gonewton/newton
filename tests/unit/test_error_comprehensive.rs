@@ -81,7 +81,7 @@ fn test_error_display() {
 
 #[test]
 fn test_error_display_with_source() {
-    let source = std::io::Error::new(std::io::ErrorKind::Other, "underlying error");
+    let source = std::io::Error::other("underlying error");
     let error = AppError::with_source(
         ErrorCategory::InternalError,
         "wrapper error",
