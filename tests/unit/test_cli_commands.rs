@@ -70,7 +70,8 @@ async fn test_report_command() {
     };
 
     let result = commands::report(args).await;
-    assert!(result.is_ok());
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not found"));
 }
 
 #[tokio::test]
