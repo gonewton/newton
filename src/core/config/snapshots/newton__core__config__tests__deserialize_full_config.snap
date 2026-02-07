@@ -1,0 +1,31 @@
+---
+source: src/core/config/mod.rs
+expression: config
+---
+NewtonConfig {
+    project: ProjectConfig {
+        name: "my-project",
+        template: Some(
+            "coding-project",
+        ),
+    },
+    executor: ExecutorConfig {
+        coding_agent: "custom-agent",
+        coding_agent_model: "custom-model",
+        auto_commit: true,
+    },
+    evaluator: EvaluatorConfig {
+        test_command: Some(
+            "./scripts/run-tests.sh",
+        ),
+        score_threshold: 90.0,
+    },
+    advisor: AdvisorConfig,
+    context: ContextConfig {
+        clear_after_use: false,
+        file: ".custom/context.md",
+    },
+    promise: PromiseConfig {
+        file: ".custom/promise.txt",
+    },
+}

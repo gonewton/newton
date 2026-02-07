@@ -2,16 +2,25 @@
 
 use super::NewtonConfig;
 use crate::core::error::AppError;
+use std::env;
 use std::path::{Path, PathBuf};
 
 pub struct ConfigLoader;
 
 impl ConfigLoader {
     /// Load config from workspace root (workspace/newton.toml)
-    /// Returns Ok(None) if file doesn't exist
-    pub fn load_from_workspace(workspace_path: &Path) -> Result<Option<NewtonConfig>, AppError> {
+    /// Environment variables override config file values
+    /// Returns Ok(None) if file doesn't exist (will use defaults + env vars)
+    pub fn load_from_workspace(workspace_path: &Path) -> Result<NewtonConfig, AppError> {
         let config_path = workspace_path.join("newton.toml");
-        Self::load_from_file(&config_path)
+        let config_file = Self::load_from_file(&config_path)?;
+
+        let mut config = config_file.unwrap_or_default();
+
+        // Apply environment variable overrides
+        Self::apply_env_overrides(&mut config);
+
+        Ok(config)
     }
 
     /// Load config from specific file path
@@ -38,144 +47,318 @@ impl ConfigLoader {
         Ok(Some(config))
     }
 
-    /// Merge config file with CLI arguments (CLI args take precedence)
-    /// If config_file is None, returns a default config merged with CLI args
-    #[allow(clippy::too_many_arguments)]
-    pub fn merge_with_args(
-        config_file: Option<NewtonConfig>,
-        evaluator_cmd: Option<String>,
-        advisor_cmd: Option<String>,
-        executor_cmd: Option<String>,
-        control_file: Option<PathBuf>,
-        branch_from_goal: bool,
-        restore_branch: bool,
-        create_pr: bool,
-    ) -> NewtonConfig {
-        let mut config = config_file.unwrap_or_default();
-
-        // CLI args override config file
-        if evaluator_cmd.is_some() {
-            config.evaluator_cmd = evaluator_cmd;
-        }
-        if advisor_cmd.is_some() {
-            config.advisor_cmd = advisor_cmd;
-        }
-        if executor_cmd.is_some() {
-            config.executor_cmd = executor_cmd;
-        }
-        if let Some(path) = control_file {
-            config.control_file = path.display().to_string();
+    /// Apply environment variable overrides to the configuration
+    /// Environment variables take precedence over config file values
+    fn apply_env_overrides(config: &mut NewtonConfig) {
+        // Project overrides
+        if let Ok(name) = env::var("NEWTON_PROJECT_NAME") {
+            config.project.name = name;
         }
 
-        // Branch flags
-        if branch_from_goal {
-            config.branch.create_from_goal = true;
+        if let Ok(template) = env::var("NEWTON_PROJECT_TEMPLATE") {
+            config.project.template = Some(template);
         }
 
-        // Git flags
-        if restore_branch {
-            config.git.restore_original_branch = true;
-        }
-        if create_pr {
-            config.git.create_pr_on_success = true;
+        // Executor overrides
+        if let Ok(coding_agent) = env::var("NEWTON_EXECUTOR_CODING_AGENT") {
+            config.executor.coding_agent = coding_agent;
         }
 
-        config
+        if let Ok(coding_agent_model) = env::var("NEWTON_EXECUTOR_CODING_AGENT_MODEL") {
+            config.executor.coding_agent_model = coding_agent_model;
+        }
+
+        if let Ok(auto_commit_str) = env::var("NEWTON_EXECUTOR_AUTO_COMMIT") {
+            if let Ok(auto_commit) = auto_commit_str.parse::<bool>() {
+                config.executor.auto_commit = auto_commit;
+            }
+        }
+
+        // Evaluator overrides
+        if let Ok(test_command) = env::var("NEWTON_EVALUATOR_TEST_COMMAND") {
+            config.evaluator.test_command = Some(test_command);
+        }
+
+        if let Ok(score_threshold_str) = env::var("NEWTON_EVALUATOR_SCORE_THRESHOLD") {
+            if let Ok(score_threshold) = score_threshold_str.parse::<f64>() {
+                config.evaluator.score_threshold = score_threshold;
+            }
+        }
+
+        // Context overrides
+        if let Ok(clear_after_use_str) = env::var("NEWTON_CONTEXT_CLEAR_AFTER_USE") {
+            if let Ok(clear_after_use) = clear_after_use_str.parse::<bool>() {
+                config.context.clear_after_use = clear_after_use;
+            }
+        }
+
+        if let Ok(context_file) = env::var("NEWTON_CONTEXT_FILE") {
+            config.context.file = PathBuf::from(context_file);
+        }
+
+        // Promise overrides
+        if let Ok(promise_file) = env::var("NEWTON_PROMISE_FILE") {
+            config.promise.file = PathBuf::from(promise_file);
+        }
+    }
+
+    /// Get documentation for supported environment variables
+    pub fn env_var_documentation() -> &'static [&'static str] {
+        &[
+            "NEWTON_PROJECT_NAME - Override project name",
+            "NEWTON_PROJECT_TEMPLATE - Override project template",
+            "NEWTON_EXECUTOR_CODING_AGENT - Override executor coding agent (default: opencode)",
+            "NEWTON_EXECUTOR_CODING_AGENT_MODEL - Override executor coding agent model (default: zai-coding-plan/glm-4.7)",
+            "NEWTON_EXECUTOR_AUTO_COMMIT - Override auto commit setting (true/false)",
+            "NEWTON_EVALUATOR_TEST_COMMAND - Override evaluator test command",
+            "NEWTON_EVALUATOR_SCORE_THRESHOLD - Override evaluator score threshold (default: 95.0)",
+            "NEWTON_CONTEXT_CLEAR_AFTER_USE - Override context clear after use setting (true/false, default: true)",
+            "NEWTON_CONTEXT_FILE - Override context file path (default: .newton/state/context.md)",
+            "NEWTON_PROMISE_FILE - Override promise file path (default: .newton/state/promise.txt)",
+        ]
+    }
+
+    /// Validate configuration values
+    pub fn validate_config(config: &NewtonConfig) -> Result<(), AppError> {
+        // Validate project name is not empty
+        if config.project.name.is_empty() {
+            return Err(AppError::new(
+                crate::core::types::ErrorCategory::ValidationError,
+                "Project name cannot be empty".to_string(),
+            ));
+        }
+
+        // Validate score threshold is within reasonable bounds
+        if config.evaluator.score_threshold < 0.0 || config.evaluator.score_threshold > 100.0 {
+            return Err(AppError::new(
+                crate::core::types::ErrorCategory::ValidationError,
+                "Score threshold must be between 0.0 and 100.0".to_string(),
+            ));
+        }
+
+        // Validate file paths are not empty
+        if config.context.file.as_os_str().is_empty() {
+            return Err(AppError::new(
+                crate::core::types::ErrorCategory::ValidationError,
+                "Context file path cannot be empty".to_string(),
+            ));
+        }
+
+        if config.promise.file.as_os_str().is_empty() {
+            return Err(AppError::new(
+                crate::core::types::ErrorCategory::ValidationError,
+                "Promise file path cannot be empty".to_string(),
+            ));
+        }
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use insta::assert_debug_snapshot;
+    use serial_test::serial;
     use tempfile::TempDir;
 
-    #[test]
-    fn test_load_config_nonexistent() {
-        let temp_dir = TempDir::new().unwrap();
-        let result = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
-        assert!(result.is_none());
+    fn clear_newton_env() {
+        for v in &[
+            "NEWTON_PROJECT_NAME",
+            "NEWTON_PROJECT_TEMPLATE",
+            "NEWTON_EXECUTOR_CODING_AGENT",
+            "NEWTON_EXECUTOR_CODING_AGENT_MODEL",
+            "NEWTON_EXECUTOR_AUTO_COMMIT",
+            "NEWTON_EVALUATOR_TEST_COMMAND",
+            "NEWTON_EVALUATOR_SCORE_THRESHOLD",
+            "NEWTON_CONTEXT_CLEAR_AFTER_USE",
+            "NEWTON_CONTEXT_FILE",
+            "NEWTON_PROMISE_FILE",
+        ] {
+            env::remove_var(v);
+        }
     }
 
     #[test]
+    #[serial]
+    fn test_load_config_nonexistent() {
+        clear_newton_env();
+        let temp_dir = TempDir::new().unwrap();
+        let result = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
+        assert_eq!(result.project.name, "newton-project");
+        assert_eq!(result.executor.coding_agent, "opencode");
+    }
+
+    #[test]
+    #[serial]
     fn test_load_config_valid() {
+        clear_newton_env();
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("newton.toml");
         std::fs::write(
             &config_path,
             r#"
-            evaluator_cmd = "eval.sh"
-            control_file = "custom.json"
-            "#,
+[project]
+name = "test-project"
+template = "test-template"
+
+[executor]
+coding_agent = "test-agent"
+auto_commit = true
+
+[evaluator]
+test_command = "./test.sh"
+score_threshold = 80.0
+"#,
         )
         .unwrap();
 
-        let result = ConfigLoader::load_from_file(&config_path).unwrap();
-        assert!(result.is_some());
-        let config = result.unwrap();
-        assert_eq!(config.evaluator_cmd, Some("eval.sh".to_string()));
-        assert_eq!(config.control_file, "custom.json");
+        let result = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
+        assert_debug_snapshot!(result);
+
+        assert_eq!(result.project.name, "test-project");
+        assert_eq!(result.project.template, Some("test-template".to_string()));
+        assert_eq!(result.executor.coding_agent, "test-agent");
+        assert!(result.executor.auto_commit);
+        assert_eq!(result.evaluator.test_command, Some("./test.sh".to_string()));
+        assert_eq!(result.evaluator.score_threshold, 80.0);
     }
 
     #[test]
+    #[serial]
     fn test_load_config_invalid() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("newton.toml");
         std::fs::write(&config_path, "invalid toml {{").unwrap();
 
-        let result = ConfigLoader::load_from_file(&config_path);
+        let result = ConfigLoader::load_from_workspace(temp_dir.path());
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_merge_cli_overrides_config() {
-        let config = Some(NewtonConfig {
-            evaluator_cmd: Some("config_eval.sh".to_string()),
-            control_file: "config_control.json".to_string(),
-            ..Default::default()
-        });
+    #[serial]
+    fn test_env_overrides() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("newton.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+[project]
+name = "file-project"
 
-        let merged = ConfigLoader::merge_with_args(
-            config,
-            Some("cli_eval.sh".to_string()),
-            None,
-            None,
-            Some(PathBuf::from("cli_control.json")),
-            false,
-            false,
-            false,
-        );
+[executor]
+coding_agent = "file-agent"
+auto_commit = false
 
-        assert_eq!(merged.evaluator_cmd, Some("cli_eval.sh".to_string()));
-        assert_eq!(merged.control_file, "cli_control.json");
+[evaluator]
+score_threshold = 75.0
+"#,
+        )
+        .unwrap();
+
+        // Set environment variables
+        env::set_var("NEWTON_PROJECT_NAME", "env-project");
+        env::set_var("NEWTON_EXECUTOR_CODING_AGENT", "env-agent");
+        env::set_var("NEWTON_EXECUTOR_AUTO_COMMIT", "true");
+        env::set_var("NEWTON_EVALUATOR_SCORE_THRESHOLD", "85.0");
+
+        let result = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
+
+        // Environment variables should override file values
+        assert_eq!(result.project.name, "env-project");
+        assert_eq!(result.executor.coding_agent, "env-agent");
+        assert!(result.executor.auto_commit);
+        assert_eq!(result.evaluator.score_threshold, 85.0);
+
+        // Clean up environment variables
+        env::remove_var("NEWTON_PROJECT_NAME");
+        env::remove_var("NEWTON_EXECUTOR_CODING_AGENT");
+        env::remove_var("NEWTON_EXECUTOR_AUTO_COMMIT");
+        env::remove_var("NEWTON_EVALUATOR_SCORE_THRESHOLD");
     }
 
     #[test]
-    fn test_merge_preserves_config_when_no_cli_args() {
-        let config = Some(NewtonConfig {
-            evaluator_cmd: Some("config_eval.sh".to_string()),
-            advisor_cmd: Some("config_advisor.sh".to_string()),
-            ..Default::default()
-        });
+    #[serial]
+    fn test_env_overrides_defaults() {
+        let temp_dir = TempDir::new().unwrap();
 
-        let merged =
-            ConfigLoader::merge_with_args(config, None, None, None, None, false, false, false);
+        // Set environment variables without config file
+        env::set_var("NEWTON_PROJECT_NAME", "env-only-project");
+        env::set_var("NEWTON_EXECUTOR_CODING_AGENT_MODEL", "env-model");
 
-        assert_eq!(merged.evaluator_cmd, Some("config_eval.sh".to_string()));
-        assert_eq!(merged.advisor_cmd, Some("config_advisor.sh".to_string()));
+        let result = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
+
+        // Environment variables should override defaults
+        assert_eq!(result.project.name, "env-only-project");
+        assert_eq!(result.executor.coding_agent_model, "env-model");
+
+        // Other values should use defaults
+        assert_eq!(result.executor.coding_agent, "opencode");
+
+        // Clean up environment variables
+        env::remove_var("NEWTON_PROJECT_NAME");
+        env::remove_var("NEWTON_EXECUTOR_CODING_AGENT_MODEL");
     }
 
     #[test]
-    fn test_merge_branch_flags() {
-        let config = Some(NewtonConfig::default());
+    fn test_validate_config_success() {
+        let config = NewtonConfig::default();
+        assert!(ConfigLoader::validate_config(&config).is_ok());
+    }
 
-        let merged = ConfigLoader::merge_with_args(
-            config, None, None, None, None, true, // branch_from_goal
-            true, // restore_branch
-            true, // create_pr
-        );
+    #[test]
+    fn test_validate_config_empty_project_name() {
+        let mut config = NewtonConfig::default();
+        config.project.name = "".to_string();
 
-        assert!(merged.branch.create_from_goal);
-        assert!(merged.git.restore_original_branch);
-        assert!(merged.git.create_pr_on_success);
+        let result = ConfigLoader::validate_config(&config);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Project name cannot be empty"));
+    }
+
+    #[test]
+    fn test_validate_config_invalid_score_threshold() {
+        let mut config = NewtonConfig::default();
+        config.evaluator.score_threshold = 150.0;
+
+        let result = ConfigLoader::validate_config(&config);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Score threshold must be between 0.0 and 100.0"));
+    }
+
+    #[test]
+    fn test_env_var_documentation() {
+        let docs = ConfigLoader::env_var_documentation();
+        assert!(!docs.is_empty());
+        assert!(docs.iter().any(|doc| doc.contains("NEWTON_PROJECT_NAME")));
+        assert!(docs
+            .iter()
+            .any(|doc| doc.contains("NEWTON_EXECUTOR_CODING_AGENT")));
+    }
+
+    #[test]
+    #[serial]
+    fn test_invalid_env_var_values() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Set invalid boolean and float values
+        env::set_var("NEWTON_EXECUTOR_AUTO_COMMIT", "invalid_bool");
+        env::set_var("NEWTON_EVALUATOR_SCORE_THRESHOLD", "invalid_float");
+
+        let result = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
+
+        // Should use default values when env vars are invalid
+        assert!(!result.executor.auto_commit); // Default is false
+        assert_eq!(result.evaluator.score_threshold, 95.0); // Default value
+
+        // Clean up environment variables
+        env::remove_var("NEWTON_EXECUTOR_AUTO_COMMIT");
+        env::remove_var("NEWTON_EVALUATOR_SCORE_THRESHOLD");
     }
 }

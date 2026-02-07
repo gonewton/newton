@@ -1,0 +1,27 @@
+---
+source: src/core/config/mod.rs
+expression: config
+---
+NewtonConfig {
+    project: ProjectConfig {
+        name: "newton-project",
+        template: None,
+    },
+    executor: ExecutorConfig {
+        coding_agent: "opencode",
+        coding_agent_model: "zai-coding-plan/glm-4.7",
+        auto_commit: false,
+    },
+    evaluator: EvaluatorConfig {
+        test_command: None,
+        score_threshold: 95.0,
+    },
+    advisor: AdvisorConfig,
+    context: ContextConfig {
+        clear_after_use: true,
+        file: ".newton/state/context.md",
+    },
+    promise: PromiseConfig {
+        file: ".newton/state/promise.txt",
+    },
+}
