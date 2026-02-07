@@ -25,6 +25,7 @@ pub struct Args {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum Command {
     #[command(
         about = "Execute a full optimization loop",

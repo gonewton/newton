@@ -21,6 +21,14 @@ async fn test_run_command_success() {
         executor_log_file: temp_dir.path().join("executor_log.md").clone(),
         tool_timeout_seconds: 30,
         verbose: false,
+        config: None,
+        goal: None,
+        control_file: None,
+        branch: None,
+        branch_from_goal: false,
+        feedback: None,
+        restore_branch: false,
+        create_pr: false,
     };
 
     let result = commands::run(args).await;
@@ -117,6 +125,14 @@ fn test_run_args_defaults() {
         executor_log_file: PathBuf::new(),
         tool_timeout_seconds: 30,
         verbose: false,
+        config: None,
+        goal: None,
+        control_file: None,
+        branch: None,
+        branch_from_goal: false,
+        feedback: None,
+        restore_branch: false,
+        create_pr: false,
     };
 
     assert_eq!(args.max_iterations, 100);

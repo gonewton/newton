@@ -73,6 +73,43 @@ pub struct RunArgs {
     /// Enable verbose output to display tool stdout/stderr
     #[arg(long, help_heading = "Output Options")]
     pub verbose: bool,
+
+    /// Path to custom config file (default: {workspace}/newton.toml)
+    #[arg(long, value_name = "FILE", help_heading = "Configuration")]
+    pub config: Option<PathBuf>,
+
+    /// Goal description (written to goal file, passed as NEWTON_GOAL_FILE)
+    #[arg(long, value_name = "TEXT", help_heading = "Goal Management")]
+    pub goal: Option<String>,
+
+    /// Control file path override (default: newton_control.json)
+    #[arg(long, value_name = "FILE", help_heading = "Goal Management")]
+    pub control_file: Option<PathBuf>,
+
+    /// Branch name to create/checkout
+    #[arg(
+        long,
+        value_name = "NAME",
+        help_heading = "Branch Management",
+        conflicts_with = "branch_from_goal"
+    )]
+    pub branch: Option<String>,
+
+    /// Create branch name from goal using branch_namer_cmd
+    #[arg(long, help_heading = "Branch Management", conflicts_with = "branch")]
+    pub branch_from_goal: bool,
+
+    /// User feedback passed to tools via NEWTON_USER_FEEDBACK
+    #[arg(long, value_name = "TEXT", help_heading = "User Interaction")]
+    pub feedback: Option<String>,
+
+    /// Restore original branch after completion
+    #[arg(long, help_heading = "Git Integration")]
+    pub restore_branch: bool,
+
+    /// Create PR on successful completion
+    #[arg(long, help_heading = "Git Integration")]
+    pub create_pr: bool,
 }
 
 #[derive(Args)]

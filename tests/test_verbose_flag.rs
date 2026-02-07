@@ -18,6 +18,14 @@ fn test_verbose_flag_in_run_args() {
         advisor_timeout: None,
         executor_timeout: None,
         verbose: true,
+        config: None,
+        goal: None,
+        control_file: None,
+        branch: None,
+        branch_from_goal: false,
+        feedback: None,
+        restore_branch: false,
+        create_pr: false,
     };
 
     assert!(args.verbose);
@@ -43,6 +51,14 @@ fn test_verbose_flag_false_by_default_in_run_args() {
         advisor_timeout: None,
         executor_timeout: None,
         verbose: false,
+        config: None,
+        goal: None,
+        control_file: None,
+        branch: None,
+        branch_from_goal: false,
+        feedback: None,
+        restore_branch: false,
+        create_pr: false,
     };
 
     assert!(!args.verbose);

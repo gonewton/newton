@@ -40,6 +40,22 @@ impl OptimizationOrchestrator {
         workspace_path: &Path,
         configuration: ExecutionConfiguration,
     ) -> Result<OptimizationExecution, AppError> {
+        self.run_optimization_with_policy(
+            workspace_path,
+            configuration,
+            &std::collections::HashMap::new(),
+            None,
+        )
+        .await
+    }
+
+    pub async fn run_optimization_with_policy(
+        &self,
+        workspace_path: &Path,
+        configuration: ExecutionConfiguration,
+        additional_env: &std::collections::HashMap<String, String>,
+        success_policy: Option<&crate::core::success_policy::SuccessPolicy>,
+    ) -> Result<OptimizationExecution, AppError> {
         self.reporter.report_info("Starting optimization run");
 
         let execution_id = uuid::Uuid::new_v4();
@@ -101,7 +117,13 @@ impl OptimizationOrchestrator {
                 .report_info(&format!("Starting iteration {}", current_iteration + 1));
 
             let iteration_result = self
-                .run_iteration(&execution, current_iteration, &configuration)
+                .run_iteration(
+                    &execution,
+                    current_iteration,
+                    &configuration,
+                    additional_env,
+                    success_policy,
+                )
                 .await;
 
             match iteration_result {
@@ -142,6 +164,8 @@ impl OptimizationOrchestrator {
         execution: &OptimizationExecution,
         iteration_number: usize,
         configuration: &ExecutionConfiguration,
+        additional_env: &std::collections::HashMap<String, String>,
+        success_policy: Option<&crate::core::success_policy::SuccessPolicy>,
     ) -> Result<Iteration, AppError> {
         let iteration_id = uuid::Uuid::new_v4();
         let start_time = chrono::Utc::now();
@@ -175,6 +199,7 @@ impl OptimizationOrchestrator {
                                 &execution.workspace_path,
                                 execution,
                                 iteration_number,
+                                additional_env,
                             )
                             .await
                         {
@@ -206,6 +231,18 @@ impl OptimizationOrchestrator {
                                         eprintln!("==========================\n");
                                     }
                                 }
+
+                                // Check success policy after evaluator completes
+                                if let Some(policy) = success_policy {
+                                    if policy.should_stop()? {
+                                        self.reporter
+                                            .report_info("Goal reached via success policy");
+                                        iteration.metadata.phase = IterationPhase::Complete;
+                                        iteration.completed_at = Some(chrono::Utc::now());
+                                        return Ok(iteration);
+                                    }
+                                }
+
                                 current_phase = IterationPhase::Advisor;
                             }
                             Err(e) => {
@@ -226,6 +263,7 @@ impl OptimizationOrchestrator {
                                 &execution.workspace_path,
                                 execution,
                                 iteration_number,
+                                additional_env,
                             )
                             .await
                         {
@@ -276,6 +314,7 @@ impl OptimizationOrchestrator {
                                 &execution.workspace_path,
                                 execution,
                                 iteration_number,
+                                additional_env,
                             )
                             .await
                         {
@@ -339,6 +378,7 @@ impl OptimizationOrchestrator {
         workspace_path: &PathBuf,
         execution: &OptimizationExecution,
         iteration_number: usize,
+        additional_env: &std::collections::HashMap<String, String>,
     ) -> Result<ToolResult, AppError> {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
         let program = parts[0];
@@ -423,6 +463,11 @@ impl OptimizationOrchestrator {
             "NEWTON_SCORE_FILE".to_string(),
             score_file.display().to_string(),
         );
+
+        // Merge additional environment variables
+        for (key, value) in additional_env {
+            env_vars.insert(key.clone(), value.clone());
+        }
 
         let env_vars: Vec<(&str, &str)> = env_vars
             .iter()
