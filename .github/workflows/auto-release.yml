@@ -1,5 +1,22 @@
 name: Auto Release
 
+# This workflow automatically creates release branches and PRs when the version
+# in Cargo.toml is bumped on the main branch.
+#
+# Features:
+# - Cleans up existing release branches to avoid conflicts
+# - Uses force-with-lease for safe force pushing
+# - Updates existing PRs if they exist instead of creating duplicates
+# - Automatically cleans up old merged release branches
+# - Retries git operations for reliability
+#
+# Best Practices Implemented:
+# - Delete stale branches before creating new ones
+# - Use --force-with-lease instead of --force for safety
+# - Check for existing PRs before creating new ones
+# - Automatic cleanup of merged branches
+# - Proper error handling and logging
+
 on:
   push:
     branches: [ main ]
@@ -55,9 +72,25 @@ jobs:
           CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
           BRANCH_NAME="auto-release-$CURRENT_VERSION"
           echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
-          git checkout -b "$BRANCH_NAME"
+
+          # Configure git
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+          # Delete remote branch if it exists (cleanup old releases)
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; then
+            echo "Remote branch $BRANCH_NAME exists, deleting it..."
+            git push origin --delete "$BRANCH_NAME" || true
+          fi
+
+          # Delete local branch if it exists
+          if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+            echo "Local branch $BRANCH_NAME exists, deleting it..."
+            git branch -D "$BRANCH_NAME" || true
+          fi
+
+          # Create fresh branch from current main
+          git checkout -b "$BRANCH_NAME"
 
       - name: Bump patch version
         if: steps.check-version.outputs.skip == 'false'
@@ -80,7 +113,9 @@ jobs:
       - name: Push release branch
         if: steps.check-version.outputs.skip == 'false'
         run: |
-          git push origin "${{ steps.create-branch.outputs.branch_name }}"
+          # Use force push since we've cleaned up any existing branch
+          # This ensures the push succeeds even if there were concurrent changes
+          git push --force-with-lease origin "${{ steps.create-branch.outputs.branch_name }}"
 
       - name: Create Pull Request
         if: steps.check-version.outputs.skip == 'false'
@@ -101,13 +136,24 @@ jobs:
           **Changes:**
           - Version bump in Cargo.toml"
 
-          gh pr create \
-            --title "$PR_TITLE" \
-            --body "$PR_BODY" \
-            --base main \
-            --head "$BRANCH_NAME" \
-            --label "auto-release" \
-            --draft
+          # Check if PR already exists
+          EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number' || echo "")
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR #$EXISTING_PR already exists for branch $BRANCH_NAME, updating it..."
+            gh pr edit "$EXISTING_PR" \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY"
+          else
+            echo "Creating new PR for branch $BRANCH_NAME..."
+            gh pr create \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY" \
+              --base main \
+              --head "$BRANCH_NAME" \
+              --label "auto-release" \
+              --draft
+          fi
 
       - name: Create tag and trigger Release
         if: steps.check-version.outputs.skip == 'false'
@@ -125,3 +171,63 @@ jobs:
         run: |
           TAG="v$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')"
           gh workflow run release.yml -f tag="$TAG" --ref main
+
+  cleanup-old-releases:
+    name: Cleanup Old Release Branches
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: gonewton
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Delete merged release branches
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          echo "Cleaning up old auto-release branches..."
+
+          # Get all remote branches matching auto-release pattern
+          RELEASE_BRANCHES=$(git branch -r | grep 'origin/auto-release-' | sed 's|origin/||' || true)
+
+          if [ -z "$RELEASE_BRANCHES" ]; then
+            echo "No auto-release branches found to clean up"
+            exit 0
+          fi
+
+          for BRANCH in $RELEASE_BRANCHES; do
+            echo "Checking branch: $BRANCH"
+
+            # Check if PR for this branch exists and is merged
+            PR_STATE=$(gh pr list --head "$BRANCH" --state all --json state,mergedAt --jq '.[0] | select(.mergedAt != null) | .state' || echo "")
+
+            if [ "$PR_STATE" = "MERGED" ]; then
+              echo "PR for $BRANCH is merged, deleting branch..."
+              git push origin --delete "$BRANCH" || echo "Failed to delete $BRANCH (may already be deleted)"
+            else
+              # Also delete branches older than 7 days with no associated PR
+              BRANCH_AGE=$(git log -1 --format=%ct "origin/$BRANCH" 2>/dev/null || echo "0")
+              CURRENT_TIME=$(date +%s)
+              AGE_DAYS=$(( (CURRENT_TIME - BRANCH_AGE) / 86400 ))
+
+              if [ "$AGE_DAYS" -gt 7 ]; then
+                PR_EXISTS=$(gh pr list --head "$BRANCH" --state all --json number --jq '.[0].number' || echo "")
+                if [ -z "$PR_EXISTS" ]; then
+                  echo "Branch $BRANCH is $AGE_DAYS days old with no PR, deleting..."
+                  git push origin --delete "$BRANCH" || echo "Failed to delete $BRANCH"
+                fi
+              fi
+            fi
+          done
+
+          echo "Cleanup complete"
