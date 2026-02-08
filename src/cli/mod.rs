@@ -5,7 +5,7 @@ pub use args::{BatchArgs, ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
 use clap::{Parser, Subcommand};
 
 const HELP_TEMPLATE: &str = "\
-{name} {version}\n\
+{name}\n\
 {about-with-newline}\n\
 USAGE:\n    {usage}\n\
 \nOPTIONS:\n{options}\n\

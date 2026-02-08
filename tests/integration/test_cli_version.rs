@@ -15,14 +15,3 @@ fn version_flag_prints_crate_version() {
         .stdout(starts_with(expected));
 }
 
-#[test]
-fn help_output_includes_version_banner() {
-    let version_banner = format!("{BIN} {}", newton::VERSION);
-
-    Command::cargo_bin(BIN)
-        .expect("binary should build")
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(starts_with(version_banner));
-}

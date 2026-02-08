@@ -2,7 +2,7 @@
 source: tests/snapshots/test_cli_commands_snapshots.rs
 expression: normalized
 ---
-newton [VERSION]
+newton
 Newton Loop optimization framework in Rust
 
 USAGE:
