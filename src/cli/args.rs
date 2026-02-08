@@ -82,34 +82,63 @@ pub struct RunArgs {
     #[arg(long, value_name = "TEXT", help_heading = "Goal Management")]
     pub goal: Option<String>,
 
+    /// Existing goal file to use instead of writing --goal text (passed as NEWTON_GOAL_FILE)
+    #[arg(long, value_name = "FILE", help_heading = "Goal Management")]
+    pub goal_file: Option<PathBuf>,
+
     /// Control file path override (default: newton_control.json)
     #[arg(long, value_name = "FILE", help_heading = "Goal Management")]
     pub control_file: Option<PathBuf>,
 
-    /// Branch name to create/checkout
-    #[arg(
-        long,
-        value_name = "NAME",
-        help_heading = "Branch Management",
-        conflicts_with = "branch_from_goal"
-    )]
-    pub branch: Option<String>,
-
-    /// Create branch name from goal using branch_namer_cmd
-    #[arg(long, help_heading = "Branch Management", conflicts_with = "branch")]
-    pub branch_from_goal: bool,
-
     /// User feedback passed to tools via NEWTON_USER_FEEDBACK
     #[arg(long, value_name = "TEXT", help_heading = "User Interaction")]
     pub feedback: Option<String>,
+}
 
-    /// Restore original branch after completion
-    #[arg(long, help_heading = "Git Integration")]
-    pub restore_branch: bool,
+impl RunArgs {
+    /// Produce default arguments used by the batch processor.
+    pub fn for_batch(project_root: PathBuf, goal_file: Option<PathBuf>) -> Self {
+        RunArgs {
+            path: project_root,
+            max_iterations: 10,
+            max_time: 300,
+            evaluator_cmd: None,
+            advisor_cmd: None,
+            executor_cmd: None,
+            evaluator_status_file: PathBuf::from("artifacts/evaluator_status.md"),
+            advisor_recommendations_file: PathBuf::from("artifacts/advisor_recommendations.md"),
+            executor_log_file: PathBuf::from("artifacts/executor_log.md"),
+            tool_timeout_seconds: 30,
+            evaluator_timeout: None,
+            advisor_timeout: None,
+            executor_timeout: None,
+            verbose: false,
+            config: None,
+            goal: None,
+            goal_file,
+            control_file: None,
+            feedback: None,
+        }
+    }
+}
 
-    /// Create PR on successful completion
-    #[arg(long, help_heading = "Git Integration")]
-    pub create_pr: bool,
+#[derive(Args)]
+pub struct BatchArgs {
+    /// Project identifier that maps to .newton/configs/<project_id>.conf
+    #[arg(value_name = "PROJECT_ID")]
+    pub project_id: String,
+
+    /// Workspace root containing the .newton directory (default: discover from CWD)
+    #[arg(long, value_name = "PATH")]
+    pub workspace: Option<PathBuf>,
+
+    /// Process a single plan and exit instead of running as a daemon
+    #[arg(long)]
+    pub once: bool,
+
+    /// Sleep interval in seconds when the queue is empty (default: 60)
+    #[arg(long, default_value = "60", value_name = "SECONDS")]
+    pub sleep: u64,
 }
 
 #[derive(Args)]

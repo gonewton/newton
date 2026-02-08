@@ -17,6 +17,12 @@ fn test_run_args_default_path() {
         evaluator_timeout: None,
         advisor_timeout: None,
         executor_timeout: None,
+        verbose: false,
+        config: None,
+        goal: None,
+        goal_file: None,
+        control_file: None,
+        feedback: None,
     };
     
     assert_eq!(args.max_iterations, 10);
@@ -39,6 +45,12 @@ fn test_run_args_with_commands() {
         evaluator_timeout: Some(10),
         advisor_timeout: Some(20),
         executor_timeout: Some(30),
+        verbose: false,
+        config: None,
+        goal: None,
+        goal_file: None,
+        control_file: None,
+        feedback: None,
     };
     
     assert!(args.evaluator_cmd.is_some());

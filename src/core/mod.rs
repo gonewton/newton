@@ -1,3 +1,4 @@
+pub mod batch_config;
 pub mod config;
 pub mod entities;
 pub mod error;
@@ -13,6 +14,7 @@ pub mod types;
 pub mod workspace;
 
 pub use crate::tools::ToolResult;
+pub use batch_config::{find_workspace_root, parse_conf, BatchProjectConfig};
 pub use config::{ConfigLoader, ConfigValidator, NewtonConfig};
 pub use entities::{
     ArtifactMetadata, ErrorCategory, ExecutionStatus, IterationPhase, OptimizationExecution,

@@ -24,4 +24,8 @@ NewtonConfig {
     promise: PromiseConfig {
         file: ".newton/state/promise.txt",
     },
+    hooks: RunHooksConfig {
+        before_run: None,
+        after_run: None,
+    },
 }

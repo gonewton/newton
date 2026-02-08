@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots/test_cli_commands_snapshots.rs
-expression: stdout
+expression: normalized
 ---
 newton [VERSION]
 Newton Loop optimization framework in Rust
@@ -16,6 +16,7 @@ OPTIONS:
           Print version
 WORKFLOW COMMANDS:
   run     Execute a full optimization loop
+  batch   Process queued work items for a project
   step    Advance loop by one cycle
   status  Inspect progress of an execution
   report  Summarize learnings from an execution

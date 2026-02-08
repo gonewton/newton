@@ -47,6 +47,15 @@ fn test_error_command_help() {
 }
 
 #[test]
+fn test_batch_command_help() {
+    let mut cmd = Command::cargo_bin("newton").unwrap();
+    cmd.arg("batch").arg("--help");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Process queued work items"));
+}
+
+#[test]
 fn test_version_command() {
     let mut cmd = Command::cargo_bin("newton").unwrap();
     cmd.arg("--version");

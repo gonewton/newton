@@ -20,12 +20,9 @@ fn test_run_args_default_path() {
         verbose: false,
         config: None,
         goal: None,
+        goal_file: None,
         control_file: None,
-        branch: None,
-        branch_from_goal: false,
         feedback: None,
-        restore_branch: false,
-        create_pr: false,
     };
 
     assert_eq!(args.max_iterations, 10);
@@ -51,12 +48,9 @@ fn test_run_args_with_commands() {
         verbose: false,
         config: None,
         goal: None,
+        goal_file: None,
         control_file: None,
-        branch: None,
-        branch_from_goal: false,
         feedback: None,
-        restore_branch: false,
-        create_pr: false,
     };
 
     assert!(args.evaluator_cmd.is_some());

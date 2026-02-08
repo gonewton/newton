@@ -1,7 +1,7 @@
 pub mod args;
 pub mod commands;
 
-pub use args::{ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
+pub use args::{BatchArgs, ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
 use clap::{Parser, Subcommand};
 
 const HELP_TEMPLATE: &str = "\
@@ -34,6 +34,12 @@ pub enum Command {
     )]
     Run(RunArgs),
     #[command(
+        about = "Process queued work items for a project",
+        long_about = "Batch reads plan files from .newton/plan/<project_id> and drives headless orchestration.",
+        after_help = "Example:\n    newton batch project-alpha --workspace ./workspace"
+    )]
+    Batch(BatchArgs),
+    #[command(
         about = "Advance loop by one cycle",
         long_about = "Step performs exactly one evaluation/advice/execution round using current workspace state.",
         after_help = "Example:\n    newton step ./workspace --execution-id exec_123"
@@ -62,6 +68,7 @@ pub enum Command {
 pub async fn run(args: Args) -> crate::Result<()> {
     match args.command {
         Command::Run(run_args) => commands::run(run_args).await,
+        Command::Batch(batch_args) => commands::batch(batch_args).await,
         Command::Step(step_args) => commands::step(step_args).await,
         Command::Status(status_args) => commands::status(status_args).await,
         Command::Report(report_args) => commands::report(report_args).await,
