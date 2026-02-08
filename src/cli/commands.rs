@@ -1,8 +1,11 @@
+use crate::core::workspace::resolve_workspace_path;
 use crate::{
-    cli::args::{ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
+    cli::args::{
+        ContextArgs, ContextCommand, ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs,
+    },
     core::{
-        ConfigLoader, ConfigValidator, DefaultErrorReporter, GitManager, OptimizationOrchestrator,
-        SuccessPolicy,
+        ConfigLoader, ConfigValidator, ContextManager, DefaultErrorReporter, GitManager,
+        OptimizationOrchestrator, SuccessPolicy,
     },
     utils::serialization::{FileUtils, JsonSerializer},
     Result,
@@ -119,6 +122,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
             exec_config,
             &additional_env,
             Some(&success_policy),
+            &newton_config,
         )
         .await;
 
@@ -311,6 +315,34 @@ pub async fn error(args: ErrorArgs) -> Result<()> {
         }
     } else {
         println!("No error log found for execution {}", args.execution_id);
+    }
+
+    Ok(())
+}
+
+pub async fn context(args: ContextArgs) -> Result<()> {
+    let config = ConfigLoader::load_from_workspace(&args.path)?;
+    ConfigValidator::validate(&config)?;
+    let context_file = resolve_workspace_path(&args.path, &config.context.file);
+
+    match args.command {
+        ContextCommand::Add { title, message } => {
+            let title = title.unwrap_or_default();
+            ContextManager::add_context(&context_file, &title, &message)?;
+            println!("Appended context entry to {}", context_file.display());
+        }
+        ContextCommand::Show => {
+            let content = ContextManager::read_context(&context_file)?;
+            if content.trim().is_empty() {
+                println!("No context entries found at {}", context_file.display());
+            } else {
+                println!("{}", content);
+            }
+        }
+        ContextCommand::Clear => {
+            ContextManager::clear_context(&context_file)?;
+            println!("Cleared context entries at {}", context_file.display());
+        }
     }
 
     Ok(())

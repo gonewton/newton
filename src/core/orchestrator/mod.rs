@@ -1,10 +1,15 @@
+#![allow(clippy::result_large_err)]
 #![allow(clippy::unnecessary_cast)]
 
+use crate::core::config::NewtonConfig;
 use crate::core::entities::*;
 use crate::core::entities::{ExecutionConfiguration, Iteration, ToolMetadata};
 use crate::core::error::{AppError, ErrorReporter};
+use crate::core::workspace::resolve_workspace_path;
+use crate::core::{ContextManager, PromiseDetector, PromptBuilder};
 use crate::tools::ToolResult;
 use crate::utils::serialization::{FileUtils, JsonSerializer};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -40,11 +45,13 @@ impl OptimizationOrchestrator {
         workspace_path: &Path,
         configuration: ExecutionConfiguration,
     ) -> Result<OptimizationExecution, AppError> {
+        let default_config = NewtonConfig::default();
         self.run_optimization_with_policy(
             workspace_path,
             configuration,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
             None,
+            &default_config,
         )
         .await
     }
@@ -53,8 +60,9 @@ impl OptimizationOrchestrator {
         &self,
         workspace_path: &Path,
         configuration: ExecutionConfiguration,
-        additional_env: &std::collections::HashMap<String, String>,
+        additional_env: &HashMap<String, String>,
         success_policy: Option<&crate::core::success_policy::SuccessPolicy>,
+        config: &NewtonConfig,
     ) -> Result<OptimizationExecution, AppError> {
         self.reporter.report_info("Starting optimization run");
 
@@ -86,6 +94,8 @@ impl OptimizationOrchestrator {
         if let Some(_time_seconds) = configuration.max_time_seconds {
             max_iterations = max_iterations.min(1000);
         }
+
+        let promise_file = resolve_workspace_path(workspace_path, &config.promise.file);
 
         self.reporter.report_info(&format!(
             "Starting optimization with max {} iterations",
@@ -123,15 +133,28 @@ impl OptimizationOrchestrator {
                     &configuration,
                     additional_env,
                     success_policy,
+                    config,
                 )
                 .await;
 
             match iteration_result {
                 Ok(iteration) => {
+                    let promise_complete = Self::process_promise(&iteration, &promise_file)?;
+
                     execution.iterations.push(iteration);
                     execution.total_iterations_completed += 1;
                     current_iteration += 1;
                     execution.current_iteration = Some(current_iteration);
+
+                    if promise_complete {
+                        execution.status = ExecutionStatus::Completed;
+                        execution.completed_at = Some(chrono::Utc::now());
+                        execution.final_solution_path =
+                            Some(workspace_path.join("final_solution.json"));
+                        execution.current_iteration_path =
+                            Some(workspace_path.join("current_solution.json"));
+                        break;
+                    }
 
                     if execution.status == ExecutionStatus::Completed {
                         execution.final_solution_path =
@@ -164,8 +187,9 @@ impl OptimizationOrchestrator {
         execution: &OptimizationExecution,
         iteration_number: usize,
         configuration: &ExecutionConfiguration,
-        additional_env: &std::collections::HashMap<String, String>,
+        additional_env: &HashMap<String, String>,
         success_policy: Option<&crate::core::success_policy::SuccessPolicy>,
+        config: &NewtonConfig,
     ) -> Result<Iteration, AppError> {
         let iteration_id = uuid::Uuid::new_v4();
         let start_time = chrono::Utc::now();
@@ -307,6 +331,51 @@ impl OptimizationOrchestrator {
                 }
                 IterationPhase::Executor => {
                     if let Some(executor_cmd) = &configuration.executor_cmd {
+                        let context_file =
+                            resolve_workspace_path(&execution.workspace_path, &config.context.file);
+                        let promise_file =
+                            resolve_workspace_path(&execution.workspace_path, &config.promise.file);
+                        let prompt_file = Self::executor_prompt_file(&execution.workspace_path);
+                        let advisor_dir = Self::iteration_artifacts_dir(
+                            &execution.workspace_path,
+                            iteration_number,
+                        )
+                        .join("advisor");
+
+                        let advisor_recommendations =
+                            PromptBuilder::read_advisor_recommendations(&advisor_dir)?;
+                        let context_content = ContextManager::read_context(&context_file)?;
+                        let context_option = if context_content.trim().is_empty() {
+                            None
+                        } else {
+                            Some(context_content.as_str())
+                        };
+
+                        let prompt = PromptBuilder::build_prompt(
+                            &execution.workspace_path,
+                            advisor_recommendations.as_deref(),
+                            context_option,
+                        )?;
+                        PromptBuilder::write_prompt(&prompt_file, &prompt)?;
+
+                        let mut executor_env = additional_env.clone();
+                        executor_env.insert(
+                            "NEWTON_EXECUTOR_PROMPT_FILE".to_string(),
+                            prompt_file.display().to_string(),
+                        );
+                        executor_env.insert(
+                            "NEWTON_CONTEXT_FILE".to_string(),
+                            context_file.display().to_string(),
+                        );
+                        executor_env.insert(
+                            "NEWTON_CONTEXT_CLEAR_AFTER_USE".to_string(),
+                            config.context.clear_after_use.to_string(),
+                        );
+                        executor_env.insert(
+                            "NEWTON_PROMISE_FILE".to_string(),
+                            promise_file.display().to_string(),
+                        );
+
                         match self
                             .execute_tool(
                                 executor_cmd,
@@ -314,7 +383,7 @@ impl OptimizationOrchestrator {
                                 &execution.workspace_path,
                                 execution,
                                 iteration_number,
-                                additional_env,
+                                &executor_env,
                             )
                             .await
                         {
@@ -349,6 +418,10 @@ impl OptimizationOrchestrator {
                                         eprintln!("=========================\n");
                                     }
                                 }
+
+                                if config.context.clear_after_use {
+                                    ContextManager::clear_context(&context_file)?;
+                                }
                                 break;
                             }
                             Err(e) => {
@@ -369,6 +442,26 @@ impl OptimizationOrchestrator {
         }
 
         Ok(iteration)
+    }
+
+    fn iteration_artifacts_dir(workspace_path: &Path, iteration_number: usize) -> PathBuf {
+        workspace_path
+            .join("artifacts")
+            .join(format!("iter-{}", iteration_number + 1))
+    }
+
+    fn executor_prompt_file(workspace_path: &Path) -> PathBuf {
+        workspace_path.join(".newton/state/executor_prompt.md")
+    }
+
+    fn process_promise(iteration: &Iteration, promise_file: &Path) -> Result<bool, AppError> {
+        if let Some(executor_result) = &iteration.executor_result {
+            if let Some(promise_value) = PromiseDetector::detect_promise(&executor_result.stdout) {
+                PromiseDetector::write_promise(promise_file, &promise_value)?;
+                return Ok(PromiseDetector::is_complete(&promise_value));
+            }
+        }
+        Ok(false)
     }
 
     async fn execute_tool(

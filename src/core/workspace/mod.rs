@@ -1,8 +1,17 @@
 #![allow(clippy::result_large_err)]
 
 use crate::core::error::AppError;
+use std::path::{Path, PathBuf};
 
-pub fn validate_path(path: &std::path::Path) -> Result<(), AppError> {
+pub fn resolve_workspace_path(workspace_path: &Path, relative_path: &Path) -> PathBuf {
+    if relative_path.is_absolute() {
+        relative_path.to_path_buf()
+    } else {
+        workspace_path.join(relative_path)
+    }
+}
+
+pub fn validate_path(path: &Path) -> Result<(), AppError> {
     if !path.exists() {
         return Err(AppError::new(
             crate::core::types::ErrorCategory::ValidationError,

@@ -1,7 +1,7 @@
 pub mod args;
 pub mod commands;
 
-pub use args::{ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
+pub use args::{ContextArgs, ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
 use clap::{Parser, Subcommand};
 
 const HELP_TEMPLATE: &str = "\
@@ -57,6 +57,12 @@ pub enum Command {
         after_help = "Example:\n    newton error exec_123 --verbose"
     )]
     Error(ErrorArgs),
+    #[command(
+        about = "Manage workspace context entries",
+        long_about = "Add, show, or clear contextual notes that adjust executor prompts and context consumption.",
+        after_help = "Example:\n    newton context add 'Focus on performance' --title 'Performance'"
+    )]
+    Context(ContextArgs),
 }
 
 pub async fn run(args: Args) -> crate::Result<()> {
@@ -66,5 +72,6 @@ pub async fn run(args: Args) -> crate::Result<()> {
         Command::Status(status_args) => commands::status(status_args).await,
         Command::Report(report_args) => commands::report(report_args).await,
         Command::Error(error_args) => commands::error(error_args).await,
+        Command::Context(context_args) => commands::context(context_args).await,
     }
 }

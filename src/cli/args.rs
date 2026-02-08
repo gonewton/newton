@@ -1,4 +1,4 @@
-use clap::Args;
+use clap::{Args, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Args)]
@@ -170,4 +170,31 @@ pub struct ErrorArgs {
     /// Include stack traces, raw logs, and contextual artifacts
     #[arg(long)]
     pub verbose: bool,
+}
+
+#[derive(Args)]
+pub struct ContextArgs {
+    /// Workspace containing Newton artifacts
+    #[arg(value_name = "PATH", default_value = ".")]
+    pub path: PathBuf,
+
+    #[command(subcommand)]
+    pub command: ContextCommand,
+}
+
+#[derive(Subcommand)]
+pub enum ContextCommand {
+    /// Add context for future iterations
+    Add {
+        /// Optional title for the context entry
+        #[arg(long)]
+        title: Option<String>,
+        /// Context message to append
+        #[arg(value_name = "TEXT")]
+        message: String,
+    },
+    /// Display stored context entries
+    Show,
+    /// Clear all context history
+    Clear,
 }
