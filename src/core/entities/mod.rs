@@ -172,4 +172,7 @@ pub struct IterationMetadata {
     pub report_path: Option<PathBuf>,
     pub artifacts_generated: usize,
     pub artifacts_deleted: usize,
+    pub evaluator_score: Option<f64>,
+    pub promise_value: Option<String>,
+    pub should_stop: bool,
 }

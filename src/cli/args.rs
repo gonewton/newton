@@ -1,4 +1,4 @@
-use clap::Args;
+use clap::{Args, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Args)]
@@ -110,6 +110,59 @@ pub struct RunArgs {
     /// Create PR on successful completion
     #[arg(long, help_heading = "Git Integration")]
     pub create_pr: bool,
+}
+
+#[derive(Args)]
+pub struct ContextArgs {
+    /// Path to the workspace to manipulate (defaults to current directory)
+    #[arg(value_name = "PATH", default_value = ".")]
+    pub workspace_path: PathBuf,
+
+    #[command(subcommand)]
+    pub command: ContextCommand,
+}
+
+#[derive(Subcommand)]
+pub enum ContextCommand {
+    /// Append a markdown context entry for the current iteration
+    Add {
+        /// Message describing the context addition
+        message: String,
+        /// Title for the context entry
+        #[arg(long)]
+        title: Option<String>,
+    },
+    /// Print the current context buffer
+    Show,
+    /// Clear all stored context entries
+    Clear,
+}
+
+#[derive(Args)]
+pub struct InitArgs {
+    /// Path where the workspace should be initialized
+    #[arg(value_name = "PATH", default_value = ".")]
+    pub workspace_path: PathBuf,
+
+    /// Template to render (defaults to basic)
+    #[arg(long, value_name = "TEMPLATE")]
+    pub template: Option<String>,
+
+    /// Project name used in rendered templates
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
+
+    /// Coding agent name to populate config
+    #[arg(long, value_name = "AGENT")]
+    pub coding_agent: Option<String>,
+
+    /// Coding agent model to populate config
+    #[arg(long, value_name = "MODEL")]
+    pub model: Option<String>,
+
+    /// Prompt for values interactively
+    #[arg(long)]
+    pub interactive: bool,
 }
 
 #[derive(Args)]

@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+printf "aikit 1.0\n"

@@ -1,10 +1,16 @@
-#![allow(clippy::unnecessary_cast)]
+#![allow(
+    clippy::unnecessary_cast,
+    clippy::result_large_err,
+    clippy::too_many_arguments
+)]
 
 use crate::core::entities::*;
 use crate::core::entities::{ExecutionConfiguration, Iteration, ToolMetadata};
 use crate::core::error::{AppError, ErrorReporter};
+use crate::core::{ContextManager, NewtonConfig, PromiseDetector, PromptBuilder};
 use crate::tools::ToolResult;
 use crate::utils::serialization::{FileUtils, JsonSerializer};
+use std::env;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -40,11 +46,13 @@ impl OptimizationOrchestrator {
         workspace_path: &Path,
         configuration: ExecutionConfiguration,
     ) -> Result<OptimizationExecution, AppError> {
+        let default_config = NewtonConfig::default();
         self.run_optimization_with_policy(
             workspace_path,
             configuration,
             &std::collections::HashMap::new(),
             None,
+            &default_config,
         )
         .await
     }
@@ -55,6 +63,7 @@ impl OptimizationOrchestrator {
         configuration: ExecutionConfiguration,
         additional_env: &std::collections::HashMap<String, String>,
         success_policy: Option<&crate::core::success_policy::SuccessPolicy>,
+        config: &NewtonConfig,
     ) -> Result<OptimizationExecution, AppError> {
         self.reporter.report_info("Starting optimization run");
 
@@ -123,6 +132,7 @@ impl OptimizationOrchestrator {
                     &configuration,
                     additional_env,
                     success_policy,
+                    config,
                 )
                 .await;
 
@@ -132,6 +142,21 @@ impl OptimizationOrchestrator {
                     execution.total_iterations_completed += 1;
                     current_iteration += 1;
                     execution.current_iteration = Some(current_iteration);
+
+                    if execution
+                        .iterations
+                        .last()
+                        .map(|iter| iter.metadata.should_stop)
+                        .unwrap_or(false)
+                    {
+                        execution.status = ExecutionStatus::Completed;
+                        execution.completed_at = Some(chrono::Utc::now());
+                        execution.final_solution_path =
+                            Some(workspace_path.join("final_solution.json"));
+                        execution.current_iteration_path =
+                            Some(workspace_path.join("current_solution.json"));
+                        break;
+                    }
 
                     if execution.status == ExecutionStatus::Completed {
                         execution.final_solution_path =
@@ -166,9 +191,15 @@ impl OptimizationOrchestrator {
         configuration: &ExecutionConfiguration,
         additional_env: &std::collections::HashMap<String, String>,
         success_policy: Option<&crate::core::success_policy::SuccessPolicy>,
+        config: &NewtonConfig,
     ) -> Result<Iteration, AppError> {
+        let workspace_path = &execution.workspace_path;
         let iteration_id = uuid::Uuid::new_v4();
         let start_time = chrono::Utc::now();
+        let score_file = workspace_path.join("artifacts").join("score.txt");
+        let context_path = workspace_path.join(&config.context.file);
+        let promise_path = workspace_path.join(&config.promise.file);
+        let prompt_path = Self::executor_prompt_path(workspace_path);
 
         let mut iteration = Iteration {
             iteration_id,
@@ -194,6 +225,7 @@ impl OptimizationOrchestrator {
                     if let Some(evaluator_cmd) = &configuration.evaluator_cmd {
                         match self
                             .execute_tool(
+                                ToolType::Evaluator,
                                 evaluator_cmd,
                                 configuration,
                                 &execution.workspace_path,
@@ -232,6 +264,12 @@ impl OptimizationOrchestrator {
                                     }
                                 }
 
+                                let evaluator_score = Self::read_evaluator_score(
+                                    &score_file,
+                                    self.reporter.as_ref(),
+                                )?;
+                                iteration.metadata.evaluator_score = evaluator_score;
+
                                 // Check success policy after evaluator completes
                                 if let Some(policy) = success_policy {
                                     if policy.should_stop()? {
@@ -258,6 +296,7 @@ impl OptimizationOrchestrator {
                     if let Some(advisor_cmd) = &configuration.advisor_cmd {
                         match self
                             .execute_tool(
+                                ToolType::Advisor,
                                 advisor_cmd,
                                 configuration,
                                 &execution.workspace_path,
@@ -294,6 +333,14 @@ impl OptimizationOrchestrator {
                                         eprintln!("======================\n");
                                     }
                                 }
+                                if configuration.executor_cmd.is_some() {
+                                    Self::build_executor_prompt(
+                                        workspace_path,
+                                        iteration_number,
+                                        &context_path,
+                                        &prompt_path,
+                                    )?;
+                                }
                                 current_phase = IterationPhase::Executor;
                             }
                             Err(e) => {
@@ -307,14 +354,33 @@ impl OptimizationOrchestrator {
                 }
                 IterationPhase::Executor => {
                     if let Some(executor_cmd) = &configuration.executor_cmd {
+                        let mut executor_env = additional_env.clone();
+                        executor_env.insert(
+                            "NEWTON_EXECUTOR_PROMPT_FILE".to_string(),
+                            prompt_path.display().to_string(),
+                        );
+                        executor_env.insert(
+                            "NEWTON_CONTEXT_FILE".to_string(),
+                            context_path.display().to_string(),
+                        );
+                        executor_env.insert(
+                            "NEWTON_CONTEXT_CLEAR_AFTER_USE".to_string(),
+                            config.context.clear_after_use.to_string(),
+                        );
+                        executor_env.insert(
+                            "NEWTON_PROMISE_FILE".to_string(),
+                            promise_path.display().to_string(),
+                        );
+
                         match self
                             .execute_tool(
+                                ToolType::Executor,
                                 executor_cmd,
                                 configuration,
                                 &execution.workspace_path,
                                 execution,
                                 iteration_number,
-                                additional_env,
+                                &executor_env,
                             )
                             .await
                         {
@@ -349,6 +415,40 @@ impl OptimizationOrchestrator {
                                         eprintln!("=========================\n");
                                     }
                                 }
+                                if config.context.clear_after_use {
+                                    ContextManager::clear_context(&context_path)?;
+                                }
+
+                                let combined_output = format!("{}{}", result.stdout, result.stderr);
+                                if let Some(promise_value) =
+                                    PromiseDetector::detect_promise(&combined_output)
+                                {
+                                    iteration.metadata.promise_value = Some(promise_value.clone());
+                                    if let Err(write_err) = PromiseDetector::write_promise(
+                                        &promise_path,
+                                        &promise_value,
+                                    ) {
+                                        self.reporter.report_warning(
+                                            &format!(
+                                                "Failed to persist promise to {}: {}",
+                                                promise_path.display(),
+                                                write_err
+                                            ),
+                                            None,
+                                        );
+                                    }
+                                    let meets_threshold = iteration
+                                        .metadata
+                                        .evaluator_score
+                                        .map(|score| score >= config.evaluator.score_threshold)
+                                        .unwrap_or(false);
+                                    if PromiseDetector::is_complete(&promise_value)
+                                        && meets_threshold
+                                    {
+                                        iteration.metadata.should_stop = true;
+                                        self.reporter.report_info("Promise signaled completion");
+                                    }
+                                }
                                 break;
                             }
                             Err(e) => {
@@ -373,6 +473,7 @@ impl OptimizationOrchestrator {
 
     async fn execute_tool(
         &self,
+        tool_type: ToolType,
         cmd: &str,
         configuration: &ExecutionConfiguration,
         workspace_path: &PathBuf,
@@ -505,7 +606,7 @@ impl OptimizationOrchestrator {
             },
             metadata: ToolMetadata {
                 tool_version: None,
-                tool_type: ToolType::Executor,
+                tool_type,
                 arguments: args,
                 environment_variables: env_vars
                     .into_iter()
@@ -513,6 +614,97 @@ impl OptimizationOrchestrator {
                     .collect(),
             },
         })
+    }
+
+    fn executor_prompt_path(workspace_path: &Path) -> PathBuf {
+        if let Ok(path) = env::var("NEWTON_EXECUTOR_PROMPT_FILE") {
+            PathBuf::from(path)
+        } else {
+            workspace_path.join(".newton/state/executor_prompt.md")
+        }
+    }
+
+    fn advisor_recommendations_path(workspace_path: &Path, iteration_number: usize) -> PathBuf {
+        workspace_path
+            .join("artifacts")
+            .join(format!("iter-{}", iteration_number + 1))
+            .join("advisor")
+            .join("recommendations.md")
+    }
+
+    fn read_optional_file(path: &Path) -> Option<String> {
+        let contents = std::fs::read_to_string(path).ok()?;
+        if contents.trim().is_empty() {
+            None
+        } else {
+            Some(contents)
+        }
+    }
+
+    fn build_executor_prompt(
+        workspace_path: &Path,
+        iteration_number: usize,
+        context_path: &Path,
+        prompt_path: &Path,
+    ) -> Result<(), AppError> {
+        let advisor_path = Self::advisor_recommendations_path(workspace_path, iteration_number);
+        let advisor_recommendations = Self::read_optional_file(&advisor_path);
+        let context_text = ContextManager::read_context(context_path)?;
+        let context_section = if context_text.trim().is_empty() {
+            None
+        } else {
+            Some(context_text)
+        };
+        let prompt = PromptBuilder::build_prompt(
+            workspace_path,
+            advisor_recommendations.as_deref(),
+            context_section.as_deref(),
+        )?;
+        Self::write_prompt(prompt_path, &prompt)
+    }
+
+    fn write_prompt(prompt_path: &Path, prompt: &str) -> Result<(), AppError> {
+        if let Some(parent) = prompt_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(prompt_path, prompt).map_err(|e| {
+            AppError::new(
+                crate::core::types::ErrorCategory::IoError,
+                format!(
+                    "Failed to write executor prompt {}: {}",
+                    prompt_path.display(),
+                    e
+                ),
+            )
+        })
+    }
+
+    fn read_evaluator_score(
+        score_file: &Path,
+        reporter: &dyn ErrorReporter,
+    ) -> Result<Option<f64>, AppError> {
+        if !score_file.exists() {
+            return Ok(None);
+        }
+        let contents = std::fs::read_to_string(score_file)?;
+        let trimmed = contents.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        match trimmed.parse::<f64>() {
+            Ok(value) => Ok(Some(value)),
+            Err(err) => {
+                reporter.report_warning(
+                    &format!(
+                        "Unable to parse evaluator score from {}: {}",
+                        score_file.display(),
+                        err
+                    ),
+                    None,
+                );
+                Ok(None)
+            }
+        }
     }
 }
 

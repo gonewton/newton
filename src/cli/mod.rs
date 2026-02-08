@@ -1,7 +1,9 @@
 pub mod args;
 pub mod commands;
+pub mod context;
+pub mod init;
 
-pub use args::{ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
+pub use args::{ContextArgs, ErrorArgs, InitArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
 use clap::{Parser, Subcommand};
 
 const HELP_TEMPLATE: &str = "\
@@ -57,6 +59,18 @@ pub enum Command {
         after_help = "Example:\n    newton error exec_123 --verbose"
     )]
     Error(ErrorArgs),
+    #[command(
+        about = "Add, view, or clear stored context entries",
+        long_about = "Context commands let you seed the Newton context buffer with notes that are fed into the executor prompt.",
+        after_help = "Examples:\n    newton context add \"Need to fix lint\"\n    newton context show"
+    )]
+    Context(ContextArgs),
+    #[command(
+        about = "Install template scaffolding for a workspace",
+        long_about = "Init renders template files (requires aikit) and sets up .newton/state so you can start running Newton.",
+        after_help = "Example:\n    newton init . --template basic"
+    )]
+    Init(InitArgs),
 }
 
 pub async fn run(args: Args) -> crate::Result<()> {
@@ -66,5 +80,7 @@ pub async fn run(args: Args) -> crate::Result<()> {
         Command::Status(status_args) => commands::status(status_args).await,
         Command::Report(report_args) => commands::report(report_args).await,
         Command::Error(error_args) => commands::error(error_args).await,
+        Command::Context(context_args) => commands::context(context_args).await,
+        Command::Init(init_args) => commands::init(init_args).await,
     }
 }

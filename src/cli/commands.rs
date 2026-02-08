@@ -1,5 +1,5 @@
 use crate::{
-    cli::args::{ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
+    cli::args::{ContextArgs, ErrorArgs, InitArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
     core::{
         ConfigLoader, ConfigValidator, DefaultErrorReporter, GitManager, OptimizationOrchestrator,
         SuccessPolicy,
@@ -8,6 +8,8 @@ use crate::{
     Result,
 };
 use std::collections::HashMap;
+
+use crate::cli::{context, init};
 
 pub async fn run(args: RunArgs) -> Result<()> {
     tracing::info!("Starting Newton Loop optimization run");
@@ -119,6 +121,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
             exec_config,
             &additional_env,
             Some(&success_policy),
+            &newton_config,
         )
         .await;
 
@@ -314,4 +317,12 @@ pub async fn error(args: ErrorArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub async fn context(args: ContextArgs) -> Result<()> {
+    context::run(args).await
+}
+
+pub async fn init(args: InitArgs) -> Result<()> {
+    init::run(args).await
 }
