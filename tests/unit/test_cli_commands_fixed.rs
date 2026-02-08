@@ -20,6 +20,11 @@ fn test_run_args_structure() {
         advisor_timeout: None,
         executor_timeout: None,
         verbose: false,
+        config: None,
+        goal: None,
+        goal_file: None,
+        control_file: None,
+        feedback: None,
     };
     
     assert_eq!(args.max_iterations, 10);

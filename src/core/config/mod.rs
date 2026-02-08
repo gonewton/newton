@@ -27,6 +27,9 @@ pub struct NewtonConfig {
     /// Promise configuration
     #[serde(default)]
     pub promise: PromiseConfig,
+    /// Hooks triggered before or after run commands
+    #[serde(default)]
+    pub hooks: RunHooksConfig,
 }
 
 /// Project configuration
@@ -162,6 +165,19 @@ impl Default for PromiseConfig {
             file: default_promise_file(),
         }
     }
+}
+
+/// Hook configuration for the run lifecycle
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct RunHooksConfig {
+    /// Command executed before the optimization orchestrator runs
+    #[serde(default)]
+    pub before_run: Option<String>,
+
+    /// Command executed after the orchestrator completes (success or failure)
+    #[serde(default)]
+    pub after_run: Option<String>,
 }
 
 #[cfg(test)]

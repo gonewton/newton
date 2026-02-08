@@ -132,6 +132,7 @@ Start optimization loop for a workspace.
 - `--advisor <command>`: Custom advisor command
 - `--executor <command>`: Custom executor command
 - `--strict-mode`: Enable strict validation mode
+- `--goal-file <FILE>`: Use an existing goal file instead of writing from CLI text (`NEWTON_GOAL_FILE` is still populated).
 
 **Examples:**
 ```bash
@@ -144,6 +145,28 @@ newton run . --max-iterations 100 --timeout 3600
 # Use custom tools
 newton run . --evaluator ./tools/my_evaluator.sh
 ```
+
+### `batch <project_id>`
+
+Process queued plan files for a project straight from the CLI. `newton batch` discovers the workspace root by walking up from the current directory (or use `--workspace PATH`) until it finds `.newton`. It expects `.newton/configs/<project_id>.conf` to contain at least `project_root`, `coding_agent`, and `coding_model`, and `.newton/plan/<project_id>/todo` to house queued plan files. Each plan is copied into `project_root/.newton/tasks/<task_id>/input/spec.md` and fed to the regular `newton run` flow.
+
+- `--workspace PATH`: Override workspace discovery.
+- `--once`: Process one todo file then exit.
+- `--sleep SECONDS`: Poll interval when the queue is empty (default 60).
+
+Plan files move from `todo` to `completed` only after a successful run, and the same task ID is reused when a plan is re-queued. Batch also sets `CODING_AGENT`, `CODING_AGENT_MODEL`, `NEWTON_EXECUTOR_CODING_AGENT`, and `NEWTON_EXECUTOR_CODING_AGENT_MODEL` based on the `.conf` so the project honors those overrides.
+
+Projects can opt into git hooks by adding a `[hooks]` section to `newton.toml`:
+
+```toml
+[hooks]
+before_run = "git checkout main"
+after_run = "git checkout $NEWTON_RESULT"
+```
+
+Hook commands always run with `sh -c "<value>"` inside the project root. `before_run` executes before the orchestrator and sees `NEWTON_GOAL_FILE`, `NEWTON_PROJECT_ID`, and `NEWTON_TASK_ID` if those variables exist. `after_run` always runs (even on failure) and is passed `NEWTON_RESULT=success|failure` plus `NEWTON_EXECUTION_ID` when available.
+
+Workspace discovery and the `.conf` parser in `core/batch_config` are shared with the upcoming monitor so logic is not duplicated.
 
 ### `step <workspace-path>`
 
@@ -449,4 +472,3 @@ Reports include detailed statistics:
 ## License
 
 See LICENSE file for details.
-

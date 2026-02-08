@@ -1,9 +1,11 @@
 use super::EnvManager;
 use crate::core::entities::{ToolMetadata, ToolType};
+use serial_test::serial;
 use std::collections::HashMap;
 use std::env;
 
 #[test]
+#[serial]
 fn test_newton_iteration_number_env_var() {
     let env_vars = EnvManager::set_newton_env_vars("exec123", 5, None, None, None);
     assert_eq!(
@@ -14,6 +16,7 @@ fn test_newton_iteration_number_env_var() {
 }
 
 #[test]
+#[serial]
 fn test_clear_newton_env_vars() {
     env::set_var("NEWTON_EXECUTION_ID", "test123");
     env::set_var("NEWTON_ITERATION_NUMBER", "3");
@@ -25,6 +28,7 @@ fn test_clear_newton_env_vars() {
 }
 
 #[test]
+#[serial]
 fn test_clear_newton_env_vars_no_execution_id() {
     env::set_var("NEWTON_ITERATION_NUMBER", "3");
 
@@ -35,6 +39,7 @@ fn test_clear_newton_env_vars_no_execution_id() {
 }
 
 #[test]
+#[serial]
 fn test_set_newton_env_vars_with_iteration() {
     let env_vars = EnvManager::set_newton_env_vars("exec123", 3, None, None, None);
 
@@ -50,6 +55,7 @@ fn test_set_newton_env_vars_with_iteration() {
 }
 
 #[test]
+#[serial]
 fn test_set_newton_env_vars_multiple_iterations() {
     // Test that iteration number is not hardcoded
     let env_vars_1 = EnvManager::set_newton_env_vars("exec1", 1, None, None, None);
@@ -71,6 +77,7 @@ fn test_set_newton_env_vars_multiple_iterations() {
 }
 
 #[test]
+#[serial]
 fn test_set_environment_variables() {
     let mut env_vars = HashMap::new();
     env_vars.insert("TEST_VAR_1".to_string(), "value1".to_string());
@@ -91,6 +98,7 @@ fn test_set_environment_variables() {
 }
 
 #[test]
+#[serial]
 fn test_set_newton_env_vars_with_tools() {
     let evaluator = ToolMetadata {
         tool_version: Some("1.0.0".to_string()),
@@ -150,6 +158,7 @@ fn test_set_newton_env_vars_with_tools() {
 }
 
 #[test]
+#[serial]
 fn test_no_numbered_iteration_variables() {
     // Ensure that numbered variables are never created
     let env_vars = EnvManager::set_newton_env_vars("exec_test", 1, None, None, None);
@@ -165,6 +174,7 @@ fn test_no_numbered_iteration_variables() {
 }
 
 #[test]
+#[serial]
 fn test_iteration_number_zero() {
     let env_vars = EnvManager::set_newton_env_vars("exec0", 0, None, None, None);
 
@@ -176,6 +186,7 @@ fn test_iteration_number_zero() {
 }
 
 #[test]
+#[serial]
 fn test_iteration_number_large() {
     let large_iteration = 999999;
     let env_vars = EnvManager::set_newton_env_vars("exec_large", large_iteration, None, None, None);

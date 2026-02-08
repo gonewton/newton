@@ -100,6 +100,15 @@ impl ConfigLoader {
         if let Ok(promise_file) = env::var("NEWTON_PROMISE_FILE") {
             config.promise.file = PathBuf::from(promise_file);
         }
+
+        // Hooks overrides
+        if let Ok(before_run) = env::var("NEWTON_HOOK_BEFORE_RUN") {
+            config.hooks.before_run = Some(before_run);
+        }
+
+        if let Ok(after_run) = env::var("NEWTON_HOOK_AFTER_RUN") {
+            config.hooks.after_run = Some(after_run);
+        }
     }
 
     /// Get documentation for supported environment variables
@@ -107,15 +116,17 @@ impl ConfigLoader {
         &[
             "NEWTON_PROJECT_NAME - Override project name",
             "NEWTON_PROJECT_TEMPLATE - Override project template",
-            "NEWTON_EXECUTOR_CODING_AGENT - Override executor coding agent (default: opencode)",
-            "NEWTON_EXECUTOR_CODING_AGENT_MODEL - Override executor coding agent model (default: zai-coding-plan/glm-4.7)",
-            "NEWTON_EXECUTOR_AUTO_COMMIT - Override auto commit setting (true/false)",
-            "NEWTON_EVALUATOR_TEST_COMMAND - Override evaluator test command",
-            "NEWTON_EVALUATOR_SCORE_THRESHOLD - Override evaluator score threshold (default: 95.0)",
-            "NEWTON_CONTEXT_CLEAR_AFTER_USE - Override context clear after use setting (true/false, default: true)",
-            "NEWTON_CONTEXT_FILE - Override context file path (default: .newton/state/context.md)",
-            "NEWTON_PROMISE_FILE - Override promise file path (default: .newton/state/promise.txt)",
-        ]
+        "NEWTON_EXECUTOR_CODING_AGENT - Override executor coding agent (default: opencode)",
+        "NEWTON_EXECUTOR_CODING_AGENT_MODEL - Override executor coding agent model (default: zai-coding-plan/glm-4.7)",
+        "NEWTON_EXECUTOR_AUTO_COMMIT - Override auto commit setting (true/false)",
+        "NEWTON_EVALUATOR_TEST_COMMAND - Override evaluator test command",
+        "NEWTON_EVALUATOR_SCORE_THRESHOLD - Override evaluator score threshold (default: 95.0)",
+        "NEWTON_CONTEXT_CLEAR_AFTER_USE - Override context clear after use setting (true/false, default: true)",
+        "NEWTON_CONTEXT_FILE - Override context file path (default: .newton/state/context.md)",
+        "NEWTON_PROMISE_FILE - Override promise file path (default: .newton/state/promise.txt)",
+        "NEWTON_HOOK_BEFORE_RUN - Override the before_run hook command",
+        "NEWTON_HOOK_AFTER_RUN - Override the after_run hook command",
+    ]
     }
 
     /// Validate configuration values
@@ -340,6 +351,10 @@ score_threshold = 75.0
         assert!(docs
             .iter()
             .any(|doc| doc.contains("NEWTON_EXECUTOR_CODING_AGENT")));
+        assert!(docs
+            .iter()
+            .any(|doc| doc.contains("NEWTON_HOOK_BEFORE_RUN")));
+        assert!(docs.iter().any(|doc| doc.contains("NEWTON_HOOK_AFTER_RUN")));
     }
 
     #[test]

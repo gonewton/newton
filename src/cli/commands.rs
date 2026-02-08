@@ -1,18 +1,27 @@
 use crate::{
-    cli::args::{ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
+    cli::args::{BatchArgs, ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
     core::{
-        ConfigLoader, ConfigValidator, DefaultErrorReporter, GitManager, OptimizationOrchestrator,
+        batch_config::{find_workspace_root, BatchProjectConfig},
+        ConfigLoader, ConfigValidator, DefaultErrorReporter, OptimizationOrchestrator,
         SuccessPolicy,
     },
     utils::serialization::{FileUtils, JsonSerializer},
     Result,
 };
-use std::collections::HashMap;
+use anyhow::anyhow;
+use chrono::Utc;
+use std::{
+    collections::HashMap,
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+};
+use tokio::time::sleep;
 
 pub async fn run(args: RunArgs) -> Result<()> {
     tracing::info!("Starting Newton Loop optimization run");
 
-    // 1. Load config
     let newton_config = if let Some(ref path) = args.config {
         ConfigLoader::load_from_file(path)?.unwrap_or_default()
     } else {
@@ -21,60 +30,26 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
     ConfigValidator::validate(&newton_config)?;
 
-    // 2. Setup goal file if --goal provided
-    let goal_file = if let Some(ref goal_text) = args.goal {
-        let path = args.path.join(".newton/state/goal.txt");
-        std::fs::create_dir_all(path.parent().unwrap())?;
-        std::fs::write(&path, goal_text)?;
-        Some(path)
-    } else {
-        None
-    };
+    let goal_file = prepare_goal_file(&args)?;
 
-    // 3. Resolve user feedback (CLI > env var)
     let user_feedback = args
         .feedback
         .clone()
-        .or_else(|| std::env::var("NEWTON_USER_FEEDBACK").ok());
+        .or_else(|| env::var("NEWTON_USER_FEEDBACK").ok());
 
-    // 4. Git: record original branch
-    let git_manager = GitManager::new(&args.path);
-    let original_branch = if git_manager.is_git_repo() {
-        Some(git_manager.current_branch()?)
-    } else {
-        None
-    };
+    let mut additional_env = HashMap::new();
+    if let Some(ref path) = goal_file {
+        additional_env.insert("NEWTON_GOAL_FILE".to_string(), path.display().to_string());
+    }
+    if let Some(ref feedback) = user_feedback {
+        additional_env.insert("NEWTON_USER_FEEDBACK".to_string(), feedback.clone());
+    }
 
-    // 5. Branch: create or checkout if requested
-    let branch_created = if args.branch_from_goal {
-        if let Some(ref goal_text) = args.goal {
-            let branch_manager = git_manager.branch_manager();
-            if let Some(branch_name) = generate_branch_from_goal(goal_text, &args.path)? {
-                if branch_manager.branch_exists(&branch_name)? {
-                    branch_manager.checkout_branch(&branch_name)?;
-                } else {
-                    branch_manager.create_branch(&branch_name)?;
-                }
-                Some(branch_name)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    } else if let Some(ref branch_name) = args.branch {
-        let branch_manager = git_manager.branch_manager();
-        if branch_manager.branch_exists(branch_name)? {
-            branch_manager.checkout_branch(branch_name)?;
-        } else {
-            branch_manager.create_branch(branch_name)?;
-        }
-        Some(branch_name.clone())
-    } else {
-        None
-    };
+    let hook_env = build_hook_env(goal_file.as_deref());
+    if let Some(ref before_hook) = newton_config.hooks.before_run {
+        run_hook(before_hook, &args.path, &hook_env, "before_run")?;
+    }
 
-    // 6. Create execution configuration (CLI args only per PRD)
     let exec_config = crate::core::entities::ExecutionConfiguration {
         evaluator_cmd: args.evaluator_cmd.clone(),
         advisor_cmd: args.advisor_cmd.clone(),
@@ -92,7 +67,6 @@ pub async fn run(args: RunArgs) -> Result<()> {
         verbose: args.verbose,
     };
 
-    // 7. Create success policy (use default or from args)
     let control_file = args
         .control_file
         .as_ref()
@@ -100,16 +74,6 @@ pub async fn run(args: RunArgs) -> Result<()> {
         .unwrap_or_else(|| "newton_control.json".to_string());
     let success_policy = SuccessPolicy::new(&args.path, &control_file);
 
-    // 8. Build additional environment variables
-    let mut additional_env = HashMap::new();
-    if let Some(ref path) = goal_file {
-        additional_env.insert("NEWTON_GOAL_FILE".to_string(), path.display().to_string());
-    }
-    if let Some(ref feedback) = user_feedback {
-        additional_env.insert("NEWTON_USER_FEEDBACK".to_string(), feedback.clone());
-    }
-
-    // 9. Run optimization with success policy
     let reporter = Box::new(DefaultErrorReporter);
     let orchestrator = OptimizationOrchestrator::new(JsonSerializer, FileUtils, reporter);
 
@@ -122,71 +86,157 @@ pub async fn run(args: RunArgs) -> Result<()> {
         )
         .await;
 
-    // 10. On success: git operations if requested
-    let success = match result {
-        Ok(execution) => {
-            tracing::info!("Optimization completed successfully");
+    if let Ok(ref execution) = result {
+        tracing::info!("Optimization completed successfully");
+        println!(
+            "Optimization completed with {} iterations",
+            execution.total_iterations_completed
+        );
+        if let Some(completed_at) = execution.completed_at {
             println!(
-                "Optimization completed with {} iterations",
-                execution.total_iterations_completed
+                "Duration: {}",
+                completed_at.signed_duration_since(execution.started_at)
             );
-            if let Some(completed_at) = execution.completed_at {
-                println!(
-                    "Duration: {}",
-                    completed_at.signed_duration_since(execution.started_at)
-                );
-            }
-
-            // Perform git operations if requested
-            if args.create_pr && branch_created.is_some() {
-                println!("Branch created: {:?}", branch_created);
-                if original_branch.is_some() {
-                    println!("Ready to create PR from branch {:?}", branch_created);
-                }
-            }
-
-            true
         }
-        Err(e) => {
-            tracing::error!("Optimization failed: {}", e);
-            eprintln!("Optimization failed: {}", e);
-            false
-        }
-    };
-
-    // 11. Restore original branch if configured
-    if args.restore_branch && original_branch.is_some() {
-        if let Some(ref orig_branch) = original_branch {
-            tracing::info!("Restoring original branch: {}", orig_branch);
-            git_manager.branch_manager().checkout_branch(orig_branch)?;
-        }
+    } else if let Err(ref e) = result {
+        tracing::error!("Optimization failed: {}", e);
+        eprintln!("Optimization failed: {}", e);
     }
 
-    if !success {
-        return Err(anyhow::anyhow!("Optimization failed"));
+    let mut after_hook_env = hook_env.clone();
+    after_hook_env.insert(
+        "NEWTON_RESULT".to_string(),
+        if result.is_ok() {
+            "success".to_string()
+        } else {
+            "failure".to_string()
+        },
+    );
+    if let Ok(ref execution) = result {
+        after_hook_env.insert(
+            "NEWTON_EXECUTION_ID".to_string(),
+            execution.execution_id.to_string(),
+        );
     }
 
+    if let Some(ref after_hook) = newton_config.hooks.after_run {
+        run_hook(after_hook, &args.path, &after_hook_env, "after_run")?;
+    }
+
+    result?;
     Ok(())
 }
 
-fn generate_branch_from_goal(
-    goal: &str,
-    workspace_path: &std::path::Path,
-) -> Result<Option<String>> {
-    let state_dir = workspace_path.join(".newton/state");
-    std::fs::create_dir_all(&state_dir)?;
+async fn sleep_if_needed(duration_secs: u64) {
+    sleep(Duration::from_secs(duration_secs)).await;
+}
 
-    // Simple branch name generation (hash of goal)
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+pub async fn batch(args: BatchArgs) -> Result<()> {
+    tracing::info!("Starting batch runner for project {}", args.project_id);
 
-    let mut hasher = DefaultHasher::new();
-    goal.hash(&mut hasher);
-    let hash = hasher.finish();
+    let workspace_root = resolve_workspace_root(args.workspace)?;
+    let configs_dir = workspace_root.join(".newton").join("configs");
+    if !configs_dir.is_dir() {
+        return Err(anyhow!(
+            "Workspace {} must contain .newton/configs",
+            workspace_root.display()
+        ));
+    }
 
-    let branch_name = format!("goal-{:x}", hash);
+    let plan_root = workspace_root.join(".newton").join("plan");
+    if !plan_root.is_dir() {
+        return Err(anyhow!(
+            "Workspace {} must contain .newton/plan",
+            workspace_root.display()
+        ));
+    }
 
-    Ok(Some(branch_name))
+    let batch_config = BatchProjectConfig::load(&workspace_root, &args.project_id)?;
+    let plan_project_dir = plan_root.join(&args.project_id);
+    let todo_dir = plan_project_dir.join("todo");
+    let completed_dir = plan_project_dir.join("completed");
+    let draft_dir = plan_project_dir.join("draft");
+    fs::create_dir_all(&todo_dir)?;
+    fs::create_dir_all(&completed_dir)?;
+    fs::create_dir_all(&draft_dir)?;
+
+    loop {
+        let plan_file = match next_plan_file(&todo_dir)? {
+            Some(path) => path,
+            None => {
+                if args.once {
+                    tracing::info!("Queue empty; exiting after --once");
+                    return Ok(());
+                }
+                sleep_if_needed(args.sleep).await;
+                continue;
+            }
+        };
+
+        let task_id =
+            sanitize_task_id(plan_file.file_name().and_then(|n| n.to_str()).unwrap_or(""));
+        let task_input_dir = batch_config
+            .project_root
+            .join(".newton")
+            .join("tasks")
+            .join(&task_id)
+            .join("input");
+        fs::create_dir_all(&task_input_dir)?;
+        let spec_path = task_input_dir.join("spec.md");
+        if spec_path.exists() {
+            fs::remove_file(&spec_path)?;
+        }
+        fs::copy(&plan_file, &spec_path)?;
+
+        let env_pairs = [
+            ("CODING_AGENT", batch_config.coding_agent.as_str()),
+            ("CODING_AGENT_MODEL", batch_config.coding_model.as_str()),
+            (
+                "NEWTON_EXECUTOR_CODING_AGENT",
+                batch_config.coding_agent.as_str(),
+            ),
+            (
+                "NEWTON_EXECUTOR_CODING_AGENT_MODEL",
+                batch_config.coding_model.as_str(),
+            ),
+            ("NEWTON_PROJECT_ID", args.project_id.as_str()),
+            ("NEWTON_TASK_ID", task_id.as_str()),
+        ];
+        let overrides = apply_env_overrides(&env_pairs);
+
+        let run_args =
+            RunArgs::for_batch(batch_config.project_root.clone(), Some(spec_path.clone()));
+        let run_result = run(run_args).await;
+
+        restore_env_vars(overrides);
+
+        if run_result.is_ok() {
+            let destination = completed_dir.join(
+                plan_file
+                    .file_name()
+                    .ok_or_else(|| anyhow!("Plan file missing name"))?,
+            );
+            if destination.exists() {
+                fs::remove_file(&destination)?;
+            }
+            fs::rename(&plan_file, &destination)?;
+            if args.once {
+                return Ok(());
+            }
+            continue;
+        }
+
+        tracing::error!(
+            "Batch processing failed for {}: {}",
+            plan_file.display(),
+            run_result.as_ref().unwrap_err()
+        );
+        if args.once {
+            return Err(anyhow!("Batch run failed for {}", plan_file.display()));
+        }
+
+        sleep_if_needed(args.sleep).await;
+    }
 }
 
 pub async fn step(args: StepArgs) -> Result<()> {
@@ -257,7 +307,7 @@ pub async fn report(args: ReportArgs) -> Result<()> {
     let execution_file = execution_dir.join("execution.json");
 
     if !execution_file.exists() {
-        return Err(anyhow::anyhow!("Execution {} not found", args.execution_id));
+        return Err(anyhow!("Execution {} not found", args.execution_id));
     }
 
     let content = std::fs::read_to_string(&execution_file)?;
@@ -291,7 +341,7 @@ pub async fn report(args: ReportArgs) -> Result<()> {
 pub async fn error(args: ErrorArgs) -> Result<()> {
     tracing::info!("Analyzing errors for execution: {}", args.execution_id);
 
-    let execution_dir = std::path::Path::new(".")
+    let execution_dir = Path::new(".")
         .join(".newton")
         .join("executions")
         .join(&args.execution_id);
@@ -314,4 +364,167 @@ pub async fn error(args: ErrorArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn prepare_goal_file(args: &RunArgs) -> Result<Option<PathBuf>> {
+    if let Some(ref path) = args.goal_file {
+        Ok(Some(path.clone()))
+    } else if let Some(ref goal_text) = args.goal {
+        let path = args.path.join(".newton/state/goal.txt");
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(&path, goal_text)?;
+        Ok(Some(path))
+    } else {
+        Ok(None)
+    }
+}
+
+fn build_hook_env(goal_file: Option<&Path>) -> HashMap<String, String> {
+    let mut env_vars = HashMap::new();
+    if let Some(goal) = goal_file {
+        env_vars.insert("NEWTON_GOAL_FILE".to_string(), goal.display().to_string());
+    }
+    for key in &["NEWTON_PROJECT_ID", "NEWTON_TASK_ID"] {
+        if let Ok(value) = env::var(key) {
+            env_vars.insert(key.to_string(), value);
+        }
+    }
+    env_vars
+}
+
+fn run_hook(
+    hook_cmd: &str,
+    cwd: &Path,
+    env_overrides: &HashMap<String, String>,
+    hook_name: &str,
+) -> Result<()> {
+    let mut command = Command::new("sh");
+    command.arg("-c").arg(hook_cmd);
+    command.current_dir(cwd);
+    command.envs(env::vars());
+    for (key, value) in env_overrides {
+        command.env(key, value);
+    }
+
+    let status = command.status().map_err(|e| {
+        anyhow!(
+            "Failed to execute {} hook (`{}`): {}",
+            hook_name,
+            hook_cmd,
+            e
+        )
+    })?;
+    if !status.success() {
+        return Err(anyhow!(
+            "{} hook (`{}`) exited with {}",
+            hook_name,
+            hook_cmd,
+            status.code().unwrap_or(-1)
+        ));
+    }
+
+    Ok(())
+}
+
+fn resolve_workspace_root(minimum_workspace: Option<PathBuf>) -> Result<PathBuf> {
+    if let Some(workspace) = minimum_workspace {
+        if workspace.join(".newton").is_dir() {
+            return Ok(workspace);
+        }
+        return Err(anyhow!(
+            "Provided workspace {} is missing .newton",
+            workspace.display()
+        ));
+    }
+
+    let current_dir = env::current_dir()?;
+    find_workspace_root(&current_dir)
+}
+
+fn next_plan_file(plan_dir: &Path) -> Result<Option<PathBuf>> {
+    let mut entries: Vec<PathBuf> = fs::read_dir(plan_dir)?
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| path.is_file())
+        .collect();
+
+    entries.sort();
+    Ok(entries.into_iter().next())
+}
+
+fn sanitize_task_id(raw_name: &str) -> String {
+    let filtered: String = raw_name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+    if filtered.is_empty() {
+        format!("task-{}", Utc::now().timestamp_millis())
+    } else {
+        filtered
+    }
+}
+
+fn apply_env_overrides(pairs: &[(&str, &str)]) -> Vec<(String, Option<String>)> {
+    pairs
+        .iter()
+        .map(|(key, value)| {
+            let previous = env::var(key).ok();
+            env::set_var(key, value);
+            (key.to_string(), previous)
+        })
+        .collect()
+}
+
+fn restore_env_vars(overrides: Vec<(String, Option<String>)>) {
+    for (key, previous) in overrides.into_iter().rev() {
+        if let Some(value) = previous {
+            env::set_var(&key, value);
+        } else {
+            env::remove_var(&key);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    #[test]
+    #[serial]
+    fn build_hook_env_collects_vars() {
+        env::set_var("NEWTON_PROJECT_ID", "proj-42");
+        env::set_var("NEWTON_TASK_ID", "task-9");
+
+        let env_vars = build_hook_env(Some(Path::new("/tmp/goal")));
+        assert_eq!(
+            env_vars.get("NEWTON_PROJECT_ID"),
+            Some(&"proj-42".to_string())
+        );
+        assert_eq!(env_vars.get("NEWTON_TASK_ID"), Some(&"task-9".to_string()));
+        assert_eq!(
+            env_vars.get("NEWTON_GOAL_FILE"),
+            Some(&"/tmp/goal".to_string())
+        );
+
+        env::remove_var("NEWTON_PROJECT_ID");
+        env::remove_var("NEWTON_TASK_ID");
+    }
+
+    #[test]
+    #[serial]
+    fn run_hook_reports_failure() {
+        let env_vars = HashMap::new();
+        let result = run_hook("exit 1", Path::new("."), &env_vars, "after_run");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[serial]
+    fn run_hook_runs_success() {
+        let env_vars = HashMap::new();
+        let result = run_hook("echo ok", Path::new("."), &env_vars, "before_run");
+        assert!(result.is_ok());
+    }
 }

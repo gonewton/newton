@@ -21,11 +21,8 @@ fn test_verbose_flag_in_run_args() {
         config: None,
         goal: None,
         control_file: None,
-        branch: None,
-        branch_from_goal: false,
+        goal_file: None,
         feedback: None,
-        restore_branch: false,
-        create_pr: false,
     };
 
     assert!(args.verbose);
@@ -54,11 +51,8 @@ fn test_verbose_flag_false_by_default_in_run_args() {
         config: None,
         goal: None,
         control_file: None,
-        branch: None,
-        branch_from_goal: false,
+        goal_file: None,
         feedback: None,
-        restore_branch: false,
-        create_pr: false,
     };
 
     assert!(!args.verbose);

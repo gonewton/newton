@@ -77,26 +77,15 @@ Goal Management:
       --goal <TEXT>
           Goal description (written to goal file, passed as NEWTON_GOAL_FILE)
 
+      --goal-file <FILE>
+          Existing goal file to use instead of writing --goal text (passed as NEWTON_GOAL_FILE)
+
       --control-file <FILE>
           Control file path override (default: newton_control.json)
-
-Branch Management:
-      --branch <NAME>
-          Branch name to create/checkout
-
-      --branch-from-goal
-          Create branch name from goal using branch_namer_cmd
 
 User Interaction:
       --feedback <TEXT>
           User feedback passed to tools via NEWTON_USER_FEEDBACK
-
-Git Integration:
-      --restore-branch
-          Restore original branch after completion
-
-      --create-pr
-          Create PR on successful completion
 
 Example:
     newton run ./workspace --max-iterations 5
