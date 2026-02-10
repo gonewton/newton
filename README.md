@@ -250,6 +250,22 @@ newton error abc-123 --verbose
 - Execution logs
 - Recovery recommendations
 
+### `monitor`
+
+Stream live ailoop channels for every project/branch in the workspace via a terminal UI that highlights blocking questions and authorizations, keeps a queue of pending prompts, lets you answer/approve/deny directly in the terminal, and provides filtering (`/`), layout toggle (`V`), queue tab (`Q`), and help (`?`).
+
+**Behavior:**
+`newton monitor` walks up from the current directory to find the workspace root containing `.newton`, then reads `ailoop_server_http_url` and `ailoop_server_ws_url` from the first `.newton/configs/*.conf` file that exposes both keys (alphabetically) or from `.newton/configs/monitor.conf` when present. It connects to the configured HTTP and WebSocket endpoints, backfills up to 50 messages per channel, subscribes to channels, and renders a ratatui interface with tiles/list stream views, a 30% queue panel, a filter status line, and optional queue-only mode.
+
+**Options:**
+- `--http-url <URL>`: Override the HTTP base URL for this session.
+- `--ws-url <URL>`: Override the WebSocket URL for this session.
+
+**Example:**
+```bash
+newton monitor
+```
+
 ## Advanced Usage
 
 ### Custom Tool Configuration

@@ -1,10 +1,11 @@
 use crate::{
-    cli::args::{BatchArgs, ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
+    cli::args::{BatchArgs, ErrorArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
     core::{
         batch_config::{find_workspace_root, BatchProjectConfig},
         ConfigLoader, ConfigValidator, DefaultErrorReporter, OptimizationOrchestrator,
         SuccessPolicy,
     },
+    monitor,
     utils::serialization::{FileUtils, JsonSerializer},
     Result,
 };
@@ -99,6 +100,12 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
     result?;
     Ok(())
+}
+
+/// Launch the interactive Newton monitor TUI that watches ailoop channels.
+pub async fn monitor(args: MonitorArgs) -> Result<()> {
+    tracing::info!("Starting Newton monitor TUI");
+    monitor::run(args).await
 }
 
 async fn sleep_if_needed(duration_secs: u64) {
