@@ -278,9 +278,16 @@ fn test_version_availability() {
     // The configuration should be loadable and valid
     assert!(ConfigLoader::validate_config(&config).is_ok());
 
-    // Verify that we can access version through the package
-    // This ensures version number is available as required
+    // Verify that we can access version through the package (from Cargo.toml at build time)
     let version = env!("CARGO_PKG_VERSION");
     assert!(!version.is_empty());
-    assert_eq!(version, "0.5.11"); // From Cargo.toml
+    // Semver-like (e.g. 0.5.11 or 0.5.12) so test does not break on version bumps or in CI release branches
+    let parts: Vec<&str> = version.split('.').collect();
+    assert!(
+        parts.len() >= 2,
+        "version should be semver-like, got {}",
+        version
+    );
+    assert!(parts[0].parse::<u32>().is_ok(), "major should be numeric");
+    assert!(parts[1].parse::<u32>().is_ok(), "minor should be numeric");
 }
