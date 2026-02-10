@@ -327,20 +327,6 @@ impl OptimizationOrchestrator {
                                     iteration.successor_solution =
                                         Some(execution.workspace_path.join("solution.json"));
                                 } else {
-                                    let executor_dir = execution
-                                        .workspace_path
-                                        .join("artifacts")
-                                        .join(format!("iter-{}", iteration_number + 1))
-                                        .join("executor");
-                                    let _ = std::fs::create_dir_all(&executor_dir);
-                                    let _ = std::fs::write(
-                                        executor_dir.join("stderr.txt"),
-                                        &result.stderr,
-                                    );
-                                    let _ = std::fs::write(
-                                        executor_dir.join("stdout.txt"),
-                                        &result.stdout,
-                                    );
                                     if !result.stderr.is_empty() {
                                         eprintln!(
                                             "\n=== Executor stderr (exit code: {}) ===",
@@ -414,21 +400,6 @@ impl OptimizationOrchestrator {
         self.reporter
             .report_info(&format!("Executing tool: {}", cmd));
 
-        let iteration_dir = workspace_path
-            .join("artifacts")
-            .join(format!("iter-{}", iteration_number + 1));
-        std::fs::create_dir_all(&iteration_dir)?;
-
-        let evaluator_dir = iteration_dir.join("evaluator");
-        let advisor_dir = iteration_dir.join("advisor");
-        let executor_dir = iteration_dir.join("executor");
-        let score_file = workspace_path.join("artifacts").join("score.txt");
-
-        std::fs::create_dir_all(&evaluator_dir)?;
-        std::fs::create_dir_all(&advisor_dir)?;
-        std::fs::create_dir_all(&executor_dir)?;
-        std::fs::create_dir_all(score_file.parent().unwrap())?;
-
         let mut env_vars = std::collections::HashMap::new();
 
         if let Some(eval_cmd) = &configuration.evaluator_cmd {
@@ -469,26 +440,6 @@ impl OptimizationOrchestrator {
         env_vars.insert(
             "NEWTON_EXECUTION_ID".to_string(),
             execution.execution_id.to_string(),
-        );
-        env_vars.insert(
-            "NEWTON_ITERATION_DIR".to_string(),
-            iteration_dir.display().to_string(),
-        );
-        env_vars.insert(
-            "NEWTON_EVALUATOR_DIR".to_string(),
-            evaluator_dir.display().to_string(),
-        );
-        env_vars.insert(
-            "NEWTON_ADVISOR_DIR".to_string(),
-            advisor_dir.display().to_string(),
-        );
-        env_vars.insert(
-            "NEWTON_EXECUTOR_DIR".to_string(),
-            executor_dir.display().to_string(),
-        );
-        env_vars.insert(
-            "NEWTON_SCORE_FILE".to_string(),
-            score_file.display().to_string(),
         );
 
         // Merge additional environment variables
