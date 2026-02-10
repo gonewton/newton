@@ -123,6 +123,7 @@ jobs:
         with:
           app-id: ${{ secrets.GH_APP_ID }}
           private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: gonewton
           repositories: homebrew-cli,scoop-bucket
 
       - name: Authenticate GitHub CLI
@@ -150,7 +151,7 @@ jobs:
         run: |
           cd homebrew-cli
           chmod +x generate_formula.sh
-          ./generate_formula.sh newton --version ${TAG_NAME#v}
+          ./generate_formula.sh newton --version ${{ env.TAG_NAME }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
@@ -181,7 +182,7 @@ jobs:
         run: |
           cd scoop-bucket
           chmod +x generate_manifest.sh
-          ./generate_manifest.sh newton --version ${TAG_NAME#v}
+          ./generate_manifest.sh newton --version ${{ env.TAG_NAME }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
