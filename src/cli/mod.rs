@@ -1,7 +1,7 @@
 pub mod args;
 pub mod commands;
 
-pub use args::{BatchArgs, ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
+pub use args::{BatchArgs, ErrorArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
 use clap::{Parser, Subcommand};
 
 const HELP_TEMPLATE: &str = "\
@@ -63,6 +63,12 @@ pub enum Command {
         after_help = "Example:\n    newton error exec_123 --verbose"
     )]
     Error(ErrorArgs),
+    #[command(
+        about = "Monitor live ailoop channels via a terminal UI",
+        long_about = "Monitor listens to every project/branch channel from the workspace using a WebSocket/HTTP mix and lets you answer questions or approve authorizations in a queue.",
+        after_help = "Example:\n    newton monitor"
+    )]
+    Monitor(MonitorArgs),
 }
 
 pub async fn run(args: Args) -> crate::Result<()> {
@@ -73,5 +79,6 @@ pub async fn run(args: Args) -> crate::Result<()> {
         Command::Status(status_args) => commands::status(status_args).await,
         Command::Report(report_args) => commands::report(report_args).await,
         Command::Error(error_args) => commands::error(error_args).await,
+        Command::Monitor(monitor_args) => commands::monitor(monitor_args).await,
     }
 }

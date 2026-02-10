@@ -190,6 +190,17 @@ pub enum ReportFormat {
     Json,
 }
 
+#[derive(Args, Clone, Debug)]
+pub struct MonitorArgs {
+    /// Explicit HTTP URL for the ailoop server (default from .newton/configs/)
+    #[arg(long, value_name = "URL")]
+    pub http_url: Option<String>,
+
+    /// Explicit WebSocket URL for the ailoop server (default from .newton/configs/)
+    #[arg(long, value_name = "URL")]
+    pub ws_url: Option<String>,
+}
+
 #[derive(Args)]
 pub struct ErrorArgs {
     /// Execution ID whose failures should be analyzed
