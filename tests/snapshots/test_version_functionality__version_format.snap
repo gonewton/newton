@@ -1,5 +1,0 @@
----
-source: tests/test_version_functionality.rs
-expression: version
----
-0.5.11
