@@ -15,6 +15,7 @@ use std::{
     collections::HashMap,
     env, fs,
     path::{Path, PathBuf},
+    process::Command,
     time::Duration,
 };
 use tokio::time::sleep;
@@ -136,10 +137,12 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
     let plan_project_dir = plan_root.join(&args.project_id);
     let todo_dir = plan_project_dir.join("todo");
     let completed_dir = plan_project_dir.join("completed");
+    let failed_dir = plan_project_dir.join("failed");
     let draft_dir = plan_project_dir.join("draft");
     fs::create_dir_all(&todo_dir)?;
     fs::create_dir_all(&completed_dir)?;
     fs::create_dir_all(&draft_dir)?;
+    fs::create_dir_all(&failed_dir)?;
 
     loop {
         let plan_file = match next_plan_file(&todo_dir)? {
@@ -189,10 +192,30 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
             RunArgs::for_batch(batch_config.project_root.clone(), Some(spec_path.clone()));
         let run_result = run(run_args).await;
 
-        restore_env_vars(overrides);
-
         if run_result.is_ok() {
-            let destination = completed_dir.join(
+            let script_env = build_batch_hook_env(
+                &batch_config,
+                args.project_id.as_str(),
+                task_id.as_str(),
+                &spec_path,
+                "success",
+            );
+
+            let mut final_destination = completed_dir.clone();
+            if let Some(success_script) = &batch_config.post_success_script {
+                let status =
+                    run_batch_hook_script(&batch_config.project_root, success_script, &script_env)?;
+                if !status.success() {
+                    tracing::warn!(
+                        "post_success_script exited {} for {}; moving plan to failed",
+                        status.code().unwrap_or(-1),
+                        plan_file.display()
+                    );
+                    final_destination = failed_dir.clone();
+                }
+            }
+
+            let destination = final_destination.join(
                 plan_file
                     .file_name()
                     .ok_or_else(|| anyhow!("Plan file missing name"))?,
@@ -201,6 +224,7 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
                 fs::remove_file(&destination)?;
             }
             fs::rename(&plan_file, &destination)?;
+            restore_env_vars(overrides);
             if args.once {
                 return Ok(());
             }
@@ -212,6 +236,42 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
             plan_file.display(),
             run_result.as_ref().unwrap_err()
         );
+        let script_env = build_batch_hook_env(
+            &batch_config,
+            args.project_id.as_str(),
+            task_id.as_str(),
+            &spec_path,
+            "failure",
+        );
+        if let Some(fail_script) = &batch_config.post_fail_script {
+            match run_batch_hook_script(&batch_config.project_root, fail_script, &script_env) {
+                Ok(status) => {
+                    if !status.success() {
+                        tracing::warn!(
+                            "post_fail_script exited {} for {}",
+                            status.code().unwrap_or(-1),
+                            plan_file.display()
+                        );
+                    }
+                }
+                Err(err) => tracing::error!(
+                    "Failed to run post_fail_script for {}: {}",
+                    plan_file.display(),
+                    err
+                ),
+            }
+        }
+
+        let destination = failed_dir.join(
+            plan_file
+                .file_name()
+                .ok_or_else(|| anyhow!("Plan file missing name"))?,
+        );
+        if destination.exists() {
+            fs::remove_file(&destination)?;
+        }
+        fs::rename(&plan_file, &destination)?;
+        restore_env_vars(overrides);
         if args.once {
             return Err(anyhow!("Batch run failed for {}", plan_file.display()));
         }
@@ -416,4 +476,57 @@ fn restore_env_vars(overrides: Vec<(String, Option<String>)>) {
             env::remove_var(&key);
         }
     }
+}
+
+fn build_batch_hook_env(
+    batch_config: &BatchProjectConfig,
+    project_id: &str,
+    task_id: &str,
+    goal_file: &Path,
+    result: &str,
+) -> HashMap<String, String> {
+    let mut env_vars = HashMap::new();
+    env_vars.insert(
+        "CODING_AGENT".to_string(),
+        batch_config.coding_agent.clone(),
+    );
+    env_vars.insert(
+        "CODING_AGENT_MODEL".to_string(),
+        batch_config.coding_model.clone(),
+    );
+    env_vars.insert(
+        "NEWTON_EXECUTOR_CODING_AGENT".to_string(),
+        batch_config.coding_agent.clone(),
+    );
+    env_vars.insert(
+        "NEWTON_EXECUTOR_CODING_AGENT_MODEL".to_string(),
+        batch_config.coding_model.clone(),
+    );
+    env_vars.insert(
+        "NEWTON_GOAL_FILE".to_string(),
+        goal_file.display().to_string(),
+    );
+    env_vars.insert("NEWTON_PROJECT_ID".to_string(), project_id.to_string());
+    env_vars.insert("NEWTON_TASK_ID".to_string(), task_id.to_string());
+    env_vars.insert(
+        "NEWTON_PROJECT_ROOT".to_string(),
+        batch_config.project_root.display().to_string(),
+    );
+    env_vars.insert("NEWTON_RESULT".to_string(), result.to_string());
+    env_vars
+}
+
+fn run_batch_hook_script(
+    project_root: &Path,
+    script: &str,
+    env_vars: &HashMap<String, String>,
+) -> Result<std::process::ExitStatus> {
+    let status = Command::new("sh")
+        .arg("-c")
+        .arg(script)
+        .current_dir(project_root)
+        .envs(env_vars)
+        .status()
+        .map_err(|e| anyhow!("failed to execute hook script: {}", e))?;
+    Ok(status)
 }

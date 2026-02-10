@@ -23,6 +23,25 @@ coding_model = <model-spec>
 
 Relative `project_root` values are resolved against the workspace root, and each project must contain its own `.newton` directory.
 
+### Post-run scripts in `.conf`
+Add these optional keys to `.newton/configs/<project_id>.conf` if you need to run cleanup or notification scripts after each batch job:
+
+```
+post_success_script = ./scripts/notify-success.sh
+post_fail_script = ./scripts/notify-failure.sh
+```
+
+- `post_success_script` runs only after `newton run` exits successfully. The script runs via `sh -c "<value>"` with the project root as the working directory. If the script exits `0`, the plan moves from `todo/` to `completed/`; any non-zero exit code moves the plan to `failed/`.
+- `post_fail_script` runs when `newton run` fails. Its exit status is ignored and the plan is moved to `failed/` anyway.
+- Both scripts receive the batch environment (`CODING_AGENT`, `CODING_AGENT_MODEL`, `NEWTON_EXECUTOR_CODING_AGENT`, `NEWTON_EXECUTOR_CODING_AGENT_MODEL`) plus:
+  - `NEWTON_GOAL_FILE`: path to the generated goal spec for this run.
+  - `NEWTON_PROJECT_ID`: the batch project identifier.
+  - `NEWTON_TASK_ID`: sanitized plan filename used to derive `.newton/tasks/<task_id>`.
+  - `NEWTON_PROJECT_ROOT`: absolute path to the project root.
+  - `NEWTON_RESULT`: `success` when running `post_success_script`, `failure` when running `post_fail_script`.
+
+Failed plans are moved into `.newton/plan/<project_id>/failed/` (created automatically). Hooks execute before the move happens, so scripts can react to the plan that just ran. `post_success_script` failures update `failed/` so you can capture retries, while `post_fail_script` always runs before a failure is recorded.
+
 ## Hooks
 Add a `[hooks]` table to the target workspace or project `newton.toml`:
 
