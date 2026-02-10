@@ -282,5 +282,5 @@ fn test_version_availability() {
     // This ensures version number is available as required
     let version = env!("CARGO_PKG_VERSION");
     assert!(!version.is_empty());
-    assert_eq!(version, "0.5.10"); // From Cargo.toml
+    assert_eq!(version, "0.5.11"); // From Cargo.toml
 }
