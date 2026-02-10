@@ -57,6 +57,51 @@ fn batch_project_config_resolves_relative_project_root() {
 }
 
 #[test]
+fn batch_project_config_parses_optional_scripts() {
+    let workspace = TempDir::new().unwrap();
+    let project_root = workspace.path().join("workspace-project");
+    fs::create_dir_all(project_root.join(".newton")).unwrap();
+
+    let configs_dir = workspace.path().join(".newton").join("configs");
+    fs::create_dir_all(&configs_dir).unwrap();
+    let conf_path = configs_dir.join("proj.conf");
+    let content = r#"
+        project_root = ./workspace-project
+        coding_agent = opencode
+        coding_model = glm-4.7
+        post_success_script = ./scripts/success.sh
+        post_fail_script = ./scripts/fail.sh
+    "#;
+    fs::write(&conf_path, content).unwrap();
+
+    let config = BatchProjectConfig::load(workspace.path(), "proj").unwrap();
+    assert_eq!(config.post_success_script.as_deref(), Some("./scripts/success.sh"));
+    assert_eq!(config.post_fail_script.as_deref(), Some("./scripts/fail.sh"));
+}
+
+#[test]
+fn batch_project_config_handles_missing_scripts() {
+    let workspace = TempDir::new().unwrap();
+    let project_root = workspace.path().join("workspace-project");
+    fs::create_dir_all(project_root.join(".newton")).unwrap();
+
+    let configs_dir = workspace.path().join(".newton").join("configs");
+    fs::create_dir_all(&configs_dir).unwrap();
+    let conf_path = configs_dir.join("proj.conf");
+    let content = r#"
+        project_root = ./workspace-project
+        coding_agent = opencode
+        coding_model = glm-4.7
+        post_success_script =   
+    "#;
+    fs::write(&conf_path, content).unwrap();
+
+    let config = BatchProjectConfig::load(workspace.path(), "proj").unwrap();
+    assert!(config.post_success_script.is_none());
+    assert!(config.post_fail_script.is_none());
+}
+
+#[test]
 fn find_workspace_root_climb_upwards() {
     let workspace = TempDir::new().unwrap();
     fs::create_dir_all(workspace.path().join(".newton")).unwrap();

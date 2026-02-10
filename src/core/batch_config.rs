@@ -14,6 +14,12 @@ pub struct BatchProjectConfig {
 
     /// Coding agent model override used while running the project.
     pub coding_model: String,
+
+    /// Optional hook executed after a successful plan run.
+    pub post_success_script: Option<String>,
+
+    /// Optional hook executed after a failed plan run.
+    pub post_fail_script: Option<String>,
 }
 
 impl BatchProjectConfig {
@@ -61,10 +67,24 @@ impl BatchProjectConfig {
             ));
         }
 
+        let post_success_script = settings
+            .get("post_success_script")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+
+        let post_fail_script = settings
+            .get("post_fail_script")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+
         Ok(BatchProjectConfig {
             project_root,
             coding_agent,
             coding_model,
+            post_success_script,
+            post_fail_script,
         })
     }
 }
