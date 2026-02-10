@@ -6,7 +6,9 @@ use crate::core::error::{AppError, ErrorReporter};
 use crate::tools::ToolResult;
 use crate::utils::serialization::{FileUtils, JsonSerializer};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::time::Instant;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub struct OptimizationOrchestrator {
     serializer: JsonSerializer,
@@ -453,12 +455,13 @@ impl OptimizationOrchestrator {
             .collect();
 
         let start_time = Instant::now();
-        let output = tokio::process::Command::new(program)
+        let mut child = tokio::process::Command::new(program)
             .args(&args)
             .current_dir(workspace_path)
             .envs(env_vars.clone())
-            .output()
-            .await
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|e| {
                 AppError::new(
                     crate::core::types::ErrorCategory::ToolExecutionError,
@@ -467,16 +470,32 @@ impl OptimizationOrchestrator {
                 .with_code("TOOL-001")
             })?;
 
+        let stdout_pipe = child.stdout.take();
+        let stderr_pipe = child.stderr.take();
+
+        let (stdout_buf, stderr_buf) = tokio::join!(
+            stream_child_output(stdout_pipe, tokio::io::stdout(), "stdout"),
+            stream_child_output(stderr_pipe, tokio::io::stderr(), "stderr"),
+        );
+
+        let status = child.wait().await.map_err(|e| {
+            AppError::new(
+                crate::core::types::ErrorCategory::ToolExecutionError,
+                format!("Failed to wait for tool completion: {}", e),
+            )
+            .with_code("TOOL-001")
+        })?;
+
         let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
         Ok(ToolResult {
             tool_name: cmd.to_string(),
-            exit_code: output.status.code().unwrap_or(-1) as i32,
+            exit_code: status.code().unwrap_or(-1) as i32,
             execution_time_ms,
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            success: output.status.success(),
-            error: if output.status.success() {
+            stdout: String::from_utf8_lossy(&stdout_buf).to_string(),
+            stderr: String::from_utf8_lossy(&stderr_buf).to_string(),
+            success: status.success(),
+            error: if status.success() {
                 None
             } else {
                 Some("Tool execution failed".to_string())
@@ -492,6 +511,38 @@ impl OptimizationOrchestrator {
             },
         })
     }
+}
+
+async fn stream_child_output<R, W>(reader: Option<R>, mut writer: W, label: &'static str) -> Vec<u8>
+where
+    R: AsyncReadExt + Unpin,
+    W: AsyncWriteExt + Unpin,
+{
+    let mut buffer = Vec::new();
+    if let Some(mut reader) = reader {
+        let mut chunk = [0u8; 4096];
+        loop {
+            match reader.read(&mut chunk).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    buffer.extend_from_slice(&chunk[..n]);
+                    if let Err(err) = writer.write_all(&chunk[..n]).await {
+                        tracing::error!(%label, ?err, "Failed to forward {label} output");
+                        break;
+                    }
+                    if let Err(err) = writer.flush().await {
+                        tracing::error!(%label, ?err, "Failed to flush parent {label} output");
+                    }
+                }
+                Err(err) => {
+                    tracing::error!(%label, ?err, "Failed to read {label} from tool");
+                    break;
+                }
+            }
+        }
+    }
+
+    buffer
 }
 
 #[cfg(test)]
