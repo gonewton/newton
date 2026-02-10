@@ -43,7 +43,9 @@ jobs:
 
       - name: Add target to toolchain
         shell: bash
-        run: rustup target add ${{ matrix.target }} --toolchain $(rustup show active-toolchain | cut -d' ' -f1)
+        run: |
+          ACTIVE_TOOLCHAIN=$(rustup show active-toolchain | cut -d' ' -f1)
+          rustup target add ${{ matrix.target }} --toolchain "$ACTIVE_TOOLCHAIN"
 
       - name: Verify version matches tag
         shell: bash
