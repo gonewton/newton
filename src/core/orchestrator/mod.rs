@@ -327,6 +327,33 @@ impl OptimizationOrchestrator {
                                     iteration.successor_solution =
                                         Some(execution.workspace_path.join("solution.json"));
                                 } else {
+                                    let executor_dir = execution
+                                        .workspace_path
+                                        .join("artifacts")
+                                        .join(format!("iter-{}", iteration_number + 1))
+                                        .join("executor");
+                                    let _ = std::fs::create_dir_all(&executor_dir);
+                                    let _ = std::fs::write(
+                                        executor_dir.join("stderr.txt"),
+                                        &result.stderr,
+                                    );
+                                    let _ = std::fs::write(
+                                        executor_dir.join("stdout.txt"),
+                                        &result.stdout,
+                                    );
+                                    if !result.stderr.is_empty() {
+                                        eprintln!(
+                                            "\n=== Executor stderr (exit code: {}) ===",
+                                            result.exit_code
+                                        );
+                                        eprintln!("{}", result.stderr);
+                                        eprintln!("=== end executor stderr ===\n");
+                                    }
+                                    if !result.stdout.is_empty() && configuration.verbose {
+                                        println!("\n=== Executor stdout ===");
+                                        println!("{}", result.stdout);
+                                        println!("========================\n");
+                                    }
                                     self.reporter.report_error(&AppError::new(
                                         crate::core::types::ErrorCategory::ToolExecutionError,
                                         "Executor failed",
