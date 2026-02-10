@@ -8,9 +8,19 @@ use std::path::{Path, PathBuf};
 pub struct ConfigLoader;
 
 impl ConfigLoader {
+    /// Helper to parse boolean from environment variable with trimming
+    fn parse_bool_env(value: &str) -> Option<bool> {
+        value.trim().to_lowercase().parse::<bool>().ok()
+    }
+
+    /// Helper to parse f64 from environment variable with trimming
+    fn parse_f64_env(value: &str) -> Option<f64> {
+        value.trim().parse::<f64>().ok()
+    }
+
     /// Load config from workspace root (workspace/newton.toml)
     /// Environment variables override config file values
-    /// Returns Ok(None) if file doesn't exist (will use defaults + env vars)
+    /// Returns default config if file doesn't exist (with env overrides applied)
     pub fn load_from_workspace(workspace_path: &Path) -> Result<NewtonConfig, AppError> {
         let config_path = workspace_path.join("newton.toml");
         let config_file = Self::load_from_file(&config_path)?;
@@ -69,7 +79,7 @@ impl ConfigLoader {
         }
 
         if let Ok(auto_commit_str) = env::var("NEWTON_EXECUTOR_AUTO_COMMIT") {
-            if let Ok(auto_commit) = auto_commit_str.parse::<bool>() {
+            if let Some(auto_commit) = Self::parse_bool_env(&auto_commit_str) {
                 config.executor.auto_commit = auto_commit;
             }
         }
@@ -80,14 +90,14 @@ impl ConfigLoader {
         }
 
         if let Ok(score_threshold_str) = env::var("NEWTON_EVALUATOR_SCORE_THRESHOLD") {
-            if let Ok(score_threshold) = score_threshold_str.parse::<f64>() {
+            if let Some(score_threshold) = Self::parse_f64_env(&score_threshold_str) {
                 config.evaluator.score_threshold = score_threshold;
             }
         }
 
         // Context overrides
         if let Ok(clear_after_use_str) = env::var("NEWTON_CONTEXT_CLEAR_AFTER_USE") {
-            if let Ok(clear_after_use) = clear_after_use_str.parse::<bool>() {
+            if let Some(clear_after_use) = Self::parse_bool_env(&clear_after_use_str) {
                 config.context.clear_after_use = clear_after_use;
             }
         }
@@ -100,15 +110,6 @@ impl ConfigLoader {
         if let Ok(promise_file) = env::var("NEWTON_PROMISE_FILE") {
             config.promise.file = PathBuf::from(promise_file);
         }
-
-        // Hooks overrides
-        if let Ok(before_run) = env::var("NEWTON_HOOK_BEFORE_RUN") {
-            config.hooks.before_run = Some(before_run);
-        }
-
-        if let Ok(after_run) = env::var("NEWTON_HOOK_AFTER_RUN") {
-            config.hooks.after_run = Some(after_run);
-        }
     }
 
     /// Get documentation for supported environment variables
@@ -116,17 +117,15 @@ impl ConfigLoader {
         &[
             "NEWTON_PROJECT_NAME - Override project name",
             "NEWTON_PROJECT_TEMPLATE - Override project template",
-        "NEWTON_EXECUTOR_CODING_AGENT - Override executor coding agent (default: opencode)",
-        "NEWTON_EXECUTOR_CODING_AGENT_MODEL - Override executor coding agent model (default: zai-coding-plan/glm-4.7)",
-        "NEWTON_EXECUTOR_AUTO_COMMIT - Override auto commit setting (true/false)",
-        "NEWTON_EVALUATOR_TEST_COMMAND - Override evaluator test command",
-        "NEWTON_EVALUATOR_SCORE_THRESHOLD - Override evaluator score threshold (default: 95.0)",
-        "NEWTON_CONTEXT_CLEAR_AFTER_USE - Override context clear after use setting (true/false, default: true)",
-        "NEWTON_CONTEXT_FILE - Override context file path (default: .newton/state/context.md)",
-        "NEWTON_PROMISE_FILE - Override promise file path (default: .newton/state/promise.txt)",
-        "NEWTON_HOOK_BEFORE_RUN - Override the before_run hook command",
-        "NEWTON_HOOK_AFTER_RUN - Override the after_run hook command",
-    ]
+            "NEWTON_EXECUTOR_CODING_AGENT - Override executor coding agent (default: opencode)",
+            "NEWTON_EXECUTOR_CODING_AGENT_MODEL - Override executor coding agent model (default: zai-coding-plan/glm-4.7)",
+            "NEWTON_EXECUTOR_AUTO_COMMIT - Override auto commit setting (true/false, case-insensitive)",
+            "NEWTON_EVALUATOR_TEST_COMMAND - Override evaluator test command",
+            "NEWTON_EVALUATOR_SCORE_THRESHOLD - Override evaluator score threshold (default: 95.0)",
+            "NEWTON_CONTEXT_CLEAR_AFTER_USE - Override context clear after use setting (true/false, default: true, case-insensitive)",
+            "NEWTON_CONTEXT_FILE - Override context file path (default: .newton/state/context.md)",
+            "NEWTON_PROMISE_FILE - Override promise file path (default: .newton/state/promise.txt)",
+        ]
     }
 
     /// Validate configuration values
@@ -196,6 +195,8 @@ mod tests {
         clear_newton_env();
         let temp_dir = TempDir::new().unwrap();
         let result = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
+
+        // Should return default config when file doesn't exist
         assert_eq!(result.project.name, "newton-project");
         assert_eq!(result.executor.coding_agent, "opencode");
     }
@@ -249,6 +250,7 @@ score_threshold = 80.0
     #[test]
     #[serial]
     fn test_env_overrides() {
+        clear_newton_env();
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("newton.toml");
         std::fs::write(
@@ -291,6 +293,7 @@ score_threshold = 75.0
     #[test]
     #[serial]
     fn test_env_overrides_defaults() {
+        clear_newton_env();
         let temp_dir = TempDir::new().unwrap();
 
         // Set environment variables without config file
@@ -351,10 +354,6 @@ score_threshold = 75.0
         assert!(docs
             .iter()
             .any(|doc| doc.contains("NEWTON_EXECUTOR_CODING_AGENT")));
-        assert!(docs
-            .iter()
-            .any(|doc| doc.contains("NEWTON_HOOK_BEFORE_RUN")));
-        assert!(docs.iter().any(|doc| doc.contains("NEWTON_HOOK_AFTER_RUN")));
     }
 
     #[test]
@@ -364,7 +363,7 @@ score_threshold = 75.0
 
         // Set invalid boolean and float values
         env::set_var("NEWTON_EXECUTOR_AUTO_COMMIT", "invalid_bool");
-        env::set_var("NEWTON_EVALUATOR_SCORE_THRESHOLD", "invalid_float");
+        env::set_var("NEWTON_EVALUATOR_SCORE_THRESHOLD", "not-a-number");
 
         let result = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
 
@@ -375,5 +374,27 @@ score_threshold = 75.0
         // Clean up environment variables
         env::remove_var("NEWTON_EXECUTOR_AUTO_COMMIT");
         env::remove_var("NEWTON_EVALUATOR_SCORE_THRESHOLD");
+    }
+
+    #[test]
+    fn test_parse_bool_env() {
+        assert_eq!(ConfigLoader::parse_bool_env("true"), Some(true));
+        assert_eq!(ConfigLoader::parse_bool_env("TRUE"), Some(true));
+        assert_eq!(ConfigLoader::parse_bool_env("  true  "), Some(true));
+        assert_eq!(ConfigLoader::parse_bool_env("  TRUE  "), Some(true));
+        assert_eq!(ConfigLoader::parse_bool_env("false"), Some(false));
+        assert_eq!(ConfigLoader::parse_bool_env("FALSE"), Some(false));
+        assert_eq!(ConfigLoader::parse_bool_env("  false  "), Some(false));
+        assert_eq!(ConfigLoader::parse_bool_env("invalid"), None);
+        assert_eq!(ConfigLoader::parse_bool_env(""), None);
+    }
+
+    #[test]
+    fn test_parse_f64_env() {
+        assert_eq!(ConfigLoader::parse_f64_env("85.5"), Some(85.5));
+        assert_eq!(ConfigLoader::parse_f64_env("  85.5  "), Some(85.5));
+        assert_eq!(ConfigLoader::parse_f64_env("95.0"), Some(95.0));
+        assert_eq!(ConfigLoader::parse_f64_env("invalid"), None);
+        assert_eq!(ConfigLoader::parse_f64_env(""), None);
     }
 }

@@ -1,31 +1,31 @@
 ---
-source: src/core/config/mod.rs
+source: tests/integration/test_config_loading.rs
 expression: config
 ---
 NewtonConfig {
     project: ProjectConfig {
-        name: "my-project",
+        name: "env-project",
         template: Some(
-            "coding-project",
+            "env-template",
         ),
     },
     executor: ExecutorConfig {
-        coding_agent: "custom-agent",
-        coding_agent_model: "custom-model",
+        coding_agent: "env-agent",
+        coding_agent_model: "env-model",
         auto_commit: true,
     },
     evaluator: EvaluatorConfig {
         test_command: Some(
-            "./scripts/run-tests.sh",
+            "./env-tests.sh",
         ),
-        score_threshold: 90.0,
+        score_threshold: 95.0,
     },
     advisor: AdvisorConfig,
     context: ContextConfig {
         clear_after_use: false,
-        file: ".custom/context.md",
+        file: ".env/context.md",
     },
     promise: PromiseConfig {
-        file: ".custom/promise.txt",
+        file: ".env/promise.txt",
     },
 }

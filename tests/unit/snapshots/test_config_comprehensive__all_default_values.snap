@@ -1,5 +1,5 @@
 ---
-source: src/core/config/mod.rs
+source: tests/unit/test_config_comprehensive.rs
 expression: config
 ---
 NewtonConfig {

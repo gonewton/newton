@@ -1,16 +1,16 @@
 ---
-source: src/core/config/mod.rs
+source: tests/integration/test_config_loading.rs
 expression: config
 ---
 NewtonConfig {
     project: ProjectConfig {
-        name: "newton-project",
+        name: "no-file-project",
         template: None,
     },
     executor: ExecutorConfig {
         coding_agent: "opencode",
         coding_agent_model: "zai-coding-plan/glm-4.7",
-        auto_commit: false,
+        auto_commit: true,
     },
     evaluator: EvaluatorConfig {
         test_command: None,

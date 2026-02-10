@@ -74,3 +74,11 @@ path = "tests/integration/test_comprehensive_coverage.rs"
 [[test]]
 name = "test_cli_commands_snapshots"
 path = "tests/snapshots/test_cli_commands_snapshots.rs"
+
+[[test]]
+name = "test_config_comprehensive"
+path = "tests/unit/test_config_comprehensive.rs"
+
+[[test]]
+name = "test_config_loading"
+path = "tests/integration/test_config_loading.rs"

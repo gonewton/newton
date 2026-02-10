@@ -1,31 +1,31 @@
 ---
-source: src/core/config/mod.rs
+source: tests/integration/test_config_loading.rs
 expression: config
 ---
 NewtonConfig {
     project: ProjectConfig {
-        name: "my-project",
+        name: "integration-test",
         template: Some(
-            "coding-project",
+            "advanced-project",
         ),
     },
     executor: ExecutorConfig {
-        coding_agent: "custom-agent",
-        coding_agent_model: "custom-model",
+        coding_agent: "advanced-agent",
+        coding_agent_model: "advanced-model",
         auto_commit: true,
     },
     evaluator: EvaluatorConfig {
         test_command: Some(
-            "./scripts/run-tests.sh",
+            "./scripts/comprehensive-tests.sh",
         ),
-        score_threshold: 90.0,
+        score_threshold: 88.5,
     },
     advisor: AdvisorConfig,
     context: ContextConfig {
         clear_after_use: false,
-        file: ".custom/context.md",
+        file: ".custom/state/context.md",
     },
     promise: PromiseConfig {
-        file: ".custom/promise.txt",
+        file: ".custom/state/promise.txt",
     },
 }

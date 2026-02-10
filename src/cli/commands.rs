@@ -14,7 +14,6 @@ use std::{
     collections::HashMap,
     env, fs,
     path::{Path, PathBuf},
-    process::Command,
     time::Duration,
 };
 use tokio::time::sleep;
@@ -43,11 +42,6 @@ pub async fn run(args: RunArgs) -> Result<()> {
     }
     if let Some(ref feedback) = user_feedback {
         additional_env.insert("NEWTON_USER_FEEDBACK".to_string(), feedback.clone());
-    }
-
-    let hook_env = build_hook_env(goal_file.as_deref());
-    if let Some(ref before_hook) = newton_config.hooks.before_run {
-        run_hook(before_hook, &args.path, &hook_env, "before_run")?;
     }
 
     let exec_config = crate::core::entities::ExecutionConfiguration {
@@ -101,26 +95,6 @@ pub async fn run(args: RunArgs) -> Result<()> {
     } else if let Err(ref e) = result {
         tracing::error!("Optimization failed: {}", e);
         eprintln!("Optimization failed: {}", e);
-    }
-
-    let mut after_hook_env = hook_env.clone();
-    after_hook_env.insert(
-        "NEWTON_RESULT".to_string(),
-        if result.is_ok() {
-            "success".to_string()
-        } else {
-            "failure".to_string()
-        },
-    );
-    if let Ok(ref execution) = result {
-        after_hook_env.insert(
-            "NEWTON_EXECUTION_ID".to_string(),
-            execution.execution_id.to_string(),
-        );
-    }
-
-    if let Some(ref after_hook) = newton_config.hooks.after_run {
-        run_hook(after_hook, &args.path, &after_hook_env, "after_run")?;
     }
 
     result?;
@@ -379,53 +353,6 @@ fn prepare_goal_file(args: &RunArgs) -> Result<Option<PathBuf>> {
     }
 }
 
-fn build_hook_env(goal_file: Option<&Path>) -> HashMap<String, String> {
-    let mut env_vars = HashMap::new();
-    if let Some(goal) = goal_file {
-        env_vars.insert("NEWTON_GOAL_FILE".to_string(), goal.display().to_string());
-    }
-    for key in &["NEWTON_PROJECT_ID", "NEWTON_TASK_ID"] {
-        if let Ok(value) = env::var(key) {
-            env_vars.insert(key.to_string(), value);
-        }
-    }
-    env_vars
-}
-
-fn run_hook(
-    hook_cmd: &str,
-    cwd: &Path,
-    env_overrides: &HashMap<String, String>,
-    hook_name: &str,
-) -> Result<()> {
-    let mut command = Command::new("sh");
-    command.arg("-c").arg(hook_cmd);
-    command.current_dir(cwd);
-    command.envs(env::vars());
-    for (key, value) in env_overrides {
-        command.env(key, value);
-    }
-
-    let status = command.status().map_err(|e| {
-        anyhow!(
-            "Failed to execute {} hook (`{}`): {}",
-            hook_name,
-            hook_cmd,
-            e
-        )
-    })?;
-    if !status.success() {
-        return Err(anyhow!(
-            "{} hook (`{}`) exited with {}",
-            hook_name,
-            hook_cmd,
-            status.code().unwrap_or(-1)
-        ));
-    }
-
-    Ok(())
-}
-
 fn resolve_workspace_root(minimum_workspace: Option<PathBuf>) -> Result<PathBuf> {
     if let Some(workspace) = minimum_workspace {
         if workspace.join(".newton").is_dir() {
@@ -481,50 +408,5 @@ fn restore_env_vars(overrides: Vec<(String, Option<String>)>) {
         } else {
             env::remove_var(&key);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serial_test::serial;
-    use std::collections::HashMap;
-    use std::path::Path;
-
-    #[test]
-    #[serial]
-    fn build_hook_env_collects_vars() {
-        env::set_var("NEWTON_PROJECT_ID", "proj-42");
-        env::set_var("NEWTON_TASK_ID", "task-9");
-
-        let env_vars = build_hook_env(Some(Path::new("/tmp/goal")));
-        assert_eq!(
-            env_vars.get("NEWTON_PROJECT_ID"),
-            Some(&"proj-42".to_string())
-        );
-        assert_eq!(env_vars.get("NEWTON_TASK_ID"), Some(&"task-9".to_string()));
-        assert_eq!(
-            env_vars.get("NEWTON_GOAL_FILE"),
-            Some(&"/tmp/goal".to_string())
-        );
-
-        env::remove_var("NEWTON_PROJECT_ID");
-        env::remove_var("NEWTON_TASK_ID");
-    }
-
-    #[test]
-    #[serial]
-    fn run_hook_reports_failure() {
-        let env_vars = HashMap::new();
-        let result = run_hook("exit 1", Path::new("."), &env_vars, "after_run");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    #[serial]
-    fn run_hook_runs_success() {
-        let env_vars = HashMap::new();
-        let result = run_hook("echo ok", Path::new("."), &env_vars, "before_run");
-        assert!(result.is_ok());
     }
 }

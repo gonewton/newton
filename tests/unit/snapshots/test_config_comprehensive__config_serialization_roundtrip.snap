@@ -1,6 +1,6 @@
 ---
-source: src/core/config/loader.rs
-expression: result
+source: tests/unit/test_config_comprehensive.rs
+expression: deserialized
 ---
 NewtonConfig {
     project: ProjectConfig {
@@ -11,21 +11,21 @@ NewtonConfig {
     },
     executor: ExecutorConfig {
         coding_agent: "test-agent",
-        coding_agent_model: "zai-coding-plan/glm-4.7",
+        coding_agent_model: "test-model",
         auto_commit: true,
     },
     evaluator: EvaluatorConfig {
         test_command: Some(
             "./test.sh",
         ),
-        score_threshold: 80.0,
+        score_threshold: 85.0,
     },
     advisor: AdvisorConfig,
     context: ContextConfig {
-        clear_after_use: true,
-        file: ".newton/state/context.md",
+        clear_after_use: false,
+        file: "test/context.md",
     },
     promise: PromiseConfig {
-        file: ".newton/state/promise.txt",
+        file: "test/promise.txt",
     },
 }

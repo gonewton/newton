@@ -1,10 +1,10 @@
 ---
-source: src/core/config/mod.rs
+source: tests/integration/test_config_loading.rs
 expression: config
 ---
 NewtonConfig {
     project: ProjectConfig {
-        name: "newton-project",
+        name: "minimal-test",
         template: None,
     },
     executor: ExecutorConfig {

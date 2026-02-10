@@ -1,8 +1,9 @@
+use insta::assert_debug_snapshot;
 use newton::core::config::{ConfigLoader, NewtonConfig};
+use serial_test::serial;
 use std::env;
 use std::fs;
 use tempfile::TempDir;
-use insta::assert_debug_snapshot;
 
 /// Comprehensive unit tests for configuration functionality
 #[test]
@@ -30,70 +31,96 @@ fn test_config_serialization_roundtrip() {
             file: std::path::PathBuf::from("test/promise.txt"),
         },
     };
-    
+
     // Serialize to TOML
     let toml_str = toml::to_string_pretty(&original_config).unwrap();
-    
+
     // Deserialize back
     let deserialized: NewtonConfig = toml::from_str(&toml_str).unwrap();
-    
+
     assert_debug_snapshot!(deserialized);
     assert_eq!(original_config.project.name, deserialized.project.name);
-    assert_eq!(original_config.project.template, deserialized.project.template);
-    assert_eq!(original_config.executor.coding_agent, deserialized.executor.coding_agent);
-    assert_eq!(original_config.executor.auto_commit, deserialized.executor.auto_commit);
-    assert_eq!(original_config.evaluator.score_threshold, deserialized.evaluator.score_threshold);
+    assert_eq!(
+        original_config.project.template,
+        deserialized.project.template
+    );
+    assert_eq!(
+        original_config.executor.coding_agent,
+        deserialized.executor.coding_agent
+    );
+    assert_eq!(
+        original_config.executor.auto_commit,
+        deserialized.executor.auto_commit
+    );
+    assert_eq!(
+        original_config.evaluator.score_threshold,
+        deserialized.evaluator.score_threshold
+    );
 }
 
 /// Test all default values
 #[test]
 fn test_all_default_values() {
     let config = NewtonConfig::default();
-    
+
     assert_debug_snapshot!(config);
-    
+
     // Project defaults
     assert_eq!(config.project.name, "newton-project");
     assert_eq!(config.project.template, None);
-    
+
     // Executor defaults
     assert_eq!(config.executor.coding_agent, "opencode");
-    assert_eq!(config.executor.coding_agent_model, "zai-coding-plan/glm-4.7");
+    assert_eq!(
+        config.executor.coding_agent_model,
+        "zai-coding-plan/glm-4.7"
+    );
     assert!(!config.executor.auto_commit);
-    
+
     // Evaluator defaults
     assert_eq!(config.evaluator.test_command, None);
     assert_eq!(config.evaluator.score_threshold, 95.0);
-    
+
     // Context defaults
     assert!(config.context.clear_after_use);
-    assert_eq!(config.context.file, std::path::PathBuf::from(".newton/state/context.md"));
-    
+    assert_eq!(
+        config.context.file,
+        std::path::PathBuf::from(".newton/state/context.md")
+    );
+
     // Promise defaults
-    assert_eq!(config.promise.file, std::path::PathBuf::from(".newton/state/promise.txt"));
+    assert_eq!(
+        config.promise.file,
+        std::path::PathBuf::from(".newton/state/promise.txt")
+    );
 }
 
 /// Test environment variable parsing edge cases
 #[test]
+#[serial]
 fn test_env_var_parsing_edge_cases() {
+    env::remove_var("NEWTON_PROJECT_NAME");
+    env::remove_var("NEWTON_EXECUTOR_AUTO_COMMIT");
+    env::remove_var("NEWTON_EVALUATOR_SCORE_THRESHOLD");
+
     let temp_dir = TempDir::new().unwrap();
-    
+
     // Test whitespace handling
     env::set_var("NEWTON_PROJECT_NAME", "  trimmed-name  ");
     env::set_var("NEWTON_EXECUTOR_AUTO_COMMIT", "  TRUE  ");
     env::set_var("NEWTON_EVALUATOR_SCORE_THRESHOLD", "  85.5  ");
-    
+
     let config = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
-    
+
     // Should preserve whitespace for strings (user responsibility to trim)
     assert_eq!(config.project.name, "  trimmed-name  ");
-    
+
     // Should parse boolean correctly even with whitespace
     assert!(config.executor.auto_commit);
-    
+
     // Should parse float correctly even with whitespace
     assert_eq!(config.evaluator.score_threshold, 85.5);
-    
+
     // Clean up
     env::remove_var("NEWTON_PROJECT_NAME");
     env::remove_var("NEWTON_EXECUTOR_AUTO_COMMIT");
@@ -102,21 +129,22 @@ fn test_env_var_parsing_edge_cases() {
 
 /// Test malformed environment variables
 #[test]
+#[serial]
 fn test_malformed_env_vars() {
     let temp_dir = TempDir::new().unwrap();
-    
+
     // Test malformed boolean
     env::set_var("NEWTON_EXECUTOR_AUTO_COMMIT", "maybe");
-    
+
     // Test malformed float
     env::set_var("NEWTON_EVALUATOR_SCORE_THRESHOLD", "not-a-number");
-    
+
     let config = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
-    
+
     // Should fall back to defaults for malformed values
     assert!(!config.executor.auto_commit); // Default is false
     assert_eq!(config.evaluator.score_threshold, 95.0); // Default value
-    
+
     // Clean up
     env::remove_var("NEWTON_EXECUTOR_AUTO_COMMIT");
     env::remove_var("NEWTON_EVALUATOR_SCORE_THRESHOLD");
@@ -124,9 +152,13 @@ fn test_malformed_env_vars() {
 
 /// Test config field ordering and serialization consistency
 #[test]
+#[serial]
 fn test_config_consistency() {
+    env::remove_var("NEWTON_PROJECT_NAME");
+    env::remove_var("NEWTON_EXECUTOR_CODING_AGENT");
+    env::remove_var("NEWTON_EXECUTOR_AUTO_COMMIT");
     let temp_dir = TempDir::new().unwrap();
-    
+
     let config_content = r#"
 [project]
 name = "consistency-test"
@@ -135,17 +167,17 @@ name = "consistency-test"
 coding_agent = "test-agent"
 auto_commit = true
 "#;
-    
+
     fs::write(temp_dir.path().join("newton.toml"), config_content).unwrap();
-    
+
     // Load config multiple times to ensure consistency
     let config1 = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
     let config2 = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
-    
+
     assert_eq!(config1.project.name, config2.project.name);
     assert_eq!(config1.executor.coding_agent, config2.executor.coding_agent);
     assert_eq!(config1.executor.auto_commit, config2.executor.auto_commit);
-    
+
     // Serialize both and compare
     let toml1 = toml::to_string_pretty(&config1).unwrap();
     let toml2 = toml::to_string_pretty(&config2).unwrap();
@@ -157,7 +189,7 @@ auto_commit = true
 fn test_file_path_formats() {
     let temp_dir = TempDir::new().unwrap();
     let workspace_path = temp_dir.path();
-    
+
     // Test with absolute paths
     let abs_config_content = r#"
 [project]
@@ -169,13 +201,19 @@ file = "/absolute/path/context.md"
 [promise]
 file = "/absolute/path/promise.txt"
 "#;
-    
+
     fs::write(workspace_path.join("newton.toml"), abs_config_content).unwrap();
     let config = ConfigLoader::load_from_workspace(workspace_path).unwrap();
-    
-    assert_eq!(config.context.file, std::path::PathBuf::from("/absolute/path/context.md"));
-    assert_eq!(config.promise.file, std::path::PathBuf::from("/absolute/path/promise.txt"));
-    
+
+    assert_eq!(
+        config.context.file,
+        std::path::PathBuf::from("/absolute/path/context.md")
+    );
+    assert_eq!(
+        config.promise.file,
+        std::path::PathBuf::from("/absolute/path/promise.txt")
+    );
+
     // Test with relative paths
     let rel_config_content = r#"
 [project]
@@ -187,39 +225,45 @@ file = "./relative/context.md"
 [promise]
 file = "relative/promise.txt"
 "#;
-    
+
     fs::write(workspace_path.join("newton.toml"), rel_config_content).unwrap();
     let config = ConfigLoader::load_from_workspace(workspace_path).unwrap();
-    
-    assert_eq!(config.context.file, std::path::PathBuf::from("./relative/context.md"));
-    assert_eq!(config.promise.file, std::path::PathBuf::from("relative/promise.txt"));
+
+    assert_eq!(
+        config.context.file,
+        std::path::PathBuf::from("./relative/context.md")
+    );
+    assert_eq!(
+        config.promise.file,
+        std::path::PathBuf::from("relative/promise.txt")
+    );
 }
 
 /// Test configuration validation edge cases
 #[test]
 fn test_validation_edge_cases() {
     let mut config = NewtonConfig::default();
-    
+
     // Test boundary values for score threshold
     config.evaluator.score_threshold = 0.0;
     assert!(ConfigLoader::validate_config(&config).is_ok());
-    
+
     config.evaluator.score_threshold = 100.0;
     assert!(ConfigLoader::validate_config(&config).is_ok());
-    
+
     config.evaluator.score_threshold = -0.1;
     assert!(ConfigLoader::validate_config(&config).is_err());
-    
+
     config.evaluator.score_threshold = 100.1;
     assert!(ConfigLoader::validate_config(&config).is_err());
-    
+
     // Test empty project name
     config.evaluator.score_threshold = 95.0; // Reset to valid
-    config.project.name = "   "; // Whitespace only
-    // This should pass validation since it's not empty string (validation could be enhanced)
+    config.project.name = "   ".to_string(); // Whitespace only
+                                             // This should pass validation since it's not empty string (validation could be enhanced)
     assert!(ConfigLoader::validate_config(&config).is_ok());
-    
-    config.project.name = "";
+
+    config.project.name = "".to_string();
     assert!(ConfigLoader::validate_config(&config).is_err());
 }
 
@@ -228,12 +272,12 @@ fn test_validation_edge_cases() {
 fn test_version_availability() {
     // This test ensures that version information is accessible
     // when configuration is loaded, which is required by the requirements
-    
+
     let config = NewtonConfig::default();
-    
+
     // The configuration should be loadable and valid
     assert!(ConfigLoader::validate_config(&config).is_ok());
-    
+
     // Verify that we can access version through the package
     // This ensures version number is available as required
     let version = env!("CARGO_PKG_VERSION");
