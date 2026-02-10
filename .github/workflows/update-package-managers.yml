@@ -1,0 +1,94 @@
+# Manually update Homebrew and Scoop for an existing newton release tag.
+# Use when the Release workflow's update step was skipped or failed.
+name: Update Package Managers (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.5.13)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  TAG_NAME: ${{ github.event.inputs.tag }}
+
+jobs:
+  update-package-managers:
+    name: Update Homebrew and Scoop
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: gonewton
+          repositories: homebrew-cli,scoop-bucket
+
+      - name: Checkout homebrew-cli repo
+        uses: actions/checkout@v4
+        with:
+          repository: gonewton/homebrew-cli
+          path: homebrew-cli
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Update Homebrew formula
+        run: |
+          cd homebrew-cli
+          chmod +x generate_formula.sh
+          ./generate_formula.sh newton --version ${{ env.TAG_NAME }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      - name: Commit and push Homebrew changes
+        run: |
+          cd homebrew-cli
+          TAG_NAME="${{ env.TAG_NAME }}"
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "No changes to commit for Homebrew formula"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            git commit -m "chore: update newton to ${TAG_NAME}"
+            git push "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/gonewton/homebrew-cli.git" main
+            echo "Homebrew formula updated to ${TAG_NAME}"
+          fi
+
+      - name: Checkout scoop-bucket repo
+        uses: actions/checkout@v4
+        with:
+          repository: gonewton/scoop-bucket
+          path: scoop-bucket
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Update Scoop manifest
+        run: |
+          cd scoop-bucket
+          chmod +x generate_manifest.sh
+          ./generate_manifest.sh newton --version ${{ env.TAG_NAME }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      - name: Commit and push Scoop changes
+        run: |
+          cd scoop-bucket
+          TAG_NAME="${{ env.TAG_NAME }}"
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "No changes to commit for Scoop manifest"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            git commit -m "chore: update newton to ${TAG_NAME}"
+            git push "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/gonewton/scoop-bucket.git" main
+            echo "Scoop manifest updated to ${TAG_NAME}"
+          fi
