@@ -31,7 +31,11 @@ impl SuccessPolicy {
     /// * `workspace_path` - The workspace root directory
     /// * `control_file_name` - The control file name (relative to workspace)
     pub fn new(workspace_path: &Path, control_file_name: &str) -> Self {
-        let control_file_path = workspace_path.join(control_file_name);
+        Self::from_path(workspace_path.join(control_file_name))
+    }
+
+    /// Create a success policy that reads a control file from a full path.
+    pub fn from_path(control_file_path: PathBuf) -> Self {
         Self { control_file_path }
     }
 

@@ -98,7 +98,7 @@ impl OptimizationOrchestrator {
             if let Some(limit) = configuration.max_iterations {
                 if current_iteration >= limit {
                     self.reporter.report_info("Maximum iterations reached");
-                    execution.status = ExecutionStatus::Completed;
+                    execution.status = ExecutionStatus::MaxIterationsReached;
                     execution.completed_at = Some(chrono::Utc::now());
                     execution.final_solution_path =
                         Some(workspace_path.join("final_solution.json"));
@@ -135,12 +135,17 @@ impl OptimizationOrchestrator {
                     current_iteration += 1;
                     execution.current_iteration = Some(current_iteration);
 
-                    if execution.status == ExecutionStatus::Completed {
-                        execution.final_solution_path =
-                            Some(workspace_path.join("final_solution.json"));
-                        execution.current_iteration_path =
-                            Some(workspace_path.join("current_solution.json"));
-                        break;
+                    if let Some(policy) = success_policy {
+                        if policy.should_stop()? {
+                            self.reporter.report_info("Goal reached via success policy");
+                            execution.status = ExecutionStatus::Completed;
+                            execution.final_solution_path =
+                                Some(workspace_path.join("final_solution.json"));
+                            execution.current_iteration_path =
+                                Some(workspace_path.join("current_solution.json"));
+                            execution.completed_at = Some(chrono::Utc::now());
+                            break;
+                        }
                     }
                 }
                 Err(e) => {
@@ -153,8 +158,13 @@ impl OptimizationOrchestrator {
             }
         }
 
-        execution.status = ExecutionStatus::Completed;
-        execution.completed_at = Some(chrono::Utc::now());
+        if execution.status == ExecutionStatus::Running {
+            execution.status = ExecutionStatus::Completed;
+            execution.final_solution_path = Some(workspace_path.join("final_solution.json"));
+        }
+        if execution.completed_at.is_none() {
+            execution.completed_at = Some(chrono::Utc::now());
+        }
 
         self.reporter
             .report_info("Optimization completed successfully");

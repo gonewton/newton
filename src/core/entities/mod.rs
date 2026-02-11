@@ -34,6 +34,7 @@ pub enum ExecutionStatus {
     Failed,
     Cancelled,
     Timeout,
+    MaxIterationsReached,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

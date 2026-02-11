@@ -120,6 +120,42 @@ impl RunArgs {
             feedback: None,
         }
     }
+
+    /// Produce batch arguments when tooling overrides and limits should come from config.
+    #[allow(clippy::too_many_arguments)]
+    pub fn for_batch_with_tools(
+        project_root: PathBuf,
+        goal_file: Option<PathBuf>,
+        evaluator_cmd: Option<String>,
+        advisor_cmd: Option<String>,
+        executor_cmd: Option<String>,
+        max_iterations: Option<usize>,
+        max_time: Option<u64>,
+        verbose: bool,
+        control_file_path: Option<PathBuf>,
+    ) -> Self {
+        RunArgs {
+            path: project_root,
+            max_iterations: max_iterations.unwrap_or(5),
+            max_time: max_time.unwrap_or(3600),
+            evaluator_cmd,
+            advisor_cmd,
+            executor_cmd,
+            evaluator_status_file: PathBuf::from("artifacts/evaluator_status.md"),
+            advisor_recommendations_file: PathBuf::from("artifacts/advisor_recommendations.md"),
+            executor_log_file: PathBuf::from("artifacts/executor_log.md"),
+            tool_timeout_seconds: 30,
+            evaluator_timeout: None,
+            advisor_timeout: None,
+            executor_timeout: None,
+            verbose,
+            config: None,
+            goal: None,
+            goal_file,
+            control_file: control_file_path,
+            feedback: None,
+        }
+    }
 }
 
 #[derive(Args)]
