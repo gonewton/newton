@@ -17,11 +17,12 @@ Use this skill whenever you need to operate Newton from the command line and wan
 ## Primary Workflow
 
 1. `newton run WORKSPACE`: launch full optimization loop. See [references/run.md](references/run.md).
-2. `newton step WORKSPACE`: manually advance one iteration. See [references/step.md](references/step.md).
-3. `newton batch PROJECT_ID`: consume queued plans for a project with before/after hooks. See [references/batch.md](references/batch.md).
-4. `newton status EXECUTION`: inspect state. See [references/status.md](references/status.md).
-5. `newton report EXECUTION`: summarize results. See [references/report.md](references/report.md).
-6. `newton error EXECUTION`: diagnose failures. See [references/error.md](references/error.md).
+2. `newton init WORKSPACE`: bootstrap a workspace with the default template installed through `aikit-sdk`. See [references/init.md](references/init.md).
+3. `newton step WORKSPACE`: manually advance one iteration. See [references/step.md](references/step.md).
+4. `newton batch PROJECT_ID`: consume queued plans for a project with before/after hooks. See [references/batch.md](references/batch.md).
+5. `newton status EXECUTION`: inspect state. See [references/status.md](references/status.md).
+6. `newton report EXECUTION`: summarize results. See [references/report.md](references/report.md).
+7. `newton error EXECUTION`: diagnose failures. See [references/error.md](references/error.md).
 
 Each reference file lists required arguments, optional flags, and example invocations so you can run Newton without diving into implementation details.
 
@@ -42,6 +43,7 @@ cargo run -- status exec_123 --workspace ./workspace
 
 ## References
 
+- [references/init.md](references/init.md)
 - [references/run.md](references/run.md)
 - [references/step.md](references/step.md)
 - [references/batch.md](references/batch.md)

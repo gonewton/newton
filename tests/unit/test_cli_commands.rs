@@ -1,4 +1,4 @@
-use newton::cli::{commands, ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
+use newton::cli::{commands, ErrorArgs, InitArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
 use newton::core::entities::ExecutionConfiguration;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -7,7 +7,7 @@ use tempfile::TempDir;
 async fn test_run_command_success() {
     let temp_dir = TempDir::new().unwrap();
     let args = RunArgs {
-        path: temp_dir.path().to_path_buf(),
+        path: Some(temp_dir.path().to_path_buf()),
         max_iterations: 1,
         max_time: 60,
         evaluator_cmd: Some("echo 'test evaluator'".to_string()),
@@ -30,6 +30,34 @@ async fn test_run_command_success() {
 
     let result = commands::run(args).await;
     assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_init_command_creates_workspace() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new().unwrap();
+    let args = InitArgs {
+        path: Some(temp_dir.path().to_path_buf()),
+        template_source: None,
+    };
+
+    commands::init(args).await?;
+
+    let newton_dir = temp_dir.path().join(".newton");
+    assert!(newton_dir.join("configs").is_dir());
+    assert!(newton_dir.join("tasks").is_dir());
+    assert!(newton_dir.join("plan/default/todo").is_dir());
+    assert!(newton_dir.join("plan/default/completed").is_dir());
+    assert!(newton_dir.join("plan/default/failed").is_dir());
+    assert!(newton_dir.join("plan/default/draft").is_dir());
+    assert!(newton_dir.join("scripts/advisor.sh").is_file());
+    assert!(newton_dir.join("scripts/executor.sh").is_file());
+
+    let config = std::fs::read_to_string(newton_dir.join("configs/default.conf"))?;
+    assert!(config.contains("project_root=."));
+    assert!(config.contains("coding_agent=opencode"));
+    assert!(config.contains("coding_model=zai-coding-plan/glm-4.7"));
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -109,7 +137,7 @@ fn test_execution_configuration_creation() {
 #[test]
 fn test_run_args_defaults() {
     let args = RunArgs {
-        path: PathBuf::from("/tmp"),
+        path: Some(PathBuf::from("/tmp")),
         max_iterations: 100,
         max_time: 3600,
         evaluator_cmd: None,

@@ -1,5 +1,8 @@
 use crate::{
-    cli::args::{BatchArgs, ErrorArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
+    cli::args::{
+        BatchArgs, ErrorArgs, InitArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs,
+        DEFAULT_TEMPLATE_SOURCE,
+    },
     core::{
         batch_config::{find_workspace_root, BatchProjectConfig},
         ConfigLoader, ConfigValidator, DefaultErrorReporter, OptimizationOrchestrator,
@@ -18,20 +21,90 @@ use std::{
     process::Command,
     time::Duration,
 };
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use tokio::time::sleep;
+
+struct TemplateAsset {
+    relative_path: &'static str,
+    content: &'static [u8],
+    executable: bool,
+}
+
+const BUILTIN_TEMPLATE_ASSETS: &[TemplateAsset] = &[
+    TemplateAsset {
+        relative_path: "README.md",
+        content: include_bytes!("../../resources/newton-template/newton/README.md"),
+        executable: false,
+    },
+    TemplateAsset {
+        relative_path: "scripts/advisor.sh",
+        content: include_bytes!("../../resources/newton-template/newton/scripts/advisor.sh"),
+        executable: true,
+    },
+    TemplateAsset {
+        relative_path: "scripts/evaluator.sh",
+        content: include_bytes!("../../resources/newton-template/newton/scripts/evaluator.sh"),
+        executable: true,
+    },
+    TemplateAsset {
+        relative_path: "scripts/post-success.sh",
+        content: include_bytes!("../../resources/newton-template/newton/scripts/post-success.sh"),
+        executable: true,
+    },
+    TemplateAsset {
+        relative_path: "scripts/post-failure.sh",
+        content: include_bytes!("../../resources/newton-template/newton/scripts/post-failure.sh"),
+        executable: true,
+    },
+];
+
+const BUILTIN_EXECUTOR_STUB: &str = "\
+#!/bin/sh\n\
+# Executor placeholder created by newton init\n\
+echo \"Executor not provided in template\"\n\
+exit 0\n";
+
+pub async fn init(args: InitArgs) -> Result<()> {
+    tracing::info!("Initializing Newton workspace");
+
+    let workspace_path = resolve_workspace_path(args.path)?;
+    let newton_dir = workspace_path.join(".newton");
+    if newton_dir.exists() {
+        return Err(anyhow!(
+            "{} already contains .newton. Remove it or choose another path.",
+            workspace_path.display()
+        ));
+    }
+
+    create_workspace_layout(&workspace_path)?;
+    install_template(&workspace_path, args.template_source.as_deref())?;
+    write_default_config(&workspace_path)?;
+
+    println!(
+        "Initialized Newton workspace at {}",
+        workspace_path.display()
+    );
+    println!("Run: newton run");
+
+    Ok(())
+}
 
 pub async fn run(args: RunArgs) -> Result<()> {
     tracing::info!("Starting Newton Loop optimization run");
 
+    let workspace_path = resolve_workspace_path(args.path.clone())?;
+
     let newton_config = if let Some(ref path) = args.config {
         ConfigLoader::load_from_file(path)?.unwrap_or_default()
     } else {
-        ConfigLoader::load_from_workspace(&args.path)?
+        ConfigLoader::load_from_workspace(&workspace_path)?
     };
 
     ConfigValidator::validate(&newton_config)?;
 
-    let goal_file = prepare_goal_file(&args)?;
+    let goal_file = prepare_goal_file(&args, &workspace_path)?;
 
     let user_feedback = args
         .feedback
@@ -46,10 +119,17 @@ pub async fn run(args: RunArgs) -> Result<()> {
         additional_env.insert("NEWTON_USER_FEEDBACK".to_string(), feedback.clone());
     }
 
+    let resolved_evaluator_cmd =
+        resolve_tool_command(&workspace_path, args.evaluator_cmd.clone(), "evaluator.sh");
+    let resolved_advisor_cmd =
+        resolve_tool_command(&workspace_path, args.advisor_cmd.clone(), "advisor.sh");
+    let resolved_executor_cmd =
+        resolve_tool_command(&workspace_path, args.executor_cmd.clone(), "executor.sh");
+
     let exec_config = crate::core::entities::ExecutionConfiguration {
-        evaluator_cmd: args.evaluator_cmd.clone(),
-        advisor_cmd: args.advisor_cmd.clone(),
-        executor_cmd: args.executor_cmd.clone(),
+        evaluator_cmd: resolved_evaluator_cmd,
+        advisor_cmd: resolved_advisor_cmd,
+        executor_cmd: resolved_executor_cmd,
         max_iterations: Some(args.max_iterations),
         max_time_seconds: Some(args.max_time),
         evaluator_timeout_ms: args.evaluator_timeout.map(|t| t * 1000),
@@ -68,14 +148,14 @@ pub async fn run(args: RunArgs) -> Result<()> {
         .as_ref()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| "newton_control.json".to_string());
-    let success_policy = SuccessPolicy::new(&args.path, &control_file);
+    let success_policy = SuccessPolicy::new(&workspace_path, &control_file);
 
     let reporter = Box::new(DefaultErrorReporter);
     let orchestrator = OptimizationOrchestrator::new(JsonSerializer, FileUtils, reporter);
 
     let result = orchestrator
         .run_optimization_with_policy(
-            &args.path,
+            &workspace_path,
             exec_config,
             &additional_env,
             Some(&success_policy),
@@ -407,17 +487,219 @@ pub async fn error(args: ErrorArgs) -> Result<()> {
     Ok(())
 }
 
-fn prepare_goal_file(args: &RunArgs) -> Result<Option<PathBuf>> {
+fn prepare_goal_file(args: &RunArgs, workspace_path: &Path) -> Result<Option<PathBuf>> {
     if let Some(ref path) = args.goal_file {
         Ok(Some(path.clone()))
     } else if let Some(ref goal_text) = args.goal {
-        let path = args.path.join(".newton/state/goal.txt");
+        let path = workspace_path.join(".newton/state/goal.txt");
         fs::create_dir_all(path.parent().unwrap())?;
         fs::write(&path, goal_text)?;
         Ok(Some(path))
     } else {
         Ok(None)
     }
+}
+
+fn resolve_workspace_path(path_arg: Option<PathBuf>) -> Result<PathBuf> {
+    let candidate = match path_arg {
+        Some(p) => p,
+        None => env::current_dir()?,
+    };
+    if !candidate.exists() {
+        return Err(anyhow!(
+            "Workspace path {} does not exist",
+            candidate.display()
+        ));
+    }
+    if !candidate.is_dir() {
+        return Err(anyhow!(
+            "Workspace path {} must be a directory",
+            candidate.display()
+        ));
+    }
+    let canonical = candidate.canonicalize()?;
+    Ok(canonical)
+}
+
+fn create_workspace_layout(workspace: &Path) -> Result<()> {
+    let newton_dir = workspace.join(".newton");
+    fs::create_dir_all(newton_dir.join("configs"))?;
+    fs::create_dir_all(newton_dir.join("tasks"))?;
+    fs::create_dir_all(newton_dir.join("state"))?;
+    fs::write(newton_dir.join("state/context.md"), "")?;
+    fs::write(newton_dir.join("state/promise.txt"), "")?;
+    create_plan_dirs(&newton_dir)?;
+    Ok(())
+}
+
+fn create_plan_dirs(newton_dir: &Path) -> Result<()> {
+    let plan_root = newton_dir.join("plan").join("default");
+    for dir in ["todo", "completed", "failed", "draft"] {
+        let target = plan_root.join(dir);
+        fs::create_dir_all(&target)?;
+        let gitkeep_path = target.join(".gitkeep");
+        if !gitkeep_path.exists() {
+            fs::write(gitkeep_path, "")?;
+        }
+    }
+    Ok(())
+}
+
+fn install_template(workspace: &Path, template_source: Option<&str>) -> Result<()> {
+    let newton_dir = workspace.join(".newton");
+    let scripts_dir = ensure_scripts_dir(workspace)?;
+    aikit_sdk::agent("newton")
+        .ok_or_else(|| anyhow!("aikit-sdk does not register a Newton agent"))?;
+
+    if let Some(source) = template_source {
+        let trimmed = source.trim();
+        if trimmed.is_empty() || trimmed == DEFAULT_TEMPLATE_SOURCE {
+            install_builtin_template(workspace, &newton_dir, &scripts_dir)?;
+            return Ok(());
+        }
+        let path = PathBuf::from(trimmed);
+        if !path.is_dir() {
+            return Err(anyhow!(
+                "Template source {} is not a directory",
+                path.display()
+            ));
+        }
+        install_from_directory(workspace, &path, &scripts_dir)?;
+        return Ok(());
+    }
+
+    install_builtin_template(workspace, &newton_dir, &scripts_dir)?;
+    Ok(())
+}
+
+fn ensure_scripts_dir(workspace: &Path) -> Result<PathBuf> {
+    let scripts_dir = aikit_sdk::scripts_dir(workspace, "newton")
+        .ok_or_else(|| anyhow!("aikit-sdk does not expose scripts directory for newton"))?;
+    fs::create_dir_all(&scripts_dir)?;
+    Ok(scripts_dir)
+}
+
+fn install_builtin_template(_: &Path, newton_dir: &Path, scripts_dir: &Path) -> Result<()> {
+    for asset in BUILTIN_TEMPLATE_ASSETS {
+        let target = if asset.relative_path.starts_with("scripts/") {
+            let relative = asset
+                .relative_path
+                .strip_prefix("scripts/")
+                .unwrap_or(asset.relative_path);
+            scripts_dir.join(relative)
+        } else {
+            newton_dir.join(asset.relative_path)
+        };
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&target, asset.content)?;
+        if asset.executable {
+            set_executable(&target)?;
+        }
+    }
+
+    ensure_executor_script(scripts_dir)?;
+    Ok(())
+}
+
+fn install_from_directory(workspace: &Path, template_dir: &Path, scripts_dir: &Path) -> Result<()> {
+    let source_newton = template_dir.join("newton");
+    if !source_newton.is_dir() {
+        return Err(anyhow!(
+            "Template directory {} lacks a newton/ folder",
+            template_dir.display()
+        ));
+    }
+    copy_dir_recursive(&source_newton, &workspace.join(".newton"))?;
+    ensure_executor_script(scripts_dir)?;
+    Ok(())
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let dest = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&entry.path(), &dest)?;
+        } else if entry.file_type()?.is_file() {
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(entry.path(), &dest)?;
+            if dest.extension().and_then(|e| e.to_str()) == Some("sh") {
+                set_executable(&dest)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_executor_script(scripts_dir: &Path) -> Result<()> {
+    let executor_path = scripts_dir.join("executor.sh");
+    if !executor_path.exists() {
+        fs::write(&executor_path, BUILTIN_EXECUTOR_STUB)?;
+        set_executable(&executor_path)?;
+    }
+    Ok(())
+}
+
+fn set_executable(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let mut permissions = fs::metadata(path)?.permissions();
+        permissions.set_mode(permissions.mode() | 0o111);
+        fs::set_permissions(path, permissions)?;
+    }
+    #[cfg(not(unix))]
+    {
+        let mut permissions = fs::metadata(path)?.permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
+}
+
+fn resolve_tool_command(
+    workspace: &Path,
+    command_override: Option<String>,
+    script_name: &str,
+) -> Option<String> {
+    if let Some(cmd) = command_override {
+        return Some(cmd);
+    }
+    aikit_sdk::scripts_dir(workspace, "newton").and_then(|scripts_dir| {
+        let script_path = scripts_dir.join(script_name);
+        if script_path.is_file() {
+            Some(script_path.to_string_lossy().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn write_default_config(workspace: &Path) -> Result<()> {
+    let configs_dir = workspace.join(".newton/configs");
+    fs::create_dir_all(&configs_dir)?;
+    let config_path = configs_dir.join("default.conf");
+    let mut lines = vec![
+        "project_root=.".to_string(),
+        "coding_agent=opencode".to_string(),
+        "coding_model=zai-coding-plan/glm-4.7".to_string(),
+    ];
+
+    if let Some(scripts_dir) = aikit_sdk::scripts_dir(workspace, "newton") {
+        if scripts_dir.join("post-success.sh").is_file() {
+            lines.push("post_success_script=.newton/scripts/post-success.sh".to_string());
+        }
+        if scripts_dir.join("post-failure.sh").is_file() {
+            lines.push("post_fail_script=.newton/scripts/post-failure.sh".to_string());
+        }
+    }
+
+    fs::write(config_path, lines.join("\n"))?;
+    Ok(())
 }
 
 fn resolve_workspace_root(minimum_workspace: Option<PathBuf>) -> Result<PathBuf> {

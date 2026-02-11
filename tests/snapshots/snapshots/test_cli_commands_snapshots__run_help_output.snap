@@ -4,11 +4,11 @@ expression: "std::str::from_utf8(&output.stdout).unwrap()"
 ---
 Run iterates evaluation, advice, and execution phases until convergence or resource caps are hit.
 
-Usage: newton run [OPTIONS] <PATH>
+Usage: newton run [OPTIONS] [PATH]
 
 Arguments:
-  <PATH>
-          Path containing Newton manifests and artifacts
+  [PATH]
+          Path containing Newton manifests and artifacts (defaults to current directory)
 
 Options:
       --max-iterations <MAX_ITERATIONS>

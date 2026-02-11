@@ -1,11 +1,24 @@
 use clap::Args;
 use std::path::PathBuf;
 
+pub const DEFAULT_TEMPLATE_SOURCE: &str = "gonewton/newton-templates";
+
+#[derive(Args)]
+pub struct InitArgs {
+    /// Path containing the workspace to initialize (default: current directory)
+    #[arg(value_name = "PATH")]
+    pub path: Option<PathBuf>,
+
+    /// Template source to install (default: gonewton/newton-templates)
+    #[arg(long, value_name = "SOURCE")]
+    pub template_source: Option<String>,
+}
+
 #[derive(Args)]
 pub struct RunArgs {
-    /// Path containing Newton manifests and artifacts
+    /// Path containing Newton manifests and artifacts (defaults to current directory)
     #[arg(value_name = "PATH")]
-    pub path: PathBuf,
+    pub path: Option<PathBuf>,
 
     /// Cap the loop after this many iterations (default: 10)
     #[arg(long, default_value = "10")]
@@ -99,7 +112,7 @@ impl RunArgs {
     /// Produce default arguments used by the batch processor.
     pub fn for_batch(project_root: PathBuf, goal_file: Option<PathBuf>) -> Self {
         RunArgs {
-            path: project_root,
+            path: Some(project_root),
             max_iterations: 10,
             max_time: 300,
             evaluator_cmd: None,
