@@ -132,7 +132,10 @@ Start optimization loop for a workspace.
 - `--advisor <command>`: Custom advisor command
 - `--executor <command>`: Custom executor command
 - `--strict-mode`: Enable strict validation mode
+- `--goal <TEXT>`: Inline goal description written to `.newton/state/goal.txt` and exported as `NEWTON_GOAL_FILE` (directories are created automatically when needed)
 - `--goal-file <FILE>`: Use an existing goal file instead of writing from CLI text (`NEWTON_GOAL_FILE` is still populated).
+
+Passing empty evaluator/advisor/executor commands now fails fast with `TOOL-002` (`command must not be empty`). Provide valid tool invocations (or omit the flag) so the orchestrator can launch real scripts.
 
 **Examples:**
 ```bash
