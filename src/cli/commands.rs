@@ -2,6 +2,7 @@ use crate::{
     cli::args::{BatchArgs, ErrorArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
     core::{
         batch_config::{find_workspace_root, BatchProjectConfig},
+        entities::ExecutionStatus,
         ConfigLoader, ConfigValidator, DefaultErrorReporter, OptimizationOrchestrator,
         SuccessPolicy,
     },
@@ -9,11 +10,12 @@ use crate::{
     utils::serialization::{FileUtils, JsonSerializer},
     Result,
 };
-use anyhow::anyhow;
+use anyhow::{anyhow, Error};
 use chrono::Utc;
 use std::{
     collections::HashMap,
     env, fs,
+    io::Write,
     path::{Path, PathBuf},
     process::Command,
     time::Duration,
@@ -63,17 +65,31 @@ pub async fn run(args: RunArgs) -> Result<()> {
         verbose: args.verbose,
     };
 
-    let control_file = args
+    let control_file_path = args
         .control_file
-        .as_ref()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| "newton_control.json".to_string());
-    let success_policy = SuccessPolicy::new(&args.path, &control_file);
+        .clone()
+        .unwrap_or_else(|| args.path.join("newton_control.json"));
+    additional_env.insert(
+        "NEWTON_CONTROL_FILE".to_string(),
+        control_file_path.display().to_string(),
+    );
+    let success_policy = SuccessPolicy::from_path(control_file_path.clone());
+
+    for key in &[
+        "NEWTON_STATE_DIR",
+        "NEWTON_WS_ROOT",
+        "NEWTON_CODER_CMD",
+        "NEWTON_BRANCH_NAME",
+    ] {
+        if let Ok(value) = env::var(key) {
+            additional_env.insert(key.to_string(), value);
+        }
+    }
 
     let reporter = Box::new(DefaultErrorReporter);
     let orchestrator = OptimizationOrchestrator::new(JsonSerializer, FileUtils, reporter);
 
-    let result = orchestrator
+    let execution = orchestrator
         .run_optimization_with_policy(
             &args.path,
             exec_config,
@@ -82,25 +98,33 @@ pub async fn run(args: RunArgs) -> Result<()> {
         )
         .await;
 
-    if let Ok(ref execution) = result {
-        tracing::info!("Optimization completed successfully");
-        println!(
-            "Optimization completed with {} iterations",
-            execution.total_iterations_completed
-        );
-        if let Some(completed_at) = execution.completed_at {
+    match execution {
+        Ok(execution) => {
+            if execution.status != ExecutionStatus::Completed {
+                return Err(anyhow!(
+                    "Optimization ended with status {:?}",
+                    execution.status
+                ));
+            }
+            tracing::info!("Optimization completed successfully");
             println!(
-                "Duration: {}",
-                completed_at.signed_duration_since(execution.started_at)
+                "Optimization completed with {} iterations",
+                execution.total_iterations_completed
             );
+            if let Some(completed_at) = execution.completed_at {
+                println!(
+                    "Duration: {}",
+                    completed_at.signed_duration_since(execution.started_at)
+                );
+            }
+            Ok(())
         }
-    } else if let Err(ref e) = result {
-        tracing::error!("Optimization failed: {}", e);
-        eprintln!("Optimization failed: {}", e);
+        Err(e) => {
+            tracing::error!("Optimization failed: {}", e);
+            eprintln!("Optimization failed: {}", e);
+            Err(e.into())
+        }
     }
-
-    result?;
-    Ok(())
 }
 
 /// Launch the interactive Newton monitor TUI that watches ailoop channels.
@@ -172,6 +196,46 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
         }
         fs::copy(&plan_file, &spec_path)?;
 
+        let state_dir = batch_config
+            .project_root
+            .join(".newton")
+            .join("tasks")
+            .join(&task_id)
+            .join("state");
+        let project_state_dir = batch_config.project_root.join(".newton").join("state");
+        if batch_config.resume {
+            fs::create_dir_all(&state_dir)?;
+            fs::create_dir_all(&project_state_dir)?;
+        } else {
+            if state_dir.exists() {
+                fs::remove_dir_all(&state_dir)?;
+            }
+            if project_state_dir.exists() {
+                fs::remove_dir_all(&project_state_dir)?;
+            }
+            fs::create_dir_all(&state_dir)?;
+            fs::create_dir_all(&project_state_dir)?;
+        }
+
+        let control_file_name = batch_config
+            .control_file
+            .as_deref()
+            .unwrap_or("newton_control.json");
+        let control_file_path = state_dir.join(control_file_name);
+
+        let branch_name = derive_branch_name(&spec_path, &task_id);
+        let base_branch = detect_base_branch(&batch_config.project_root);
+        let coder_cmd = workspace_root
+            .join(".newton")
+            .join("scripts")
+            .join("coder.sh");
+
+        let project_root_str = batch_config.project_root.display().to_string();
+        let workspace_root_str = workspace_root.display().to_string();
+        let state_dir_str = state_dir.display().to_string();
+        let coder_cmd_str = coder_cmd.display().to_string();
+        let control_file_str = control_file_path.display().to_string();
+
         let env_pairs = [
             ("CODING_AGENT", batch_config.coding_agent.as_str()),
             ("CODING_AGENT_MODEL", batch_config.coding_model.as_str()),
@@ -183,14 +247,70 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
                 "NEWTON_EXECUTOR_CODING_AGENT_MODEL",
                 batch_config.coding_model.as_str(),
             ),
+            ("NEWTON_PROJECT_ROOT", project_root_str.as_str()),
             ("NEWTON_PROJECT_ID", args.project_id.as_str()),
             ("NEWTON_TASK_ID", task_id.as_str()),
+            ("NEWTON_WS_ROOT", workspace_root_str.as_str()),
+            ("NEWTON_STATE_DIR", state_dir_str.as_str()),
+            ("NEWTON_CODER_CMD", coder_cmd_str.as_str()),
+            ("NEWTON_BRANCH_NAME", branch_name.as_str()),
+            ("NEWTON_CONTROL_FILE", control_file_str.as_str()),
         ];
         let overrides = apply_env_overrides(&env_pairs);
 
-        let run_args =
-            RunArgs::for_batch(batch_config.project_root.clone(), Some(spec_path.clone()));
-        let run_result = run(run_args).await;
+        let mut pre_run_error: Option<Error> = None;
+        if let Some(pre_script) = &batch_config.pre_run_script {
+            let pre_env = build_pre_run_env(
+                &batch_config,
+                args.project_id.as_str(),
+                task_id.as_str(),
+                &spec_path,
+                &workspace_root,
+                &state_dir,
+                &control_file_path,
+                &branch_name,
+            );
+            let status = run_batch_hook_script(&batch_config.project_root, pre_script, &pre_env)?;
+            if !status.success() {
+                let code = status.code().unwrap_or(-1);
+                tracing::warn!(
+                    "pre_run_script exited {} for {}; skipping run",
+                    code,
+                    plan_file.display()
+                );
+                write_run_log(
+                    &state_dir,
+                    &format!("pre-run script failed with exit code {}", code),
+                )?;
+                pre_run_error = Some(anyhow!("pre-run script failed with exit code {}", code));
+            }
+        }
+
+        let run_result = if let Some(err) = pre_run_error {
+            Err(err)
+        } else {
+            write_run_log(&state_dir, "Starting Newton run")?;
+            let run_args = RunArgs::for_batch_with_tools(
+                batch_config.project_root.clone(),
+                Some(spec_path.clone()),
+                batch_config.evaluator_cmd.clone(),
+                batch_config.advisor_cmd.clone(),
+                batch_config.executor_cmd.clone(),
+                batch_config.max_iterations,
+                batch_config.max_time,
+                batch_config.verbose,
+                Some(control_file_path.clone()),
+            );
+            let result = run(run_args).await;
+            write_run_log(
+                &state_dir,
+                &format!(
+                    "Newton run finished: {}",
+                    if result.is_ok() { "success" } else { "failure" }
+                ),
+            )?;
+            result
+        };
 
         if run_result.is_ok() {
             let script_env = build_batch_hook_env(
@@ -199,6 +319,11 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
                 task_id.as_str(),
                 &spec_path,
                 "success",
+                &branch_name,
+                &base_branch,
+                &workspace_root,
+                &state_dir,
+                &control_file_path,
             );
 
             let mut final_destination = completed_dir.clone();
@@ -231,10 +356,11 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
             continue;
         }
 
+        let error = run_result.unwrap_err();
         tracing::error!(
             "Batch processing failed for {}: {}",
             plan_file.display(),
-            run_result.as_ref().unwrap_err()
+            error
         );
         let script_env = build_batch_hook_env(
             &batch_config,
@@ -242,6 +368,11 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
             task_id.as_str(),
             &spec_path,
             "failure",
+            &branch_name,
+            &base_branch,
+            &workspace_root,
+            &state_dir,
+            &control_file_path,
         );
         if let Some(fail_script) = &batch_config.post_fail_script {
             match run_batch_hook_script(&batch_config.project_root, fail_script, &script_env) {
@@ -478,12 +609,18 @@ fn restore_env_vars(overrides: Vec<(String, Option<String>)>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_batch_hook_env(
     batch_config: &BatchProjectConfig,
     project_id: &str,
     task_id: &str,
     goal_file: &Path,
     result: &str,
+    branch_name: &str,
+    base_branch: &str,
+    workspace_root: &Path,
+    state_dir: &Path,
+    control_file: &Path,
 ) -> HashMap<String, String> {
     let mut env_vars = HashMap::new();
     env_vars.insert(
@@ -512,7 +649,21 @@ fn build_batch_hook_env(
         "NEWTON_PROJECT_ROOT".to_string(),
         batch_config.project_root.display().to_string(),
     );
+    env_vars.insert(
+        "NEWTON_WS_ROOT".to_string(),
+        workspace_root.display().to_string(),
+    );
+    env_vars.insert(
+        "NEWTON_STATE_DIR".to_string(),
+        state_dir.display().to_string(),
+    );
+    env_vars.insert(
+        "NEWTON_CONTROL_FILE".to_string(),
+        control_file.display().to_string(),
+    );
     env_vars.insert("NEWTON_RESULT".to_string(), result.to_string());
+    env_vars.insert("NEWTON_BASE_BRANCH".to_string(), base_branch.to_string());
+    env_vars.insert("NEWTON_BRANCH_NAME".to_string(), branch_name.to_string());
     env_vars
 }
 
@@ -529,4 +680,110 @@ fn run_batch_hook_script(
         .status()
         .map_err(|e| anyhow!("failed to execute hook script: {}", e))?;
     Ok(status)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_pre_run_env(
+    batch_config: &BatchProjectConfig,
+    project_id: &str,
+    task_id: &str,
+    goal_file: &Path,
+    workspace_root: &Path,
+    state_dir: &Path,
+    control_file: &Path,
+    branch_name: &str,
+) -> HashMap<String, String> {
+    let mut env_vars = HashMap::new();
+    env_vars.insert(
+        "CODING_AGENT".to_string(),
+        batch_config.coding_agent.clone(),
+    );
+    env_vars.insert(
+        "CODING_AGENT_MODEL".to_string(),
+        batch_config.coding_model.clone(),
+    );
+    env_vars.insert(
+        "NEWTON_PROJECT_ROOT".to_string(),
+        batch_config.project_root.display().to_string(),
+    );
+    env_vars.insert("NEWTON_PROJECT_ID".to_string(), project_id.to_string());
+    env_vars.insert("NEWTON_TASK_ID".to_string(), task_id.to_string());
+    env_vars.insert(
+        "NEWTON_GOAL_FILE".to_string(),
+        goal_file.display().to_string(),
+    );
+    env_vars.insert(
+        "NEWTON_WS_ROOT".to_string(),
+        workspace_root.display().to_string(),
+    );
+    env_vars.insert(
+        "NEWTON_STATE_DIR".to_string(),
+        state_dir.display().to_string(),
+    );
+    env_vars.insert(
+        "NEWTON_CONTROL_FILE".to_string(),
+        control_file.display().to_string(),
+    );
+    env_vars.insert("NEWTON_BRANCH_NAME".to_string(), branch_name.to_string());
+    env_vars.insert(
+        "NEWTON_RESUME".to_string(),
+        if batch_config.resume { "1" } else { "0" }.to_string(),
+    );
+    env_vars
+}
+
+fn derive_branch_name(goal_file: &Path, task_id: &str) -> String {
+    if let Ok(content) = fs::read_to_string(goal_file) {
+        let mut lines = content.lines();
+        if lines.next().map(str::trim) == Some("---") {
+            for line in lines {
+                let trimmed = line.trim();
+                if trimmed == "---" {
+                    break;
+                }
+                if let Some(rest) = trimmed.strip_prefix("branch:") {
+                    let branch = rest.trim().trim_matches('"');
+                    if !branch.is_empty() {
+                        return branch.to_string();
+                    }
+                }
+            }
+        }
+    }
+    format!("feature/{}", task_id.replace('_', "-"))
+}
+
+fn detect_base_branch(project_root: &Path) -> String {
+    let default_branch = "main".to_string();
+    if let Ok(output) = Command::new("git")
+        .arg("-C")
+        .arg(project_root)
+        .arg("rev-parse")
+        .arg("--abbrev-ref")
+        .arg("origin/HEAD")
+        .output()
+    {
+        if output.status.success() {
+            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if let Some(stripped) = branch.strip_prefix("origin/") {
+                if !stripped.is_empty() {
+                    return stripped.to_string();
+                }
+            }
+            if !branch.is_empty() {
+                return branch;
+            }
+        }
+    }
+    default_branch
+}
+
+fn write_run_log(state_dir: &Path, message: &str) -> Result<()> {
+    let log_path = state_dir.join("newton_run.log");
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+    writeln!(file, "[{}] {}", Utc::now(), message)?;
+    Ok(())
 }

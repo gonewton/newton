@@ -1,11 +1,14 @@
 use newton::cli::{commands, ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
 use newton::core::entities::ExecutionConfiguration;
+use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
 #[tokio::test]
 async fn test_run_command_success() {
     let temp_dir = TempDir::new().unwrap();
+    let control_file = temp_dir.path().join("newton_control.json");
+    fs::write(&control_file, r#"{"done": true}"#).unwrap();
     let args = RunArgs {
         path: temp_dir.path().to_path_buf(),
         max_iterations: 1,
@@ -24,7 +27,7 @@ async fn test_run_command_success() {
         config: None,
         goal: None,
         goal_file: None,
-        control_file: None,
+        control_file: Some(control_file.clone()),
         feedback: None,
     };
 

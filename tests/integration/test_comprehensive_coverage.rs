@@ -34,7 +34,7 @@ async fn test_full_orchestrator_workflow() {
     assert!(result.is_ok());
 
     let execution = result.unwrap();
-    assert_eq!(execution.status, ExecutionStatus::Completed);
+    assert_eq!(execution.status, ExecutionStatus::MaxIterationsReached);
     assert_eq!(execution.total_iterations_completed, 2);
     assert!(execution.completed_at.is_some());
 }
