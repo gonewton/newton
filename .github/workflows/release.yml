@@ -35,6 +35,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          toolchain: stable
           target: ${{ matrix.target }}
 
       - name: Install musl tools (for musl target)
