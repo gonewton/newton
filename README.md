@@ -81,6 +81,14 @@ EOF
 chmod +x tools/evaluator.sh
 ```
 
+### 2.5. Initialize Newton
+
+```bash
+newton init .
+```
+
+`newton init` scaffolds the `.newton` workspace, writes the default `.newton/configs/default.conf`, and installs the Newton template through `aikit-sdk` (README + `.newton/scripts`). After initialization you can run `newton run` without specifying a path—`run` now defaults to the current directory and uses the `.newton/scripts` toolchain by default.
+
 ### 3. Run Optimization
 
 ```bash
@@ -124,9 +132,11 @@ The help output now includes the same version banner at the top, so you can conf
 
 ## Commands Reference
 
-### `run <workspace-path>`
+### `run [workspace-path]`
 
 Start optimization loop for a workspace.
+
+If the workspace path is omitted the command runs in the current directory. After `newton init .` the `.newton/scripts` toolchain is installed automatically, so you can rely on the default `evaluator.sh`, `advisor.sh`, and `executor.sh` without passing strict-mode overrides.
 
 **Options:**
 - `--max-iterations N`: Maximum iterations before stopping
@@ -151,6 +161,19 @@ newton run . --max-iterations 100 --timeout 3600
 
 # Use custom tools
 newton run . --evaluator ./tools/my_evaluator.sh
+```
+
+### `init [workspace-path]`
+
+Create the `.newton` workspace layout, install the default Newton template via `aikit-sdk`, and write `.newton/configs/default.conf` with `project_root=.`, `coding_agent=opencode`, and the default `zai-coding-plan/glm-4.7` model.
+
+**Options:**
+- `--template-source <SOURCE>`: Optional template locator (default: `gonewton/newton-templates`). Paths that exist on disk are copied directly, otherwise the built-in template is used.
+
+**Examples:**
+```bash
+newton init .
+newton init /path/to/project
 ```
 
 ### `batch <project_id>`

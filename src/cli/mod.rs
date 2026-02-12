@@ -36,6 +36,12 @@ pub enum Command {
     )]
     Run(RunArgs),
     #[command(
+        about = "Initialize a Newton workspace with the default template",
+        long_about = "Init creates the .newton workspace layout, installs the Newton template with aikit-sdk, and writes default configs so you can run immediately.",
+        after_help = "Example:\n    newton init ./workspace"
+    )]
+    Init(InitArgs),
+    #[command(
         about = "Process queued work items for a project",
         long_about = "Batch reads plan files from .newton/plan/<project_id> and drives headless orchestration.",
         after_help = "Example:\n    newton batch project-alpha --workspace ./workspace"
@@ -71,23 +77,17 @@ pub enum Command {
         after_help = "Example:\n    newton monitor"
     )]
     Monitor(MonitorArgs),
-    #[command(
-        about = "Initialize a directory as a Newton workspace",
-        long_about = "Init creates the .newton layout, installs the Newton template via aikit-sdk, and writes the default config files.",
-        after_help = "Example:\n    newton init ./workspace"
-    )]
-    Init(InitArgs),
 }
 
 pub async fn run(args: Args) -> crate::Result<()> {
     match args.command {
         Command::Run(run_args) => commands::run(run_args).await,
+        Command::Init(init_args) => commands::init(init_args).await,
         Command::Batch(batch_args) => commands::batch(batch_args).await,
         Command::Step(step_args) => commands::step(step_args).await,
         Command::Status(status_args) => commands::status(status_args).await,
         Command::Report(report_args) => commands::report(report_args).await,
         Command::Error(error_args) => commands::error(error_args).await,
         Command::Monitor(monitor_args) => commands::monitor(monitor_args).await,
-        Command::Init(init_args) => commands::init(init_args).await,
     }
 }
