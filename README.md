@@ -54,6 +54,18 @@ scoop install newton
 
 Follow the **Setting up a new project** flow below to go from a blank directory to `newton run` with the default templates and tooling.
 
+### Quick setup: run a simple coding project
+
+1. Create a project directory and `cd` into it.
+2. Run `newton init .` to scaffold the workspace.
+3. Run the loop with an inline goal (no `GOAL.md` needed):
+   ```bash
+   newton run . --goal "Add a README.md that describes this project in one paragraph."
+   ```
+4. Use the execution ID printed by `newton run` with `newton status <execution-id>` to inspect progress.
+
+For a project with a persistent goal file or custom evaluator/advisor/executor scripts, follow **Setting up a new project** below.
+
 ### Setting up a new project
 
 1. Create a project directory and `cd` into it.
