@@ -4,7 +4,7 @@ use std::path::PathBuf;
 #[derive(Args)]
 pub struct RunArgs {
     /// Path containing Newton manifests and artifacts
-    #[arg(value_name = "PATH")]
+    #[arg(value_name = "PATH", default_value = ".")]
     pub path: PathBuf,
 
     /// Cap the loop after this many iterations (default: 10)
@@ -156,6 +156,17 @@ impl RunArgs {
             feedback: None,
         }
     }
+}
+
+#[derive(Args)]
+pub struct InitArgs {
+    /// Location to initialize (defaults to current directory)
+    #[arg(value_name = "PATH")]
+    pub path: Option<PathBuf>,
+
+    /// Template source passed to aikit-sdk (owner/repo, URL, or local path)
+    #[arg(long, value_name = "SOURCE")]
+    pub template_source: Option<String>,
 }
 
 #[derive(Args)]

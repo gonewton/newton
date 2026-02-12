@@ -46,6 +46,10 @@ scoop install newton
 
 ## Quick Start
 
+### Initialize a Newton Workspace
+
+Instead of hand-crafting the `.newton/` layout, run `newton init` inside your project root. The command uses **aikit-sdk** to install the official Newton template, writes the default config, and places all helper scripts under `.newton/scripts/`. Once initialization completes, you can launch `newton run` from that directory without passing an explicit path.
+
 ### 1. Create a Workspace
 
 ```bash
@@ -80,7 +84,7 @@ chmod +x tools/evaluator.sh
 ### 3. Run Optimization
 
 ```bash
-newton run .
+newton run
 ```
 
 Newton will:

@@ -1,0 +1,21 @@
+---
+source: tests/snapshots/test_cli_commands_snapshots.rs
+expression: normalized
+---
+Init creates the .newton layout, installs the Newton template via aikit-sdk, and writes the default config files.
+
+Usage: newton init [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]
+          Location to initialize (defaults to current directory)
+
+Options:
+      --template-source <SOURCE>
+          Template source passed to aikit-sdk (owner/repo, URL, or local path)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Example:
+    newton init ./workspace

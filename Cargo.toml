@@ -8,6 +8,7 @@ authors = ["Newton Loop Framework"]
 clap = { version = "4.4", features = ["derive", "cargo"] }
 tokio = { version = "1.49", features = ["full"] }
 anyhow = "1.0"
+aikit-sdk = { git = "https://github.com/goaikit/aikit.git", package = "aikit-sdk" }
 thiserror = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

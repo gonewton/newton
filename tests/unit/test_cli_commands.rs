@@ -1,4 +1,4 @@
-use newton::cli::{commands, ErrorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
+use newton::cli::{commands, ErrorArgs, InitArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
 use newton::core::entities::ExecutionConfiguration;
 use std::fs;
 use std::path::PathBuf;
@@ -136,4 +136,74 @@ fn test_run_args_defaults() {
     assert_eq!(args.max_iterations, 100);
     assert_eq!(args.max_time, 3600);
     assert!(!args.verbose);
+}
+
+#[tokio::test]
+async fn test_init_creates_workspace_structure() {
+    let workspace = TempDir::new().unwrap();
+    let template_dir = create_template_fixture();
+
+    let args = InitArgs {
+        path: Some(workspace.path().to_path_buf()),
+        template_source: Some(template_dir.path().to_str().unwrap().to_string()),
+    };
+
+    commands::init(args).await.unwrap();
+
+    let newton_dir = workspace.path().join(".newton");
+    assert!(newton_dir.join("configs").is_dir());
+    assert!(newton_dir.join("tasks").is_dir());
+    assert!(newton_dir.join("state").is_dir());
+    assert!(newton_dir.join("plan/default/todo").is_dir());
+    assert!(newton_dir.join("plan/default/completed").is_dir());
+    assert!(newton_dir.join("plan/default/failed").is_dir());
+    assert!(newton_dir.join("plan/default/draft").is_dir());
+
+    let config = fs::read_to_string(newton_dir.join("configs/default.conf")).unwrap();
+    assert!(config.contains("project_root=."));
+    assert!(config.contains("coding_agent=opencode"));
+    assert!(config.contains("coding_model=zai-coding-plan/glm-4.7"));
+    assert!(config.contains("post_success_script=.newton/scripts/post-success.sh"));
+    assert!(config.contains("post_fail_script=.newton/scripts/post-failure.sh"));
+
+    assert!(newton_dir.join("scripts/executor.sh").is_file());
+}
+
+fn create_template_fixture() -> TempDir {
+    let temp = TempDir::new().unwrap();
+    let newton_root = temp.path().join("newton");
+    let scripts_dir = newton_root.join("scripts");
+    fs::create_dir_all(&scripts_dir).unwrap();
+
+    fs::write(newton_root.join("README.md"), "# Newton Template\n").unwrap();
+    fs::write(scripts_dir.join("advisor.sh"), "#!/bin/sh\necho advisor\n").unwrap();
+    fs::write(
+        scripts_dir.join("evaluator.sh"),
+        "#!/bin/sh\necho evaluator\n",
+    )
+    .unwrap();
+    fs::write(
+        scripts_dir.join("post-success.sh"),
+        "#!/bin/sh\necho success\n",
+    )
+    .unwrap();
+    fs::write(
+        scripts_dir.join("post-failure.sh"),
+        "#!/bin/sh\necho failure\n",
+    )
+    .unwrap();
+
+    fs::write(
+        temp.path().join("aikit.toml"),
+        r#"[package]
+name = "test-newton-template"
+version = "0.1.0"
+
+[artifacts]
+"newton/**" = ".newton"
+"#,
+    )
+    .unwrap();
+
+    temp
 }

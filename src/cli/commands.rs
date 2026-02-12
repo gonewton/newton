@@ -1,5 +1,8 @@
+use crate::core::config::ExecutorConfig;
 use crate::{
-    cli::args::{BatchArgs, ErrorArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
+    cli::args::{
+        BatchArgs, ErrorArgs, InitArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs,
+    },
     core::{
         batch_config::{find_workspace_root, BatchProjectConfig},
         entities::ExecutionStatus,
@@ -10,8 +13,14 @@ use crate::{
     utils::serialization::{FileUtils, JsonSerializer},
     Result,
 };
+use aikit_sdk::{
+    fetch::TemplateSource,
+    install::{install_template_from_source, InstallError, InstallTemplateFromSourceOptions},
+};
 use anyhow::{anyhow, Error};
 use chrono::Utc;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
     collections::HashMap,
     env, fs,
@@ -22,18 +31,22 @@ use std::{
 };
 use tokio::time::sleep;
 
+const DEFAULT_TEMPLATE_SOURCE: &str = "gonewton/newton-templates";
+
 pub async fn run(args: RunArgs) -> Result<()> {
     tracing::info!("Starting Newton Loop optimization run");
+
+    let workspace_path = args.path.clone();
 
     let newton_config = if let Some(ref path) = args.config {
         ConfigLoader::load_from_file(path)?.unwrap_or_default()
     } else {
-        ConfigLoader::load_from_workspace(&args.path)?
+        ConfigLoader::load_from_workspace(&workspace_path)?
     };
 
     ConfigValidator::validate(&newton_config)?;
 
-    let goal_file = prepare_goal_file(&args)?;
+    let goal_file = prepare_goal_file(&args, &workspace_path)?;
 
     let user_feedback = args
         .feedback
@@ -48,19 +61,32 @@ pub async fn run(args: RunArgs) -> Result<()> {
         additional_env.insert("NEWTON_USER_FEEDBACK".to_string(), feedback.clone());
     }
 
+    let evaluator_cmd = args
+        .evaluator_cmd
+        .clone()
+        .or_else(|| default_workspace_script(&workspace_path, "evaluator.sh"));
+    let advisor_cmd = args
+        .advisor_cmd
+        .clone()
+        .or_else(|| default_workspace_script(&workspace_path, "advisor.sh"));
+    let executor_cmd = args
+        .executor_cmd
+        .clone()
+        .or_else(|| default_workspace_script(&workspace_path, "executor.sh"));
+    let strict_toolchain_mode =
+        args.evaluator_cmd.is_some() || args.advisor_cmd.is_some() || args.executor_cmd.is_some();
+
     let exec_config = crate::core::entities::ExecutionConfiguration {
-        evaluator_cmd: args.evaluator_cmd.clone(),
-        advisor_cmd: args.advisor_cmd.clone(),
-        executor_cmd: args.executor_cmd.clone(),
+        evaluator_cmd,
+        advisor_cmd,
+        executor_cmd,
         max_iterations: Some(args.max_iterations),
         max_time_seconds: Some(args.max_time),
         evaluator_timeout_ms: args.evaluator_timeout.map(|t| t * 1000),
         advisor_timeout_ms: args.advisor_timeout.map(|t| t * 1000),
         executor_timeout_ms: args.executor_timeout.map(|t| t * 1000),
         global_timeout_ms: Some(args.max_time * 1000),
-        strict_toolchain_mode: args.evaluator_cmd.is_some()
-            || args.advisor_cmd.is_some()
-            || args.executor_cmd.is_some(),
+        strict_toolchain_mode,
         resource_monitoring: false,
         verbose: args.verbose,
     };
@@ -68,7 +94,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
     let control_file_path = args
         .control_file
         .clone()
-        .unwrap_or_else(|| args.path.join("newton_control.json"));
+        .unwrap_or_else(|| workspace_path.join("newton_control.json"));
     additional_env.insert(
         "NEWTON_CONTROL_FILE".to_string(),
         control_file_path.display().to_string(),
@@ -91,7 +117,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
     let execution = orchestrator
         .run_optimization_with_policy(
-            &args.path,
+            &workspace_path,
             exec_config,
             &additional_env,
             Some(&success_policy),
@@ -125,6 +151,103 @@ pub async fn run(args: RunArgs) -> Result<()> {
             Err(e.into())
         }
     }
+}
+
+pub async fn init(args: InitArgs) -> Result<()> {
+    tracing::info!("Initializing Newton workspace");
+
+    let workspace_root = if let Some(path) = args.path.clone() {
+        path
+    } else {
+        env::current_dir()?
+    };
+
+    if !workspace_root.exists() {
+        return Err(anyhow!(
+            "Target path {} does not exist",
+            workspace_root.display()
+        ));
+    }
+
+    if !workspace_root.is_dir() {
+        return Err(anyhow!(
+            "Target path {} is not a directory",
+            workspace_root.display()
+        ));
+    }
+
+    let newton_dir = workspace_root.join(".newton");
+    if newton_dir.exists() {
+        return Err(anyhow!(
+            "{} already contains a .newton directory; remove it or choose another location",
+            workspace_root.display()
+        ));
+    }
+
+    fs::create_dir_all(&newton_dir)?;
+    fs::create_dir_all(newton_dir.join("configs"))?;
+    fs::create_dir_all(newton_dir.join("tasks"))?;
+    fs::create_dir_all(newton_dir.join("state"))?;
+    let plan_default = newton_dir.join("plan").join("default");
+    for stage in &["todo", "completed", "failed", "draft"] {
+        fs::create_dir_all(plan_default.join(stage))?;
+    }
+    let scripts_dir = newton_dir.join("scripts");
+    fs::create_dir_all(&scripts_dir)?;
+
+    let source_str = args
+        .template_source
+        .as_deref()
+        .unwrap_or(DEFAULT_TEMPLATE_SOURCE);
+    let template_source = TemplateSource::parse(source_str).map_err(|e: InstallError| {
+        anyhow!("Failed to parse template source '{}': {}", source_str, e)
+    })?;
+
+    install_template_from_source(InstallTemplateFromSourceOptions {
+        source: template_source,
+        project_root: workspace_root.clone(),
+        packages_dir: None,
+    })
+    .map_err(|e: InstallError| {
+        anyhow!("Failed to install template from '{}': {}", source_str, e)
+    })?;
+
+    let executor_script = scripts_dir.join("executor.sh");
+    if !executor_script.exists() {
+        fs::write(
+            &executor_script,
+            "#!/bin/sh\nset -euo pipefail\n\necho \"Executor script placeholder.\"\n",
+        )?;
+        #[cfg(unix)]
+        {
+            fs::set_permissions(&executor_script, PermissionsExt::from_mode(0o755))?;
+        }
+    }
+
+    let executor_defaults = ExecutorConfig::default();
+    let mut config_lines = vec![
+        "project_root=.".to_string(),
+        format!("coding_agent={}", executor_defaults.coding_agent),
+        format!("coding_model={}", executor_defaults.coding_agent_model),
+    ];
+
+    if scripts_dir.join("post-success.sh").is_file() {
+        config_lines.push("post_success_script=.newton/scripts/post-success.sh".to_string());
+    }
+    if scripts_dir.join("post-failure.sh").is_file() {
+        config_lines.push("post_fail_script=.newton/scripts/post-failure.sh".to_string());
+    }
+
+    let config_path = newton_dir.join("configs").join("default.conf");
+    fs::write(config_path, format!("{}\n", config_lines.join("\n")))?;
+
+    println!(
+        "Initialized Newton workspace at {}",
+        workspace_root.display()
+    );
+    println!("Run: newton run");
+
+    Ok(())
 }
 
 /// Launch the interactive Newton monitor TUI that watches ailoop channels.
@@ -538,16 +661,25 @@ pub async fn error(args: ErrorArgs) -> Result<()> {
     Ok(())
 }
 
-fn prepare_goal_file(args: &RunArgs) -> Result<Option<PathBuf>> {
+fn prepare_goal_file(args: &RunArgs, workspace_path: &Path) -> Result<Option<PathBuf>> {
     if let Some(ref path) = args.goal_file {
         Ok(Some(path.clone()))
     } else if let Some(ref goal_text) = args.goal {
-        let path = args.path.join(".newton/state/goal.txt");
+        let path = workspace_path.join(".newton/state/goal.txt");
         fs::create_dir_all(path.parent().unwrap())?;
         fs::write(&path, goal_text)?;
         Ok(Some(path))
     } else {
         Ok(None)
+    }
+}
+
+fn default_workspace_script(workspace_path: &Path, script_name: &str) -> Option<String> {
+    let script_path = workspace_path.join(".newton/scripts").join(script_name);
+    if script_path.is_file() {
+        Some(script_path.display().to_string())
+    } else {
+        None
     }
 }
 
