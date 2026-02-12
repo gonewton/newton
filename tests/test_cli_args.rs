@@ -4,7 +4,7 @@ use std::path::PathBuf;
 #[test]
 fn test_run_args_default_path() {
     let args = RunArgs {
-        path: Some(PathBuf::from(".")),
+        path: PathBuf::from("."),
         max_iterations: 10,
         max_time: 300,
         evaluator_cmd: None,
@@ -32,7 +32,7 @@ fn test_run_args_default_path() {
 #[test]
 fn test_run_args_with_commands() {
     let args = RunArgs {
-        path: Some(PathBuf::from(".")),
+        path: PathBuf::from("."),
         max_iterations: 5,
         max_time: 60,
         evaluator_cmd: Some("./evaluator.sh".to_string()),
