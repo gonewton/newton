@@ -46,16 +46,14 @@ Failed plans are moved into `.newton/plan/<project_id>/failed/` (created automat
 New batch workflows can opt in to tighter control with these optional `.conf` keys:
 
 - `evaluator_cmd`, `advisor_cmd`, `executor_cmd`: Override the default scripts located at `project_root/.newton/scripts/{evaluator,advisor}.sh` and `workspace_root/.newton/scripts/executor.sh` (derived by `newton init` when omitted).
-- `pre_run_script`: Run once per plan before `newton run` (commonly `.newton/scripts/pre-run.sh`, which prepares the feature branch and clears `NEWTON_CONTROL_FILE`).
-- `resume`: Set to `true`/`1` to preserve the task state directories instead of wiping them between runs.
-- `max_iterations`, `max_time`, and `verbose`: Control the loop limits and echo verbosity passed through to `newton run`.
-- `control_file`: Filename (default `newton_control.json`) stored under `NEWTON_STATE_DIR`. Evaluators write `{"done": true}` to `$NEWTON_CONTROL_FILE` to signal success; every other exit (limits, missing file, or `done: false`) triggers failure.
+- `pre_run_script`: Run once per plan before `newton run` (commonly `.newton/scripts/pre-run.sh`). Pre-run scripts clear `NEWTON_CONTROL_FILE`, prepare the feature branch, stash/restore changes, and respect the `resume` flag exactly like `loop.sh`.
+- `resume`: Set to `true`/`1` to keep both the task and project state directories intact across runs; when false, batch wipes both before invoking `pre_run_script`.
+- `max_iterations`, `max_time` (and the existing `verbose` flag): These values are forwarded to `newton run`, and limits count as failure unless `NEWTON_CONTROL_FILE` reports `{"done": true}`.
+- `control_file`: Filename (default `newton_control.json`) stored under `NEWTON_STATE_DIR`. Evaluators must write `{"done": true}` to `$NEWTON_CONTROL_FILE` to signal success; any other termination (limits, errors, missing file, `{"done": false}`, or evaluator/advisor/executor failures) triggers the failure path so the plan goes to `failed/`.
 
-Batch forwards these environment variables to hooks and tools when processing a plan:
+Batch injects the following environment variables into tools, scripts, and hooks: `NEWTON_STATE_DIR`, `NEWTON_CONTROL_FILE`, `NEWTON_WS_ROOT`, `NEWTON_CODER_CMD`, `NEWTON_BRANCH_NAME`, `NEWTON_BASE_BRANCH`, `NEWTON_PROJECT_ROOT`, `NEWTON_PROJECT_ID`, `NEWTON_TASK_ID`, `NEWTON_GOAL_FILE`, `NEWTON_RESUME`, `CODING_AGENT`, and `CODING_AGENT_MODEL`. Post hooks also see `NEWTON_RESULT=success|failure`, `NEWTON_STATE_DIR`, and `NEWTON_CONTROL_FILE` so they can reuse the same artifacts without re-parsing the plan.
 
-- `NEWTON_STATE_DIR`, `NEWTON_CONTROL_FILE`, `NEWTON_WS_ROOT`, `NEWTON_CODER_CMD`, `NEWTON_BRANCH_NAME`, `NEWTON_BASE_BRANCH`, `NEWTON_PROJECT_ROOT`, `NEWTON_PROJECT_ID`, `NEWTON_TASK_ID`, `NEWTON_GOAL_FILE`, `NEWTON_RESUME`, and `CODING_AGENT`/`CODING_AGENT_MODEL`.
-
-Feature branches are determined by `branch:` frontmatter in the plan spec; if missing, batch uses `feature/<task_id>` (underscores become dashes). `NEWTON_BRANCH_NAME` and `NEWTON_BASE_BRANCH` stay available so hooks and scripts can create PRs or cleanup the correct refs.
+Feature branches are determined by `branch:` frontmatter in the plan spec; if missing, batch derives `feature/<task_id>` (underscores become dashes). Batch exposes this value as `NEWTON_BRANCH_NAME` so scripts, hooks, and `gh` commands operate on the correct ref without re-reading the YAML.
 
 ## Hooks
 Add a `[hooks]` table to the target workspace or project `newton.toml`:

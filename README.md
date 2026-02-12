@@ -162,16 +162,15 @@ Batch configs now support additional optional keys for parity with `start.sh`/`l
 
 | Key | Description |
 | --- | --- |
-| `evaluator_cmd`, `advisor_cmd`, `executor_cmd` | Override the tool invocations. When omitted, batch derives defaults that match the workspace layout created by `newton init` (`project_root/.newton/scripts/{evaluator,advisor}.sh` and `workspace_root/.newton/scripts/executor.sh`). |
-| `pre_run_script` | Runs once before `newton run` (e.g., `.newton/scripts/pre-run.sh`). |
-| `resume` | `true`/`1` keeps the task and project state directories intact; when false the directories are wiped before the run. |
-| `max_iterations`, `max_time` | Optional limits that mirror the values passed to `newton run`. Without a control file signal, hitting either limit counts as failure. |
-| `verbose` | Passes `--verbose` through to the run so tool stdout/stderr is rendered. |
-| `control_file` | The filename (default `newton_control.json`) stored inside the task state directory; evaluators must write `{"done": true}` to `NEWTON_CONTROL_FILE` in that folder to signal success. |
+| `evaluator_cmd`, `advisor_cmd`, `executor_cmd` | Override the tool invocations. When omitted, batch derives defaults that mirror the layout created by `newton init` (`project_root/.newton/scripts/{evaluator,advisor}.sh` and `workspace_root/.newton/scripts/executor.sh`). |
+| `pre_run_script` | Runs once per plan before `newton run`. The script can clear `NEWTON_CONTROL_FILE`, prepare the feature branch, stash uncommitted changes, and reuse the task state directory like `loop.sh`. |
+| `resume` | `true`/`1` preserves the state directories across runs; without it, batch wipes both the task and project state directories before invoking `pre_run_script`. |
+| `max_iterations`, `max_time`, `verbose` | These values are forwarded to `newton run`, and limits count as failure unless the control file reports completion. |
+| `control_file` | Filename (default `newton_control.json`) stored inside `NEWTON_STATE_DIR`. Evaluators signal success by writing `{"done": true}` to `$NEWTON_CONTROL_FILE`; any other outcome (missing file, `{"done": false}`, tool failure, or limits) sends the plan to `failed/`. |
 
-Batch exposes the following environment variables for pre-run hooks, tool runs, and post hooks: `NEWTON_STATE_DIR`, `NEWTON_WS_ROOT`, `NEWTON_CODER_CMD`, `NEWTON_CONTROL_FILE`, `NEWTON_BRANCH_NAME`, `NEWTON_BASE_BRANCH`, `NEWTON_PRE_RUN` (1/0), `CODING_AGENT`, and `CODING_AGENT_MODEL`. Pre-run scripts also see `NEWTON_PROJECT_ROOT`, `NEWTON_PROJECT_ID`, `NEWTON_TASK_ID`, `NEWTON_GOAL_FILE`, and `NEWTON_RESUME`. Post hooks additionally receive `NEWTON_RESULT`, `NEWTON_BRANCH_NAME`, `NEWTON_BASE_BRANCH`, `NEWTON_STATE_DIR`, and `NEWTON_CONTROL_FILE` so they can reference the same artifacts without re-reading the plan.
+Batch injects the following environment variables into hooks, scripts, and tool runs: `NEWTON_STATE_DIR`, `NEWTON_WS_ROOT`, `NEWTON_CODER_CMD`, `NEWTON_CONTROL_FILE`, `NEWTON_BRANCH_NAME`, `NEWTON_BASE_BRANCH`, `NEWTON_PROJECT_ROOT`, `NEWTON_PROJECT_ID`, `NEWTON_TASK_ID`, `NEWTON_GOAL_FILE`, `NEWTON_RESUME`, and the coding-agent overrides (`CODING_AGENT`/`CODING_AGENT_MODEL`). Post hooks additionally receive `NEWTON_RESULT=success|failure`, `NEWTON_STATE_DIR`, and `NEWTON_CONTROL_FILE` so they can operate on the same artifacts without re-reading the plan.
 
-The feature branch name is derived from the plan frontmatter (`branch: feature/foo`) when present; otherwise batch uses `feature/<task_id>` with underscores replaced by dashes. This value populates `NEWTON_BRANCH_NAME` everywhere so hooks can operate on the right Git branch without re-parsing the spec.
+The feature branch name is read from the plan frontmatter (`branch: feature/foo`) when provided; otherwise batch derives `feature/<task_id>` (underscores become dashes). Batch exposes this name via `NEWTON_BRANCH_NAME`, letting scripts and hooks act on the correct branch without parsing the YAML again.
 
 Success is gatekept by the control file that lives under `NEWTON_STATE_DIR`. Evaluator scripts must write `{"done": true}` to `NEWTON_CONTROL_FILE` when the goal is reached and `{"done": false}` (or remove the file) when more iterations are required. The loop stops only when the control file reports `done: true`; every other termination (limits, errors, or missing file) is treated as failure and sends the plan to `failed/`.
 

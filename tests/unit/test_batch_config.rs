@@ -243,6 +243,31 @@ fn batch_project_config_parses_additional_settings() {
 }
 
 #[test]
+fn batch_project_config_parses_pre_run_script() {
+    let workspace = TempDir::new().unwrap();
+    let project_root = workspace.path().join("workspace-project");
+    fs::create_dir_all(project_root.join(".newton")).unwrap();
+    fs::create_dir_all(project_root.join(".newton").join("scripts")).unwrap();
+    fs::create_dir_all(workspace.path().join(".newton").join("scripts")).unwrap();
+
+    let configs_dir = workspace.path().join(".newton").join("configs");
+    fs::create_dir_all(&configs_dir).unwrap();
+    let conf_path = configs_dir.join("proj.conf");
+    let content = r#"
+        project_root = ./workspace-project
+        coding_agent = opencode
+        coding_model = glm-4.7
+        pre_run_script = ./scripts/pre-run.sh
+        control_file = batch.json
+    "#;
+    fs::write(&conf_path, content).unwrap();
+
+    let config = BatchProjectConfig::load(workspace.path(), "proj").unwrap();
+    assert_eq!(config.pre_run_script.as_deref(), Some("./scripts/pre-run.sh"));
+    assert_eq!(config.control_file.as_deref(), Some("batch.json"));
+}
+
+#[test]
 fn batch_project_config_resume_accepts_one() {
     let workspace = TempDir::new().unwrap();
     let project_root = workspace.path().join("workspace-project");

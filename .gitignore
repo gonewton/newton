@@ -11,6 +11,10 @@ release/
 target
 repomix-output.xml
 .claude
-.newton
+.newton/*
+!.newton/configs/
+!.newton/configs/**
+!.newton/scripts/
+!.newton/scripts/**
 specs
 tarpaulin-report.html.gitignore
