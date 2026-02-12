@@ -19,6 +19,7 @@ WORKFLOW COMMANDS:
   run      Execute a full optimization loop
   init     Initialize a Newton workspace with the default template
   batch    Process queued work items for a project
+  init     Initialize a workspace from a Newton template
   step     Advance loop by one cycle
   status   Inspect progress of an execution
   report   Summarize learnings from an execution

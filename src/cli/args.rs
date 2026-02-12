@@ -204,6 +204,37 @@ pub struct StepArgs {
 }
 
 #[derive(Args)]
+pub struct InitArgs {
+    /// Workspace path to bootstrap (defaults to current directory)
+    #[arg(value_name = "PATH", default_value = ".")]
+    pub workspace_path: PathBuf,
+
+    /// Template to render (default: basic)
+    #[arg(long, value_name = "TEMPLATE")]
+    pub template: Option<String>,
+
+    /// Project name applied to generated newton.toml
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
+
+    /// Override coding agent to populate config
+    #[arg(long, value_name = "AGENT")]
+    pub coding_agent: Option<String>,
+
+    /// Override coding agent model when creating config
+    #[arg(long, value_name = "MODEL")]
+    pub model: Option<String>,
+
+    /// Interactive mode prompts for missing values
+    #[arg(long)]
+    pub interactive: bool,
+
+    /// Overwrite existing .newton/ layout when present
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Args)]
 pub struct StatusArgs {
     /// Identifier of the execution to inspect
     #[arg(value_name = "EXECUTION")]

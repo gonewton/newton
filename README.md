@@ -66,6 +66,8 @@ EOF
 mkdir -p tools
 ```
 
+Before wiring your tools, run `newton init .` (requires `aikit` and an installed template archive) to bootstrap `.newton/`, default scripts, and configuration guidance. The command writes `newton.toml`, `GOAL.md`, and `.newton/state` artifacts so subsequent runs have the expected layout. Use `--template basic` (the default) or point to any template you installed via `aikit`.
+
 ### 2. Configure Your Tools
 
 Newton Loop uses external CLI tools for each phase. Create simple shell scripts:
@@ -313,6 +315,29 @@ Stream live ailoop channels for every project/branch in the workspace via a term
 **Example:**
 ```bash
 newton monitor
+```
+
+### `init <workspace-path>`
+
+Bootstrap a workspace from an installed Newton template. `newton init` renders `.newton/scripts`, `.newton/state`, and `newton.toml`, seeds `GOAL.md`, and keeps everything in sync with the template variables (`project_name`, `coding_agent`, `coding_agent_model`, `test_command`, `language`). The command requires `aikit` to be available on `PATH` and at least one template directory under `.newton/templates/` (templates can be installed via `aikit` packages or checked in alongside your projects).
+
+**Options:**
+- `--template <NAME>`: Choose a template (default: `basic`). The template name must match a subdirectory under `.newton/templates/`.
+- `--name <NAME>`: Override the project name written to `newton.toml` and used in the GOAL stub.
+- `--coding-agent <AGENT>`: Specify the coding agent that will be listed in `newton.toml`.
+- `--model <MODEL>`: Override the coding agent model in the generated config.
+- `--interactive`: Prompt for missing values instead of assuming defaults.
+- `--force`: Proceed even if `.newton/` already exists (existing files are overwritten).
+
+**Behavior:**
+- Validates that `aikit` is installed (`aikit --version` must succeed); otherwise prints an install hint (`https://aikit.readthedocs.io`) and exits with an error.
+- Clears `.newton/state/context.md`, writes fresh `promise.txt`/`executor_prompt.md`/`iteration.txt`, and renders the selected template into `.newton/`.
+- Writes `newton.toml` only when it does not already exist, defaults the `project.template` to the template name, and populates `executor.coding_agent`/`coding_agent_model` plus the recommended `test_command`.
+- Creates `GOAL.md` with a placeholder goal if it is missing.
+
+**Example:**
+```bash
+newton init . --template basic --interactive
 ```
 
 ## Advanced Usage
