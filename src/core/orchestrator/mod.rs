@@ -406,6 +406,13 @@ impl OptimizationOrchestrator {
         additional_env: &std::collections::HashMap<String, String>,
     ) -> Result<ToolResult, AppError> {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if parts.is_empty() {
+            return Err(AppError::new(
+                crate::core::types::ErrorCategory::ToolExecutionError,
+                "command must not be empty",
+            )
+            .with_code("TOOL-002"));
+        }
         let program = parts[0];
         let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
 
