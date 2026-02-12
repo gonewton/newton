@@ -4,7 +4,7 @@ fn test_verbose_flag_in_run_args() {
     use std::path::PathBuf;
 
     let args = RunArgs {
-        path: Some(PathBuf::from(".")),
+        path: PathBuf::from("."),
         max_iterations: 5,
         max_time: 60,
         evaluator_cmd: None,
@@ -34,7 +34,7 @@ fn test_verbose_flag_false_by_default_in_run_args() {
     use std::path::PathBuf;
 
     let args = RunArgs {
-        path: Some(PathBuf::from(".")),
+        path: PathBuf::from("."),
         max_iterations: 5,
         max_time: 60,
         evaluator_cmd: None,
