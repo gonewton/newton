@@ -36,6 +36,42 @@ async fn test_run_command_success() {
 }
 
 #[tokio::test]
+async fn test_run_writes_goal_file_when_goal_text_provided() {
+    let temp_dir = TempDir::new().unwrap();
+    let control_file = temp_dir.path().join("newton_control.json");
+    fs::write(&control_file, r#"{"done": true}"#).unwrap();
+    let goal_text = "Ship version 1.0";
+    let args = RunArgs {
+        path: temp_dir.path().to_path_buf(),
+        max_iterations: 1,
+        max_time: 60,
+        evaluator_cmd: Some("echo 'test evaluator'".to_string()),
+        advisor_cmd: Some("echo 'test advisor'".to_string()),
+        executor_cmd: Some("echo 'test executor'".to_string()),
+        evaluator_status_file: temp_dir.path().join("evaluator_status.md").clone(),
+        advisor_recommendations_file: temp_dir.path().join("advisor_recommendations.md").clone(),
+        executor_log_file: temp_dir.path().join("executor_log.md").clone(),
+        tool_timeout_seconds: 30,
+        evaluator_timeout: Some(5),
+        advisor_timeout: Some(5),
+        executor_timeout: Some(5),
+        verbose: false,
+        config: None,
+        goal: Some(goal_text.to_string()),
+        goal_file: None,
+        control_file: Some(control_file.clone()),
+        feedback: None,
+    };
+
+    let result = commands::run(args).await;
+    assert!(result.is_ok());
+
+    let goal_path = temp_dir.path().join(".newton/state/goal.txt");
+    let content = fs::read_to_string(&goal_path).unwrap();
+    assert_eq!(content, goal_text);
+}
+
+#[tokio::test]
 async fn test_step_command_basic() {
     let temp_dir = TempDir::new().unwrap();
     let args = StepArgs {
