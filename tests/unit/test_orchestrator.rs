@@ -72,3 +72,39 @@ async fn test_orchestrator_run_optimization_minimal() {
     assert_eq!(execution.status, ExecutionStatus::Running);
     assert_eq!(execution.total_iterations_completed, 0);
 }
+
+#[tokio::test]
+async fn test_orchestrator_empty_evaluator_command_errors() {
+    let temp_dir = TempDir::new().unwrap();
+    let serializer = newton::utils::serialization::JsonSerializer;
+    let file_serializer = newton::utils::serialization::FileUtils;
+    let reporter = Box::new(DefaultErrorReporter);
+
+    let orchestrator = OptimizationOrchestrator::new(serializer, file_serializer, reporter);
+
+    let config = ExecutionConfiguration {
+        evaluator_cmd: Some("   ".to_string()),
+        advisor_cmd: None,
+        executor_cmd: None,
+        max_iterations: None,
+        max_time_seconds: None,
+        evaluator_timeout_ms: None,
+        advisor_timeout_ms: None,
+        executor_timeout_ms: None,
+        global_timeout_ms: None,
+        strict_toolchain_mode: false,
+        resource_monitoring: false,
+        verbose: false,
+    };
+
+    let result = orchestrator.run_optimization(temp_dir.path(), config).await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.code, "TOOL-002");
+    assert!(
+        err.message.contains("command must not be empty"),
+        "unexpected message: {}",
+        err.message
+    );
+}

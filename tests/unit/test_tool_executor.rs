@@ -177,6 +177,69 @@ async fn test_execute_nonexistent_command() {
 }
 
 #[tokio::test]
+async fn test_execute_empty_command_returns_error() {
+    let temp_dir = TempDir::new().unwrap();
+    let executor = ToolExecutor::new();
+
+    let config = ExecutionConfiguration {
+        evaluator_cmd: None,
+        advisor_cmd: None,
+        executor_cmd: None,
+        max_iterations: None,
+        max_time_seconds: None,
+        evaluator_timeout_ms: None,
+        advisor_timeout_ms: None,
+        executor_timeout_ms: None,
+        global_timeout_ms: None,
+        strict_toolchain_mode: false,
+        resource_monitoring: false,
+        verbose: false,
+    };
+
+    let result = executor
+        .execute("", &config, &temp_dir.path().to_path_buf())
+        .await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.code, "TOOL-002");
+    assert!(
+        err.message.contains("command must not be empty"),
+        "unexpected message: {}",
+        err.message
+    );
+}
+
+#[tokio::test]
+async fn test_execute_whitespace_command_returns_error() {
+    let temp_dir = TempDir::new().unwrap();
+    let executor = ToolExecutor::new();
+
+    let config = ExecutionConfiguration {
+        evaluator_cmd: None,
+        advisor_cmd: None,
+        executor_cmd: None,
+        max_iterations: None,
+        max_time_seconds: None,
+        evaluator_timeout_ms: None,
+        advisor_timeout_ms: None,
+        executor_timeout_ms: None,
+        global_timeout_ms: None,
+        strict_toolchain_mode: false,
+        resource_monitoring: false,
+        verbose: false,
+    };
+
+    let result = executor
+        .execute("   ", &config, &temp_dir.path().to_path_buf())
+        .await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.code, "TOOL-002");
+}
+
+#[tokio::test]
 async fn test_tool_result_structure() {
     let temp_dir = TempDir::new().unwrap();
     let executor = ToolExecutor::new();

@@ -543,7 +543,10 @@ fn prepare_goal_file(args: &RunArgs) -> Result<Option<PathBuf>> {
         Ok(Some(path.clone()))
     } else if let Some(ref goal_text) = args.goal {
         let path = args.path.join(".newton/state/goal.txt");
-        fs::create_dir_all(path.parent().unwrap())?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| anyhow!("goal path has no parent directory"))?;
+        fs::create_dir_all(parent)?;
         fs::write(&path, goal_text)?;
         Ok(Some(path))
     } else {
