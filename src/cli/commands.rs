@@ -25,15 +25,17 @@ use tokio::time::sleep;
 pub async fn run(args: RunArgs) -> Result<()> {
     tracing::info!("Starting Newton Loop optimization run");
 
+    let workspace_path = args.path.clone();
+
     let newton_config = if let Some(ref path) = args.config {
         ConfigLoader::load_from_file(path)?.unwrap_or_default()
     } else {
-        ConfigLoader::load_from_workspace(&args.path)?
+        ConfigLoader::load_from_workspace(&workspace_path)?
     };
 
     ConfigValidator::validate(&newton_config)?;
 
-    let goal_file = prepare_goal_file(&args)?;
+    let goal_file = prepare_goal_file(&args, &workspace_path)?;
 
     let user_feedback = args
         .feedback
@@ -48,19 +50,32 @@ pub async fn run(args: RunArgs) -> Result<()> {
         additional_env.insert("NEWTON_USER_FEEDBACK".to_string(), feedback.clone());
     }
 
+    let evaluator_cmd = args
+        .evaluator_cmd
+        .clone()
+        .or_else(|| default_workspace_script(&workspace_path, "evaluator.sh"));
+    let advisor_cmd = args
+        .advisor_cmd
+        .clone()
+        .or_else(|| default_workspace_script(&workspace_path, "advisor.sh"));
+    let executor_cmd = args
+        .executor_cmd
+        .clone()
+        .or_else(|| default_workspace_script(&workspace_path, "executor.sh"));
+    let strict_toolchain_mode =
+        args.evaluator_cmd.is_some() || args.advisor_cmd.is_some() || args.executor_cmd.is_some();
+
     let exec_config = crate::core::entities::ExecutionConfiguration {
-        evaluator_cmd: args.evaluator_cmd.clone(),
-        advisor_cmd: args.advisor_cmd.clone(),
-        executor_cmd: args.executor_cmd.clone(),
+        evaluator_cmd,
+        advisor_cmd,
+        executor_cmd,
         max_iterations: Some(args.max_iterations),
         max_time_seconds: Some(args.max_time),
         evaluator_timeout_ms: args.evaluator_timeout.map(|t| t * 1000),
         advisor_timeout_ms: args.advisor_timeout.map(|t| t * 1000),
         executor_timeout_ms: args.executor_timeout.map(|t| t * 1000),
         global_timeout_ms: Some(args.max_time * 1000),
-        strict_toolchain_mode: args.evaluator_cmd.is_some()
-            || args.advisor_cmd.is_some()
-            || args.executor_cmd.is_some(),
+        strict_toolchain_mode,
         resource_monitoring: false,
         verbose: args.verbose,
     };
@@ -68,7 +83,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
     let control_file_path = args
         .control_file
         .clone()
-        .unwrap_or_else(|| args.path.join("newton_control.json"));
+        .unwrap_or_else(|| workspace_path.join("newton_control.json"));
     additional_env.insert(
         "NEWTON_CONTROL_FILE".to_string(),
         control_file_path.display().to_string(),
@@ -91,7 +106,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
     let execution = orchestrator
         .run_optimization_with_policy(
-            &args.path,
+            &workspace_path,
             exec_config,
             &additional_env,
             Some(&success_policy),
@@ -538,11 +553,11 @@ pub async fn error(args: ErrorArgs) -> Result<()> {
     Ok(())
 }
 
-fn prepare_goal_file(args: &RunArgs) -> Result<Option<PathBuf>> {
+fn prepare_goal_file(args: &RunArgs, workspace_path: &Path) -> Result<Option<PathBuf>> {
     if let Some(ref path) = args.goal_file {
         Ok(Some(path.clone()))
     } else if let Some(ref goal_text) = args.goal {
-        let path = args.path.join(".newton/state/goal.txt");
+        let path = workspace_path.join(".newton/state/goal.txt");
         let parent = path
             .parent()
             .ok_or_else(|| anyhow!("goal path has no parent directory"))?;
@@ -551,6 +566,15 @@ fn prepare_goal_file(args: &RunArgs) -> Result<Option<PathBuf>> {
         Ok(Some(path))
     } else {
         Ok(None)
+    }
+}
+
+fn default_workspace_script(workspace_path: &Path, script_name: &str) -> Option<String> {
+    let script_path = workspace_path.join(".newton/scripts").join(script_name);
+    if script_path.is_file() {
+        Some(script_path.display().to_string())
+    } else {
+        None
     }
 }
 

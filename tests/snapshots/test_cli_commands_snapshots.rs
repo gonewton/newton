@@ -47,3 +47,18 @@ fn run_command_help_snapshot() {
         std::str::from_utf8(&output.stdout).unwrap()
     );
 }
+
+#[test]
+fn init_command_help_snapshot() {
+    let output = Command::new(assert_cmd::cargo::cargo_bin!("newton"))
+        .args(["init", "--help"])
+        .output()
+        .expect("should run successfully");
+
+    let stdout = std::str::from_utf8(&output.stdout).unwrap();
+    let normalized = regex::Regex::new(r"\d+\.\d+\.\d+")
+        .unwrap()
+        .replace_all(stdout, "[VERSION]");
+
+    assert_snapshot!("init_help_output", normalized);
+}

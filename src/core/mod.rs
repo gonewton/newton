@@ -1,5 +1,6 @@
 pub mod batch_config;
 pub mod config;
+pub mod context;
 pub mod entities;
 pub mod error;
 pub mod git;
@@ -9,6 +10,7 @@ pub mod orchestrator;
 pub mod performance;
 pub mod results_processor;
 pub mod success_policy;
+pub mod template;
 pub mod tool_executor;
 pub mod types;
 pub mod workspace;
@@ -16,6 +18,7 @@ pub mod workspace;
 pub use crate::tools::ToolResult;
 pub use batch_config::{find_workspace_root, parse_conf, BatchProjectConfig};
 pub use config::{ConfigLoader, ConfigValidator, NewtonConfig};
+pub use context::ContextManager;
 pub use entities::{
     ArtifactMetadata, ErrorCategory, ExecutionStatus, IterationPhase, OptimizationExecution,
     ToolType,
@@ -27,4 +30,5 @@ pub use orchestrator::OptimizationOrchestrator;
 pub use performance::PerformanceProfiler;
 pub use results_processor::{OutputFormat, ResultsProcessor};
 pub use success_policy::SuccessPolicy;
+pub use template::{TemplateInfo, TemplateManager, TemplateRenderer};
 pub use types::*;

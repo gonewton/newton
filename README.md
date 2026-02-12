@@ -46,6 +46,10 @@ scoop install newton
 
 ## Quick Start
 
+### Initialize a Newton Workspace
+
+Instead of hand-crafting the `.newton/` layout, run `newton init` inside your project root. The command uses **aikit-sdk** to install the official Newton template, writes the default config, and places all helper scripts under `.newton/scripts/`. Once initialization completes, you can launch `newton run` from that directory without passing an explicit path.
+
 ### 1. Create a Workspace
 
 ```bash
@@ -62,6 +66,8 @@ EOF
 mkdir -p tools
 ```
 
+Before wiring your tools, run `newton init .` (requires `aikit` and an installed template archive) to bootstrap `.newton/`, default scripts, and configuration guidance. The command writes `newton.toml`, `GOAL.md`, and `.newton/state` artifacts so subsequent runs have the expected layout. Use `--template basic` (the default) or point to any template you installed via `aikit`.
+
 ### 2. Configure Your Tools
 
 Newton Loop uses external CLI tools for each phase. Create simple shell scripts:
@@ -77,10 +83,18 @@ EOF
 chmod +x tools/evaluator.sh
 ```
 
+### 2.5. Initialize Newton
+
+```bash
+newton init .
+```
+
+`newton init` scaffolds the `.newton` workspace, writes the default `.newton/configs/default.conf`, and installs the Newton template through `aikit-sdk` (README + `.newton/scripts`). After initialization you can run `newton run` without specifying a path—`run` now defaults to the current directory and uses the `.newton/scripts` toolchain by default.
+
 ### 3. Run Optimization
 
 ```bash
-newton run .
+newton run
 ```
 
 Newton will:
@@ -120,9 +134,11 @@ The help output now includes the same version banner at the top, so you can conf
 
 ## Commands Reference
 
-### `run <workspace-path>`
+### `run [workspace-path]`
 
 Start optimization loop for a workspace.
+
+If the workspace path is omitted the command runs in the current directory. After `newton init .` the `.newton/scripts` toolchain is installed automatically, so you can rely on the default `evaluator.sh`, `advisor.sh`, and `executor.sh` without passing strict-mode overrides.
 
 **Options:**
 - `--max-iterations N`: Maximum iterations before stopping
@@ -147,6 +163,19 @@ newton run . --max-iterations 100 --timeout 3600
 
 # Use custom tools
 newton run . --evaluator ./tools/my_evaluator.sh
+```
+
+### `init [workspace-path]`
+
+Create the `.newton` workspace layout, install the default Newton template via `aikit-sdk`, and write `.newton/configs/default.conf` with `project_root=.`, `coding_agent=opencode`, and the default `zai-coding-plan/glm-4.7` model.
+
+**Options:**
+- `--template-source <SOURCE>`: Optional template locator (default: `gonewton/newton-templates`). Paths that exist on disk are copied directly, otherwise the built-in template is used.
+
+**Examples:**
+```bash
+newton init .
+newton init /path/to/project
 ```
 
 ### `batch <project_id>`
@@ -286,6 +315,29 @@ Stream live ailoop channels for every project/branch in the workspace via a term
 **Example:**
 ```bash
 newton monitor
+```
+
+### `init <workspace-path>`
+
+Bootstrap a workspace from an installed Newton template. `newton init` renders `.newton/scripts`, `.newton/state`, and `newton.toml`, seeds `GOAL.md`, and keeps everything in sync with the template variables (`project_name`, `coding_agent`, `coding_agent_model`, `test_command`, `language`). The command requires `aikit` to be available on `PATH` and at least one template directory under `.newton/templates/` (templates can be installed via `aikit` packages or checked in alongside your projects).
+
+**Options:**
+- `--template <NAME>`: Choose a template (default: `basic`). The template name must match a subdirectory under `.newton/templates/`.
+- `--name <NAME>`: Override the project name written to `newton.toml` and used in the GOAL stub.
+- `--coding-agent <AGENT>`: Specify the coding agent that will be listed in `newton.toml`.
+- `--model <MODEL>`: Override the coding agent model in the generated config.
+- `--interactive`: Prompt for missing values instead of assuming defaults.
+- `--force`: Proceed even if `.newton/` already exists (existing files are overwritten).
+
+**Behavior:**
+- Validates that `aikit` is installed (`aikit --version` must succeed); otherwise prints an install hint (`https://aikit.readthedocs.io`) and exits with an error.
+- Clears `.newton/state/context.md`, writes fresh `promise.txt`/`executor_prompt.md`/`iteration.txt`, and renders the selected template into `.newton/`.
+- Writes `newton.toml` only when it does not already exist, defaults the `project.template` to the template name, and populates `executor.coding_agent`/`coding_agent_model` plus the recommended `test_command`.
+- Creates `GOAL.md` with a placeholder goal if it is missing.
+
+**Example:**
+```bash
+newton init . --template basic --interactive
 ```
 
 ## Advanced Usage

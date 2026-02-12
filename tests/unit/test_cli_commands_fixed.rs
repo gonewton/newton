@@ -6,7 +6,7 @@ use tempfile::TempDir;
 #[test]
 fn test_run_args_structure() {
     let args = RunArgs {
-        path: PathBuf::from("/tmp"),
+        path: Some(PathBuf::from("/tmp")),
         max_iterations: 10,
         max_time: 300,
         evaluator_cmd: Some("echo test".to_string()),

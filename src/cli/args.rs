@@ -4,7 +4,7 @@ use std::path::PathBuf;
 #[derive(Args)]
 pub struct RunArgs {
     /// Path containing Newton manifests and artifacts
-    #[arg(value_name = "PATH")]
+    #[arg(value_name = "PATH", default_value = ".")]
     pub path: PathBuf,
 
     /// Cap the loop after this many iterations (default: 10)
@@ -190,6 +190,17 @@ pub struct StepArgs {
     /// Enable verbose output to display tool stdout/stderr
     #[arg(long, help_heading = "Output Options")]
     pub verbose: bool,
+}
+
+#[derive(Args)]
+pub struct InitArgs {
+    /// Directory where .newton/ will be created (defaults to current directory)
+    #[arg(value_name = "PATH")]
+    pub path: Option<PathBuf>,
+
+    /// Template source (GitHub repo, URL, or local path; default: gonewton/newton-templates)
+    #[arg(long, value_name = "SOURCE")]
+    pub template_source: Option<String>,
 }
 
 #[derive(Args)]
