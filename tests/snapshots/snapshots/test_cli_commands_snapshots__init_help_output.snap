@@ -1,8 +1,9 @@
 ---
 source: tests/snapshots/test_cli_commands_snapshots.rs
+assertion_line: 63
 expression: normalized
 ---
-Init creates the .newton layout, installs the Newton template via aikit-sdk, and writes the default config files.
+Init creates the .newton workspace layout, installs the Newton template with aikit-sdk, and writes default configs so you can run immediately.
 
 Usage: newton init [OPTIONS] [PATH]
 
