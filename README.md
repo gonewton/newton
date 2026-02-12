@@ -44,78 +44,33 @@ Then install:
 scoop install newton
 ```
 
+## Prerequisites
+
+- **Required**: The Newton CLI itself, installed via the package instructions above. Once the CLI is available, `newton init .` installs the workspace template for you.
+- **Optional**: Git for working with version control, hooks, and batch workflows.
+- If `newton init .` cannot complete (missing template, network issues, or template source errors), check your connectivity and that the configured template source is reachable.
+
 ## Quick Start
 
-### Initialize a Newton Workspace
+Follow the **Setting up a new project** flow below to go from a blank directory to `newton run` with the default templates and tooling.
 
-Instead of hand-crafting the `.newton/` layout, run `newton init` inside your project root. The command uses **aikit-sdk** to install the official Newton template, writes the default config, and places all helper scripts under `.newton/scripts/`. Once initialization completes, you can launch `newton run` from that directory without passing an explicit path.
+### Setting up a new project
 
-### 1. Create a Workspace
+1. Create a project directory and `cd` into it.
+2. Run `newton init .` to scaffold `.newton/`, install the template under `.newton/scripts/`, write `.newton/configs/default.conf`, and prompt the template to add `GOAL.md` if it was missing.
+3. Optionally edit `GOAL.md` after initialization so it reflects your real goal.
+4. Run `newton run` in that directory—`run` uses the `.newton/scripts/` toolchain by default, so no additional paths are required.
+5. Use `newton status`, `newton report`, and `newton error` with the returned execution ID to inspect progress and failures.
 
-```bash
-mkdir my-optimization
-cd my-optimization
+For an existing repository, run `newton init .` at the repo root instead of creating a new directory.
 
-# Define your optimization goal
-cat > GOAL.md << 'EOF'
-Improve code quality by reducing cyclomatic complexity in Python files
-while maintaining functionality and test coverage.
-EOF
+To swap in custom evaluators, advisors, or executors, either pass `--evaluator`, `--advisor`, and `--executor` to `newton run` or replace the scripts under `.newton/scripts/` after initialization; see **Advanced Usage → Custom Tool Configuration** for details.
 
-# Create tools directory
-mkdir -p tools
-```
+### Verify your setup
 
-Before wiring your tools, run `newton init .` (requires `aikit` and an installed template archive) to bootstrap `.newton/`, default scripts, and configuration guidance. The command writes `newton.toml`, `GOAL.md`, and `.newton/state` artifacts so subsequent runs have the expected layout. Use `--template basic` (the default) or point to any template you installed via `aikit`.
-
-### 2. Configure Your Tools
-
-Newton Loop uses external CLI tools for each phase. Create simple shell scripts:
-
-```bash
-# tools/evaluator.sh
-cat > tools/evaluator.sh << 'EOF'
-#!/bin/bash
-# Your evaluation logic here
-# Output a score to stdout or write to $NEWTON_SCORE_FILE
-echo "42" > "$NEWTON_SCORE_FILE"
-EOF
-chmod +x tools/evaluator.sh
-```
-
-### 2.5. Initialize Newton
-
-```bash
-newton init .
-```
-
-`newton init` scaffolds the `.newton` workspace, writes the default `.newton/configs/default.conf`, and installs the Newton template through `aikit-sdk` (README + `.newton/scripts`). After initialization you can run `newton run` without specifying a path—`run` now defaults to the current directory and uses the `.newton/scripts` toolchain by default.
-
-### 3. Run Optimization
-
-```bash
-newton run
-```
-
-Newton will:
-1. Read GOAL.md
-2. Execute your evaluator tool
-3. Generate recommendations via advisor
-4. Apply changes via executor
-5. Repeat until goals are met
-
-### 4. Check Results
-
-```bash
-# Check execution status
-newton status <execution-id>
-
-# View execution report
-newton report <execution-id>
-
-# Check for errors
-newton error <execution-id>
-```
+- Before your first run, confirm the CLI is installed by checking `newton --version`.
+- After `newton init .`, list the layout (`ls .newton`) or run `newton step .` once to verify `.newton/scripts/` and `.newton/configs/default.conf` exist.
+- Optionally run `newton step .` to exercise the default template before starting the full loop.
 
 ### CLI Version & Help
 
@@ -131,6 +86,10 @@ Usage: newton <COMMAND>
 ```
 
 The help output now includes the same version banner at the top, so you can confirm which release is installed even when scanning command descriptions.
+
+## Repository
+
+This repository includes a Repomix pack (`repomix-output.xml`) for contributors who want AI-assisted analysis or review assistance.
 
 ## Commands Reference
 
@@ -319,7 +278,7 @@ newton monitor
 
 ### `init <workspace-path>`
 
-Bootstrap a workspace from an installed Newton template. `newton init` renders `.newton/scripts`, `.newton/state`, and `newton.toml`, seeds `GOAL.md`, and keeps everything in sync with the template variables (`project_name`, `coding_agent`, `coding_agent_model`, `test_command`, `language`). The command requires `aikit` to be available on `PATH` and at least one template directory under `.newton/templates/` (templates can be installed via `aikit` packages or checked in alongside your projects).
+Bootstrap a workspace from an installed Newton template. See **Quick Start → Setting up a new project** for the minimal flow that gets a fresh directory to `newton run`. `newton init` renders `.newton/scripts`, `.newton/state`, and `newton.toml`, seeds `GOAL.md`, and keeps everything in sync with the template variables (`project_name`, `coding_agent`, `coding_agent_model`, `test_command`, `language`). The command requires `aikit` to be available on `PATH` and at least one template directory under `.newton/templates/` (templates can be installed via `aikit` packages or checked in alongside your projects).
 
 **Options:**
 - `--template <NAME>`: Choose a template (default: `basic`). The template name must match a subdirectory under `.newton/templates/`.
