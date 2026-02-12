@@ -1,212 +1,182 @@
 use crate::cli::args::InitArgs;
-use crate::core::{ContextManager, NewtonConfig, TemplateInfo, TemplateManager, TemplateRenderer};
+use crate::core::config::ExecutorConfig;
 use crate::Result;
+use aikit_sdk::{install_template_from_source, InstallTemplateFromSourceOptions, TemplateSource};
 use anyhow::anyhow;
-use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::fs;
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
 
-const AIKIT_DOCS_URL: &str = "https://aikit.readthedocs.io";
-const DEFAULT_LANGUAGE: &str = "rust";
-const DEFAULT_TEMPLATE: &str = "basic";
+const DEFAULT_TEMPLATE_SOURCE: &str = "gonewton/newton-templates";
+const DEFAULT_CODING_AGENT: &str = "opencode";
+const DEFAULT_CODING_MODEL: &str = "zai-coding-plan/glm-4.7";
 
-/// Handles `newton init` by rendering templates, creating state, and scaffolding.
+/// Handles `newton init` by creating a `.newton/` workspace and installing the Newton template via aikit-sdk.
 pub async fn run(args: InitArgs) -> Result<()> {
-    ensure_aikit_installed()?;
+    // Resolve target path (default: current directory)
+    let path = args
+        .path
+        .unwrap_or_else(|| std::env::current_dir().expect("Failed to get current directory"));
 
-    let workspace_path = args.workspace_path;
-    let newton_dir = workspace_path.join(".newton");
-
-    if newton_dir.exists() && !args.force {
-        return Err(anyhow!("Workspace already contains .newton directory"));
-    }
-
-    let templates = TemplateManager::list_templates(&workspace_path)?;
-    if templates.is_empty() {
-        return Err(anyhow!(
-            "No templates found under {}/.newton/templates/. Install a template via aikit ({}) before running init.",
-            workspace_path.display(),
-            AIKIT_DOCS_URL
-        ));
-    }
-
-    let template_name = select_template(args.template, args.interactive, &templates)?;
-    if !templates.iter().any(|t| t.name == template_name) {
-        return Err(anyhow!(
-            "Template '{}' is not installed. Available templates: {}",
-            template_name,
-            templates
-                .iter()
-                .map(|t| t.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-
-    let defaults = NewtonConfig::default();
-    let project_name = args
-        .name
-        .clone()
-        .or_else(|| {
-            workspace_path
-                .file_name()
-                .and_then(OsStr::to_str)
-                .map(|s| s.to_string())
+    // Canonicalize the path to ensure it's absolute
+    let path = fs::canonicalize(&path)
+        .or_else(|_| {
+            // If canonicalize fails (e.g., path doesn't exist), try to create it
+            fs::create_dir_all(&path)?;
+            fs::canonicalize(&path)
         })
-        .unwrap_or_else(|| defaults.project.name.clone());
-    let coding_agent = args
-        .coding_agent
-        .clone()
-        .unwrap_or_else(|| defaults.executor.coding_agent.clone());
-    let coding_agent_model = args
-        .model
-        .clone()
-        .unwrap_or_else(|| defaults.executor.coding_agent_model.clone());
-    let test_command = determine_test_command(&workspace_path);
-    let language = DEFAULT_LANGUAGE.to_string();
+        .map_err(|e| anyhow!("Invalid path: {}", e))?;
 
-    let project_name = if args.interactive && project_name.trim().is_empty() {
-        prompt_for_value("Project name", Some(&project_name))?
-    } else {
-        project_name
-    };
-
-    let coding_agent = if args.interactive {
-        prompt_for_value("Coding agent", Some(&coding_agent))?
-    } else {
-        coding_agent
-    };
-
-    let coding_agent_model = if args.interactive {
-        prompt_for_value("Coding agent model", Some(&coding_agent_model))?
-    } else {
-        coding_agent_model
-    };
-
-    let language = if args.interactive {
-        prompt_for_value("Language", Some(&language))?
-    } else {
-        language
-    };
-
-    let template_to_render = template_name.clone();
-
-    fs::create_dir_all(newton_dir.join("state"))?;
-    let context_file = newton_dir.join("state/context.md");
-    ContextManager::clear_context(&context_file)?;
-    fs::write(newton_dir.join("state/promise.txt"), "")?;
-    fs::write(newton_dir.join("state/executor_prompt.md"), "")?;
-    fs::write(newton_dir.join("state/iteration.txt"), "0")?;
-
-    let mut variables = HashMap::new();
-    variables.insert("project_name".to_string(), project_name.clone());
-    variables.insert("coding_agent".to_string(), coding_agent.clone());
-    variables.insert("coding_agent_model".to_string(), coding_agent_model.clone());
-    variables.insert("test_command".to_string(), test_command.clone());
-    variables.insert("language".to_string(), language.clone());
-
-    TemplateRenderer::render_template(&workspace_path, &template_to_render, variables)?;
-
-    let config_path = workspace_path.join("newton.toml");
-    if !config_path.exists() {
-        let mut config = NewtonConfig::default();
-        config.project.name = project_name.clone();
-        config.project.template = Some(template_to_render.clone());
-        config.executor.coding_agent = coding_agent;
-        config.executor.coding_agent_model = coding_agent_model;
-        config.evaluator.test_command = Some(test_command.clone());
-        fs::write(&config_path, toml::to_string_pretty(&config)?)?;
+    if !path.is_dir() {
+        return Err(anyhow!("Path {} is not a directory", path.display()));
     }
 
-    let goal_path = workspace_path.join("GOAL.md");
-    if !goal_path.exists() {
-        fs::write(
-            &goal_path,
-            format!(
-                "# Goal for {}\n\nDescribe what you want Newton Loop to achieve.\n",
-                project_name
-            ),
-        )?;
+    let newton_dir = path.join(".newton");
+
+    // Check if .newton already exists (idempotency check)
+    if newton_dir.exists() {
+        return Err(anyhow!(
+            ".newton already exists at {}; remove it or use a different path",
+            path.display()
+        ));
     }
 
-    println!(
-        "Initialized workspace with template '{}'",
-        template_to_render
-    );
-    println!("Newton CLI is ready. See GOAL.md to describe your objective.");
+    // Create directory layout
+    create_directory_layout(&newton_dir)?;
+
+    // Install template using aikit-sdk
+    let template_source = args
+        .template_source
+        .unwrap_or_else(|| DEFAULT_TEMPLATE_SOURCE.to_string());
+    install_template(&path, &template_source)?;
+
+    // Create minimal executor.sh stub if it doesn't exist
+    ensure_executor_script(&newton_dir)?;
+
+    // Write .newton/configs/default.conf
+    write_default_config(&newton_dir, &path)?;
+
+    println!("Initialized Newton workspace at {}", path.display());
+    println!("Run: newton run");
 
     Ok(())
 }
 
-fn ensure_aikit_installed() -> anyhow::Result<()> {
-    match Command::new("aikit").arg("--version").output() {
-        Ok(output) if output.status.success() => Ok(()),
-        _ => Err(anyhow!(
-            "aikit is required for template support. Install it first:\n  {}",
-            AIKIT_DOCS_URL
-        )),
-    }
+/// Creates the required directory layout for a Newton workspace
+fn create_directory_layout(newton_dir: &Path) -> Result<()> {
+    // Create base directories
+    fs::create_dir_all(newton_dir.join("configs"))?;
+    fs::create_dir_all(newton_dir.join("tasks"))?;
+
+    // Create plan/default subdirectories
+    fs::create_dir_all(newton_dir.join("plan/default/todo"))?;
+    fs::create_dir_all(newton_dir.join("plan/default/completed"))?;
+    fs::create_dir_all(newton_dir.join("plan/default/failed"))?;
+    fs::create_dir_all(newton_dir.join("plan/default/draft"))?;
+
+    // Optionally create .newton/state/ for consistency
+    fs::create_dir_all(newton_dir.join("state"))?;
+
+    Ok(())
 }
 
-fn select_template(
-    requested: Option<String>,
-    interactive: bool,
-    available: &[TemplateInfo],
-) -> anyhow::Result<String> {
-    if let Some(name) = requested {
-        return Ok(name);
-    }
-    if interactive {
-        prompt_for_selection("Select a template", available)
-    } else {
-        Ok(DEFAULT_TEMPLATE.to_string())
-    }
+/// Installs the Newton template using aikit-sdk
+fn install_template(project_root: &Path, template_source: &str) -> Result<()> {
+    let source = TemplateSource::parse(template_source).map_err(|e| {
+        anyhow!(
+            "Failed to parse template source '{}': {}",
+            template_source,
+            e
+        )
+    })?;
+
+    let options = InstallTemplateFromSourceOptions {
+        source,
+        project_root: project_root.to_path_buf(),
+        packages_dir: None, // Use temp directory, don't cache
+    };
+
+    install_template_from_source(options).map_err(|e| {
+        anyhow!(
+            "Failed to install template from source '{}': {}",
+            template_source,
+            e
+        )
+    })?;
+
+    Ok(())
 }
 
-fn prompt_for_selection(prompt: &str, available: &[TemplateInfo]) -> anyhow::Result<String> {
-    println!("{}:", prompt);
-    for (idx, template) in available.iter().enumerate() {
-        println!("  {}) {}", idx + 1, template.name);
-    }
-    let selection = prompt_for_value("Enter the number of the template", None)?;
-    let index: usize = selection
-        .trim()
-        .parse()
-        .map_err(|_| anyhow!("Invalid selection"))?;
-    available
-        .get(index.saturating_sub(1))
-        .ok_or_else(|| anyhow!("Template selection out of range"))
-        .map(|t| t.name.clone())
-}
+/// Ensures executor.sh exists, creating a minimal stub if the template didn't provide one
+fn ensure_executor_script(newton_dir: &Path) -> Result<()> {
+    let executor_path = newton_dir.join("scripts/executor.sh");
 
-fn prompt_for_value(prompt: &str, default: Option<&str>) -> anyhow::Result<String> {
-    print!("{}", prompt);
-    if let Some(def) = default {
-        print!(" [{}]", def);
-    }
-    print!(": ");
-    io::stdout().flush()?;
+    if !executor_path.exists() {
+        fs::create_dir_all(executor_path.parent().unwrap())?;
 
-    let mut buffer = String::new();
-    io::stdin().read_line(&mut buffer)?;
-    let trimmed = buffer.trim();
-    if trimmed.is_empty() {
-        if let Some(def) = default {
-            return Ok(def.to_string());
+        let stub_content = r#"#!/bin/bash
+# Minimal executor stub
+# Replace with your actual executor implementation
+
+echo "Executor stub: implement your coding agent integration here"
+exit 1
+"#;
+
+        fs::write(&executor_path, stub_content)?;
+
+        // Make executable on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&executor_path)?.permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&executor_path, perms)?;
         }
-        return Err(anyhow!("Value cannot be empty"));
     }
-    Ok(trimmed.to_string())
+
+    Ok(())
 }
 
-fn determine_test_command(workspace_path: &Path) -> String {
-    let run_tests = workspace_path.join("scripts/run-tests.sh");
-    if run_tests.exists() {
-        format!("./{}", run_tests.display())
+/// Writes .newton/configs/default.conf with key=value pairs
+fn write_default_config(newton_dir: &Path, project_root: &Path) -> Result<()> {
+    let config_path = newton_dir.join("configs/default.conf");
+
+    // Load defaults from ExecutorConfig
+    let defaults = ExecutorConfig::default();
+    let coding_agent = if defaults.coding_agent.is_empty() {
+        DEFAULT_CODING_AGENT
     } else {
-        "cargo test".to_string()
+        &defaults.coding_agent
+    };
+    let coding_model = if defaults.coding_agent_model.is_empty() {
+        DEFAULT_CODING_MODEL
+    } else {
+        &defaults.coding_agent_model
+    };
+
+    let mut config_file = fs::File::create(&config_path)?;
+
+    // Write key=value lines
+    writeln!(config_file, "project_root={}", project_root.display())?;
+    writeln!(config_file, "coding_agent={}", coding_agent)?;
+    writeln!(config_file, "coding_model={}", coding_model)?;
+
+    // Optionally add script paths if they exist
+    let post_success_script = newton_dir.join("scripts/post-success.sh");
+    if post_success_script.exists() {
+        writeln!(
+            config_file,
+            "post_success_script=.newton/scripts/post-success.sh"
+        )?;
     }
+
+    let post_fail_script = newton_dir.join("scripts/post-failure.sh");
+    if post_fail_script.exists() {
+        writeln!(
+            config_file,
+            "post_fail_script=.newton/scripts/post-failure.sh"
+        )?;
+    }
+
+    Ok(())
 }

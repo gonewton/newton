@@ -1,8 +1,5 @@
-use crate::core::config::ExecutorConfig;
 use crate::{
-    cli::args::{
-        BatchArgs, ErrorArgs, InitArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs,
-    },
+    cli::args::{BatchArgs, ErrorArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
     core::{
         batch_config::{find_workspace_root, BatchProjectConfig},
         entities::ExecutionStatus,
@@ -13,14 +10,8 @@ use crate::{
     utils::serialization::{FileUtils, JsonSerializer},
     Result,
 };
-use aikit_sdk::{
-    fetch::TemplateSource,
-    install::{install_template_from_source, InstallError, InstallTemplateFromSourceOptions},
-};
 use anyhow::{anyhow, Error};
 use chrono::Utc;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::{
     collections::HashMap,
     env, fs,
@@ -30,8 +21,6 @@ use std::{
     time::Duration,
 };
 use tokio::time::sleep;
-
-const DEFAULT_TEMPLATE_SOURCE: &str = "gonewton/newton-templates";
 
 pub async fn run(args: RunArgs) -> Result<()> {
     tracing::info!("Starting Newton Loop optimization run");
@@ -151,103 +140,6 @@ pub async fn run(args: RunArgs) -> Result<()> {
             Err(e.into())
         }
     }
-}
-
-pub async fn init(args: InitArgs) -> Result<()> {
-    tracing::info!("Initializing Newton workspace");
-
-    let workspace_root = if let Some(path) = args.path.clone() {
-        path
-    } else {
-        env::current_dir()?
-    };
-
-    if !workspace_root.exists() {
-        return Err(anyhow!(
-            "Target path {} does not exist",
-            workspace_root.display()
-        ));
-    }
-
-    if !workspace_root.is_dir() {
-        return Err(anyhow!(
-            "Target path {} is not a directory",
-            workspace_root.display()
-        ));
-    }
-
-    let newton_dir = workspace_root.join(".newton");
-    if newton_dir.exists() {
-        return Err(anyhow!(
-            "{} already contains a .newton directory; remove it or choose another location",
-            workspace_root.display()
-        ));
-    }
-
-    fs::create_dir_all(&newton_dir)?;
-    fs::create_dir_all(newton_dir.join("configs"))?;
-    fs::create_dir_all(newton_dir.join("tasks"))?;
-    fs::create_dir_all(newton_dir.join("state"))?;
-    let plan_default = newton_dir.join("plan").join("default");
-    for stage in &["todo", "completed", "failed", "draft"] {
-        fs::create_dir_all(plan_default.join(stage))?;
-    }
-    let scripts_dir = newton_dir.join("scripts");
-    fs::create_dir_all(&scripts_dir)?;
-
-    let source_str = args
-        .template_source
-        .as_deref()
-        .unwrap_or(DEFAULT_TEMPLATE_SOURCE);
-    let template_source = TemplateSource::parse(source_str).map_err(|e: InstallError| {
-        anyhow!("Failed to parse template source '{}': {}", source_str, e)
-    })?;
-
-    install_template_from_source(InstallTemplateFromSourceOptions {
-        source: template_source,
-        project_root: workspace_root.clone(),
-        packages_dir: None,
-    })
-    .map_err(|e: InstallError| {
-        anyhow!("Failed to install template from '{}': {}", source_str, e)
-    })?;
-
-    let executor_script = scripts_dir.join("executor.sh");
-    if !executor_script.exists() {
-        fs::write(
-            &executor_script,
-            "#!/bin/sh\nset -euo pipefail\n\necho \"Executor script placeholder.\"\n",
-        )?;
-        #[cfg(unix)]
-        {
-            fs::set_permissions(&executor_script, PermissionsExt::from_mode(0o755))?;
-        }
-    }
-
-    let executor_defaults = ExecutorConfig::default();
-    let mut config_lines = vec![
-        "project_root=.".to_string(),
-        format!("coding_agent={}", executor_defaults.coding_agent),
-        format!("coding_model={}", executor_defaults.coding_agent_model),
-    ];
-
-    if scripts_dir.join("post-success.sh").is_file() {
-        config_lines.push("post_success_script=.newton/scripts/post-success.sh".to_string());
-    }
-    if scripts_dir.join("post-failure.sh").is_file() {
-        config_lines.push("post_fail_script=.newton/scripts/post-failure.sh".to_string());
-    }
-
-    let config_path = newton_dir.join("configs").join("default.conf");
-    fs::write(config_path, format!("{}\n", config_lines.join("\n")))?;
-
-    println!(
-        "Initialized Newton workspace at {}",
-        workspace_root.display()
-    );
-    println!("Run: newton run");
-
-    Ok(())
 }
 
 /// Launch the interactive Newton monitor TUI that watches ailoop channels.

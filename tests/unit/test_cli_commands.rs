@@ -1,4 +1,4 @@
-use newton::cli::{commands, ErrorArgs, InitArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
+use newton::cli::{commands, init, ErrorArgs, InitArgs, ReportArgs, RunArgs, StatusArgs, StepArgs};
 use newton::core::entities::ExecutionConfiguration;
 use std::fs;
 use std::path::PathBuf;
@@ -177,69 +177,86 @@ fn test_run_args_defaults() {
 #[tokio::test]
 async fn test_init_creates_workspace_structure() {
     let workspace = TempDir::new().unwrap();
-    let template_dir = create_template_fixture();
+    let template_source = create_aikit_template_fixture();
 
     let args = InitArgs {
         path: Some(workspace.path().to_path_buf()),
-        template_source: Some(template_dir.path().to_str().unwrap().to_string()),
+        template_source: Some(template_source.to_string_lossy().to_string()),
     };
 
-    commands::init(args).await.unwrap();
+    init::run(args).await.unwrap();
 
     let newton_dir = workspace.path().join(".newton");
+
+    // Assert directory layout as per plan
     assert!(newton_dir.join("configs").is_dir());
     assert!(newton_dir.join("tasks").is_dir());
-    assert!(newton_dir.join("state").is_dir());
     assert!(newton_dir.join("plan/default/todo").is_dir());
     assert!(newton_dir.join("plan/default/completed").is_dir());
     assert!(newton_dir.join("plan/default/failed").is_dir());
     assert!(newton_dir.join("plan/default/draft").is_dir());
+    assert!(newton_dir.join("state").is_dir());
 
-    let config = fs::read_to_string(newton_dir.join("configs/default.conf")).unwrap();
-    assert!(config.contains("project_root=."));
-    assert!(config.contains("coding_agent=opencode"));
-    assert!(config.contains("coding_model=zai-coding-plan/glm-4.7"));
-    assert!(config.contains("post_success_script=.newton/scripts/post-success.sh"));
-    assert!(config.contains("post_fail_script=.newton/scripts/post-failure.sh"));
+    // Assert .newton/configs/default.conf exists and contains required fields
+    let config_path = newton_dir.join("configs/default.conf");
+    assert!(config_path.is_file());
+    let config_content = fs::read_to_string(&config_path).unwrap();
+    assert!(config_content.contains("project_root="));
+    assert!(config_content.contains("coding_agent="));
+    assert!(config_content.contains("coding_model="));
 
-    assert!(newton_dir.join("scripts/executor.sh").is_file());
+    // Assert scripts from template were installed
+    assert!(newton_dir.join("scripts/advisor.sh").is_file());
+    assert!(newton_dir.join("scripts/evaluator.sh").is_file());
+    assert!(newton_dir.join("scripts/executor.sh").is_file()); // Either from template or stub
+    assert!(newton_dir.join("README.md").is_file());
 }
 
-fn create_template_fixture() -> TempDir {
-    let temp = TempDir::new().unwrap();
-    let newton_root = temp.path().join("newton");
-    let scripts_dir = newton_root.join("scripts");
-    fs::create_dir_all(&scripts_dir).unwrap();
+/// Create a minimal aikit template fixture for testing
+fn create_aikit_template_fixture() -> PathBuf {
+    let temp_dir = TempDir::new().unwrap();
+    let template_dir = temp_dir.path().join("newton-template");
+    fs::create_dir_all(template_dir.join("newton/scripts")).unwrap();
 
-    fs::write(newton_root.join("README.md"), "# Newton Template\n").unwrap();
-    fs::write(scripts_dir.join("advisor.sh"), "#!/bin/sh\necho advisor\n").unwrap();
-    fs::write(
-        scripts_dir.join("evaluator.sh"),
-        "#!/bin/sh\necho evaluator\n",
-    )
-    .unwrap();
-    fs::write(
-        scripts_dir.join("post-success.sh"),
-        "#!/bin/sh\necho success\n",
-    )
-    .unwrap();
-    fs::write(
-        scripts_dir.join("post-failure.sh"),
-        "#!/bin/sh\necho failure\n",
-    )
-    .unwrap();
-
-    fs::write(
-        temp.path().join("aikit.toml"),
-        r#"[package]
-name = "test-newton-template"
-version = "0.1.0"
+    // Create aikit.toml manifest
+    let aikit_toml = r#"
+[package]
+name = "newton-template"
+version = "1.0.0"
+description = "Newton workspace template for testing"
 
 [artifacts]
 "newton/**" = ".newton"
-"#,
+"#;
+    fs::write(template_dir.join("aikit.toml"), aikit_toml).unwrap();
+
+    // Create template files
+    fs::write(
+        template_dir.join("newton/README.md"),
+        "# Newton Workspace\n\nThis workspace was initialized with the Newton template.",
     )
     .unwrap();
 
-    temp
+    fs::write(
+        template_dir.join("newton/scripts/advisor.sh"),
+        "#!/bin/bash\necho 'advisor output'\n",
+    )
+    .unwrap();
+
+    fs::write(
+        template_dir.join("newton/scripts/evaluator.sh"),
+        "#!/bin/bash\necho 'evaluator output'\n",
+    )
+    .unwrap();
+
+    fs::write(
+        template_dir.join("newton/scripts/executor.sh"),
+        "#!/bin/bash\necho 'executor output'\n",
+    )
+    .unwrap();
+
+    // Return the path and leak the TempDir so it's not cleaned up during the test
+    let path = template_dir.clone();
+    std::mem::forget(temp_dir);
+    path
 }

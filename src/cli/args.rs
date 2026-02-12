@@ -159,17 +159,6 @@ impl RunArgs {
 }
 
 #[derive(Args)]
-pub struct InitArgs {
-    /// Location to initialize (defaults to current directory)
-    #[arg(value_name = "PATH")]
-    pub path: Option<PathBuf>,
-
-    /// Template source passed to aikit-sdk (owner/repo, URL, or local path)
-    #[arg(long, value_name = "SOURCE")]
-    pub template_source: Option<String>,
-}
-
-#[derive(Args)]
 pub struct BatchArgs {
     /// Project identifier that maps to .newton/configs/<project_id>.conf
     #[arg(value_name = "PROJECT_ID")]
@@ -205,33 +194,13 @@ pub struct StepArgs {
 
 #[derive(Args)]
 pub struct InitArgs {
-    /// Workspace path to bootstrap (defaults to current directory)
-    #[arg(value_name = "PATH", default_value = ".")]
-    pub workspace_path: PathBuf,
+    /// Directory where .newton/ will be created (defaults to current directory)
+    #[arg(value_name = "PATH")]
+    pub path: Option<PathBuf>,
 
-    /// Template to render (default: basic)
-    #[arg(long, value_name = "TEMPLATE")]
-    pub template: Option<String>,
-
-    /// Project name applied to generated newton.toml
-    #[arg(long, value_name = "NAME")]
-    pub name: Option<String>,
-
-    /// Override coding agent to populate config
-    #[arg(long, value_name = "AGENT")]
-    pub coding_agent: Option<String>,
-
-    /// Override coding agent model when creating config
-    #[arg(long, value_name = "MODEL")]
-    pub model: Option<String>,
-
-    /// Interactive mode prompts for missing values
-    #[arg(long)]
-    pub interactive: bool,
-
-    /// Overwrite existing .newton/ layout when present
-    #[arg(long)]
-    pub force: bool,
+    /// Template source (GitHub repo, URL, or local path; default: gonewton/newton-templates)
+    #[arg(long, value_name = "SOURCE")]
+    pub template_source: Option<String>,
 }
 
 #[derive(Args)]

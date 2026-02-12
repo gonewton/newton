@@ -49,12 +49,6 @@ pub enum Command {
     )]
     Batch(BatchArgs),
     #[command(
-        about = "Initialize a workspace from a Newton template",
-        long_about = "Scaffold .newton/state, scripts, and configuration by rendering an installed template.",
-        after_help = "Example:\n    newton init ./workspace --template basic"
-    )]
-    Init(InitArgs),
-    #[command(
         about = "Advance loop by one cycle",
         long_about = "Step performs exactly one evaluation/advice/execution round using current workspace state.",
         after_help = "Example:\n    newton step ./workspace --execution-id exec_123"
@@ -89,9 +83,8 @@ pub enum Command {
 pub async fn run(args: Args) -> crate::Result<()> {
     match args.command {
         Command::Run(run_args) => commands::run(run_args).await,
-        Command::Init(init_args) => commands::init(init_args).await,
-        Command::Batch(batch_args) => commands::batch(batch_args).await,
         Command::Init(init_args) => init::run(init_args).await,
+        Command::Batch(batch_args) => commands::batch(batch_args).await,
         Command::Step(step_args) => commands::step(step_args).await,
         Command::Status(status_args) => commands::status(status_args).await,
         Command::Report(report_args) => commands::report(report_args).await,
