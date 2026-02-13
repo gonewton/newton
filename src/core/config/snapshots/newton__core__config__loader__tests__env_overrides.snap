@@ -1,0 +1,27 @@
+---
+source: src/core/config/loader.rs
+expression: result
+---
+NewtonConfig {
+    project: ProjectConfig {
+        name: "env-project",
+        template: None,
+    },
+    executor: ExecutorConfig {
+        coding_agent: "env-agent",
+        coding_agent_model: "zai-coding-plan/glm-4.7",
+        auto_commit: true,
+    },
+    evaluator: EvaluatorConfig {
+        test_command: None,
+        score_threshold: 85.0,
+    },
+    advisor: AdvisorConfig,
+    context: ContextConfig {
+        clear_after_use: true,
+        file: ".newton/state/context.md",
+    },
+    promise: PromiseConfig {
+        file: ".newton/state/promise.txt",
+    },
+}

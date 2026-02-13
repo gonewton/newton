@@ -60,55 +60,54 @@ impl ConfigLoader {
     /// Apply environment variable overrides to the configuration
     /// Environment variables take precedence over config file values
     fn apply_env_overrides(config: &mut NewtonConfig) {
-        // Project overrides
-        if let Ok(name) = env::var("NEWTON_PROJECT_NAME") {
-            config.project.name = name;
-        }
+        // Type alias to satisfy clippy::type_complexity
+        type EnvOverride = (&'static str, fn(&str, &mut NewtonConfig));
 
-        if let Ok(template) = env::var("NEWTON_PROJECT_TEMPLATE") {
-            config.project.template = Some(template);
-        }
+        // Define override descriptors: (env_key, applier_function)
+        let overrides: &[EnvOverride] = &[
+            ("NEWTON_PROJECT_NAME", |val, cfg| {
+                cfg.project.name = val.to_string();
+            }),
+            ("NEWTON_PROJECT_TEMPLATE", |val, cfg| {
+                cfg.project.template = Some(val.to_string());
+            }),
+            ("NEWTON_EXECUTOR_CODING_AGENT", |val, cfg| {
+                cfg.executor.coding_agent = val.to_string();
+            }),
+            ("NEWTON_EXECUTOR_CODING_AGENT_MODEL", |val, cfg| {
+                cfg.executor.coding_agent_model = val.to_string();
+            }),
+            ("NEWTON_EXECUTOR_AUTO_COMMIT", |val, cfg| {
+                if let Some(parsed) = Self::parse_bool_env(val) {
+                    cfg.executor.auto_commit = parsed;
+                }
+            }),
+            ("NEWTON_EVALUATOR_TEST_COMMAND", |val, cfg| {
+                cfg.evaluator.test_command = Some(val.to_string());
+            }),
+            ("NEWTON_EVALUATOR_SCORE_THRESHOLD", |val, cfg| {
+                if let Some(parsed) = Self::parse_f64_env(val) {
+                    cfg.evaluator.score_threshold = parsed;
+                }
+            }),
+            ("NEWTON_CONTEXT_CLEAR_AFTER_USE", |val, cfg| {
+                if let Some(parsed) = Self::parse_bool_env(val) {
+                    cfg.context.clear_after_use = parsed;
+                }
+            }),
+            ("NEWTON_CONTEXT_FILE", |val, cfg| {
+                cfg.context.file = PathBuf::from(val);
+            }),
+            ("NEWTON_PROMISE_FILE", |val, cfg| {
+                cfg.promise.file = PathBuf::from(val);
+            }),
+        ];
 
-        // Executor overrides
-        if let Ok(coding_agent) = env::var("NEWTON_EXECUTOR_CODING_AGENT") {
-            config.executor.coding_agent = coding_agent;
-        }
-
-        if let Ok(coding_agent_model) = env::var("NEWTON_EXECUTOR_CODING_AGENT_MODEL") {
-            config.executor.coding_agent_model = coding_agent_model;
-        }
-
-        if let Ok(auto_commit_str) = env::var("NEWTON_EXECUTOR_AUTO_COMMIT") {
-            if let Some(auto_commit) = Self::parse_bool_env(&auto_commit_str) {
-                config.executor.auto_commit = auto_commit;
+        // Apply each override if the environment variable is set
+        for (env_key, applier) in overrides {
+            if let Ok(value) = env::var(env_key) {
+                applier(&value, config);
             }
-        }
-
-        // Evaluator overrides
-        if let Ok(test_command) = env::var("NEWTON_EVALUATOR_TEST_COMMAND") {
-            config.evaluator.test_command = Some(test_command);
-        }
-
-        if let Ok(score_threshold_str) = env::var("NEWTON_EVALUATOR_SCORE_THRESHOLD") {
-            if let Some(score_threshold) = Self::parse_f64_env(&score_threshold_str) {
-                config.evaluator.score_threshold = score_threshold;
-            }
-        }
-
-        // Context overrides
-        if let Ok(clear_after_use_str) = env::var("NEWTON_CONTEXT_CLEAR_AFTER_USE") {
-            if let Some(clear_after_use) = Self::parse_bool_env(&clear_after_use_str) {
-                config.context.clear_after_use = clear_after_use;
-            }
-        }
-
-        if let Ok(context_file) = env::var("NEWTON_CONTEXT_FILE") {
-            config.context.file = PathBuf::from(context_file);
-        }
-
-        // Promise overrides
-        if let Ok(promise_file) = env::var("NEWTON_PROMISE_FILE") {
-            config.promise.file = PathBuf::from(promise_file);
         }
     }
 
@@ -189,6 +188,12 @@ mod tests {
         }
     }
 
+    fn assert_validate_error(config: &NewtonConfig, expected_substring: &str) {
+        let result = ConfigLoader::validate_config(config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains(expected_substring));
+    }
+
     #[test]
     #[serial]
     fn test_load_config_nonexistent() {
@@ -227,13 +232,6 @@ score_threshold = 80.0
 
         let result = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
         assert_debug_snapshot!(result);
-
-        assert_eq!(result.project.name, "test-project");
-        assert_eq!(result.project.template, Some("test-template".to_string()));
-        assert_eq!(result.executor.coding_agent, "test-agent");
-        assert!(result.executor.auto_commit);
-        assert_eq!(result.evaluator.test_command, Some("./test.sh".to_string()));
-        assert_eq!(result.evaluator.score_threshold, 80.0);
     }
 
     #[test]
@@ -276,12 +274,7 @@ score_threshold = 75.0
         env::set_var("NEWTON_EVALUATOR_SCORE_THRESHOLD", "85.0");
 
         let result = ConfigLoader::load_from_workspace(temp_dir.path()).unwrap();
-
-        // Environment variables should override file values
-        assert_eq!(result.project.name, "env-project");
-        assert_eq!(result.executor.coding_agent, "env-agent");
-        assert!(result.executor.auto_commit);
-        assert_eq!(result.evaluator.score_threshold, 85.0);
+        assert_debug_snapshot!(result);
 
         // Clean up environment variables
         env::remove_var("NEWTON_PROJECT_NAME");
@@ -325,12 +318,7 @@ score_threshold = 75.0
         let mut config = NewtonConfig::default();
         config.project.name = "".to_string();
 
-        let result = ConfigLoader::validate_config(&config);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Project name cannot be empty"));
+        assert_validate_error(&config, "Project name cannot be empty");
     }
 
     #[test]
@@ -338,12 +326,7 @@ score_threshold = 75.0
         let mut config = NewtonConfig::default();
         config.evaluator.score_threshold = 150.0;
 
-        let result = ConfigLoader::validate_config(&config);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Score threshold must be between 0.0 and 100.0"));
+        assert_validate_error(&config, "Score threshold must be between 0.0 and 100.0");
     }
 
     #[test]
@@ -378,23 +361,35 @@ score_threshold = 75.0
 
     #[test]
     fn test_parse_bool_env() {
-        assert_eq!(ConfigLoader::parse_bool_env("true"), Some(true));
-        assert_eq!(ConfigLoader::parse_bool_env("TRUE"), Some(true));
-        assert_eq!(ConfigLoader::parse_bool_env("  true  "), Some(true));
-        assert_eq!(ConfigLoader::parse_bool_env("  TRUE  "), Some(true));
-        assert_eq!(ConfigLoader::parse_bool_env("false"), Some(false));
-        assert_eq!(ConfigLoader::parse_bool_env("FALSE"), Some(false));
-        assert_eq!(ConfigLoader::parse_bool_env("  false  "), Some(false));
-        assert_eq!(ConfigLoader::parse_bool_env("invalid"), None);
-        assert_eq!(ConfigLoader::parse_bool_env(""), None);
+        let test_cases = [
+            ("true", Some(true)),
+            ("TRUE", Some(true)),
+            ("  true  ", Some(true)),
+            ("  TRUE  ", Some(true)),
+            ("false", Some(false)),
+            ("FALSE", Some(false)),
+            ("  false  ", Some(false)),
+            ("invalid", None),
+            ("", None),
+        ];
+
+        for (input, expected) in test_cases {
+            assert_eq!(ConfigLoader::parse_bool_env(input), expected);
+        }
     }
 
     #[test]
     fn test_parse_f64_env() {
-        assert_eq!(ConfigLoader::parse_f64_env("85.5"), Some(85.5));
-        assert_eq!(ConfigLoader::parse_f64_env("  85.5  "), Some(85.5));
-        assert_eq!(ConfigLoader::parse_f64_env("95.0"), Some(95.0));
-        assert_eq!(ConfigLoader::parse_f64_env("invalid"), None);
-        assert_eq!(ConfigLoader::parse_f64_env(""), None);
+        let test_cases = [
+            ("85.5", Some(85.5)),
+            ("  85.5  ", Some(85.5)),
+            ("95.0", Some(95.0)),
+            ("invalid", None),
+            ("", None),
+        ];
+
+        for (input, expected) in test_cases {
+            assert_eq!(ConfigLoader::parse_f64_env(input), expected);
+        }
     }
 }
