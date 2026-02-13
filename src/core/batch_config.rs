@@ -24,6 +24,9 @@ pub struct BatchProjectConfig {
     /// Executor tool invocation.
     pub executor_cmd: Option<String>,
 
+    /// Coder tool invocation (used in batch mode).
+    pub coder_cmd: Option<String>,
+
     /// Optional hook run once before executing the Newton run.
     pub pre_run_script: Option<String>,
 
@@ -133,6 +136,12 @@ impl BatchProjectConfig {
             workspace_root,
             workspace_scripts.join("executor.sh"),
         );
+        let coder_cmd = resolve_tool_command(
+            &settings,
+            "coder_cmd",
+            workspace_root,
+            workspace_scripts.join("coder.sh"),
+        );
 
         let resume = parse_flag(&settings, "resume");
 
@@ -171,6 +180,7 @@ impl BatchProjectConfig {
             evaluator_cmd,
             advisor_cmd,
             executor_cmd,
+            coder_cmd,
             pre_run_script,
             post_success_script,
             post_fail_script,

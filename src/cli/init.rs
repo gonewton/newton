@@ -160,6 +160,18 @@ fn write_default_config(newton_dir: &Path, project_root: &Path) -> Result<()> {
     writeln!(config_file, "project_root={}", project_root.display())?;
     writeln!(config_file, "coding_agent={}", coding_agent)?;
     writeln!(config_file, "coding_model={}", coding_model)?;
+    writeln!(config_file)?;
+
+    // Script paths (optional - defaults to .newton/scripts/*.sh)
+    writeln!(
+        config_file,
+        "# Can be absolute paths or relative to project/workspace root"
+    )?;
+    writeln!(config_file, "# evaluator_cmd=.newton/scripts/evaluator.sh")?;
+    writeln!(config_file, "# advisor_cmd=.newton/scripts/advisor.sh")?;
+    writeln!(config_file, "# executor_cmd=.newton/scripts/executor.sh")?;
+    writeln!(config_file, "# coder_cmd=.newton/scripts/coder.sh")?;
+    writeln!(config_file)?;
 
     // Optionally add script paths if they exist
     let post_success_script = newton_dir.join("scripts/post-success.sh");

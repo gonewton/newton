@@ -436,10 +436,16 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
 
         let branch_name = derive_branch_name(&spec_path, &task_id);
         let base_branch = detect_base_branch(&batch_config.project_root);
-        let coder_cmd = workspace_root
-            .join(".newton")
-            .join("scripts")
-            .join("coder.sh");
+        let coder_cmd = batch_config
+            .coder_cmd
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                workspace_root
+                    .join(".newton")
+                    .join("scripts")
+                    .join("coder.sh")
+            });
 
         let context = BatchTaskContext {
             batch_config: batch_config.clone(),
