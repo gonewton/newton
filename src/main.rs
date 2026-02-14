@@ -1,17 +1,15 @@
 use clap::Parser;
-use newton::Result;
+use newton::{cli, logging, Result};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-
     // Parse CLI arguments
-    let args = newton::cli::Args::parse();
+    let args = cli::Args::parse();
+
+    // Initialize logging once globally
+    let _logging_guard = logging::init(&args.command)?;
 
     // Run the command
-    newton::cli::run(args).await
+    cli::run(args).await
 }
 // Test auto-release workflow

@@ -640,6 +640,31 @@ If monitor can't find the ailoop URLs, ensure you have either:
   ailoop_server_ws_url=ws://127.0.0.1:8080
   ```
 
+## Logging
+
+Newton now ships with a deterministic logging framework that routes events to file, console, and optional OpenTelemetry exporters. Behavior depends on the execution context and the resolved configuration (defaults → `.newton/config/logging.toml` → environment overrides → CLI flags when available).
+
+### Context-aware sinks
+
+- **Monitor (TUI):** console output is suppressed so ratatui can stay stable. Logs always go to `<workspace>/.newton/logs/newton.log` (or `$HOME/.newton/logs/newton.log` when the workspace cannot be determined).
+- **Batch:** runs headless with console logging disabled by default and file output retained. Use `NEWTON_REMOTE_AGENT=1` to switch the context to `RemoteAgent`, which also keeps file logging enabled even when OpenTelemetry is configured.
+- **Local development (run/step/status/report/error/init):** console output defaults to `stderr` while every event is persisted to the workspace log file.
+
+### Configuration precedence
+
+1. **CLI flags** (future extensions): explicit flags always win.
+2. **Environment variables:** `RUST_LOG` controls the level filter, `NEWTON_REMOTE_AGENT=1` enables remote-agent context, and `OTEL_EXPORTER_OTLP_ENDPOINT` turns on OpenTelemetry export with the provided URL.
+3. **`.newton/config/logging.toml`:** available keys are `logging.log_dir`, `logging.default_level`, `logging.enable_file`, `logging.console_output` (`stdout|stderr|none`), and the `logging.opentelemetry.*` section described above.
+4. **Built-in defaults:** file sink enabled, default level `info`, and console sink set according to context.
+
+Invalid values in the config file now fail fast with actionable diagnostics (e.g., invalid log levels or malformed OpenTelemetry endpoints).
+
+### Troubleshooting
+
+- **Monitor TUI shows garbage because of concurrent logs?** Check `.newton/logs/newton.log` for the events instead of the console, since the console sink is disabled for `newton monitor`.
+- **Need to debug a headless run?** Set `RUST_LOG=debug` to raise the filter and read the persisted log file to correlate file and console output. Console logs are emitted to `stderr` only in LocalDev contexts.
+- **OpenTelemetry endpoint seems unreachable?** NewtonLogs continue to write to disk even if the exporter cannot initialize; the warning is emitted once during startup so you can fix the OTLP endpoint without losing logging data.
+
 ## License
 
 See LICENSE file for details.

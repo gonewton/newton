@@ -20,6 +20,7 @@ toml = "0.8"
 tempfile = "3.10"
 rand = "0.8"
 percent-encoding = "2.1"
+tracing-core = "0.1"
 ratatui = { version = "0.23" }
 crossterm = "0.28"
 tokio-tungstenite = { version = "0.20", features = ["__rustls-tls"] }
@@ -27,6 +28,12 @@ tungstenite = { version = "0.20", features = ["__rustls-tls"] }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 url = "2"
 futures = "0.3"
+dirs = "5.0"
+tracing-appender = "0.2.4"
+opentelemetry = "0.31"
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "trace", "tracing", "reqwest-client"] }
+tracing-opentelemetry = "0.32.1"
+opentelemetry_sdk = { version = "0.31", features = ["experimental_async_runtime", "rt-tokio"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"
