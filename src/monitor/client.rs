@@ -46,22 +46,36 @@ impl AiloopClient {
         let resp = self.http.get(url).send().await?;
         let value: Value = resp.json().await?;
 
-        // Parse structured ChannelInfo objects from "channels" array
-        if let Some(entries) = value.get("channels").and_then(|section| section.as_array()) {
-            let channels: Vec<String> = entries
-                .iter()
-                .filter_map(|entry| {
-                    // Extract the "name" field from each ChannelInfo object
-                    entry
-                        .get("name")
-                        .and_then(|name| name.as_str())
-                        .map(|s| s.to_string())
-                })
-                .collect();
+        if let Some(channels_section) = value.get("channels") {
+            // Parse structured ChannelInfo objects from "channels" array
+            if let Some(entries) = channels_section.as_array() {
+                let channels: Vec<String> = entries
+                    .iter()
+                    .filter_map(|entry| {
+                        entry
+                            .get("name")
+                            .and_then(|name| name.as_str())
+                            .map(|s| s.to_string())
+                    })
+                    .collect();
 
-            if !channels.is_empty() {
-                tracing::debug!("Fetched {} channels from server", channels.len());
-                return Ok(channels);
+                if !channels.is_empty() {
+                    tracing::debug!("Fetched {} channels from server", channels.len());
+                    return Ok(channels);
+                }
+            }
+
+            // Older responses exposed channels as a map instead of an array
+            if let Some(map) = channels_section.as_object() {
+                let mut channels: Vec<String> = map.keys().cloned().collect();
+                channels.sort();
+                if !channels.is_empty() {
+                    tracing::debug!(
+                        "Fetched {} channels from server (map format)",
+                        channels.len()
+                    );
+                    return Ok(channels);
+                }
             }
         }
 
@@ -414,5 +428,38 @@ mod tests {
         assert_eq!(channels.len(), 2);
         assert_eq!(channels[0], "simple/channel");
         assert_eq!(channels[1], "another/channel");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_channels_handles_map_response() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/channels"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "channels": {
+                    "project-z/feature-b": {
+                        "message_count": 1
+                    },
+                    "project-a/main": {
+                        "message_count": 2
+                    }
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let endpoints = build_endpoints(&mock_server);
+
+        let client = AiloopClient::new(endpoints);
+        let channels = client.fetch_channels().await.unwrap();
+
+        assert_eq!(
+            channels,
+            vec![
+                "project-a/main".to_string(),
+                "project-z/feature-b".to_string()
+            ]
+        );
     }
 }
