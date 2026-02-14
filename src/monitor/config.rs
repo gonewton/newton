@@ -31,10 +31,10 @@ pub fn load_monitor_endpoints(
     overrides: MonitorOverrides,
 ) -> Result<MonitorEndpoints> {
     let configs_dir = validate_configs_dir(workspace_root)?;
+    let monitor_conf = configs_dir.join("monitor.conf");
     let mut accumulator = ConfigPair::from_overrides(overrides);
 
-    let monitor_conf = configs_dir.join("monitor.conf");
-    if let Some(pair) = parse_config_entry(&monitor_conf)? {
+    if let Some(pair) = load_monitor_config(&monitor_conf)? {
         accumulator.merge(pair);
     }
 
@@ -42,16 +42,9 @@ pub fn load_monitor_endpoints(
         accumulate_config_entries(&configs_dir, &monitor_conf, &mut accumulator)?;
     }
 
-    if accumulator.ready() {
-        accumulator
-            .into_endpoints(workspace_root.to_path_buf())
-            .map_err(|e| anyhow!("parsing monitor endpoints: {}", e))
-    } else {
-        Err(anyhow!(
-            "Could not find a config under {} that defines both ailoop_server_http_url and ailoop_server_ws_url",
-            configs_dir.display()
-        ))
-    }
+    accumulator
+        .into_endpoints(workspace_root.to_path_buf())
+        .map_err(|e| anyhow!("parsing monitor endpoints: {}", e))
 }
 
 struct ConfigPair {
@@ -118,6 +111,14 @@ fn parse_config_entry(path: &Path) -> Result<Option<ConfigPair>> {
     Ok(Some(ConfigPair { http_url, ws_url }))
 }
 
+fn load_monitor_config(path: &Path) -> Result<Option<ConfigPair>> {
+    if path.is_file() {
+        parse_config_entry(path)
+    } else {
+        Ok(None)
+    }
+}
+
 fn validate_configs_dir(workspace_root: &Path) -> Result<PathBuf> {
     let configs_dir = workspace_root.join(".newton").join("configs");
     if configs_dir.is_dir() {
@@ -135,13 +136,7 @@ fn accumulate_config_entries(
     monitor_conf: &Path,
     accumulator: &mut ConfigPair,
 ) -> Result<()> {
-    let mut entries = fs::read_dir(configs_dir)?
-        .filter_map(|entry| entry.ok().map(|e| e.path()))
-        .filter(|path| path.is_file() && path != monitor_conf)
-        .collect::<Vec<_>>();
-    entries.sort();
-
-    for entry in entries {
+    for entry in scan_config_files(configs_dir, monitor_conf)? {
         if accumulator.ready() {
             break;
         }
@@ -150,4 +145,13 @@ fn accumulate_config_entries(
         }
     }
     Ok(())
+}
+
+fn scan_config_files(configs_dir: &Path, monitor_conf: &Path) -> Result<Vec<PathBuf>> {
+    let mut entries = fs::read_dir(configs_dir)?
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| path.is_file() && path != monitor_conf)
+        .collect::<Vec<_>>();
+    entries.sort();
+    Ok(entries)
 }

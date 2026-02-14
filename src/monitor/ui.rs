@@ -126,62 +126,71 @@ fn draw_ui<B: ratatui::backend::Backend>(
         )
         .split(frame.size());
 
-    render_header(frame, chunks[0], header_context);
+    HeaderRenderer::new(header_context).render(frame, chunks[0]);
     render_body(frame, chunks[1], state);
     render_status(frame, chunks[2], state);
 }
 
-fn render_header<B: ratatui::backend::Backend>(
-    frame: &mut Frame<B>,
-    area: Rect,
-    context: &RenderHeaderContext,
-) {
-    let content = vec![
-        Line::from(vec![
-            Span::styled("Workspace: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(context.workspace_display.as_str()),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "Connection: ",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                context.connection_label,
-                Style::default().fg(Color::LightGreen),
-            ),
-            Span::raw(format!(" {}", context.connection_detail)),
-            Span::raw(" | "),
-            Span::styled("Filter: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw({
-                let filter_display = &context.filter_display;
-                if filter_display.is_empty() {
-                    "None".to_string()
-                } else {
-                    filter_display.clone()
-                }
-            }),
-            Span::raw(" | "),
-            Span::styled("View: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(context.layout_name),
-        ]),
-        Line::from(vec![
-            Span::styled("HTTP: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(context.http_url.as_str()),
-            Span::raw(" "),
-            Span::styled("WS: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(context.ws_url.as_str()),
-        ]),
-    ];
+struct HeaderRenderer<'a> {
+    context: &'a RenderHeaderContext,
+}
 
-    let header = Paragraph::new(content)
-        .block(
-            Block::default()
-                .title("Newton Monitor")
-                .borders(Borders::ALL),
-        )
-        .wrap(Wrap { trim: true });
-    frame.render_widget(header, area);
+impl<'a> HeaderRenderer<'a> {
+    fn new(context: &'a RenderHeaderContext) -> Self {
+        Self { context }
+    }
+
+    fn build_lines(&self) -> Vec<Line<'_>> {
+        vec![
+            Line::from(vec![
+                Span::styled("Workspace: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(self.context.workspace_display.as_str()),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Connection: ",
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    self.context.connection_label,
+                    Style::default().fg(Color::LightGreen),
+                ),
+                Span::raw(format!(" {}", self.context.connection_detail)),
+                Span::raw(" | "),
+                Span::styled("Filter: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(self.filter_display_line()),
+                Span::raw(" | "),
+                Span::styled("View: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(self.context.layout_name),
+            ]),
+            Line::from(vec![
+                Span::styled("HTTP: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(self.context.http_url.as_str()),
+                Span::raw(" "),
+                Span::styled("WS: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(self.context.ws_url.as_str()),
+            ]),
+        ]
+    }
+
+    fn filter_display_line(&self) -> String {
+        if self.context.filter_display.is_empty() {
+            "None".to_string()
+        } else {
+            self.context.filter_display.clone()
+        }
+    }
+
+    fn render<B: ratatui::backend::Backend>(&self, frame: &mut Frame<B>, area: Rect) {
+        let header = Paragraph::new(self.build_lines())
+            .block(
+                Block::default()
+                    .title("Newton Monitor")
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: true });
+        frame.render_widget(header, area);
+    }
 }
 
 fn render_body<B: ratatui::backend::Backend>(

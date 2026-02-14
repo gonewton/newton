@@ -530,17 +530,23 @@ impl OptimizationOrchestrator {
     }
 }
 
-async fn stream_child_output<R, W>(reader: Option<R>, mut writer: W, label: &'static str) -> Vec<u8>
+async fn stream_child_output<R, W>(reader: Option<R>, writer: W, label: &'static str) -> Vec<u8>
+where
+    R: AsyncReadExt + Unpin,
+    W: AsyncWriteExt + Unpin,
+{
+    read_output_lines(reader, writer, label).await
+}
+
+async fn read_output_lines<R, W>(reader: Option<R>, mut writer: W, label: &'static str) -> Vec<u8>
 where
     R: AsyncReadExt + Unpin,
     W: AsyncWriteExt + Unpin,
 {
     let mut buffer = Vec::new();
-    let mut reader = match reader {
-        Some(reader) => reader,
-        None => return buffer,
-    };
-    forward_stream(&mut reader, &mut writer, label, &mut buffer).await;
+    if let Some(mut reader) = reader {
+        forward_stream(&mut reader, &mut writer, label, &mut buffer).await;
+    }
     buffer
 }
 
