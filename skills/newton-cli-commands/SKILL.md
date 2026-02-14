@@ -24,7 +24,7 @@ Use this skill whenever you need to operate Newton from the command line and wan
 5. `newton status EXECUTION`: inspect state. See [references/status.md](references/status.md).
 6. `newton report EXECUTION`: summarize results. See [references/report.md](references/report.md).
 7. `newton error EXECUTION`: diagnose failures. See [references/error.md](references/error.md).
-8. `newton monitor`: watch live channels. See [references/error.md](references/error.md).
+8. `newton monitor`: watch live channels. See [references/monitor.md](references/monitor.md).
 
 Each reference file lists required arguments, optional flags, and example invocations so you can run Newton without diving into implementation details.
 
@@ -53,3 +53,4 @@ Each reference file lists required arguments, optional flags, and example invoca
 - [references/status.md](references/status.md)
 - [references/report.md](references/report.md)
 - [references/error.md](references/error.md)
+- [references/monitor.md](references/monitor.md)
