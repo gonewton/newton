@@ -1,8 +1,10 @@
 #![allow(clippy::result_large_err)]
 
-use crate::core::entities::OptimizationExecution;
-use crate::core::entities::{ExecutionStatus, IterationPhase};
+use crate::core::entities::{
+    ExecutionConfiguration, ExecutionStatus, Iteration, IterationPhase, OptimizationExecution,
+};
 use crate::core::error::{AppError, ErrorReporter};
+use crate::tools::ToolResult;
 use crate::utils::serialization::JsonSerializer;
 use serde::{Deserialize, Serialize};
 
@@ -52,133 +54,12 @@ impl ResultsProcessor {
     }
 
     fn generate_text_report(&self, execution: &OptimizationExecution) -> Result<String, AppError> {
-        let mut report = String::new();
-
-        report.push_str("=== Newton Loop Optimization Report ===\n\n");
-        report.push_str(&format!("Execution ID: {}\n", execution.execution_id));
-        report.push_str(&format!("Status: {:?}\n", execution.status));
-        report.push_str(&format!(
-            "Started At: {}\n",
-            execution.started_at.format("%Y-%m-%d %H:%M:%S UTC")
-        ));
-        if let Some(completed_at) = execution.completed_at {
-            report.push_str(&format!(
-                "Completed At: {}\n",
-                completed_at.format("%Y-%m-%d %H:%M:%S UTC")
-            ));
-        }
-        report.push('\n');
-
-        if let Some(max_iter) = execution.max_iterations {
-            report.push_str(&format!("Max Iterations: {}\n", max_iter));
-        }
-
-        if let Some(curr_iter) = execution.current_iteration {
-            report.push_str(&format!("Current Iteration: {}\n", curr_iter));
-        }
-
-        report.push_str(&format!(
-            "Total Iterations Completed: {}\n",
-            execution.total_iterations_completed
-        ));
-        report.push_str(&format!(
-            "Total Iterations Failed: {}\n",
-            execution.total_iterations_failed
-        ));
-
-        report.push_str("\n=== Iterations ===\n");
-        for iteration in &execution.iterations {
-            report.push_str(&format!(
-                "\nIteration {} ({}):\n",
-                iteration.iteration_number, iteration.iteration_id
-            ));
-            report.push_str(&format!("  Phase: {:?}\n", iteration.phase));
-
-            if let Some(eval_result) = &iteration.evaluator_result {
-                report.push_str(&format!("  Evaluator: {:?}\n", eval_result.tool_name));
-                report.push_str(&format!("    Exit Code: {}\n", eval_result.exit_code));
-                report.push_str(&format!("    Success: {}\n", eval_result.success));
-                report.push_str(&format!("    Time: {}ms\n", eval_result.execution_time_ms));
-            }
-
-            if let Some(advisor_result) = &iteration.advisor_result {
-                report.push_str(&format!("  Advisor: {:?}\n", advisor_result.tool_name));
-                report.push_str(&format!("    Exit Code: {}\n", advisor_result.exit_code));
-                report.push_str(&format!("    Success: {}\n", advisor_result.success));
-                report.push_str(&format!(
-                    "    Time: {}ms\n",
-                    advisor_result.execution_time_ms
-                ));
-            }
-
-            if let Some(exec_result) = &iteration.executor_result {
-                report.push_str(&format!("  Executor: {:?}\n", exec_result.tool_name));
-                report.push_str(&format!("    Exit Code: {}\n", exec_result.exit_code));
-                report.push_str(&format!("    Success: {}\n", exec_result.success));
-                report.push_str(&format!("    Time: {}ms\n", exec_result.execution_time_ms));
-            }
-
-            report.push_str(&format!(
-                "  Artifacts Generated: {}\n",
-                iteration.metadata.artifacts_generated
-            ));
-        }
-
-        report.push_str("\n=== Statistics ===\n");
-
-        if !execution.iterations.is_empty() {
-            let total_time = execution
-                .iterations
-                .iter()
-                .map(|i| {
-                    i.completed_at
-                        .unwrap_or(i.started_at)
-                        .signed_duration_since(i.started_at)
-                        .num_milliseconds()
-                })
-                .sum::<i64>();
-
-            let avg_time = execution.iterations.len() as f64 / total_time as f64 * 1000.0;
-            report.push_str(&format!("Total Time: {}ms\n", total_time));
-            if total_time > 0 {
-                report.push_str(&format!("Average Iteration Time: {:.2}ms\n", avg_time));
-            }
-        }
-
-        report.push_str("\n=== Resource Usage ===\n");
-        if let Some(max_iter) = execution.max_iterations {
-            let progress =
-                execution.current_iteration.unwrap_or(0) as f64 / max_iter as f64 * 100.0;
-            report.push_str(&format!("Progress: {:.1}%\n", progress));
-        }
-
-        report.push_str("\n=== Configuration ===\n");
-        report.push_str(&format!(
-            "Evaluator: {:?}\n",
-            execution.configuration.evaluator_cmd
-        ));
-        report.push_str(&format!(
-            "Advisor: {:?}\n",
-            execution.configuration.advisor_cmd
-        ));
-        report.push_str(&format!(
-            "Executor: {:?}\n",
-            execution.configuration.executor_cmd
-        ));
-        report.push_str(&format!(
-            "Strict Mode: {}\n",
-            execution.configuration.strict_toolchain_mode
-        ));
-        report.push_str(&format!(
-            "Resource Monitoring: {}\n",
-            execution.configuration.resource_monitoring
-        ));
-
-        if let Some(timeout) = execution.configuration.global_timeout_ms {
-            report.push_str(&format!("Global Timeout: {}ms\n", timeout));
-        }
-
-        Ok(report)
+        let mut builder = ReportBuilder::new();
+        builder.add_section(build_header_section(execution));
+        builder.add_section(build_iterations_section(&execution.iterations));
+        builder.add_section(build_statistics_section(execution));
+        builder.add_section(build_configuration_section(&execution.configuration));
+        Ok(builder.build())
     }
 
     pub fn generate_summary(&self, execution: &OptimizationExecution) -> Result<String, AppError> {
@@ -277,6 +158,159 @@ impl ResultsProcessor {
             start_time: execution.started_at,
             end_time: execution.completed_at,
         })
+    }
+}
+
+fn build_header_section(execution: &OptimizationExecution) -> String {
+    let mut section = String::new();
+    section.push_str("=== Newton Loop Optimization Report ===\n\n");
+    section.push_str(&format!("Execution ID: {}\n", execution.execution_id));
+    section.push_str(&format!("Status: {:?}\n", execution.status));
+    section.push_str(&format!(
+        "Started At: {}\n",
+        execution.started_at.format("%Y-%m-%d %H:%M:%S UTC")
+    ));
+    if let Some(completed_at) = execution.completed_at {
+        section.push_str(&format!(
+            "Completed At: {}\n",
+            completed_at.format("%Y-%m-%d %H:%M:%S UTC")
+        ));
+    }
+    if let Some(max_iter) = execution.max_iterations {
+        section.push_str(&format!("Max Iterations: {}\n", max_iter));
+    }
+    if let Some(curr_iter) = execution.current_iteration {
+        section.push_str(&format!("Current Iteration: {}\n", curr_iter));
+    }
+    section.push_str(&format!(
+        "Total Iterations Completed: {}\n",
+        execution.total_iterations_completed
+    ));
+    section.push_str(&format!(
+        "Total Iterations Failed: {}\n",
+        execution.total_iterations_failed
+    ));
+    section
+}
+
+fn build_iterations_section(iterations: &[Iteration]) -> String {
+    let mut section = String::new();
+    section.push_str("=== Iterations ===\n");
+    if iterations.is_empty() {
+        section.push_str("No iterations recorded.\n");
+        return section;
+    }
+
+    for iteration in iterations {
+        section.push('\n');
+        section.push_str(&build_iteration_summary(iteration));
+    }
+    section
+}
+
+fn build_iteration_summary(iteration: &Iteration) -> String {
+    let mut summary = String::new();
+    summary.push_str(&format!(
+        "Iteration {} ({}):\n",
+        iteration.iteration_number, iteration.iteration_id
+    ));
+    summary.push_str(&format!("  Phase: {:?}\n", iteration.phase));
+    if let Some(result) = &iteration.evaluator_result {
+        summary.push_str(&format_tool_result("Evaluator", result));
+    }
+    if let Some(result) = &iteration.advisor_result {
+        summary.push_str(&format_tool_result("Advisor", result));
+    }
+    if let Some(result) = &iteration.executor_result {
+        summary.push_str(&format_tool_result("Executor", result));
+    }
+    summary.push_str(&format!(
+        "  Artifacts Generated: {}\n",
+        iteration.metadata.artifacts_generated
+    ));
+    summary
+}
+
+fn format_tool_result(label: &str, result: &ToolResult) -> String {
+    format!(
+        "  {}: {}\n    Exit Code: {}\n    Success: {}\n    Time: {}ms\n",
+        label, result.tool_name, result.exit_code, result.success, result.execution_time_ms
+    )
+}
+
+fn build_statistics_section(execution: &OptimizationExecution) -> String {
+    let mut section = String::new();
+    section.push_str("=== Statistics ===\n");
+
+    if execution.iterations.is_empty() {
+        section.push_str("No iteration timing data available.\n");
+    } else {
+        let total_time = execution
+            .iterations
+            .iter()
+            .map(|iteration| {
+                iteration
+                    .completed_at
+                    .unwrap_or(iteration.started_at)
+                    .signed_duration_since(iteration.started_at)
+                    .num_milliseconds()
+            })
+            .sum::<i64>();
+        let avg_time = total_time as f64 / execution.iterations.len() as f64;
+        section.push_str(&format!("Total Time: {}ms\n", total_time));
+        section.push_str(&format!("Average Iteration Time: {:.2}ms\n", avg_time));
+    }
+
+    section.push_str("\n=== Resource Usage ===\n");
+    if let Some(max_iter) = execution.max_iterations {
+        let progress = if max_iter == 0 {
+            0.0
+        } else {
+            execution.current_iteration.unwrap_or(0) as f64 / max_iter as f64 * 100.0
+        };
+        section.push_str(&format!("Progress: {:.1}%\n", progress));
+    } else {
+        section.push_str("Progress: n/a\n");
+    }
+    section
+}
+
+fn build_configuration_section(config: &ExecutionConfiguration) -> String {
+    let mut section = String::new();
+    section.push_str("=== Configuration ===\n");
+    section.push_str(&format!("Evaluator: {:?}\n", config.evaluator_cmd));
+    section.push_str(&format!("Advisor: {:?}\n", config.advisor_cmd));
+    section.push_str(&format!("Executor: {:?}\n", config.executor_cmd));
+    section.push_str(&format!("Strict Mode: {}\n", config.strict_toolchain_mode));
+    section.push_str(&format!(
+        "Resource Monitoring: {}\n",
+        config.resource_monitoring
+    ));
+    if let Some(timeout) = config.global_timeout_ms {
+        section.push_str(&format!("Global Timeout: {}ms\n", timeout));
+    }
+    section
+}
+
+struct ReportBuilder {
+    sections: Vec<String>,
+}
+
+impl ReportBuilder {
+    fn new() -> Self {
+        ReportBuilder {
+            sections: Vec::new(),
+        }
+    }
+
+    fn add_section(&mut self, section: String) {
+        if !section.trim().is_empty() {
+            self.sections.push(section);
+        }
+    }
+
+    fn build(self) -> String {
+        self.sections.join("\n\n")
     }
 }
 

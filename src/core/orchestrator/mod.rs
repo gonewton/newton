@@ -536,30 +536,42 @@ where
     W: AsyncWriteExt + Unpin,
 {
     let mut buffer = Vec::new();
-    if let Some(mut reader) = reader {
-        let mut chunk = [0u8; 4096];
-        loop {
-            match reader.read(&mut chunk).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    buffer.extend_from_slice(&chunk[..n]);
-                    if let Err(err) = writer.write_all(&chunk[..n]).await {
-                        tracing::error!(%label, ?err, "Failed to forward {label} output");
-                        break;
-                    }
-                    if let Err(err) = writer.flush().await {
-                        tracing::error!(%label, ?err, "Failed to flush parent {label} output");
-                    }
-                }
-                Err(err) => {
-                    tracing::error!(%label, ?err, "Failed to read {label} from tool");
-                    break;
-                }
+    let mut reader = match reader {
+        Some(reader) => reader,
+        None => return buffer,
+    };
+    forward_stream(&mut reader, &mut writer, label, &mut buffer).await;
+    buffer
+}
+
+async fn forward_stream<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    label: &'static str,
+    buffer: &mut Vec<u8>,
+) where
+    R: AsyncReadExt + Unpin,
+    W: AsyncWriteExt + Unpin,
+{
+    let mut chunk = [0u8; 4096];
+    loop {
+        let bytes_read = match reader.read(&mut chunk).await {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(err) => {
+                tracing::error!(%label, ?err, "Failed to read {label} from tool");
+                break;
             }
+        };
+        buffer.extend_from_slice(&chunk[..bytes_read]);
+        if let Err(err) = writer.write_all(&chunk[..bytes_read]).await {
+            tracing::error!(%label, ?err, "Failed to forward {label} output");
+            break;
+        }
+        if let Err(err) = writer.flush().await {
+            tracing::error!(%label, ?err, "Failed to flush parent {label} output");
         }
     }
-
-    buffer
 }
 
 #[cfg(test)]

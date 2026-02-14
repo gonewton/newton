@@ -3,7 +3,7 @@ use crate::monitor::event::{
     ConnectionState, ConnectionStatus, MonitorCommand, MonitorEvent, ResponseType,
 };
 use crate::monitor::message::MonitorMessage;
-use futures::{SinkExt, StreamExt};
+use futures::{Sink, SinkExt, StreamExt};
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use reqwest::StatusCode;
 use serde::Serialize;
@@ -227,35 +227,8 @@ pub async fn websocket_loop(client: AiloopClient, event_tx: UnboundedSender<Moni
                 }
 
                 while let Some(message) = reader.next().await {
-                    match message {
-                        Ok(Message::Text(txt)) => {
-                            tracing::debug!("Received WebSocket text: {}", txt);
-                            match serde_json::from_str::<MonitorMessage>(&txt) {
-                                Ok(parsed) => {
-                                    tracing::info!("Parsed message: {:?}", parsed.summary);
-                                    let _ = event_tx.send(MonitorEvent::Message(parsed));
-                                }
-                                Err(e) => {
-                                    tracing::warn!("Failed to parse message: {} - Raw: {}", e, txt);
-                                }
-                            }
-                        }
-                        Ok(Message::Binary(bytes)) => {
-                            if let Ok(txt) = String::from_utf8(bytes) {
-                                if let Ok(parsed) = serde_json::from_str::<MonitorMessage>(&txt) {
-                                    let _ = event_tx.send(MonitorEvent::Message(parsed));
-                                }
-                            }
-                        }
-                        Ok(Message::Ping(payload)) => {
-                            let _ = writer.send(Message::Pong(payload)).await;
-                        }
-                        Ok(Message::Close(_)) => break,
-                        Err(err) => {
-                            error!("WebSocket error: {}", err);
-                            break;
-                        }
-                        _ => {}
+                    if !handle_websocket_message(message, &mut writer, &event_tx).await {
+                        break;
                     }
                 }
             }
@@ -271,34 +244,83 @@ pub async fn websocket_loop(client: AiloopClient, event_tx: UnboundedSender<Moni
     }
 }
 
+async fn handle_websocket_message<W>(
+    message: Result<Message, tokio_tungstenite::tungstenite::Error>,
+    writer: &mut W,
+    event_tx: &UnboundedSender<MonitorEvent>,
+) -> bool
+where
+    W: Sink<Message> + Unpin,
+{
+    match message {
+        Ok(Message::Text(txt)) => {
+            tracing::debug!("Received WebSocket text: {}", txt);
+            if let Ok(parsed) = serde_json::from_str::<MonitorMessage>(&txt) {
+                tracing::info!("Parsed message: {:?}", parsed.summary);
+                let _ = event_tx.send(MonitorEvent::Message(parsed));
+            } else {
+                tracing::warn!("Failed to parse text message: {}", txt);
+            }
+            true
+        }
+        Ok(Message::Binary(bytes)) => {
+            if let Ok(txt) = String::from_utf8(bytes) {
+                if let Ok(parsed) = serde_json::from_str::<MonitorMessage>(&txt) {
+                    let _ = event_tx.send(MonitorEvent::Message(parsed));
+                }
+            }
+            true
+        }
+        Ok(Message::Ping(payload)) => {
+            let _ = writer.send(Message::Pong(payload)).await;
+            true
+        }
+        Ok(Message::Close(_)) => false,
+        Err(err) => {
+            error!("WebSocket error: {}", err);
+            false
+        }
+        _ => true,
+    }
+}
+
 /// Fallback polling loop that keeps message buffers fresh in case viewer subscribe is ignored.
 pub async fn polling_loop(client: AiloopClient, event_tx: UnboundedSender<MonitorEvent>) {
     let mut interval = tokio::time::interval(StdDuration::from_secs(5));
     let mut seen = HashSet::new();
     loop {
         interval.tick().await;
-        match client.fetch_channels().await {
-            Ok(channels) => {
-                for channel in channels {
-                    match client.fetch_channel_messages(&channel, 20).await {
-                        Ok(messages) => {
-                            for message in messages {
-                                if seen.insert(message.id) {
-                                    let _ = event_tx.send(MonitorEvent::Message(message));
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            error!("polling messages failed for {}: {}", channel, err);
-                        }
-                    }
-                }
-            }
-            Err(err) => {
-                error!("polling channels failed: {}", err);
-            }
+        if let Err(err) = poll_channels_once(&client, &mut seen, &event_tx).await {
+            error!("polling channels failed: {}", err);
         }
     }
+}
+
+async fn poll_channels_once(
+    client: &AiloopClient,
+    seen: &mut HashSet<Uuid>,
+    event_tx: &UnboundedSender<MonitorEvent>,
+) -> crate::Result<()> {
+    let channels = client.fetch_channels().await?;
+    for channel in channels {
+        poll_channel_messages(client, &channel, seen, event_tx).await?;
+    }
+    Ok(())
+}
+
+async fn poll_channel_messages(
+    client: &AiloopClient,
+    channel: &str,
+    seen: &mut HashSet<Uuid>,
+    event_tx: &UnboundedSender<MonitorEvent>,
+) -> crate::Result<()> {
+    let messages = client.fetch_channel_messages(channel, 20).await?;
+    for message in messages {
+        if seen.insert(message.id) {
+            let _ = event_tx.send(MonitorEvent::Message(message));
+        }
+    }
+    Ok(())
 }
 
 /// Handle commands issued by the UI (answer/approve/deny).

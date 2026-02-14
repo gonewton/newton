@@ -122,25 +122,86 @@ impl RunArgs {
     }
 
     /// Produce batch arguments when tooling overrides and limits should come from config.
-    #[allow(clippy::too_many_arguments)]
-    pub fn for_batch_with_tools(
-        project_root: PathBuf,
-        goal_file: Option<PathBuf>,
-        evaluator_cmd: Option<String>,
-        advisor_cmd: Option<String>,
-        executor_cmd: Option<String>,
-        max_iterations: Option<usize>,
-        max_time: Option<u64>,
-        verbose: bool,
-        control_file_path: Option<PathBuf>,
-    ) -> Self {
+    pub fn for_batch_with_tools(builder: RunArgsBuilder) -> Self {
+        builder.build()
+    }
+}
+
+pub struct RunArgsBuilder {
+    project_root: PathBuf,
+    goal_file: Option<PathBuf>,
+    evaluator_cmd: Option<String>,
+    advisor_cmd: Option<String>,
+    executor_cmd: Option<String>,
+    max_iterations: Option<usize>,
+    max_time: Option<u64>,
+    verbose: bool,
+    control_file: Option<PathBuf>,
+}
+
+impl RunArgsBuilder {
+    pub fn new(project_root: PathBuf) -> Self {
+        RunArgsBuilder {
+            project_root,
+            goal_file: None,
+            evaluator_cmd: None,
+            advisor_cmd: None,
+            executor_cmd: None,
+            max_iterations: None,
+            max_time: None,
+            verbose: false,
+            control_file: None,
+        }
+    }
+
+    pub fn goal_file(mut self, goal_file: Option<PathBuf>) -> Self {
+        self.goal_file = goal_file;
+        self
+    }
+
+    pub fn evaluator_cmd(mut self, cmd: Option<String>) -> Self {
+        self.evaluator_cmd = cmd;
+        self
+    }
+
+    pub fn advisor_cmd(mut self, cmd: Option<String>) -> Self {
+        self.advisor_cmd = cmd;
+        self
+    }
+
+    pub fn executor_cmd(mut self, cmd: Option<String>) -> Self {
+        self.executor_cmd = cmd;
+        self
+    }
+
+    pub fn max_iterations(mut self, max: Option<usize>) -> Self {
+        self.max_iterations = max;
+        self
+    }
+
+    pub fn max_time(mut self, max: Option<u64>) -> Self {
+        self.max_time = max;
+        self
+    }
+
+    pub fn verbose(mut self, verbose: bool) -> Self {
+        self.verbose = verbose;
+        self
+    }
+
+    pub fn control_file(mut self, path: Option<PathBuf>) -> Self {
+        self.control_file = path;
+        self
+    }
+
+    fn build(self) -> RunArgs {
         RunArgs {
-            path: project_root,
-            max_iterations: max_iterations.unwrap_or(5),
-            max_time: max_time.unwrap_or(3600),
-            evaluator_cmd,
-            advisor_cmd,
-            executor_cmd,
+            path: self.project_root,
+            max_iterations: self.max_iterations.unwrap_or(5),
+            max_time: self.max_time.unwrap_or(3600),
+            evaluator_cmd: self.evaluator_cmd,
+            advisor_cmd: self.advisor_cmd,
+            executor_cmd: self.executor_cmd,
             evaluator_status_file: PathBuf::from("artifacts/evaluator_status.md"),
             advisor_recommendations_file: PathBuf::from("artifacts/advisor_recommendations.md"),
             executor_log_file: PathBuf::from("artifacts/executor_log.md"),
@@ -148,11 +209,11 @@ impl RunArgs {
             evaluator_timeout: None,
             advisor_timeout: None,
             executor_timeout: None,
-            verbose,
+            verbose: self.verbose,
             config: None,
             goal: None,
-            goal_file,
-            control_file: control_file_path,
+            goal_file: self.goal_file,
+            control_file: self.control_file,
             feedback: None,
         }
     }

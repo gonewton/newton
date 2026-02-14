@@ -83,43 +83,46 @@ impl std::fmt::Display for AppError {
 
 impl std::error::Error for AppError {}
 
-impl From<anyhow::Error> for AppError {
-    fn from(e: anyhow::Error) -> Self {
-        AppError {
-            category: ErrorCategory::InternalError,
-            severity: ErrorSeverity::Error,
-            code: "ANYHOW_ERROR".to_string(),
-            message: e.to_string(),
-            context: HashMap::new(),
-            recovery_suggestions: vec!["Check the error details".to_string()],
-            occurred_at: Utc::now(),
-            stack_trace: None,
-            source: Some(e),
-        }
-    }
-}
-
 impl AppError {
     pub fn add_context(&mut self, key: &str, value: &str) {
         self.context.insert(key.to_string(), value.to_string());
     }
 }
 
-impl From<std::io::Error> for AppError {
-    fn from(e: std::io::Error) -> Self {
-        AppError {
-            category: ErrorCategory::IoError,
-            severity: ErrorSeverity::Error,
-            code: "IO_ERROR".to_string(),
-            message: e.to_string(),
-            context: HashMap::new(),
-            recovery_suggestions: vec!["Check file permissions and paths".to_string()],
-            occurred_at: Utc::now(),
-            stack_trace: None,
-            source: Some(anyhow::anyhow!(e)),
+macro_rules! impl_from_error {
+    ($from:ty, $category:expr, $code:expr, $suggestion:expr) => {
+        impl From<$from> for AppError {
+            fn from(error: $from) -> Self {
+                let message = error.to_string();
+                AppError {
+                    category: $category,
+                    severity: ErrorSeverity::Error,
+                    code: $code.to_string(),
+                    message,
+                    context: HashMap::new(),
+                    recovery_suggestions: vec![$suggestion.to_string()],
+                    occurred_at: Utc::now(),
+                    stack_trace: None,
+                    source: Some(anyhow::anyhow!(error)),
+                }
+            }
         }
-    }
+    };
 }
+
+impl_from_error!(
+    anyhow::Error,
+    ErrorCategory::InternalError,
+    "ANYHOW_ERROR",
+    "Check the error details"
+);
+
+impl_from_error!(
+    std::io::Error,
+    ErrorCategory::IoError,
+    "IO_ERROR",
+    "Check file permissions and paths"
+);
 
 pub trait ErrorReporter {
     fn report_error(&self, error: &AppError);

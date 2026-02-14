@@ -3,7 +3,7 @@ use crate::monitor::event::{
     ConnectionState, ConnectionStatus, MonitorCommand, MonitorEvent, ResponseType,
 };
 use crate::monitor::message::{MessageKind, MonitorMessage};
-use crate::monitor::state::{InputMode, MonitorState, QueueItem, StreamLayout};
+use crate::monitor::state::{ChannelState, InputMode, MonitorState, QueueItem, StreamLayout};
 use chrono::Utc;
 use crossterm::{
     event::{self, Event as CEvent, KeyCode, KeyEvent, KeyModifiers},
@@ -50,7 +50,11 @@ pub fn run_tui(
             state.apply_event(event);
         }
 
-        terminal.draw(|frame| draw_ui(frame, &state, &endpoints, workspace_root.as_path()))?;
+        terminal.draw(|frame| {
+            let header_context =
+                RenderHeaderContext::new(&state, &endpoints, workspace_root.as_path());
+            draw_ui(frame, &state, &header_context)
+        })?;
 
         if state.exit_requested() {
             break;
@@ -68,11 +72,47 @@ pub fn run_tui(
     Ok(())
 }
 
+struct RenderHeaderContext {
+    workspace_display: String,
+    connection_label: &'static str,
+    connection_detail: String,
+    layout_name: &'static str,
+    filter_display: String,
+    http_url: String,
+    ws_url: String,
+}
+
+impl RenderHeaderContext {
+    fn new(state: &MonitorState, endpoints: &MonitorEndpoints, workspace_root: &Path) -> Self {
+        let connection_label = match state.connection_status.state {
+            ConnectionState::Connected => "Connected",
+            ConnectionState::Connecting => "Connecting",
+            ConnectionState::Disconnected => "Disconnected",
+        };
+
+        let connection_detail = state.connection_status.detail.clone().unwrap_or_default();
+
+        let layout_name = match state.layout {
+            StreamLayout::Tiles => "Tiles",
+            StreamLayout::List => "List",
+        };
+
+        RenderHeaderContext {
+            workspace_display: workspace_root.display().to_string(),
+            connection_label,
+            connection_detail,
+            layout_name,
+            filter_display: state.filter.display(),
+            http_url: truncate_str(endpoints.http_url.as_str(), 40),
+            ws_url: truncate_str(endpoints.ws_url.as_str(), 40),
+        }
+    }
+}
+
 fn draw_ui<B: ratatui::backend::Backend>(
     frame: &mut Frame<B>,
     state: &MonitorState,
-    endpoints: &MonitorEndpoints,
-    workspace_root: &Path,
+    header_context: &RenderHeaderContext,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -86,7 +126,7 @@ fn draw_ui<B: ratatui::backend::Backend>(
         )
         .split(frame.size());
 
-    render_header(frame, chunks[0], state, endpoints, workspace_root);
+    render_header(frame, chunks[0], header_context);
     render_body(frame, chunks[1], state);
     render_status(frame, chunks[2], state);
 }
@@ -94,59 +134,43 @@ fn draw_ui<B: ratatui::backend::Backend>(
 fn render_header<B: ratatui::backend::Backend>(
     frame: &mut Frame<B>,
     area: Rect,
-    state: &MonitorState,
-    endpoints: &MonitorEndpoints,
-    workspace_root: &Path,
+    context: &RenderHeaderContext,
 ) {
-    let connection = match state.connection_status.state {
-        ConnectionState::Connected => "Connected",
-        ConnectionState::Connecting => "Connecting",
-        ConnectionState::Disconnected => "Disconnected",
-    };
-
-    let connection_detail = state
-        .connection_status
-        .detail
-        .as_deref()
-        .unwrap_or_default();
-
-    let layout_name = match state.layout {
-        StreamLayout::Tiles => "Tiles",
-        StreamLayout::List => "List",
-    };
-
     let content = vec![
         Line::from(vec![
             Span::styled("Workspace: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(workspace_root.display().to_string()),
+            Span::raw(context.workspace_display.as_str()),
         ]),
         Line::from(vec![
             Span::styled(
                 "Connection: ",
                 Style::default().add_modifier(Modifier::BOLD),
             ),
-            Span::styled(connection, Style::default().fg(Color::LightGreen)),
-            Span::raw(format!(" {}", connection_detail)),
+            Span::styled(
+                context.connection_label,
+                Style::default().fg(Color::LightGreen),
+            ),
+            Span::raw(format!(" {}", context.connection_detail)),
             Span::raw(" | "),
             Span::styled("Filter: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw({
-                let filter_display = state.filter.display();
+                let filter_display = &context.filter_display;
                 if filter_display.is_empty() {
                     "None".to_string()
                 } else {
-                    filter_display
+                    filter_display.clone()
                 }
             }),
             Span::raw(" | "),
             Span::styled("View: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(layout_name),
+            Span::raw(context.layout_name),
         ]),
         Line::from(vec![
             Span::styled("HTTP: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(truncate_str(endpoints.http_url.as_str(), 40)),
+            Span::raw(context.http_url.as_str()),
             Span::raw(" "),
             Span::styled("WS: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(truncate_str(endpoints.ws_url.as_str(), 40)),
+            Span::raw(context.ws_url.as_str()),
         ]),
     ];
 
@@ -193,70 +217,86 @@ fn render_stream<B: ratatui::backend::Backend>(
         .collect();
 
     if channels.is_empty() {
-        let block = Block::default()
-            .title("Stream (empty)")
-            .borders(Borders::ALL);
-        let empty = Paragraph::new("No channels match the current filter.")
-            .block(block)
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(empty, area);
+        render_empty_stream(frame, area);
         return;
     }
 
-    let items = if matches!(state.layout, StreamLayout::Tiles) {
-        channels
-            .iter()
-            .map(|channel| {
-                let mut lines = vec![Line::from(vec![Span::styled(
-                    format!("{} / {}", channel.project, channel.branch),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )])];
-                for message in channel.messages.iter().rev().take(4).rev() {
-                    lines.push(render_message_span(message));
-                }
-                ListItem::new(lines)
-            })
-            .collect::<Vec<_>>()
-    } else {
-        let mut entries = Vec::new();
-        for channel in &channels {
-            for message in channel.messages.iter() {
-                entries.push((channel, message));
-            }
-        }
-        entries.sort_by_key(|(_, message)| message.timestamp);
-        entries
-            .into_iter()
-            .rev()
-            .take(80)
-            .map(|(channel, message)| {
-                let line = Line::from(vec![
-                    Span::styled(
-                        format!("[{} / {}] ", channel.project, channel.branch),
-                        Style::default().fg(Color::LightBlue),
-                    ),
-                    Span::styled(
-                        message.summary.clone(),
-                        Style::default().fg(message_color(message)),
-                    ),
-                ]);
-                ListItem::new(vec![line])
-            })
-            .collect::<Vec<_>>()
+    let (title, items) = match state.layout {
+        StreamLayout::Tiles => ("Stream (Tiles)", build_tile_items(&channels)),
+        StreamLayout::List => ("Stream (List)", build_list_entries(&channels)),
     };
 
-    let title = match state.layout {
-        StreamLayout::Tiles => "Stream (Tiles)",
-        StreamLayout::List => "Stream (List)",
-    };
+    render_message_stream(frame, area, title, items);
+}
+
+fn render_empty_stream<B: ratatui::backend::Backend>(frame: &mut Frame<B>, area: Rect) {
+    let block = Block::default()
+        .title("Stream (empty)")
+        .borders(Borders::ALL);
+    let empty = Paragraph::new("No channels match the current filter.")
+        .block(block)
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(empty, area);
+}
+
+fn render_message_stream<'a, B: ratatui::backend::Backend>(
+    frame: &mut Frame<B>,
+    area: Rect,
+    title: &str,
+    items: Vec<ListItem<'a>>,
+) {
     let list = List::new(items)
         .block(Block::default().title(title).borders(Borders::ALL))
         .start_corner(Corner::TopLeft);
     frame.render_widget(list, area);
 }
 
+fn build_tile_items<'a>(channels: &[&'a ChannelState]) -> Vec<ListItem<'a>> {
+    channels
+        .iter()
+        .map(|channel| {
+            let mut lines = Vec::new();
+            lines.push(Line::from(vec![Span::styled(
+                format!("{} / {}", channel.project, channel.branch),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )]));
+            for message in channel.messages.iter().rev().take(4).rev() {
+                lines.push(render_message_span(message));
+            }
+            ListItem::new(lines)
+        })
+        .collect()
+}
+
+fn build_list_entries<'a>(channels: &[&'a ChannelState]) -> Vec<ListItem<'a>> {
+    let mut entries = Vec::new();
+    for channel in channels {
+        for message in &channel.messages {
+            entries.push((channel, message));
+        }
+    }
+    entries.sort_by_key(|(_, message)| message.timestamp);
+    entries
+        .into_iter()
+        .rev()
+        .take(80)
+        .map(|(channel, message)| {
+            let line = Line::from(vec![
+                Span::styled(
+                    format!("[{} / {}] ", channel.project, channel.branch),
+                    Style::default().fg(Color::LightBlue),
+                ),
+                Span::styled(
+                    message.summary.clone(),
+                    Style::default().fg(message_color(message)),
+                ),
+            ]);
+            ListItem::new(vec![line])
+        })
+        .collect()
+}
 fn render_queue<B: ratatui::backend::Backend>(
     frame: &mut Frame<B>,
     area: Rect,

@@ -1,5 +1,8 @@
 use crate::{
-    cli::args::{BatchArgs, ErrorArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
+    cli::args::{
+        BatchArgs, ErrorArgs, MonitorArgs, ReportArgs, RunArgs, RunArgsBuilder, StatusArgs,
+        StepArgs,
+    },
     core::{
         batch_config::{find_workspace_root, BatchProjectConfig},
         entities::ExecutionStatus,
@@ -400,145 +403,234 @@ fn handle_failure(
     }
 }
 
+enum TaskFetchOutcome {
+    Task(PathBuf),
+    Empty,
+    Exit,
+}
+
+struct TaskPreparation {
+    task_id: String,
+    spec_path: PathBuf,
+    state_dir: PathBuf,
+    control_file_path: PathBuf,
+    branch_name: String,
+    base_branch: String,
+    env_pairs: Vec<(&'static str, String)>,
+}
+
+async fn fetch_next_task(dirs: &BatchDirs, args: &BatchArgs) -> Result<TaskFetchOutcome> {
+    match next_plan_file(&dirs.todo_dir)? {
+        Some(path) => Ok(TaskFetchOutcome::Task(path)),
+        None => {
+            if args.once {
+                tracing::info!("Queue empty; exiting after --once");
+                Ok(TaskFetchOutcome::Exit)
+            } else {
+                sleep_if_needed(args.sleep).await;
+                Ok(TaskFetchOutcome::Empty)
+            }
+        }
+    }
+}
+
+fn prepare_task_execution(
+    args: &BatchArgs,
+    batch_config: &BatchProjectConfig,
+    workspace_root: &Path,
+    plan_file: &Path,
+) -> Result<TaskPreparation> {
+    let task_id = sanitize_task_id(
+        plan_file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(""),
+    );
+    let (spec_path, state_dir, control_file_path) =
+        setup_task_dirs_and_state(batch_config, &task_id, plan_file, batch_config.resume)?;
+    let branch_name = derive_branch_name(&spec_path, &task_id);
+    let base_branch = detect_base_branch(&batch_config.project_root);
+    let coder_cmd = batch_config
+        .coder_cmd
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            workspace_root
+                .join(".newton")
+                .join("scripts")
+                .join("coder.sh")
+        });
+    let env_pairs = build_environment_variables(&EnvBuilderContext {
+        batch_config,
+        args,
+        workspace_root,
+        state_dir: &state_dir,
+        coder_cmd: &coder_cmd,
+        control_file: &control_file_path,
+        task_id: &task_id,
+        branch_name: &branch_name,
+    });
+
+    Ok(TaskPreparation {
+        task_id,
+        spec_path,
+        state_dir,
+        control_file_path,
+        branch_name,
+        base_branch,
+        env_pairs,
+    })
+}
+
+fn build_environment_variables(ctx: &EnvBuilderContext<'_>) -> Vec<(&'static str, String)> {
+    vec![
+        ("CODING_AGENT", ctx.batch_config.coding_agent.clone()),
+        ("CODING_AGENT_MODEL", ctx.batch_config.coding_model.clone()),
+        (
+            "NEWTON_EXECUTOR_CODING_AGENT",
+            ctx.batch_config.coding_agent.clone(),
+        ),
+        (
+            "NEWTON_EXECUTOR_CODING_AGENT_MODEL",
+            ctx.batch_config.coding_model.clone(),
+        ),
+        (
+            "NEWTON_PROJECT_ROOT",
+            ctx.batch_config.project_root.display().to_string(),
+        ),
+        ("NEWTON_PROJECT_ID", ctx.args.project_id.clone()),
+        ("NEWTON_TASK_ID", ctx.task_id.to_string()),
+        ("NEWTON_WS_ROOT", ctx.workspace_root.display().to_string()),
+        ("NEWTON_STATE_DIR", ctx.state_dir.display().to_string()),
+        ("NEWTON_CODER_CMD", ctx.coder_cmd.display().to_string()),
+        ("NEWTON_BRANCH_NAME", ctx.branch_name.to_string()),
+        (
+            "NEWTON_CONTROL_FILE",
+            ctx.control_file.display().to_string(),
+        ),
+    ]
+}
+
+struct EnvBuilderContext<'a> {
+    batch_config: &'a BatchProjectConfig,
+    args: &'a BatchArgs,
+    workspace_root: &'a Path,
+    state_dir: &'a Path,
+    coder_cmd: &'a Path,
+    control_file: &'a Path,
+    task_id: &'a str,
+    branch_name: &'a str,
+}
+
+fn build_batch_task_context(
+    batch_config: &BatchProjectConfig,
+    args: &BatchArgs,
+    workspace_root: &Path,
+    preparation: &TaskPreparation,
+) -> BatchTaskContext {
+    BatchTaskContext {
+        batch_config: batch_config.clone(),
+        project_id: args.project_id.clone(),
+        task_id: preparation.task_id.clone(),
+        goal_file: preparation.spec_path.clone(),
+        workspace_root: workspace_root.to_path_buf(),
+        state_dir: preparation.state_dir.clone(),
+        control_file: preparation.control_file_path.clone(),
+        branch_name: preparation.branch_name.clone(),
+        base_branch: preparation.base_branch.clone(),
+    }
+}
+
+async fn execute_task(
+    batch_config: &BatchProjectConfig,
+    context: &BatchTaskContext,
+    plan_file: &Path,
+    preparation: &TaskPreparation,
+) -> Result<std::result::Result<(), Error>> {
+    if let Err(err) = run_pre_run_hook(batch_config, context, plan_file) {
+        return Ok(Err(err));
+    }
+    write_run_log(&preparation.state_dir, "Starting Newton run")?;
+    let run_args = RunArgs::for_batch_with_tools(
+        RunArgsBuilder::new(batch_config.project_root.clone())
+            .goal_file(Some(preparation.spec_path.clone()))
+            .evaluator_cmd(batch_config.evaluator_cmd.clone())
+            .advisor_cmd(batch_config.advisor_cmd.clone())
+            .executor_cmd(batch_config.executor_cmd.clone())
+            .max_iterations(batch_config.max_iterations)
+            .max_time(batch_config.max_time)
+            .verbose(batch_config.verbose)
+            .control_file(Some(preparation.control_file_path.clone())),
+    );
+    let result = run(run_args).await;
+    write_run_log(
+        &preparation.state_dir,
+        &format!(
+            "Newton run finished: {}",
+            if result.is_ok() { "success" } else { "failure" }
+        ),
+    )?;
+    Ok(result)
+}
+
+fn handle_task_result(
+    context: &BatchTaskContext,
+    plan_file: &Path,
+    dirs: &BatchDirs,
+    overrides: Vec<(String, Option<String>)>,
+    once: bool,
+    run_result: std::result::Result<(), Error>,
+) -> Result<bool> {
+    match run_result {
+        Ok(_) => handle_success(
+            context,
+            plan_file,
+            &dirs.completed_dir,
+            &dirs.failed_dir,
+            overrides,
+            once,
+        ),
+        Err(error) => {
+            handle_failure(context, plan_file, &dirs.failed_dir, overrides, once, error)?;
+            Ok(false)
+        }
+    }
+}
+
 pub async fn batch(args: BatchArgs) -> Result<()> {
     tracing::info!("Starting batch runner for project {}", args.project_id);
 
-    let workspace_root = resolve_workspace_root(args.workspace)?;
-    let configs_dir = workspace_root.join(".newton").join("configs");
-    if !configs_dir.is_dir() {
-        return Err(anyhow!(
-            "Workspace {} must contain .newton/configs",
-            workspace_root.display()
-        ));
-    }
-
+    let workspace_root = resolve_workspace_root(args.workspace.clone())?;
     let batch_config = BatchProjectConfig::load(&workspace_root, &args.project_id)?;
     let dirs = ensure_batch_dirs(&workspace_root, &args.project_id)?;
 
     loop {
-        let plan_file = match next_plan_file(&dirs.todo_dir)? {
-            Some(path) => path,
-            None => {
-                if args.once {
-                    tracing::info!("Queue empty; exiting after --once");
+        match fetch_next_task(&dirs, &args).await? {
+            TaskFetchOutcome::Exit => return Ok(()),
+            TaskFetchOutcome::Empty => continue,
+            TaskFetchOutcome::Task(plan_file) => {
+                let preparation =
+                    prepare_task_execution(&args, &batch_config, &workspace_root, &plan_file)?;
+                let context =
+                    build_batch_task_context(&batch_config, &args, &workspace_root, &preparation);
+
+                let env_refs = preparation
+                    .env_pairs
+                    .iter()
+                    .map(|(key, value)| (*key, value.as_str()))
+                    .collect::<Vec<_>>();
+                let overrides = apply_env_overrides(&env_refs);
+
+                let run_result =
+                    execute_task(&batch_config, &context, &plan_file, &preparation).await?;
+
+                if handle_task_result(
+                    &context, &plan_file, &dirs, overrides, args.once, run_result,
+                )? {
                     return Ok(());
                 }
-                sleep_if_needed(args.sleep).await;
-                continue;
             }
-        };
-
-        let task_id =
-            sanitize_task_id(plan_file.file_name().and_then(|n| n.to_str()).unwrap_or(""));
-
-        let (spec_path, state_dir, control_file_path) =
-            setup_task_dirs_and_state(&batch_config, &task_id, &plan_file, batch_config.resume)?;
-
-        let branch_name = derive_branch_name(&spec_path, &task_id);
-        let base_branch = detect_base_branch(&batch_config.project_root);
-        let coder_cmd = batch_config
-            .coder_cmd
-            .as_ref()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                workspace_root
-                    .join(".newton")
-                    .join("scripts")
-                    .join("coder.sh")
-            });
-
-        let context = BatchTaskContext {
-            batch_config: batch_config.clone(),
-            project_id: args.project_id.clone(),
-            task_id: task_id.clone(),
-            goal_file: spec_path.clone(),
-            workspace_root: workspace_root.clone(),
-            state_dir: state_dir.clone(),
-            control_file: control_file_path.clone(),
-            branch_name: branch_name.clone(),
-            base_branch: base_branch.clone(),
-        };
-
-        let project_root_str = batch_config.project_root.display().to_string();
-        let workspace_root_str = workspace_root.display().to_string();
-        let state_dir_str = state_dir.display().to_string();
-        let coder_cmd_str = coder_cmd.display().to_string();
-        let control_file_str = control_file_path.display().to_string();
-
-        let env_pairs = [
-            ("CODING_AGENT", batch_config.coding_agent.as_str()),
-            ("CODING_AGENT_MODEL", batch_config.coding_model.as_str()),
-            (
-                "NEWTON_EXECUTOR_CODING_AGENT",
-                batch_config.coding_agent.as_str(),
-            ),
-            (
-                "NEWTON_EXECUTOR_CODING_AGENT_MODEL",
-                batch_config.coding_model.as_str(),
-            ),
-            ("NEWTON_PROJECT_ROOT", project_root_str.as_str()),
-            ("NEWTON_PROJECT_ID", args.project_id.as_str()),
-            ("NEWTON_TASK_ID", task_id.as_str()),
-            ("NEWTON_WS_ROOT", workspace_root_str.as_str()),
-            ("NEWTON_STATE_DIR", state_dir_str.as_str()),
-            ("NEWTON_CODER_CMD", coder_cmd_str.as_str()),
-            ("NEWTON_BRANCH_NAME", branch_name.as_str()),
-            ("NEWTON_CONTROL_FILE", control_file_str.as_str()),
-        ];
-        let overrides = apply_env_overrides(&env_pairs);
-
-        let run_result = match run_pre_run_hook(&batch_config, &context, &plan_file) {
-            Err(err) => Err(err),
-            Ok(()) => {
-                write_run_log(&state_dir, "Starting Newton run")?;
-                let run_args = RunArgs::for_batch_with_tools(
-                    batch_config.project_root.clone(),
-                    Some(spec_path.clone()),
-                    batch_config.evaluator_cmd.clone(),
-                    batch_config.advisor_cmd.clone(),
-                    batch_config.executor_cmd.clone(),
-                    batch_config.max_iterations,
-                    batch_config.max_time,
-                    batch_config.verbose,
-                    Some(control_file_path.clone()),
-                );
-                let result = run(run_args).await;
-                write_run_log(
-                    &state_dir,
-                    &format!(
-                        "Newton run finished: {}",
-                        if result.is_ok() { "success" } else { "failure" }
-                    ),
-                )?;
-                result
-            }
-        };
-
-        if run_result.is_ok() {
-            if handle_success(
-                &context,
-                &plan_file,
-                &dirs.completed_dir,
-                &dirs.failed_dir,
-                overrides,
-                args.once,
-            )? {
-                return Ok(());
-            }
-            continue;
         }
-
-        let error = run_result.unwrap_err();
-        handle_failure(
-            &context,
-            &plan_file,
-            &dirs.failed_dir,
-            overrides,
-            args.once,
-            error,
-        )?;
-
-        sleep_if_needed(args.sleep).await;
     }
 }
 
