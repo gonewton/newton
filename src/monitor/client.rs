@@ -45,18 +45,60 @@ impl AiloopClient {
         let url = join_path(&self.endpoints.http_url, &["api", "channels"])?;
         let resp = self.http.get(url).send().await?;
         let value: Value = resp.json().await?;
+
+        if let Some(channels_section) = value.get("channels") {
+            // Parse structured ChannelInfo objects from "channels" array
+            if let Some(entries) = channels_section.as_array() {
+                let channels: Vec<String> = entries
+                    .iter()
+                    .filter_map(|entry| {
+                        entry
+                            .get("name")
+                            .and_then(|name| name.as_str())
+                            .map(|s| s.to_string())
+                    })
+                    .collect();
+
+                if !channels.is_empty() {
+                    tracing::debug!("Fetched {} channels from server", channels.len());
+                    return Ok(channels);
+                }
+            }
+
+            // Older responses exposed channels as a map instead of an array
+            if let Some(map) = channels_section.as_object() {
+                let mut channels: Vec<String> = map.keys().cloned().collect();
+                channels.sort();
+                if !channels.is_empty() {
+                    tracing::debug!(
+                        "Fetched {} channels from server (map format)",
+                        channels.len()
+                    );
+                    return Ok(channels);
+                }
+            }
+        }
+
+        // Fallback: try parsing as direct array for backward compatibility
         if let Some(arr) = value.as_array() {
-            return Ok(arr
+            let channels: Vec<String> = arr
                 .iter()
                 .filter_map(|entry| entry.as_str().map(|s| s.to_string()))
-                .collect());
+                .collect();
+
+            if !channels.is_empty() {
+                tracing::debug!(
+                    "Fetched {} channels from server (legacy format)",
+                    channels.len()
+                );
+                return Ok(channels);
+            }
         }
-        if let Some(entries) = value.get("channels").and_then(|section| section.as_array()) {
-            return Ok(entries
-                .iter()
-                .filter_map(|entry| entry.as_str().map(|s| s.to_string()))
-                .collect());
-        }
+
+        tracing::warn!(
+            "Channel list parsing returned empty result. Response: {:?}",
+            value
+        );
         Ok(Vec::new())
     }
 
@@ -289,5 +331,135 @@ pub async fn command_loop(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::path::PathBuf;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn build_endpoints(mock_server: &MockServer) -> MonitorEndpoints {
+        let http_url = reqwest::Url::parse(&mock_server.uri()).unwrap();
+        let ws_url = reqwest::Url::parse(&mock_server.uri().replace("http", "ws")).unwrap();
+        MonitorEndpoints {
+            http_url,
+            ws_url,
+            workspace_root: PathBuf::from("."),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_channels_parses_structured_response() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/channels"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "channels": [
+                    {
+                        "name": "project1/branch1",
+                        "message_count": 5,
+                        "oldest_message": "2026-02-14T10:00:00Z",
+                        "newest_message": "2026-02-14T11:30:00Z"
+                    },
+                    {
+                        "name": "project2/branch2",
+                        "message_count": 3,
+                        "oldest_message": "2026-02-14T09:00:00Z",
+                        "newest_message": "2026-02-14T10:15:00Z"
+                    }
+                ]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let endpoints = build_endpoints(&mock_server);
+
+        let client = AiloopClient::new(endpoints);
+        let channels = client.fetch_channels().await.unwrap();
+
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0], "project1/branch1");
+        assert_eq!(channels[1], "project2/branch2");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_channels_handles_empty_list() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/channels"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "channels": []
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let endpoints = build_endpoints(&mock_server);
+
+        let client = AiloopClient::new(endpoints);
+        let channels = client.fetch_channels().await.unwrap();
+
+        assert!(channels.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_channels_backwards_compatible() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/channels"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!(["simple/channel", "another/channel"])),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let endpoints = build_endpoints(&mock_server);
+
+        let client = AiloopClient::new(endpoints);
+        let channels = client.fetch_channels().await.unwrap();
+
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0], "simple/channel");
+        assert_eq!(channels[1], "another/channel");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_channels_handles_map_response() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/channels"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "channels": {
+                    "project-z/feature-b": {
+                        "message_count": 1
+                    },
+                    "project-a/main": {
+                        "message_count": 2
+                    }
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let endpoints = build_endpoints(&mock_server);
+
+        let client = AiloopClient::new(endpoints);
+        let channels = client.fetch_channels().await.unwrap();
+
+        assert_eq!(
+            channels,
+            vec![
+                "project-a/main".to_string(),
+                "project-z/feature-b".to_string()
+            ]
+        );
     }
 }
