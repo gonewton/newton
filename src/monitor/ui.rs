@@ -479,90 +479,148 @@ fn handle_normal_input(
     state: &mut MonitorState,
     command_tx: &UnboundedSender<MonitorCommand>,
 ) {
+    if let Some(action) = key_code_to_action(&key) {
+        handle_normal_action(action, state, command_tx);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum KeyAction {
+    Exit,
+    Filter,
+    Next,
+    Previous,
+    JumpStart,
+    JumpEnd,
+    ToggleLayout,
+    ToggleQueueTab,
+    Answer,
+    Deny,
+    Activate,
+    EscapeQueueTab,
+}
+
+fn key_code_to_action(key: &KeyEvent) -> Option<KeyAction> {
     match key.code {
-        KeyCode::Char('q') => {
-            state.request_exit();
+        KeyCode::Char('q') => Some(KeyAction::Exit),
+        KeyCode::Char('/') => Some(KeyAction::Filter),
+        KeyCode::Char('n') | KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => {
+            Some(KeyAction::Next)
         }
-        KeyCode::Char('/') => {
+        KeyCode::Char('k') | KeyCode::Up => Some(KeyAction::Previous),
+        KeyCode::Char('g') => Some(KeyAction::JumpStart),
+        KeyCode::Char('G') => Some(KeyAction::JumpEnd),
+        KeyCode::Char('V') | KeyCode::Char('v') => Some(KeyAction::ToggleLayout),
+        KeyCode::Char('Q') => Some(KeyAction::ToggleQueueTab),
+        KeyCode::Char('a') => Some(KeyAction::Answer),
+        KeyCode::Char('d') => Some(KeyAction::Deny),
+        KeyCode::Enter => Some(KeyAction::Activate),
+        KeyCode::Esc => Some(KeyAction::EscapeQueueTab),
+        _ => None,
+    }
+}
+
+fn handle_normal_action(
+    action: KeyAction,
+    state: &mut MonitorState,
+    command_tx: &UnboundedSender<MonitorCommand>,
+) {
+    match action {
+        KeyAction::Exit => state.request_exit(),
+        KeyAction::Filter => {
             state.input_mode = InputMode::Filter;
             state.filter_input = state.filter.display();
         }
-        KeyCode::Char('n') | KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => {
-            state.next_queue();
+        KeyAction::Next | KeyAction::Previous | KeyAction::JumpStart | KeyAction::JumpEnd => {
+            handle_queue_navigation(action, state);
         }
-        KeyCode::Char('k') | KeyCode::Up => {
-            state.previous_queue();
+        KeyAction::ToggleLayout | KeyAction::ToggleQueueTab | KeyAction::EscapeQueueTab => {
+            handle_ui_toggle(action, state);
         }
-        KeyCode::Char('g') => {
-            state.queue_index = 0;
+        KeyAction::Answer | KeyAction::Deny | KeyAction::Activate => {
+            handle_message_interaction(action, state, command_tx);
         }
-        KeyCode::Char('G') => {
+    }
+}
+
+fn handle_queue_navigation(action: KeyAction, state: &mut MonitorState) {
+    match action {
+        KeyAction::Next => state.next_queue(),
+        KeyAction::Previous => state.previous_queue(),
+        KeyAction::JumpStart => state.queue_index = 0,
+        KeyAction::JumpEnd => {
             if !state.queue.is_empty() {
                 state.queue_index = state.queue.len() - 1;
             }
         }
-        KeyCode::Char('V') | KeyCode::Char('v') => {
-            state.toggle_layout();
-        }
-        KeyCode::Char('Q') => {
-            state.toggle_queue_tab();
-        }
-        KeyCode::Char('a') => {
-            if let Some(item) = state.queue.get(state.queue_index) {
-                match item.message.kind {
-                    MessageKind::Question => {
-                        state.input_mode = InputMode::Answer {
-                            target: item.message.id,
-                        };
-                        state.answer_buffer.clear();
-                    }
-                    MessageKind::Authorization => {
-                        send_response(
-                            command_tx,
-                            item.message.id,
-                            None,
-                            ResponseType::AuthorizationApproved,
-                        );
-                        state.next_queue();
-                    }
-                    _ => {}
-                }
-            }
-        }
-        KeyCode::Char('d') => {
-            if let Some(item) = state.queue.get(state.queue_index) {
-                if item.message.kind == MessageKind::Authorization {
-                    send_response(
-                        command_tx,
-                        item.message.id,
-                        None,
-                        ResponseType::AuthorizationDenied,
-                    );
-                    state.next_queue();
-                }
-            }
-        }
-        KeyCode::Enter => {
-            if let Some(item) = state.queue.get(state.queue_index) {
-                if item.message.kind == MessageKind::Question {
-                    state.input_mode = InputMode::Answer {
-                        target: item.message.id,
-                    };
-                    state.answer_buffer.clear();
-                } else if item.message.kind == MessageKind::Authorization {
-                    state.input_mode = InputMode::Authorization {
-                        target: item.message.id,
-                    };
-                }
-            }
-        }
-        KeyCode::Esc => {
+        _ => {}
+    }
+}
+
+fn handle_ui_toggle(action: KeyAction, state: &mut MonitorState) {
+    match action {
+        KeyAction::ToggleLayout => state.toggle_layout(),
+        KeyAction::ToggleQueueTab => state.toggle_queue_tab(),
+        KeyAction::EscapeQueueTab => {
             if state.queue_tab {
                 state.queue_tab = false;
             }
         }
         _ => {}
     }
+}
+
+fn handle_message_interaction(
+    action: KeyAction,
+    state: &mut MonitorState,
+    command_tx: &UnboundedSender<MonitorCommand>,
+) {
+    let item = match state.queue.get(state.queue_index) {
+        Some(item) => item,
+        None => return,
+    };
+
+    match action {
+        KeyAction::Answer => match item.message.kind {
+            MessageKind::Question => process_question_item(state, item.message.id),
+            MessageKind::Authorization => {
+                send_response(
+                    command_tx,
+                    item.message.id,
+                    None,
+                    ResponseType::AuthorizationApproved,
+                );
+                state.next_queue();
+            }
+            _ => {}
+        },
+        KeyAction::Deny => {
+            if item.message.kind == MessageKind::Authorization {
+                send_response(
+                    command_tx,
+                    item.message.id,
+                    None,
+                    ResponseType::AuthorizationDenied,
+                );
+                state.next_queue();
+            }
+        }
+        KeyAction::Activate => match item.message.kind {
+            MessageKind::Question => process_question_item(state, item.message.id),
+            MessageKind::Authorization => process_authorization_item(state, item.message.id),
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
+fn process_question_item(state: &mut MonitorState, target: Uuid) {
+    state.input_mode = InputMode::Answer { target };
+    state.answer_buffer.clear();
+}
+
+fn process_authorization_item(state: &mut MonitorState, target: Uuid) {
+    state.input_mode = InputMode::Authorization { target };
 }
 
 fn send_response(
