@@ -288,6 +288,57 @@ Stream live ailoop channels for every project/branch in the workspace via a term
 newton monitor
 ```
 
+**Setup with ailoop:**
+
+`newton monitor` works with [ailoop](https://github.com/goailoop/ailoop), a human-in-the-loop messaging server for AI agents. To use newton monitor:
+
+1. **Install ailoop:**
+   ```bash
+   # Using Homebrew
+   brew install ailoop
+
+   # Or using cargo
+   cargo install ailoop-cli
+   ```
+
+2. **Start the ailoop server:**
+   ```bash
+   ailoop serve
+   # Default: WebSocket on ws://127.0.0.1:8080, HTTP API on http://127.0.0.1:8081
+   ```
+
+3. **Start newton monitor in another terminal:**
+   ```bash
+   newton monitor --http-url http://127.0.0.1:8081 --ws-url ws://127.0.0.1:8080
+   ```
+
+4. **Send messages from agents or other terminals:**
+   ```bash
+   # Send a notification
+   ailoop say "Task completed successfully" --server ws://127.0.0.1:8080 --channel myproject
+
+   # Ask a question
+   ailoop ask "Should I proceed with deployment?" --server ws://127.0.0.1:8080 --channel myproject
+
+   # Request authorization
+   ailoop authorize "Push to production branch" --server ws://127.0.0.1:8080 --channel myproject
+   ```
+
+Messages will appear in the newton monitor UI in real-time. Interactive messages (questions, authorizations) appear in the queue panel where you can respond directly.
+
+**Configuration:**
+
+To avoid passing URLs each time, create `.newton/configs/monitor.conf`:
+```
+ailoop_server_http_url=http://127.0.0.1:8081
+ailoop_server_ws_url=ws://127.0.0.1:8080
+```
+
+Then simply run:
+```bash
+newton monitor
+```
+
 ### `init <workspace-path>`
 
 Bootstrap a workspace from an installed Newton template. See **Quick Start → Setting up a new project** for the minimal flow that gets a fresh directory to `newton run`. `newton init` renders `.newton/scripts`, `.newton/state`, and `newton.toml`, seeds `GOAL.md`, and keeps everything in sync with the template variables (`project_name`, `coding_agent`, `coding_agent_model`, `test_command`, `language`). The command requires `aikit` to be available on `PATH` and at least one template directory under `.newton/templates/` (templates can be installed via `aikit` packages or checked in alongside your projects).
@@ -529,6 +580,65 @@ Reports include detailed statistics:
 - Changes applied per iteration
 - Resource usage metrics
 - Success/failure rates
+
+## Troubleshooting
+
+### Monitor Issues
+
+**Monitor not receiving messages:**
+
+1. **Verify ailoop server is running:**
+   ```bash
+   # Check if ailoop is listening on the correct ports
+   lsof -i :8080 -i :8081
+   ```
+
+2. **Check connection in monitor logs:**
+   ```bash
+   RUST_LOG=newton=debug,info newton monitor --http-url http://127.0.0.1:8081 --ws-url ws://127.0.0.1:8080
+   ```
+   Look for "Subscription message sent successfully" and "Parsed message" logs.
+
+3. **Test ailoop server directly:**
+   ```bash
+   # In one terminal
+   ailoop serve
+
+   # In another terminal, test sending a message
+   ailoop say "Test message" --server ws://127.0.0.1:8080 --channel test
+   ```
+
+4. **Verify message format:**
+   Messages sent to ailoop must match the expected format:
+   ```json
+   {
+     "id": "<uuid>",
+     "channel": "channel-name",
+     "sender_type": "AGENT",
+     "content": {
+       "type": "notification",
+       "text": "Message text",
+       "priority": "normal"
+     },
+     "timestamp": "2024-01-15T10:00:00Z"
+   }
+   ```
+
+**Common errors in ailoop serve:**
+
+- `Failed to parse message: missing field 'sender_type'` - Message is missing required fields
+- `unknown variant 'agent', expected 'AGENT' or 'HUMAN'` - sender_type must be uppercase
+- `expected struct Message` - Message structure is incorrect
+
+**Configuration issues:**
+
+If monitor can't find the ailoop URLs, ensure you have either:
+- Command-line flags: `--http-url` and `--ws-url`
+- Or a config file at `.newton/configs/monitor.conf` with:
+  ```
+  ailoop_server_http_url=http://127.0.0.1:8081
+  ailoop_server_ws_url=ws://127.0.0.1:8080
+  ```
 
 ## License
 

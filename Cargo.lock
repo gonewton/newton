@@ -1330,7 +1330,7 @@ dependencies = [
 
 [[package]]
 name = "newton"
-version = "0.5.19"
+version = "0.5.23"
 dependencies = [
  "aikit-sdk",
  "anyhow",

@@ -161,11 +161,41 @@ pub async fn websocket_loop(client: AiloopClient, event_tx: UnboundedSender<Moni
                 }));
                 backoff = StdDuration::from_secs(1);
                 let (mut writer, mut reader) = stream.split();
+
+                // Subscribe to all channels by sending a notification message
+                // Note: ailoop automatically subscribes connections when they send messages
+                let subscribe_msg = serde_json::json!({
+                    "id": Uuid::new_v4().to_string(),
+                    "channel": "*",
+                    "sender_type": "AGENT",
+                    "content": {
+                        "type": "notification",
+                        "text": "newton monitor connected",
+                        "priority": "low"
+                    },
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                });
+                if let Ok(msg_text) = serde_json::to_string(&subscribe_msg) {
+                    tracing::info!("Sending subscription message: {}", msg_text);
+                    if let Err(e) = writer.send(Message::Text(msg_text)).await {
+                        tracing::error!("Failed to send subscription: {}", e);
+                    } else {
+                        tracing::info!("Subscription message sent successfully");
+                    }
+                }
+
                 while let Some(message) = reader.next().await {
                     match message {
                         Ok(Message::Text(txt)) => {
-                            if let Ok(parsed) = serde_json::from_str::<MonitorMessage>(&txt) {
-                                let _ = event_tx.send(MonitorEvent::Message(parsed));
+                            tracing::debug!("Received WebSocket text: {}", txt);
+                            match serde_json::from_str::<MonitorMessage>(&txt) {
+                                Ok(parsed) => {
+                                    tracing::info!("Parsed message: {:?}", parsed.summary);
+                                    let _ = event_tx.send(MonitorEvent::Message(parsed));
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Failed to parse message: {} - Raw: {}", e, txt);
+                                }
                             }
                         }
                         Ok(Message::Binary(bytes)) => {
