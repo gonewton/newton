@@ -1,7 +1,7 @@
 use clap::Args;
 use std::path::PathBuf;
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct RunArgs {
     /// Path containing Newton manifests and artifacts
     #[arg(value_name = "PATH", default_value = ".")]
@@ -158,7 +158,7 @@ impl RunArgs {
     }
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct BatchArgs {
     /// Project identifier that maps to .newton/configs/<project_id>.conf
     #[arg(value_name = "PROJECT_ID")]
@@ -177,7 +177,7 @@ pub struct BatchArgs {
     pub sleep: u64,
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct StepArgs {
     /// Path to read/write Newton artifacts from
     #[arg(value_name = "PATH")]
@@ -192,7 +192,7 @@ pub struct StepArgs {
     pub verbose: bool,
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct InitArgs {
     /// Directory where .newton/ will be created (defaults to current directory)
     #[arg(value_name = "PATH")]
@@ -203,7 +203,7 @@ pub struct InitArgs {
     pub template_source: Option<String>,
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct StatusArgs {
     /// Identifier of the execution to inspect
     #[arg(value_name = "EXECUTION")]
@@ -214,7 +214,7 @@ pub struct StatusArgs {
     pub path: PathBuf,
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct ReportArgs {
     /// Execution whose insights should be summarized
     #[arg(value_name = "EXECUTION")]
@@ -248,7 +248,7 @@ pub struct MonitorArgs {
     pub ws_url: Option<String>,
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct ErrorArgs {
     /// Execution ID whose failures should be analyzed
     #[arg(value_name = "EXECUTION")]

@@ -14,7 +14,7 @@ USAGE:\n    {usage}\n\
 \nOPTIONS:\n{options}\n\
 WORKFLOW COMMANDS:\n{subcommands}\n";
 
-#[derive(Parser)]
+#[derive(Parser, Clone)]
 #[command(name = "newton")]
 #[command(version = crate::VERSION)]
 #[command(about = "Newton Loop optimization framework in Rust")]
@@ -27,7 +27,7 @@ pub struct Args {
     pub command: Command,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum Command {
     #[command(

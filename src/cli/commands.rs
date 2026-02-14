@@ -1,5 +1,9 @@
 use crate::{
-    cli::args::{BatchArgs, ErrorArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
+    ailoop_integration,
+    cli::{
+        args::{BatchArgs, ErrorArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
+        Command,
+    },
     core::{
         batch_config::{find_workspace_root, BatchProjectConfig},
         entities::ExecutionStatus,
@@ -17,7 +21,7 @@ use std::{
     env, fs,
     io::Write,
     path::{Path, PathBuf},
-    process::Command,
+    process::Command as ProcessCommand,
     time::Duration,
 };
 use tokio::time::sleep;
@@ -140,6 +144,8 @@ pub async fn run(args: RunArgs) -> Result<()> {
     tracing::info!("Starting Newton Loop optimization run");
 
     let workspace_path = args.path.clone();
+    let command_clone = Command::Run(args.clone());
+    let mut ailoop_context = ailoop_integration::init_context(&workspace_path, &command_clone)?;
 
     let newton_config = if let Some(ref path) = args.config {
         ConfigLoader::load_from_file(path)?.unwrap_or_default()
@@ -167,8 +173,15 @@ pub async fn run(args: RunArgs) -> Result<()> {
             exec_config,
             &additional_env,
             Some(&success_policy),
+            ailoop_context.as_ref(),
         )
         .await;
+
+    if let Some(ctx) = ailoop_context.take() {
+        if let Err(err) = ctx.shutdown().await {
+            tracing::warn!(error = ?err, "ailoop context shutdown failed");
+        }
+    }
 
     match execution {
         Ok(execution) => report_run_result(execution),
@@ -545,6 +558,9 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
 pub async fn step(args: StepArgs) -> Result<()> {
     tracing::info!("Executing single step");
 
+    let command_clone = Command::Step(args.clone());
+    let mut ailoop_context = ailoop_integration::init_context(&args.path, &command_clone)?;
+
     let reporter = Box::new(DefaultErrorReporter);
     let orchestrator = OptimizationOrchestrator::new(JsonSerializer, FileUtils, reporter);
 
@@ -563,10 +579,24 @@ pub async fn step(args: StepArgs) -> Result<()> {
         verbose: args.verbose,
     };
 
-    orchestrator
-        .run_optimization(&args.path, exec_config)
-        .await?;
+    let additional_env = std::collections::HashMap::new();
+    let run_result = orchestrator
+        .run_optimization_with_policy(
+            &args.path,
+            exec_config,
+            &additional_env,
+            None,
+            ailoop_context.as_ref(),
+        )
+        .await;
 
+    if let Some(ctx) = ailoop_context.take() {
+        if let Err(err) = ctx.shutdown().await {
+            tracing::warn!(error = ?err, "ailoop context shutdown failed");
+        }
+    }
+
+    run_result?;
     Ok(())
 }
 
@@ -809,7 +839,7 @@ fn run_batch_hook_script(
     script: &str,
     env_vars: &HashMap<String, String>,
 ) -> Result<std::process::ExitStatus> {
-    let status = Command::new("sh")
+    let status = ProcessCommand::new("sh")
         .arg("-c")
         .arg(script)
         .current_dir(project_root)
@@ -897,7 +927,7 @@ fn derive_branch_name(goal_file: &Path, task_id: &str) -> String {
 fn detect_base_branch(project_root: &Path) -> String {
     let default_branch = "main".to_string();
 
-    let output = match Command::new("git")
+    let output = match ProcessCommand::new("git")
         .arg("-C")
         .arg(project_root)
         .arg("rev-parse")

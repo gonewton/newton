@@ -339,6 +339,29 @@ Then simply run:
 newton monitor
 ```
 
+### Ailoop observability for `run`/`batch`/`step`
+
+Newton can now stream lifecycle events, tool stdout/stderr, and interactive prompts directly to the same ailoop server used by `newton monitor`. Create a workspace config (under `.newton/configs/*.conf`) that defines both `ailoop_server_http_url` and `ailoop_server_ws_url`, optionally adding `ailoop_channel` and `ailoop_fail_fast`. The CLI obeys the following environment overrides when present:
+
+- `NEWTON_AILOOP_INTEGRATION=1|on` enables the integration; `0|disabled` skips it; `fail-fast` aborts early when the transport cannot connect.
+- `NEWTON_AILOOP_HTTP_URL`, `NEWTON_AILOOP_WS_URL`, `NEWTON_AILOOP_CHANNEL` override the workspace config values for the current session.
+- `NEWTON_AILOOP_FAIL_FAST=1` makes transport failures fatal instead of best-effort.
+
+When integration is active, Newton injects the following variables into every tool subprocess:
+
+- `NEWTON_AILOOP_ENABLED=1`
+- `NEWTON_AILOOP_HTTP_URL`
+- `NEWTON_AILOOP_WS_URL`
+- `NEWTON_AILOOP_CHANNEL`
+
+Tool scripts can consume these variables to call the ailoop helper client, request human approvals/questions with explicit timeouts, or emit notifications that are non-blocking for the orchestrator. Tool stdout/stderr is forwarded line-by-line to the configured channel, while still being printed locally for auditability. If the remote endpoint is unreachable, runs continue normally unless `NEWTON_AILOOP_FAIL_FAST` (or the workspace `ailoop_fail_fast` flag) is set, in which case Newton surfaces an error.
+
+The `monitor` command keeps working as before; the new integration simply wires the orchestration path into the same ailoop feed when you opt in.
+
+Tool scripts can instantiate `newton::ailoop_integration::tool_client::ToolClient` by reading the injected environment variables. The helper exposes `ask_question`, `request_authorization`, and `send_notification`, all honoring explicit timeouts so tools keep running when humans do not respond; each call returns a `ToolInteractionOutcome` that documents whether an answer arrived, an authorization was approved/denied, or the request timed out. Newton also flushes outstanding events during shutdown (with a short bounded timeout), so remote observers see the final lifecycle status before the process exits.
+
+For more detail on the new helpers, reliability safeguards, and manual validation commands, see `docs/ailoop_integration.md`.
+
 ### `init <workspace-path>`
 
 Bootstrap a workspace from an installed Newton template. See **Quick Start → Setting up a new project** for the minimal flow that gets a fresh directory to `newton run`. `newton init` renders `.newton/scripts`, `.newton/state`, and `newton.toml`, seeds `GOAL.md`, and keeps everything in sync with the template variables (`project_name`, `coding_agent`, `coding_agent_model`, `test_command`, `language`). The command requires `aikit` to be available on `PATH` and at least one template directory under `.newton/templates/` (templates can be installed via `aikit` packages or checked in alongside your projects).

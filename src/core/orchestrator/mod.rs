@@ -1,8 +1,14 @@
 #![allow(clippy::unnecessary_cast)]
 
+use crate::ailoop_integration::{
+    output_forwarder::{OutputForwarder, StreamKind},
+    workflow_emitter::{WorkflowEvent, WorkflowEventType},
+    AiloopContext,
+};
 use crate::core::entities::*;
 use crate::core::entities::{ExecutionConfiguration, Iteration, ToolMetadata};
 use crate::core::error::{AppError, ErrorReporter};
+use crate::core::types::ErrorCategory;
 use crate::tools::ToolResult;
 use crate::utils::serialization::{FileUtils, JsonSerializer};
 use std::path::{Path, PathBuf};
@@ -47,6 +53,7 @@ impl OptimizationOrchestrator {
             configuration,
             &std::collections::HashMap::new(),
             None,
+            None,
         )
         .await
     }
@@ -57,6 +64,7 @@ impl OptimizationOrchestrator {
         configuration: ExecutionConfiguration,
         additional_env: &std::collections::HashMap<String, String>,
         success_policy: Option<&crate::core::success_policy::SuccessPolicy>,
+        ailoop_context: Option<&AiloopContext>,
     ) -> Result<OptimizationExecution, AppError> {
         self.reporter.report_info("Starting optimization run");
 
@@ -81,6 +89,19 @@ impl OptimizationOrchestrator {
             configuration: configuration.clone(),
         };
 
+        emit_workflow_event(
+            ailoop_context,
+            WorkflowEventType::ExecutionStarted,
+            &execution,
+            None,
+            Some("execution".to_string()),
+            format!("{:?}", execution.status),
+            Some("Execution started".to_string()),
+            None,
+        );
+
+        ensure_ailoop_health(ailoop_context)?;
+
         let mut current_iteration = 0;
         let start_time = Instant::now();
         let mut max_iterations = configuration.max_iterations.unwrap_or(100);
@@ -95,6 +116,7 @@ impl OptimizationOrchestrator {
         ));
 
         loop {
+            ensure_ailoop_health(ailoop_context)?;
             if let Some(limit) = configuration.max_iterations {
                 if current_iteration >= limit {
                     self.reporter.report_info("Maximum iterations reached");
@@ -115,8 +137,19 @@ impl OptimizationOrchestrator {
                 }
             }
 
+            let iteration_number = current_iteration + 1;
             self.reporter
-                .report_info(&format!("Starting iteration {}", current_iteration + 1));
+                .report_info(&format!("Starting iteration {}", iteration_number));
+            emit_workflow_event(
+                ailoop_context,
+                WorkflowEventType::IterationStarted,
+                &execution,
+                Some(iteration_number),
+                Some("iteration".to_string()),
+                "running".to_string(),
+                Some(format!("Iteration {} started", iteration_number)),
+                compute_progress_percent(configuration.max_iterations, iteration_number),
+            );
 
             let iteration_result = self
                 .run_iteration(
@@ -125,6 +158,7 @@ impl OptimizationOrchestrator {
                     &configuration,
                     additional_env,
                     success_policy,
+                    ailoop_context,
                 )
                 .await;
 
@@ -134,6 +168,18 @@ impl OptimizationOrchestrator {
                     execution.total_iterations_completed += 1;
                     current_iteration += 1;
                     execution.current_iteration = Some(current_iteration);
+
+                    let completed_iteration = current_iteration;
+                    emit_workflow_event(
+                        ailoop_context,
+                        WorkflowEventType::IterationCompleted,
+                        &execution,
+                        Some(completed_iteration),
+                        Some("iteration".to_string()),
+                        "completed".to_string(),
+                        Some(format!("Iteration {} completed", completed_iteration)),
+                        compute_progress_percent(configuration.max_iterations, completed_iteration),
+                    );
 
                     if let Some(policy) = success_policy {
                         if policy.should_stop()? {
@@ -149,6 +195,19 @@ impl OptimizationOrchestrator {
                     }
                 }
                 Err(e) => {
+                    emit_workflow_event(
+                        ailoop_context,
+                        WorkflowEventType::ExecutionFailed,
+                        &execution,
+                        Some(current_iteration + 1),
+                        Some("execution".to_string()),
+                        "failed".to_string(),
+                        Some(e.message.clone()),
+                        compute_progress_percent(
+                            configuration.max_iterations,
+                            current_iteration + 1,
+                        ),
+                    );
                     self.reporter.report_error(&e);
                     execution.total_iterations_failed += 1;
                     execution.status = ExecutionStatus::Failed;
@@ -166,6 +225,19 @@ impl OptimizationOrchestrator {
             execution.completed_at = Some(chrono::Utc::now());
         }
 
+        ensure_ailoop_health(ailoop_context)?;
+
+        emit_workflow_event(
+            ailoop_context,
+            WorkflowEventType::ExecutionCompleted,
+            &execution,
+            None,
+            Some("execution".to_string()),
+            format!("{:?}", execution.status),
+            Some("Execution completed".to_string()),
+            Some(100),
+        );
+
         self.reporter
             .report_info("Optimization completed successfully");
         Ok(execution)
@@ -178,6 +250,7 @@ impl OptimizationOrchestrator {
         configuration: &ExecutionConfiguration,
         additional_env: &std::collections::HashMap<String, String>,
         success_policy: Option<&crate::core::success_policy::SuccessPolicy>,
+        ailoop_context: Option<&AiloopContext>,
     ) -> Result<Iteration, AppError> {
         let iteration_id = uuid::Uuid::new_v4();
         let start_time = chrono::Utc::now();
@@ -212,6 +285,7 @@ impl OptimizationOrchestrator {
                                 execution,
                                 iteration_number,
                                 additional_env,
+                                ailoop_context,
                             )
                             .await
                         {
@@ -276,6 +350,7 @@ impl OptimizationOrchestrator {
                                 execution,
                                 iteration_number,
                                 additional_env,
+                                ailoop_context,
                             )
                             .await
                         {
@@ -327,6 +402,7 @@ impl OptimizationOrchestrator {
                                 execution,
                                 iteration_number,
                                 additional_env,
+                                ailoop_context,
                             )
                             .await
                         {
@@ -396,6 +472,7 @@ impl OptimizationOrchestrator {
         Ok(iteration)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn execute_tool(
         &self,
         cmd: &str,
@@ -404,6 +481,7 @@ impl OptimizationOrchestrator {
         execution: &OptimizationExecution,
         iteration_number: usize,
         additional_env: &std::collections::HashMap<String, String>,
+        ailoop_context: Option<&AiloopContext>,
     ) -> Result<ToolResult, AppError> {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
         if parts.is_empty() {
@@ -466,6 +544,10 @@ impl OptimizationOrchestrator {
             env_vars.insert(key.clone(), value.clone());
         }
 
+        if let Some(ctx) = ailoop_context {
+            ctx.inject_env(&mut env_vars);
+        }
+
         let env_vars: Vec<(&str, &str)> = env_vars
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
@@ -489,10 +571,25 @@ impl OptimizationOrchestrator {
 
         let stdout_pipe = child.stdout.take();
         let stderr_pipe = child.stderr.take();
+        let output_forwarder = ailoop_context.map(|ctx| ctx.output_forwarder());
 
         let (stdout_buf, stderr_buf) = tokio::join!(
-            stream_child_output(stdout_pipe, tokio::io::stdout(), "stdout"),
-            stream_child_output(stderr_pipe, tokio::io::stderr(), "stderr"),
+            stream_child_output(
+                stdout_pipe,
+                tokio::io::stdout(),
+                "stdout",
+                StreamKind::Stdout,
+                output_forwarder,
+                Some(execution.execution_id),
+            ),
+            stream_child_output(
+                stderr_pipe,
+                tokio::io::stderr(),
+                "stderr",
+                StreamKind::Stderr,
+                output_forwarder,
+                Some(execution.execution_id),
+            ),
         );
 
         let status = child.wait().await.map_err(|e| {
@@ -530,12 +627,21 @@ impl OptimizationOrchestrator {
     }
 }
 
-async fn stream_child_output<R, W>(reader: Option<R>, mut writer: W, label: &'static str) -> Vec<u8>
+async fn stream_child_output<R, W>(
+    reader: Option<R>,
+    mut writer: W,
+    label: &'static str,
+    stream_kind: StreamKind,
+    forwarder: Option<&OutputForwarder>,
+    execution_id: Option<uuid::Uuid>,
+) -> Vec<u8>
 where
     R: AsyncReadExt + Unpin,
     W: AsyncWriteExt + Unpin,
 {
     let mut buffer = Vec::new();
+    let mut pending = String::new();
+
     if let Some(mut reader) = reader {
         let mut chunk = [0u8; 4096];
         loop {
@@ -550,6 +656,13 @@ where
                     if let Err(err) = writer.flush().await {
                         tracing::error!(%label, ?err, "Failed to flush parent {label} output");
                     }
+                    let chunk_text = String::from_utf8_lossy(&chunk[..n]);
+                    pending.push_str(&chunk_text);
+                    while let Some(pos) = pending.find('\n') {
+                        let line = pending[..pos].to_string();
+                        pending.drain(..=pos);
+                        emit_forwarder_line(forwarder, execution_id, stream_kind, &line);
+                    }
                 }
                 Err(err) => {
                     tracing::error!(%label, ?err, "Failed to read {label} from tool");
@@ -559,7 +672,79 @@ where
         }
     }
 
+    if !pending.is_empty() {
+        emit_forwarder_line(forwarder, execution_id, stream_kind, &pending);
+    }
+
     buffer
+}
+
+fn emit_forwarder_line(
+    forwarder: Option<&OutputForwarder>,
+    execution_id: Option<uuid::Uuid>,
+    stream_kind: StreamKind,
+    line: &str,
+) {
+    if let (Some(client), Some(exec_id)) = (forwarder, execution_id) {
+        client.forward_line(exec_id, stream_kind, line);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_workflow_event(
+    context: Option<&AiloopContext>,
+    event_type: WorkflowEventType,
+    execution: &OptimizationExecution,
+    iteration_number: Option<usize>,
+    phase: Option<String>,
+    status: String,
+    message: Option<String>,
+    progress_percent: Option<u8>,
+) {
+    if let Some(ctx) = context {
+        let event = WorkflowEvent {
+            event_type,
+            execution_id: execution.execution_id,
+            iteration_number,
+            phase,
+            status,
+            message,
+            progress_percent,
+            timestamp: chrono::Utc::now(),
+            workspace_identifier: ctx.workspace_identifier().to_string(),
+            command_context: ctx.command_context(),
+        };
+        ctx.notifier().enqueue(event);
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn ensure_ailoop_health(context: Option<&AiloopContext>) -> Result<(), AppError> {
+    if let Some(ctx) = context {
+        if ctx.fail_fast() && ctx.has_transport_failure() {
+            let reason = ctx
+                .transport_failure_message()
+                .unwrap_or_else(|| "ailoop transport failure".to_string());
+            let mut error = AppError::new(
+                ErrorCategory::InternalError,
+                format!("ailoop integration fail-fast triggered: {}", reason),
+            );
+            error.add_context("ailoop", "transport failure");
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+fn compute_progress_percent(max_iterations: Option<usize>, iteration: usize) -> Option<u8> {
+    max_iterations.map(|max| {
+        if max == 0 {
+            100
+        } else {
+            let ratio = (iteration as f32 / max as f32) * 100.0;
+            ratio.clamp(0.0, 100.0) as u8
+        }
+    })
 }
 
 #[cfg(test)]
