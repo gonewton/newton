@@ -1,7 +1,7 @@
 use clap::Args;
 use std::path::PathBuf;
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct RunArgs {
     /// Path containing Newton manifests and artifacts
     #[arg(value_name = "PATH", default_value = ".")]
@@ -158,7 +158,7 @@ impl RunArgs {
     }
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct BatchArgs {
     /// Project identifier that maps to .newton/configs/<project_id>.conf
     #[arg(value_name = "PROJECT_ID")]
