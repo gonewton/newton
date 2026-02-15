@@ -1,3 +1,4 @@
+pub mod ailoop_integration;
 pub mod cli;
 pub mod core;
 pub mod logging;

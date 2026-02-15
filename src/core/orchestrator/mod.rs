@@ -1,5 +1,6 @@
 #![allow(clippy::unnecessary_cast)]
 
+use crate::ailoop_integration::{AiloopContext, OrchestratorNotifier, OutputForwarder};
 use crate::core::entities::*;
 use crate::core::entities::{ExecutionConfiguration, Iteration, ToolMetadata};
 use crate::core::error::{AppError, ErrorReporter};
@@ -7,6 +8,7 @@ use crate::tools::ToolResult;
 use crate::utils::serialization::{FileUtils, JsonSerializer};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -14,6 +16,7 @@ pub struct OptimizationOrchestrator {
     serializer: JsonSerializer,
     file_serializer: FileUtils,
     reporter: Box<dyn ErrorReporter>,
+    ailoop_context: Option<Arc<AiloopContext>>,
 }
 
 impl OptimizationOrchestrator {
@@ -26,6 +29,22 @@ impl OptimizationOrchestrator {
             serializer,
             file_serializer,
             reporter,
+            ailoop_context: None,
+        }
+    }
+
+    /// Create a new orchestrator with ailoop integration.
+    pub fn with_ailoop_context(
+        serializer: JsonSerializer,
+        file_serializer: FileUtils,
+        reporter: Box<dyn ErrorReporter>,
+        ailoop_context: Option<Arc<AiloopContext>>,
+    ) -> Self {
+        OptimizationOrchestrator {
+            serializer,
+            file_serializer,
+            reporter,
+            ailoop_context,
         }
     }
 
@@ -61,6 +80,18 @@ impl OptimizationOrchestrator {
         self.reporter.report_info("Starting optimization run");
 
         let execution_id = uuid::Uuid::new_v4();
+
+        // Initialize ailoop notifier if context is available
+        let notifier = self.ailoop_context.as_ref().map(|ctx| {
+            let notifier = OrchestratorNotifier::new(ctx.clone());
+            // Emit execution started event
+            if let Err(e) =
+                notifier.execution_started(execution_id, workspace_path.display().to_string())
+            {
+                tracing::warn!("Failed to emit execution_started event: {}", e);
+            }
+            notifier
+        });
 
         let mut execution = OptimizationExecution {
             id: uuid::Uuid::new_v4(),
@@ -118,6 +149,13 @@ impl OptimizationOrchestrator {
             self.reporter
                 .report_info(&format!("Starting iteration {}", current_iteration + 1));
 
+            // Emit iteration started event
+            if let Some(ref notifier) = notifier {
+                if let Err(e) = notifier.iteration_started(execution_id, current_iteration) {
+                    tracing::warn!("Failed to emit iteration_started event: {}", e);
+                }
+            }
+
             let iteration_result = self
                 .run_iteration(
                     &execution,
@@ -132,6 +170,16 @@ impl OptimizationOrchestrator {
                 Ok(iteration) => {
                     execution.iterations.push(iteration);
                     execution.total_iterations_completed += 1;
+
+                    // Emit iteration completed event
+                    if let Some(ref notifier) = notifier {
+                        if let Err(e) =
+                            notifier.iteration_completed(execution_id, current_iteration)
+                        {
+                            tracing::warn!("Failed to emit iteration_completed event: {}", e);
+                        }
+                    }
+
                     current_iteration += 1;
                     execution.current_iteration = Some(current_iteration);
 
@@ -153,6 +201,16 @@ impl OptimizationOrchestrator {
                     execution.total_iterations_failed += 1;
                     execution.status = ExecutionStatus::Failed;
                     execution.completed_at = Some(chrono::Utc::now());
+
+                    // Emit execution failed event
+                    if let Some(ref notifier) = notifier {
+                        if let Err(emit_err) =
+                            notifier.execution_failed(execution_id, e.to_string())
+                        {
+                            tracing::warn!("Failed to emit execution_failed event: {}", emit_err);
+                        }
+                    }
+
                     return Err(e);
                 }
             }
@@ -164,6 +222,17 @@ impl OptimizationOrchestrator {
         }
         if execution.completed_at.is_none() {
             execution.completed_at = Some(chrono::Utc::now());
+        }
+
+        // Emit execution completed event
+        if let Some(ref notifier) = notifier {
+            if let Err(e) = notifier.execution_completed(
+                execution_id,
+                execution.status.clone(),
+                execution.total_iterations_completed,
+            ) {
+                tracing::warn!("Failed to emit execution_completed event: {}", e);
+            }
         }
 
         self.reporter
@@ -461,6 +530,20 @@ impl OptimizationOrchestrator {
             execution.execution_id.to_string(),
         );
 
+        // Add ailoop environment variables if integration is enabled
+        if let Some(ref ctx) = self.ailoop_context {
+            env_vars.insert("NEWTON_AILOOP_ENABLED".to_string(), "1".to_string());
+            env_vars.insert(
+                "NEWTON_AILOOP_HTTP_URL".to_string(),
+                ctx.http_url().to_string(),
+            );
+            env_vars.insert("NEWTON_AILOOP_WS_URL".to_string(), ctx.ws_url().to_string());
+            env_vars.insert(
+                "NEWTON_AILOOP_CHANNEL".to_string(),
+                ctx.channel().to_string(),
+            );
+        }
+
         // Merge additional environment variables
         for (key, value) in additional_env {
             env_vars.insert(key.clone(), value.clone());
@@ -490,9 +573,27 @@ impl OptimizationOrchestrator {
         let stdout_pipe = child.stdout.take();
         let stderr_pipe = child.stderr.take();
 
+        // Initialize output forwarder if ailoop is enabled
+        let forwarder = self
+            .ailoop_context
+            .as_ref()
+            .map(|ctx| OutputForwarder::new(ctx.clone()));
+
         let (stdout_buf, stderr_buf) = tokio::join!(
-            stream_child_output(stdout_pipe, tokio::io::stdout(), "stdout"),
-            stream_child_output(stderr_pipe, tokio::io::stderr(), "stderr"),
+            stream_child_output(
+                stdout_pipe,
+                tokio::io::stdout(),
+                "stdout",
+                forwarder.clone(),
+                Some(execution.execution_id),
+            ),
+            stream_child_output(
+                stderr_pipe,
+                tokio::io::stderr(),
+                "stderr",
+                forwarder,
+                Some(execution.execution_id),
+            ),
         );
 
         let status = child.wait().await.map_err(|e| {
@@ -530,7 +631,13 @@ impl OptimizationOrchestrator {
     }
 }
 
-async fn stream_child_output<R, W>(reader: Option<R>, mut writer: W, label: &'static str) -> Vec<u8>
+async fn stream_child_output<R, W>(
+    reader: Option<R>,
+    mut writer: W,
+    label: &'static str,
+    forwarder: Option<OutputForwarder>,
+    execution_id: Option<uuid::Uuid>,
+) -> Vec<u8>
 where
     R: AsyncReadExt + Unpin,
     W: AsyncWriteExt + Unpin,
@@ -538,17 +645,50 @@ where
     let mut buffer = Vec::new();
     if let Some(mut reader) = reader {
         let mut chunk = [0u8; 4096];
+        let mut line_buffer = Vec::new();
+
         loop {
             match reader.read(&mut chunk).await {
-                Ok(0) => break,
+                Ok(0) => {
+                    // Flush any remaining line buffer
+                    if !line_buffer.is_empty() && forwarder.is_some() {
+                        let line = String::from_utf8_lossy(&line_buffer).to_string();
+                        if let Some(ref fwd) = forwarder {
+                            let _ = match label {
+                                "stdout" => fwd.forward_stdout(line, execution_id).await,
+                                "stderr" => fwd.forward_stderr(line, execution_id).await,
+                                _ => Ok(()),
+                            };
+                        }
+                    }
+                    break;
+                }
                 Ok(n) => {
                     buffer.extend_from_slice(&chunk[..n]);
+
+                    // Write to local output
                     if let Err(err) = writer.write_all(&chunk[..n]).await {
                         tracing::error!(%label, ?err, "Failed to forward {label} output");
                         break;
                     }
                     if let Err(err) = writer.flush().await {
                         tracing::error!(%label, ?err, "Failed to flush parent {label} output");
+                    }
+
+                    // Forward lines to ailoop if enabled
+                    if let Some(ref fwd) = forwarder {
+                        for &byte in &chunk[..n] {
+                            line_buffer.push(byte);
+                            if byte == b'\n' {
+                                let line = String::from_utf8_lossy(&line_buffer).to_string();
+                                let _ = match label {
+                                    "stdout" => fwd.forward_stdout(line, execution_id).await,
+                                    "stderr" => fwd.forward_stderr(line, execution_id).await,
+                                    _ => Ok(()),
+                                };
+                                line_buffer.clear();
+                            }
+                        }
                     }
                 }
                 Err(err) => {

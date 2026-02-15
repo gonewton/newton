@@ -1,5 +1,7 @@
 use crate::{
+    ailoop_integration,
     cli::args::{BatchArgs, ErrorArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
+    cli::Command as CliCommand,
     core::{
         batch_config::{find_workspace_root, BatchProjectConfig},
         entities::ExecutionStatus,
@@ -12,6 +14,7 @@ use crate::{
 };
 use anyhow::{anyhow, Error};
 use chrono::Utc;
+use std::sync::Arc;
 use std::{
     collections::HashMap,
     env, fs,
@@ -158,8 +161,31 @@ pub async fn run(args: RunArgs) -> Result<()> {
         .unwrap_or_else(|| workspace_path.join("newton_control.json"));
     let success_policy = SuccessPolicy::from_path(control_file_path);
 
+    // Initialize ailoop context
+    let ailoop_context =
+        match ailoop_integration::init_context(&workspace_path, &CliCommand::Run(args.clone())) {
+            Ok(ctx) => {
+                if let Some(ref context) = ctx {
+                    tracing::info!(
+                        "Ailoop integration enabled for channel: {}",
+                        context.channel()
+                    );
+                }
+                ctx.map(Arc::new)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize ailoop integration: {}", e);
+                None
+            }
+        };
+
     let reporter = Box::new(DefaultErrorReporter);
-    let orchestrator = OptimizationOrchestrator::new(JsonSerializer, FileUtils, reporter);
+    let orchestrator = OptimizationOrchestrator::with_ailoop_context(
+        JsonSerializer,
+        FileUtils,
+        reporter,
+        ailoop_context,
+    );
 
     let execution = orchestrator
         .run_optimization_with_policy(
@@ -403,6 +429,7 @@ fn handle_failure(
 pub async fn batch(args: BatchArgs) -> Result<()> {
     tracing::info!("Starting batch runner for project {}", args.project_id);
 
+    let args_clone = args.clone();
     let workspace_root = resolve_workspace_root(args.workspace)?;
     let configs_dir = workspace_root.join(".newton").join("configs");
     if !configs_dir.is_dir() {
@@ -491,6 +518,28 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
             Err(err) => Err(err),
             Ok(()) => {
                 write_run_log(&state_dir, "Starting Newton run")?;
+
+                // Initialize ailoop context for batch
+                let ailoop_ctx = match ailoop_integration::init_context(
+                    &workspace_root,
+                    &CliCommand::Batch(args_clone.clone()),
+                ) {
+                    Ok(ctx) => {
+                        if let Some(ref context) = ctx {
+                            tracing::info!(
+                                "Ailoop integration enabled for batch task {} on channel: {}",
+                                task_id,
+                                context.channel()
+                            );
+                        }
+                        ctx.map(Arc::new)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to initialize ailoop integration for batch: {}", e);
+                        None
+                    }
+                };
+
                 let run_args = RunArgs::for_batch_with_tools(
                     batch_config.project_root.clone(),
                     Some(spec_path.clone()),
@@ -502,7 +551,37 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
                     batch_config.verbose,
                     Some(control_file_path.clone()),
                 );
-                let result = run(run_args).await;
+
+                // Run with ailoop context
+                let newton_config = ConfigLoader::load_from_workspace(&batch_config.project_root)?;
+                ConfigValidator::validate(&newton_config)?;
+
+                let (_goal_file, additional_env) =
+                    build_run_additional_env(&run_args, &batch_config.project_root)?;
+                let exec_config = build_run_exec_config(&run_args, &batch_config.project_root);
+                let success_policy = SuccessPolicy::from_path(control_file_path.clone());
+
+                let reporter = Box::new(DefaultErrorReporter);
+                let orchestrator = OptimizationOrchestrator::with_ailoop_context(
+                    JsonSerializer,
+                    FileUtils,
+                    reporter,
+                    ailoop_ctx,
+                );
+
+                let result = orchestrator
+                    .run_optimization_with_policy(
+                        &batch_config.project_root,
+                        exec_config,
+                        &additional_env,
+                        Some(&success_policy),
+                    )
+                    .await;
+
+                let result = match result {
+                    Ok(execution) => report_run_result(execution),
+                    Err(e) => Err(e.into()),
+                };
                 write_run_log(
                     &state_dir,
                     &format!(
