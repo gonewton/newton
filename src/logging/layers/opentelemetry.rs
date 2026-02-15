@@ -8,9 +8,11 @@ use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::registry::LookupSpan;
 use url::Url;
 
+/// Guard that flushes and shuts down the OpenTelemetry tracer provider on drop.
 pub struct OpenTelemetryGuard(SdkTracerProvider);
 
 impl OpenTelemetryGuard {
+    /// Wraps the configured tracer provider to keep its lifecycle alive.
     pub fn new(provider: SdkTracerProvider) -> Self {
         Self(provider)
     }
