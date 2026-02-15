@@ -86,13 +86,14 @@ fn parse_message(value: Value) -> Result<MonitorMessage, anyhow::Error> {
     let choices = array_field_strings(&content, &["choices"]);
     let response_type = string_field(&content, &["response_type", "responseType"]);
 
-    let summary = build_summary(
-        &kind,
-        text.as_deref(),
-        detail.as_deref(),
-        &choices,
-        response_type.as_deref(),
-    );
+    let summary_params = SummaryParams {
+        kind: &kind,
+        text: text.as_deref(),
+        detail: detail.as_deref(),
+        choices: &choices,
+        response_type: response_type.as_deref(),
+    };
+    let summary = build_summary(&summary_params);
 
     Ok(MonitorMessage {
         id,
@@ -109,62 +110,67 @@ fn parse_message(value: Value) -> Result<MonitorMessage, anyhow::Error> {
     })
 }
 
-fn build_summary(
-    kind: &MessageKind,
-    text: Option<&str>,
-    detail: Option<&str>,
-    choices: &[String],
-    response_type: Option<&str>,
-) -> String {
-    match kind {
+struct SummaryParams<'a> {
+    kind: &'a MessageKind,
+    text: Option<&'a str>,
+    detail: Option<&'a str>,
+    choices: &'a [String],
+    response_type: Option<&'a str>,
+}
+
+fn build_summary(params: &SummaryParams) -> String {
+    match params.kind {
         MessageKind::Question => {
-            let question = text.unwrap_or("Question");
-            if choices.is_empty() {
+            let question = params.text.unwrap_or("Question");
+            if params.choices.is_empty() {
                 format!("Question: {}", question)
             } else {
-                let choice_list = choices.join(", ");
+                let choice_list = params.choices.join(", ");
                 format!("Question: {} [{}]", question, choice_list)
             }
         }
         MessageKind::Authorization => {
-            let action = detail.unwrap_or("Authorization required");
+            let action = params.detail.unwrap_or("Authorization required");
             format!("Authorization: {}", action)
         }
         MessageKind::Notification => {
-            format!("Notification: {}", text.unwrap_or("Notification"))
+            format!("Notification: {}", params.text.unwrap_or("Notification"))
         }
         MessageKind::Response => {
-            let target = response_type.unwrap_or("response");
+            let target = params.response_type.unwrap_or("response");
             format!("Response: {}", target)
         }
         MessageKind::Navigate => {
-            format!("Navigate: {}", text.unwrap_or("Navigate"))
+            format!("Navigate: {}", params.text.unwrap_or("Navigate"))
         }
         MessageKind::WorkflowProgress => {
-            format!("Workflow progress: {}", text.unwrap_or("In-flight"))
+            format!("Workflow progress: {}", params.text.unwrap_or("In-flight"))
         }
         MessageKind::WorkflowCompleted => {
-            format!("Workflow completed: {}", text.unwrap_or("Done"))
+            format!("Workflow completed: {}", params.text.unwrap_or("Done"))
         }
         MessageKind::Stdout => {
-            format!("stdout: {}", text.unwrap_or(""))
+            format!("stdout: {}", params.text.unwrap_or(""))
         }
         MessageKind::Stderr => {
-            format!("stderr: {}", text.unwrap_or(""))
+            format!("stderr: {}", params.text.unwrap_or(""))
         }
         MessageKind::TaskCreate => {
-            format!("Task created: {}", text.unwrap_or("Task"))
+            format!("Task created: {}", params.text.unwrap_or("Task"))
         }
         MessageKind::TaskUpdate => {
-            format!("Task update: {}", text.unwrap_or("Task updated"))
+            format!("Task update: {}", params.text.unwrap_or("Task updated"))
         }
         MessageKind::TaskDependencyAdd => {
-            format!("Dependency added: {}", text.unwrap_or("Dependency change"))
+            format!(
+                "Dependency added: {}",
+                params.text.unwrap_or("Dependency change")
+            )
         }
         MessageKind::TaskDependencyRemove => {
             format!(
                 "Dependency removed: {}",
-                text.unwrap_or("Dependency change")
+                params.text.unwrap_or("Dependency change")
             )
         }
         MessageKind::Unknown(label) => label.clone(),
@@ -178,16 +184,18 @@ fn string_field(value: &Value, keys: &[&str]) -> Option<String> {
 }
 
 fn timestamp_field(value: &Value) -> Option<DateTime<Utc>> {
-    if let Some(ts) = value.get("timestamp").and_then(|v| v.as_str()) {
-        if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
-            return Some(dt.with_timezone(&Utc));
-        }
+    let ts_value = value.get("timestamp")?;
+
+    if let Some(ts) = ts_value.as_str() {
+        return DateTime::parse_from_rfc3339(ts)
+            .ok()
+            .map(|dt| dt.with_timezone(&Utc));
     }
-    if let Some(ts_num) = value.get("timestamp").and_then(|v| v.as_i64()) {
-        if let Some(dt) = Utc.timestamp_opt(ts_num, 0).single() {
-            return Some(dt);
-        }
+
+    if let Some(ts_num) = ts_value.as_i64() {
+        return Utc.timestamp_opt(ts_num, 0).single();
     }
+
     None
 }
 

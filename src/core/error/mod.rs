@@ -83,6 +83,26 @@ impl std::fmt::Display for AppError {
 
 impl std::error::Error for AppError {}
 
+macro_rules! impl_error_from {
+    ($error_type:ty, $category:expr, $code:expr, $suggestion:expr) => {
+        impl From<$error_type> for AppError {
+            fn from(e: $error_type) -> Self {
+                AppError {
+                    category: $category,
+                    severity: ErrorSeverity::Error,
+                    code: $code.to_string(),
+                    message: e.to_string(),
+                    context: HashMap::new(),
+                    recovery_suggestions: vec![$suggestion.to_string()],
+                    occurred_at: Utc::now(),
+                    stack_trace: None,
+                    source: Some(anyhow::anyhow!(e)),
+                }
+            }
+        }
+    };
+}
+
 impl From<anyhow::Error> for AppError {
     fn from(e: anyhow::Error) -> Self {
         AppError {
@@ -105,21 +125,12 @@ impl AppError {
     }
 }
 
-impl From<std::io::Error> for AppError {
-    fn from(e: std::io::Error) -> Self {
-        AppError {
-            category: ErrorCategory::IoError,
-            severity: ErrorSeverity::Error,
-            code: "IO_ERROR".to_string(),
-            message: e.to_string(),
-            context: HashMap::new(),
-            recovery_suggestions: vec!["Check file permissions and paths".to_string()],
-            occurred_at: Utc::now(),
-            stack_trace: None,
-            source: Some(anyhow::anyhow!(e)),
-        }
-    }
-}
+impl_error_from!(
+    std::io::Error,
+    ErrorCategory::IoError,
+    "IO_ERROR",
+    "Check file permissions and paths"
+);
 
 pub trait ErrorReporter {
     fn report_error(&self, error: &AppError);

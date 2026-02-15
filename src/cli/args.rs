@@ -134,13 +134,28 @@ impl RunArgs {
         verbose: bool,
         control_file_path: Option<PathBuf>,
     ) -> Self {
-        RunArgs {
-            path: project_root,
-            max_iterations: max_iterations.unwrap_or(5),
-            max_time: max_time.unwrap_or(3600),
+        let config = BatchRunConfig {
+            project_root,
+            goal_file,
             evaluator_cmd,
             advisor_cmd,
             executor_cmd,
+            max_iterations,
+            max_time,
+            verbose,
+            control_file_path,
+        };
+        Self::from_batch_config(config)
+    }
+
+    fn from_batch_config(config: BatchRunConfig) -> Self {
+        RunArgs {
+            path: config.project_root,
+            max_iterations: config.max_iterations.unwrap_or(5),
+            max_time: config.max_time.unwrap_or(3600),
+            evaluator_cmd: config.evaluator_cmd,
+            advisor_cmd: config.advisor_cmd,
+            executor_cmd: config.executor_cmd,
             evaluator_status_file: PathBuf::from("artifacts/evaluator_status.md"),
             advisor_recommendations_file: PathBuf::from("artifacts/advisor_recommendations.md"),
             executor_log_file: PathBuf::from("artifacts/executor_log.md"),
@@ -148,14 +163,27 @@ impl RunArgs {
             evaluator_timeout: None,
             advisor_timeout: None,
             executor_timeout: None,
-            verbose,
+            verbose: config.verbose,
             config: None,
             goal: None,
-            goal_file,
-            control_file: control_file_path,
+            goal_file: config.goal_file,
+            control_file: config.control_file_path,
             feedback: None,
         }
     }
+}
+
+/// Configuration for batch run arguments
+pub struct BatchRunConfig {
+    pub project_root: PathBuf,
+    pub goal_file: Option<PathBuf>,
+    pub evaluator_cmd: Option<String>,
+    pub advisor_cmd: Option<String>,
+    pub executor_cmd: Option<String>,
+    pub max_iterations: Option<usize>,
+    pub max_time: Option<u64>,
+    pub verbose: bool,
+    pub control_file_path: Option<PathBuf>,
 }
 
 #[derive(Args, Clone)]

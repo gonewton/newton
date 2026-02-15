@@ -429,31 +429,16 @@ fn handle_failure(
 pub async fn batch(args: BatchArgs) -> Result<()> {
     tracing::info!("Starting batch runner for project {}", args.project_id);
 
-    let args_clone = args.clone();
-    let workspace_root = resolve_workspace_root(args.workspace)?;
-    let configs_dir = workspace_root.join(".newton").join("configs");
-    if !configs_dir.is_dir() {
-        return Err(anyhow!(
-            "Workspace {} must contain .newton/configs",
-            workspace_root.display()
-        ));
-    }
-
+    let workspace_root = validate_batch_workspace(args.workspace.clone())?;
     let batch_config = BatchProjectConfig::load(&workspace_root, &args.project_id)?;
     let dirs = ensure_batch_dirs(&workspace_root, &args.project_id)?;
 
     loop {
-        let plan_file = match next_plan_file(&dirs.todo_dir)? {
-            Some(path) => path,
-            None => {
-                if args.once {
-                    tracing::info!("Queue empty; exiting after --once");
-                    return Ok(());
-                }
-                sleep_if_needed(args.sleep).await;
-                continue;
-            }
-        };
+        let plan_file = fetch_next_task(&dirs.todo_dir, args.once, args.sleep).await?;
+        if plan_file.is_none() {
+            return Ok(());
+        }
+        let plan_file = plan_file.unwrap();
 
         let task_id =
             sanitize_task_id(plan_file.file_name().and_then(|n| n.to_str()).unwrap_or(""));
@@ -461,137 +446,19 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
         let (spec_path, state_dir, control_file_path) =
             setup_task_dirs_and_state(&batch_config, &task_id, &plan_file, batch_config.resume)?;
 
-        let branch_name = derive_branch_name(&spec_path, &task_id);
-        let base_branch = detect_base_branch(&batch_config.project_root);
-        let coder_cmd = batch_config
-            .coder_cmd
-            .as_ref()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                workspace_root
-                    .join(".newton")
-                    .join("scripts")
-                    .join("coder.sh")
-            });
+        let context = prepare_batch_context(
+            &batch_config,
+            &args.project_id,
+            &task_id,
+            &spec_path,
+            &workspace_root,
+            &state_dir,
+            &control_file_path,
+        );
 
-        let context = BatchTaskContext {
-            batch_config: batch_config.clone(),
-            project_id: args.project_id.clone(),
-            task_id: task_id.clone(),
-            goal_file: spec_path.clone(),
-            workspace_root: workspace_root.clone(),
-            state_dir: state_dir.clone(),
-            control_file: control_file_path.clone(),
-            branch_name: branch_name.clone(),
-            base_branch: base_branch.clone(),
-        };
+        let overrides = setup_task_environment(&context, &workspace_root);
 
-        let project_root_str = batch_config.project_root.display().to_string();
-        let workspace_root_str = workspace_root.display().to_string();
-        let state_dir_str = state_dir.display().to_string();
-        let coder_cmd_str = coder_cmd.display().to_string();
-        let control_file_str = control_file_path.display().to_string();
-
-        let env_pairs = [
-            ("CODING_AGENT", batch_config.coding_agent.as_str()),
-            ("CODING_AGENT_MODEL", batch_config.coding_model.as_str()),
-            (
-                "NEWTON_EXECUTOR_CODING_AGENT",
-                batch_config.coding_agent.as_str(),
-            ),
-            (
-                "NEWTON_EXECUTOR_CODING_AGENT_MODEL",
-                batch_config.coding_model.as_str(),
-            ),
-            ("NEWTON_PROJECT_ROOT", project_root_str.as_str()),
-            ("NEWTON_PROJECT_ID", args.project_id.as_str()),
-            ("NEWTON_TASK_ID", task_id.as_str()),
-            ("NEWTON_WS_ROOT", workspace_root_str.as_str()),
-            ("NEWTON_STATE_DIR", state_dir_str.as_str()),
-            ("NEWTON_CODER_CMD", coder_cmd_str.as_str()),
-            ("NEWTON_BRANCH_NAME", branch_name.as_str()),
-            ("NEWTON_CONTROL_FILE", control_file_str.as_str()),
-        ];
-        let overrides = apply_env_overrides(&env_pairs);
-
-        let run_result = match run_pre_run_hook(&batch_config, &context, &plan_file) {
-            Err(err) => Err(err),
-            Ok(()) => {
-                write_run_log(&state_dir, "Starting Newton run")?;
-
-                // Initialize ailoop context for batch
-                let ailoop_ctx = match ailoop_integration::init_context(
-                    &workspace_root,
-                    &CliCommand::Batch(args_clone.clone()),
-                ) {
-                    Ok(ctx) => {
-                        if let Some(ref context) = ctx {
-                            tracing::info!(
-                                "Ailoop integration enabled for batch task {} on channel: {}",
-                                task_id,
-                                context.channel()
-                            );
-                        }
-                        ctx.map(Arc::new)
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to initialize ailoop integration for batch: {}", e);
-                        None
-                    }
-                };
-
-                let run_args = RunArgs::for_batch_with_tools(
-                    batch_config.project_root.clone(),
-                    Some(spec_path.clone()),
-                    batch_config.evaluator_cmd.clone(),
-                    batch_config.advisor_cmd.clone(),
-                    batch_config.executor_cmd.clone(),
-                    batch_config.max_iterations,
-                    batch_config.max_time,
-                    batch_config.verbose,
-                    Some(control_file_path.clone()),
-                );
-
-                // Run with ailoop context
-                let newton_config = ConfigLoader::load_from_workspace(&batch_config.project_root)?;
-                ConfigValidator::validate(&newton_config)?;
-
-                let (_goal_file, additional_env) =
-                    build_run_additional_env(&run_args, &batch_config.project_root)?;
-                let exec_config = build_run_exec_config(&run_args, &batch_config.project_root);
-                let success_policy = SuccessPolicy::from_path(control_file_path.clone());
-
-                let reporter = Box::new(DefaultErrorReporter);
-                let orchestrator = OptimizationOrchestrator::with_ailoop_context(
-                    JsonSerializer,
-                    FileUtils,
-                    reporter,
-                    ailoop_ctx,
-                );
-
-                let result = orchestrator
-                    .run_optimization_with_policy(
-                        &batch_config.project_root,
-                        exec_config,
-                        &additional_env,
-                        Some(&success_policy),
-                    )
-                    .await;
-
-                let result = match result {
-                    Ok(execution) => report_run_result(execution),
-                    Err(e) => Err(e.into()),
-                };
-                write_run_log(
-                    &state_dir,
-                    &format!(
-                        "Newton run finished: {}",
-                        if result.is_ok() { "success" } else { "failure" }
-                    ),
-                )?;
-                result
-            }
-        };
+        let run_result = execute_batch_task(&context, &args, &workspace_root, &plan_file).await;
 
         if run_result.is_ok() {
             if handle_success(
@@ -618,6 +485,196 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
         )?;
 
         sleep_if_needed(args.sleep).await;
+    }
+}
+
+fn validate_batch_workspace(workspace: Option<PathBuf>) -> Result<PathBuf> {
+    let workspace_root = resolve_workspace_root(workspace)?;
+    let configs_dir = workspace_root.join(".newton").join("configs");
+    if !configs_dir.is_dir() {
+        return Err(anyhow!(
+            "Workspace {} must contain .newton/configs",
+            workspace_root.display()
+        ));
+    }
+    Ok(workspace_root)
+}
+
+async fn fetch_next_task(
+    todo_dir: &Path,
+    once: bool,
+    sleep_duration: u64,
+) -> Result<Option<PathBuf>> {
+    loop {
+        if let Some(path) = next_plan_file(todo_dir)? {
+            return Ok(Some(path));
+        }
+        if once {
+            tracing::info!("Queue empty; exiting after --once");
+            return Ok(None);
+        }
+        sleep_if_needed(sleep_duration).await;
+    }
+}
+
+fn prepare_batch_context(
+    batch_config: &BatchProjectConfig,
+    project_id: &str,
+    task_id: &str,
+    spec_path: &Path,
+    workspace_root: &Path,
+    state_dir: &Path,
+    control_file: &Path,
+) -> BatchTaskContext {
+    let branch_name = derive_branch_name(spec_path, task_id);
+    let base_branch = detect_base_branch(&batch_config.project_root);
+
+    BatchTaskContext {
+        batch_config: batch_config.clone(),
+        project_id: project_id.to_string(),
+        task_id: task_id.to_string(),
+        goal_file: spec_path.to_path_buf(),
+        workspace_root: workspace_root.to_path_buf(),
+        state_dir: state_dir.to_path_buf(),
+        control_file: control_file.to_path_buf(),
+        branch_name,
+        base_branch,
+    }
+}
+
+fn setup_task_environment(
+    context: &BatchTaskContext,
+    workspace_root: &Path,
+) -> Vec<(String, Option<String>)> {
+    let coder_cmd = context
+        .batch_config
+        .coder_cmd
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            workspace_root
+                .join(".newton")
+                .join("scripts")
+                .join("coder.sh")
+        });
+
+    let project_root_str = context.batch_config.project_root.display().to_string();
+    let workspace_root_str = context.workspace_root.display().to_string();
+    let state_dir_str = context.state_dir.display().to_string();
+    let coder_cmd_str = coder_cmd.display().to_string();
+    let control_file_str = context.control_file.display().to_string();
+
+    let env_pairs = [
+        ("CODING_AGENT", context.batch_config.coding_agent.as_str()),
+        (
+            "CODING_AGENT_MODEL",
+            context.batch_config.coding_model.as_str(),
+        ),
+        (
+            "NEWTON_EXECUTOR_CODING_AGENT",
+            context.batch_config.coding_agent.as_str(),
+        ),
+        (
+            "NEWTON_EXECUTOR_CODING_AGENT_MODEL",
+            context.batch_config.coding_model.as_str(),
+        ),
+        ("NEWTON_PROJECT_ROOT", project_root_str.as_str()),
+        ("NEWTON_PROJECT_ID", context.project_id.as_str()),
+        ("NEWTON_TASK_ID", context.task_id.as_str()),
+        ("NEWTON_WS_ROOT", workspace_root_str.as_str()),
+        ("NEWTON_STATE_DIR", state_dir_str.as_str()),
+        ("NEWTON_CODER_CMD", coder_cmd_str.as_str()),
+        ("NEWTON_BRANCH_NAME", context.branch_name.as_str()),
+        ("NEWTON_CONTROL_FILE", control_file_str.as_str()),
+    ];
+    apply_env_overrides(&env_pairs)
+}
+
+async fn execute_batch_task(
+    context: &BatchTaskContext,
+    args: &BatchArgs,
+    workspace_root: &Path,
+    plan_file: &Path,
+) -> Result<()> {
+    run_pre_run_hook(&context.batch_config, context, plan_file)?;
+
+    write_run_log(&context.state_dir, "Starting Newton run")?;
+
+    let ailoop_ctx = initialize_ailoop_context(workspace_root, args, &context.task_id)?;
+
+    let run_args = RunArgs::for_batch_with_tools(
+        context.batch_config.project_root.clone(),
+        Some(context.goal_file.clone()),
+        context.batch_config.evaluator_cmd.clone(),
+        context.batch_config.advisor_cmd.clone(),
+        context.batch_config.executor_cmd.clone(),
+        context.batch_config.max_iterations,
+        context.batch_config.max_time,
+        context.batch_config.verbose,
+        Some(context.control_file.clone()),
+    );
+
+    let newton_config = ConfigLoader::load_from_workspace(&context.batch_config.project_root)?;
+    ConfigValidator::validate(&newton_config)?;
+
+    let (_goal_file, additional_env) =
+        build_run_additional_env(&run_args, &context.batch_config.project_root)?;
+    let exec_config = build_run_exec_config(&run_args, &context.batch_config.project_root);
+    let success_policy = SuccessPolicy::from_path(context.control_file.clone());
+
+    let reporter = Box::new(DefaultErrorReporter);
+    let orchestrator = OptimizationOrchestrator::with_ailoop_context(
+        JsonSerializer,
+        FileUtils,
+        reporter,
+        ailoop_ctx,
+    );
+
+    let result = orchestrator
+        .run_optimization_with_policy(
+            &context.batch_config.project_root,
+            exec_config,
+            &additional_env,
+            Some(&success_policy),
+        )
+        .await;
+
+    let result = match result {
+        Ok(execution) => report_run_result(execution),
+        Err(e) => Err(e.into()),
+    };
+
+    write_run_log(
+        &context.state_dir,
+        &format!(
+            "Newton run finished: {}",
+            if result.is_ok() { "success" } else { "failure" }
+        ),
+    )?;
+
+    result
+}
+
+fn initialize_ailoop_context(
+    workspace_root: &Path,
+    args: &BatchArgs,
+    task_id: &str,
+) -> Result<Option<Arc<ailoop_integration::AiloopContext>>> {
+    match ailoop_integration::init_context(workspace_root, &CliCommand::Batch(args.clone())) {
+        Ok(ctx) => {
+            if let Some(ref context) = ctx {
+                tracing::info!(
+                    "Ailoop integration enabled for batch task {} on channel: {}",
+                    task_id,
+                    context.channel()
+                );
+            }
+            Ok(ctx.map(Arc::new))
+        }
+        Err(e) => {
+            tracing::warn!("Failed to initialize ailoop integration for batch: {}", e);
+            Ok(None)
+        }
     }
 }
 

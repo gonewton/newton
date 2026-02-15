@@ -30,6 +30,19 @@ pub fn load_monitor_endpoints(
     workspace_root: &Path,
     overrides: MonitorOverrides,
 ) -> Result<MonitorEndpoints> {
+    let configs_dir = validate_configs_dir(workspace_root)?;
+    let mut accumulator = ConfigPair::from_overrides(overrides);
+
+    load_monitor_conf(&configs_dir, &mut accumulator)?;
+
+    if !accumulator.ready() {
+        scan_config_files(&configs_dir, &mut accumulator)?;
+    }
+
+    finalize_endpoints(accumulator, workspace_root, &configs_dir)
+}
+
+fn validate_configs_dir(workspace_root: &Path) -> Result<PathBuf> {
     let configs_dir = workspace_root.join(".newton").join("configs");
     if !configs_dir.is_dir() {
         return Err(anyhow!(
@@ -37,46 +50,58 @@ pub fn load_monitor_endpoints(
             workspace_root.display()
         ));
     }
+    Ok(configs_dir)
+}
 
-    let mut accumulator = ConfigPair::from_overrides(overrides);
-
+fn load_monitor_conf(configs_dir: &Path, accumulator: &mut ConfigPair) -> Result<()> {
     let monitor_conf = configs_dir.join("monitor.conf");
-    if monitor_conf.is_file() {
-        if let Some(overridden) = parse_config_entry(&monitor_conf)? {
-            accumulator.merge(overridden);
-        }
+    if !monitor_conf.is_file() {
+        return Ok(());
     }
 
+    if let Some(pair) = parse_config_entry(&monitor_conf)? {
+        accumulator.merge(pair);
+    }
+    Ok(())
+}
+
+fn scan_config_files(configs_dir: &Path, accumulator: &mut ConfigPair) -> Result<()> {
+    let monitor_conf = configs_dir.join("monitor.conf");
+    let mut entries: Vec<_> = fs::read_dir(configs_dir)?
+        .filter_map(|e| e.ok())
+        .filter(|entry| entry.path().is_file())
+        .collect();
+    entries.sort_by_key(|entry| entry.file_name());
+
+    for entry in entries {
+        if entry.path() == monitor_conf {
+            continue;
+        }
+        if let Some(pair) = parse_config_entry(&entry.path())? {
+            accumulator.merge(pair);
+            if accumulator.ready() {
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn finalize_endpoints(
+    accumulator: ConfigPair,
+    workspace_root: &Path,
+    configs_dir: &Path,
+) -> Result<MonitorEndpoints> {
     if !accumulator.ready() {
-        let mut entries: Vec<_> = fs::read_dir(&configs_dir)?
-            .filter_map(|e| e.ok())
-            .filter(|entry| entry.path().is_file())
-            .collect();
-        entries.sort_by_key(|entry| entry.file_name());
-
-        for entry in entries {
-            if entry.path() == monitor_conf {
-                continue;
-            }
-            if let Some(pair) = parse_config_entry(&entry.path())? {
-                accumulator.merge(pair);
-                if accumulator.ready() {
-                    break;
-                }
-            }
-        }
-    }
-
-    if accumulator.ready() {
-        accumulator
-            .into_endpoints(workspace_root.to_path_buf())
-            .map_err(|e| anyhow!("parsing monitor endpoints: {}", e))
-    } else {
-        Err(anyhow!(
+        return Err(anyhow!(
             "Could not find a config under {} that defines both ailoop_server_http_url and ailoop_server_ws_url",
             configs_dir.display()
-        ))
+        ));
     }
+
+    accumulator
+        .into_endpoints(workspace_root.to_path_buf())
+        .map_err(|e| anyhow!("parsing monitor endpoints: {}", e))
 }
 
 struct ConfigPair {
