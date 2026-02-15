@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod core;
+pub mod logging;
 pub mod monitor;
 pub mod tools;
 pub mod utils;

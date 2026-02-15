@@ -190,6 +190,35 @@ Hook commands always run with `sh -c "<value>"` inside the project root. `before
 
 Workspace discovery and the `.conf` parser in `core/batch_config` are shared with the upcoming monitor so logic is not duplicated.
 
+## Logging
+
+Newton routing now keeps logs deterministic across every command by mapping the CLI command and environment to an execution context. Contexts are:
+
+- **TUI**: `newton monitor` with no console output (logs persist to file only).
+- **LocalDev**: interactive commands such as `run`, `step`, `status`, `report`, `error`, and `init`; console output defaults to `stderr`.
+- **Batch**: `newton batch` runs in quiet mode, writing only to files unless overridden.
+- **RemoteAgent**: any command run with `NEWTON_REMOTE_AGENT=1` (except `monitor`) – file logging stays enabled and console output remains disabled.
+
+All commands write to `<workspace>/.newton/logs/newton.log` when a workspace is detected, or to `$HOME/.newton/logs/newton.log` as a fallback. The directory is created automatically when missing, and paths provided via config are normalized to avoid accidental traversal.
+
+Newton looks for an optional `.newton/config/logging.toml` file and applies the settings only when the file exists. Invalid values (such as a malformed OpenTelemetry endpoint) fail fast with a clear message, while the absence of the config file is not treated as an error.
+
+### Configuration precedence
+
+Logging behavior can be customized via:
+
+1. CLI flags (future-proof – none exist yet for this feature).
+2. Environment variables such as `RUST_LOG`, `NEWTON_REMOTE_AGENT`, and `OTEL_EXPORTER_OTLP_ENDPOINT`.
+3. `.newton/config/logging.toml` using keys like `logging.log_dir`, `logging.default_level`, `logging.enable_file`, `logging.console_output`, and the `logging.opentelemetry.*` table.
+4. Built-in defaults (`info` level, file enabled, console only for local dev, no telemetry).
+
+OpenTelemetry exports only activate when either `logging.opentelemetry.endpoint` or `OTEL_EXPORTER_OTLP_ENDPOINT` provides a valid URL, and the endpoint string is validated before use. The framework always honors `RUST_LOG` as the highest-priority level filter so you can drive verbosity without touching the config file.
+
+### Troubleshooting TUI/logging conflicts
+
+- If `newton monitor` shows garbled output when you run `RUST_LOG=debug`, confirm no console sink is configured (`console_output` defaults to `none` in the TUI context) and inspect `<workspace>/.newton/logs/newton.log` for the emitted events.
+- To temporarily force console logging for debugging, set `logging.console_output = "stderr"` or add `logging.console_output = "stdout"` and rely on the file sink for production runs.
+- Setting `NEWTON_REMOTE_AGENT=1` switches the context to `RemoteAgent`, which guarantees file logging remains active even when the console is disabled, making it ideal for remote workers or batch troubleshooting.
 ### `step <workspace-path>`
 
 Execute a single evaluation-advice-execution iteration.

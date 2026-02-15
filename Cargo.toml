@@ -11,7 +11,7 @@ anyhow = "1.0"
 aikit-sdk = "0.1.49"
 thiserror = "1.0"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
@@ -26,6 +26,12 @@ tokio-tungstenite = { version = "0.20", features = ["__rustls-tls"] }
 tungstenite = { version = "0.20", features = ["__rustls-tls"] }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 url = "2"
+dirs-next = "2"
+tracing-appender = "0.2.4"
+tracing-opentelemetry = "0.32"
+opentelemetry = "0.31"
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
+opentelemetry_sdk = "0.31"
 futures = "0.3"
 
 [dev-dependencies]
@@ -92,3 +98,7 @@ path = "tests/unit/test_config_comprehensive.rs"
 [[test]]
 name = "test_config_loading"
 path = "tests/integration/test_config_loading.rs"
+
+[[bin]]
+name = "logging_integration_helper"
+path = "tests/bin/logging_integration_helper.rs"
