@@ -37,11 +37,7 @@ async fn test_execute_simple_command() {
 
     // Use a command that should exist on most systems
     let result = executor
-        .execute(
-            "echo 'hello world'",
-            &config,
-            &temp_dir.path().to_path_buf(),
-        )
+        .execute("echo 'hello world'", &config, temp_dir.path())
         .await;
 
     assert!(result.is_ok());
@@ -72,11 +68,7 @@ async fn test_execute_command_with_args() {
     };
 
     let result = executor
-        .execute(
-            "echo 'test with args'",
-            &config,
-            &temp_dir.path().to_path_buf(),
-        )
+        .execute("echo 'test with args'", &config, temp_dir.path())
         .await;
 
     assert!(result.is_ok());
@@ -133,7 +125,7 @@ async fn test_execute_failing_command() {
 
     // Use a command that should fail
     let result = executor
-        .execute("/usr/bin/false", &config, &temp_dir.path().to_path_buf())
+        .execute("/usr/bin/false", &config, temp_dir.path())
         .await;
 
     assert!(result.is_ok());
@@ -166,11 +158,7 @@ async fn test_execute_nonexistent_command() {
 
     // Use a command that doesn't exist
     let result = executor
-        .execute(
-            "nonexistent_command_12345",
-            &config,
-            &temp_dir.path().to_path_buf(),
-        )
+        .execute("nonexistent_command_12345", &config, temp_dir.path())
         .await;
 
     assert!(result.is_err());
@@ -196,9 +184,7 @@ async fn test_execute_empty_command_returns_error() {
         verbose: false,
     };
 
-    let result = executor
-        .execute("", &config, &temp_dir.path().to_path_buf())
-        .await;
+    let result = executor.execute("", &config, temp_dir.path()).await;
 
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -230,9 +216,7 @@ async fn test_execute_whitespace_command_returns_error() {
         verbose: false,
     };
 
-    let result = executor
-        .execute("   ", &config, &temp_dir.path().to_path_buf())
-        .await;
+    let result = executor.execute("   ", &config, temp_dir.path()).await;
 
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -260,7 +244,7 @@ async fn test_tool_result_structure() {
     };
 
     let result = executor
-        .execute("echo 'test'", &config, &temp_dir.path().to_path_buf())
+        .execute("echo 'test'", &config, temp_dir.path())
         .await;
 
     assert!(result.is_ok());
@@ -314,7 +298,7 @@ async fn test_environment_variables_comprehensive() {
     };
 
     let result = executor
-        .execute("echo 'env test'", &config, &temp_dir.path().to_path_buf())
+        .execute("echo 'env test'", &config, temp_dir.path())
         .await;
 
     assert!(result.is_ok());

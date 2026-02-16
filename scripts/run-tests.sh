@@ -69,9 +69,11 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Requirements:"
             echo "  - cargo-nextest: Fast test runner for Rust"
+            echo "  - cargo-clippy: Rust linter (included with rustup)"
             echo ""
             echo "Install requirements:"
             echo "  cargo install cargo-nextest"
+            echo "  rustup component add clippy"
             exit 0
             ;;
         *)
@@ -85,6 +87,7 @@ echo -e "${YELLOW}Checking dependencies...${NC}" >&2
 
 check_command "cargo" "Cargo (Rust package manager)"
 check_command "cargo-nextest" "cargo-nextest (install with: cargo install cargo-nextest)"
+check_command "cargo-clippy" "cargo-clippy (install with: rustup component add clippy)"
 
 echo -e "${GREEN}All dependencies found!${NC}" >&2
 echo "" >&2
@@ -95,6 +98,16 @@ NEWTON_DIR="$(dirname "$SCRIPT_DIR")"
 
 echo -e "${YELLOW}Running tests in: $NEWTON_DIR${NC}" >&2
 cd "$NEWTON_DIR"
+
+# Run clippy linter to check code quality
+echo -e "${YELLOW}Running clippy linter...${NC}" >&2
+if ! cargo clippy --all-targets --all-features -- -D warnings 2>&1; then
+    echo -e "${RED}Clippy found issues. Please fix the warnings above before running tests.${NC}" >&2
+    echo -e "${YELLOW}Note: Use -D warnings to treat all warnings as errors${NC}" >&2
+    exit 1
+fi
+echo -e "${GREEN}Clippy checks passed!${NC}" >&2
+echo "" >&2
 
 # Run tests and capture output
 echo -e "${YELLOW}Running tests with cargo-nextest...${NC}" >&2
@@ -142,6 +155,11 @@ else
             FAILED=$(echo "$SUMMARY_LINE" | sed -n 's/.* \([0-9]*\) failed.*/\1/p')
             SKIPPED=$(echo "$SUMMARY_LINE" | sed -n 's/.* \([0-9]*\) skipped.*/\1/p')
         fi
+
+        # Default to 0 if variables are empty
+        PASSED=${PASSED:-0}
+        FAILED=${FAILED:-0}
+        SKIPPED=${SKIPPED:-0}
 
         # Calculate total and percentage
         TOTAL=$((PASSED + FAILED + SKIPPED))
