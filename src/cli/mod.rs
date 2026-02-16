@@ -74,8 +74,35 @@ pub enum Command {
     Error(ErrorArgs),
     #[command(
         about = "Monitor live ailoop channels via a terminal UI",
-        long_about = "Monitor listens to every project/branch channel from the workspace using a WebSocket/HTTP mix and lets you answer questions or approve authorizations in a queue.",
-        after_help = "Example:\n    newton monitor"
+        long_about = "Monitor listens to every project/branch channel from the workspace using a WebSocket/HTTP mix and lets you answer questions or approve authorizations in a queue.\n\n\
+CONFIGURATION:\n  \
+Monitor requires both HTTP and WebSocket endpoints to connect to the ailoop server.\n  \
+Endpoints can come from CLI overrides (--http-url, --ws-url) or workspace config files.\n  \
+Partial overrides are supported: one flag can be set while the other comes from config.\n\n\
+Endpoint discovery order:\n  \
+  1. CLI overrides: --http-url and --ws-url (merged with config if partial)\n  \
+  2. .newton/configs/monitor.conf (if present)\n  \
+  3. First alphabetical .conf file in .newton/configs/ containing both keys\n\n\
+Config files use simple key=value format:\n  \
+  ailoop_server_http_url = http://127.0.0.1:8081\n  \
+  ailoop_server_ws_url = ws://127.0.0.1:8080",
+        after_help = "EXAMPLES:\n  \
+Using both CLI overrides:\n    \
+newton monitor --http-url http://127.0.0.1:8081 --ws-url ws://127.0.0.1:8080\n\n  \
+Using .newton/configs/monitor.conf:\n    \
+newton monitor\n\n  \
+Partial override (HTTP from CLI, WS from config):\n    \
+newton monitor --http-url http://192.168.1.10:8081\n\n\
+TROUBLESHOOTING:\n  \
+Missing URL configuration:\n    \
+If both endpoints are not found, ensure .newton/configs/monitor.conf exists\n    \
+or provide both --http-url and --ws-url on the command line.\n\n  \
+Connection refused / server unavailable:\n    \
+Verify the ailoop server is running at the configured endpoints.\n    \
+Check URLs use correct protocol schemes (http:// and ws://).\n\n  \
+Missing .newton/configs workspace setup:\n    \
+Run 'newton init' in your workspace root to create the .newton directory structure,\n    \
+or manually create .newton/configs/ and add a monitor.conf file."
     )]
     Monitor(MonitorArgs),
 }
