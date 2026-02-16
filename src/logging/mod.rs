@@ -440,7 +440,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn detect_context_matches_table() {
+        env::remove_var("NEWTON_REMOTE_AGENT");
         let mapping = vec![
             (make_run_command(), ExecutionContext::LocalDev),
             (make_step_command(), ExecutionContext::LocalDev),
@@ -580,7 +582,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn determine_opentelemetry_from_config() {
+        env::remove_var("OTEL_EXPORTER_OTLP_ENDPOINT");
         let mut config = LoggingConfigFile {
             log_dir: None,
             default_level: None,

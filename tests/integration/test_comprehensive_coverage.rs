@@ -109,11 +109,7 @@ async fn test_tool_executor_integration() {
     };
 
     let result = executor
-        .execute(
-            "echo 'integration test'",
-            &config,
-            &temp_dir.path().to_path_buf(),
-        )
+        .execute("echo 'integration test'", &config, temp_dir.path())
         .await;
     assert!(result.is_ok());
 
