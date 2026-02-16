@@ -30,8 +30,17 @@ pub fn load_monitor_endpoints(
     workspace_root: &Path,
     overrides: MonitorOverrides,
 ) -> Result<MonitorEndpoints> {
-    let configs_dir = validate_configs_dir(workspace_root)?;
     let mut accumulator = ConfigPair::from_overrides(overrides);
+
+    // If both endpoints are provided via CLI, skip config directory checks
+    if accumulator.ready() {
+        return accumulator
+            .into_endpoints(workspace_root.to_path_buf())
+            .map_err(|e| anyhow!("Failed to parse monitor endpoint URLs: {}", e));
+    }
+
+    // Otherwise, check for config directory
+    let configs_dir = validate_configs_dir(workspace_root)?;
 
     load_monitor_conf(&configs_dir, &mut accumulator)?;
 
@@ -46,8 +55,13 @@ fn validate_configs_dir(workspace_root: &Path) -> Result<PathBuf> {
     let configs_dir = workspace_root.join(".newton").join("configs");
     if !configs_dir.is_dir() {
         return Err(anyhow!(
-            "Workspace {} must contain .newton/configs",
-            workspace_root.display()
+            "Monitor requires .newton/configs/ directory.\n\
+             Expected location: {}\n\n\
+             To fix:\n  \
+             - Run 'newton init' in your workspace root, or\n  \
+             - Manually create the directory and add a monitor.conf file, or\n  \
+             - Provide both --http-url and --ws-url on the command line",
+            configs_dir.display()
         ));
     }
     Ok(configs_dir)
@@ -93,15 +107,30 @@ fn finalize_endpoints(
     configs_dir: &Path,
 ) -> Result<MonitorEndpoints> {
     if !accumulator.ready() {
+        let missing = accumulator.describe_missing();
         return Err(anyhow!(
-            "Could not find a config under {} that defines both ailoop_server_http_url and ailoop_server_ws_url",
-            configs_dir.display()
+            "Monitor endpoint configuration incomplete.\n\
+             Missing: {}\n\n\
+             Checked locations:\n  \
+             - {}/monitor.conf\n  \
+             - Other .conf files in {}\n\n\
+             To fix:\n  \
+             - Create {}/monitor.conf with both keys:\n    \
+             ailoop_server_http_url = http://127.0.0.1:8081\n    \
+             ailoop_server_ws_url = ws://127.0.0.1:8080\n  \
+             - Or provide missing endpoint(s) via CLI:\n    \
+             {}",
+            missing,
+            configs_dir.display(),
+            configs_dir.display(),
+            configs_dir.display(),
+            accumulator.describe_cli_fix()
         ));
     }
 
     accumulator
         .into_endpoints(workspace_root.to_path_buf())
-        .map_err(|e| anyhow!("parsing monitor endpoints: {}", e))
+        .map_err(|e| anyhow!("Failed to parse monitor endpoint URLs: {}", e))
 }
 
 struct ConfigPair {
@@ -130,17 +159,40 @@ impl ConfigPair {
         self.http_url.is_some() && self.ws_url.is_some()
     }
 
+    fn describe_missing(&self) -> String {
+        match (self.http_url.is_some(), self.ws_url.is_some()) {
+            (false, false) => "HTTP and WebSocket endpoints".to_string(),
+            (false, true) => "HTTP endpoint (ailoop_server_http_url)".to_string(),
+            (true, false) => "WebSocket endpoint (ailoop_server_ws_url)".to_string(),
+            (true, true) => "none (both endpoints present)".to_string(),
+        }
+    }
+
+    fn describe_cli_fix(&self) -> String {
+        match (self.http_url.is_some(), self.ws_url.is_some()) {
+            (false, false) => {
+                "newton monitor --http-url http://127.0.0.1:8081 --ws-url ws://127.0.0.1:8080"
+                    .to_string()
+            }
+            (false, true) => "newton monitor --http-url http://127.0.0.1:8081".to_string(),
+            (true, false) => "newton monitor --ws-url ws://127.0.0.1:8080".to_string(),
+            (true, true) => "No CLI fix needed (both endpoints present)".to_string(),
+        }
+    }
+
     fn into_endpoints(self, workspace_root: PathBuf) -> Result<MonitorEndpoints> {
         let http_url = Url::parse(
             self.http_url
                 .as_ref()
-                .ok_or_else(|| anyhow!("missing HTTP URL"))?,
-        )?;
+                .ok_or_else(|| anyhow!("missing HTTP endpoint"))?,
+        )
+        .map_err(|e| anyhow!("Invalid HTTP URL: {}", e))?;
         let ws_url = Url::parse(
             self.ws_url
                 .as_ref()
-                .ok_or_else(|| anyhow!("missing WebSocket URL"))?,
-        )?;
+                .ok_or_else(|| anyhow!("missing WebSocket endpoint"))?,
+        )
+        .map_err(|e| anyhow!("Invalid WebSocket URL: {}", e))?;
         Ok(MonitorEndpoints {
             http_url,
             ws_url,
@@ -152,16 +204,25 @@ impl ConfigPair {
 fn parse_config_entry(path: &Path) -> Result<Option<ConfigPair>> {
     let settings = parse_conf(path)?;
 
-    let http_url = settings
-        .get("ailoop_server_http_url")
-        .map(|v| v.trim().to_string());
-    let ws_url = settings
-        .get("ailoop_server_ws_url")
-        .map(|v| v.trim().to_string());
+    let http_url = settings.get("ailoop_server_http_url").and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+    let ws_url = settings.get("ailoop_server_ws_url").and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
 
-    if http_url.as_ref().map(|s| s.is_empty()).unwrap_or(true)
-        || ws_url.as_ref().map(|s| s.is_empty()).unwrap_or(true)
-    {
+    // Return None only if both are missing; partial configs are valid
+    if http_url.is_none() && ws_url.is_none() {
         return Ok(None);
     }
 

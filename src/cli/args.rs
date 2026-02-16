@@ -267,11 +267,19 @@ pub enum ReportFormat {
 
 #[derive(Args, Clone, Debug)]
 pub struct MonitorArgs {
-    /// Explicit HTTP URL for the ailoop server (default from .newton/configs/)
+    /// Override HTTP endpoint for the ailoop server.
+    ///
+    /// When provided, --ws-url must also be provided (or available in config).
+    /// If omitted, HTTP URL is loaded from .newton/configs/monitor.conf or the
+    /// first alphabetically-sorted .conf file that defines both endpoints.
     #[arg(long, value_name = "URL")]
     pub http_url: Option<String>,
 
-    /// Explicit WebSocket URL for the ailoop server (default from .newton/configs/)
+    /// Override WebSocket endpoint for the ailoop server.
+    ///
+    /// When provided, --http-url must also be provided (or available in config).
+    /// If omitted, WebSocket URL is loaded from .newton/configs/monitor.conf or
+    /// the first alphabetically-sorted .conf file that defines both endpoints.
     #[arg(long, value_name = "URL")]
     pub ws_url: Option<String>,
 }
