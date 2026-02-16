@@ -227,35 +227,8 @@ pub async fn websocket_loop(client: AiloopClient, event_tx: UnboundedSender<Moni
                 }
 
                 while let Some(message) = reader.next().await {
-                    match message {
-                        Ok(Message::Text(txt)) => {
-                            tracing::debug!("Received WebSocket text: {}", txt);
-                            match serde_json::from_str::<MonitorMessage>(&txt) {
-                                Ok(parsed) => {
-                                    tracing::info!("Parsed message: {:?}", parsed.summary);
-                                    let _ = event_tx.send(MonitorEvent::Message(parsed));
-                                }
-                                Err(e) => {
-                                    tracing::warn!("Failed to parse message: {} - Raw: {}", e, txt);
-                                }
-                            }
-                        }
-                        Ok(Message::Binary(bytes)) => {
-                            if let Ok(txt) = String::from_utf8(bytes) {
-                                if let Ok(parsed) = serde_json::from_str::<MonitorMessage>(&txt) {
-                                    let _ = event_tx.send(MonitorEvent::Message(parsed));
-                                }
-                            }
-                        }
-                        Ok(Message::Ping(payload)) => {
-                            let _ = writer.send(Message::Pong(payload)).await;
-                        }
-                        Ok(Message::Close(_)) => break,
-                        Err(err) => {
-                            error!("WebSocket error: {}", err);
-                            break;
-                        }
-                        _ => {}
+                    if !handle_ws_message(message, &mut writer, &event_tx).await {
+                        break;
                     }
                 }
             }
@@ -277,26 +250,85 @@ pub async fn polling_loop(client: AiloopClient, event_tx: UnboundedSender<Monito
     let mut seen = HashSet::new();
     loop {
         interval.tick().await;
-        match client.fetch_channels().await {
-            Ok(channels) => {
-                for channel in channels {
-                    match client.fetch_channel_messages(&channel, 20).await {
-                        Ok(messages) => {
-                            for message in messages {
-                                if seen.insert(message.id) {
-                                    let _ = event_tx.send(MonitorEvent::Message(message));
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            error!("polling messages failed for {}: {}", channel, err);
-                        }
-                    }
+        if let Ok(channels) = client.fetch_channels().await {
+            for channel in channels {
+                let _ = poll_channel_messages(&client, &channel, &mut seen, &event_tx).await;
+            }
+        }
+    }
+}
+
+async fn handle_ws_message(
+    message: Result<Message, tokio_tungstenite::tungstenite::Error>,
+    writer: &mut futures::stream::SplitSink<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        Message,
+    >,
+    event_tx: &UnboundedSender<MonitorEvent>,
+) -> bool {
+    match message {
+        Ok(Message::Text(txt)) => {
+            tracing::debug!("Received WebSocket text: {}", txt);
+            handle_text_message(&txt, event_tx);
+            true
+        }
+        Ok(Message::Binary(bytes)) => {
+            handle_binary_message(bytes, event_tx);
+            true
+        }
+        Ok(Message::Ping(payload)) => {
+            let _ = writer.send(Message::Pong(payload)).await;
+            true
+        }
+        Ok(Message::Close(_)) => false,
+        Err(err) => {
+            error!("WebSocket error: {}", err);
+            false
+        }
+        _ => true,
+    }
+}
+
+fn handle_text_message(txt: &str, event_tx: &UnboundedSender<MonitorEvent>) {
+    match serde_json::from_str::<MonitorMessage>(txt) {
+        Ok(parsed) => {
+            tracing::info!("Parsed message: {:?}", parsed.summary);
+            let _ = event_tx.send(MonitorEvent::Message(parsed));
+        }
+        Err(e) => {
+            tracing::warn!("Failed to parse message: {} - Raw: {}", e, txt);
+        }
+    }
+}
+
+fn handle_binary_message(bytes: Vec<u8>, event_tx: &UnboundedSender<MonitorEvent>) {
+    if let Ok(txt) = String::from_utf8(bytes) {
+        if let Ok(parsed) = serde_json::from_str::<MonitorMessage>(&txt) {
+            let _ = event_tx.send(MonitorEvent::Message(parsed));
+        }
+    }
+}
+
+async fn poll_channel_messages(
+    client: &AiloopClient,
+    channel: &str,
+    seen: &mut HashSet<uuid::Uuid>,
+    event_tx: &UnboundedSender<MonitorEvent>,
+) -> crate::Result<()> {
+    match client.fetch_channel_messages(channel, 20).await {
+        Ok(messages) => {
+            for message in messages {
+                if seen.insert(message.id) {
+                    let _ = event_tx.send(MonitorEvent::Message(message));
                 }
             }
-            Err(err) => {
-                error!("polling channels failed: {}", err);
-            }
+            Ok(())
+        }
+        Err(err) => {
+            error!("polling channel {} failed: {}", channel, err);
+            Err(err)
         }
     }
 }

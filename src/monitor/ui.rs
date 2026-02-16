@@ -86,39 +86,73 @@ fn draw_ui<B: ratatui::backend::Backend>(
         )
         .split(frame.size());
 
-    render_header(frame, chunks[0], state, endpoints, workspace_root);
+    render_header(
+        frame,
+        chunks[0],
+        HeaderParams {
+            state,
+            endpoints,
+            workspace_root,
+        },
+    );
     render_body(frame, chunks[1], state);
     render_status(frame, chunks[2], state);
+}
+
+/// Parameters for rendering the header section
+struct HeaderParams<'a> {
+    state: &'a MonitorState,
+    endpoints: &'a MonitorEndpoints,
+    workspace_root: &'a Path,
 }
 
 fn render_header<B: ratatui::backend::Backend>(
     frame: &mut Frame<B>,
     area: Rect,
-    state: &MonitorState,
-    endpoints: &MonitorEndpoints,
-    workspace_root: &Path,
+    params: HeaderParams,
 ) {
-    let connection = match state.connection_status.state {
+    let content = build_header_lines(&params);
+
+    let header = Paragraph::new(content)
+        .block(
+            Block::default()
+                .title("Newton Monitor")
+                .borders(Borders::ALL),
+        )
+        .wrap(Wrap { trim: true });
+    frame.render_widget(header, area);
+}
+
+fn build_header_lines<'a>(params: &'a HeaderParams<'a>) -> Vec<Line<'a>> {
+    let connection = match params.state.connection_status.state {
         ConnectionState::Connected => "Connected",
         ConnectionState::Connecting => "Connecting",
         ConnectionState::Disconnected => "Disconnected",
     };
 
-    let connection_detail = state
+    let connection_detail = params
+        .state
         .connection_status
         .detail
         .as_deref()
         .unwrap_or_default();
 
-    let layout_name = match state.layout {
+    let layout_name = match params.state.layout {
         StreamLayout::Tiles => "Tiles",
         StreamLayout::List => "List",
     };
 
-    let content = vec![
+    let filter_display = params.state.filter.display();
+    let filter_text = if filter_display.is_empty() {
+        "None".to_string()
+    } else {
+        filter_display
+    };
+
+    vec![
         Line::from(vec![
             Span::styled("Workspace: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(workspace_root.display().to_string()),
+            Span::raw(params.workspace_root.display().to_string()),
         ]),
         Line::from(vec![
             Span::styled(
@@ -129,35 +163,19 @@ fn render_header<B: ratatui::backend::Backend>(
             Span::raw(format!(" {}", connection_detail)),
             Span::raw(" | "),
             Span::styled("Filter: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw({
-                let filter_display = state.filter.display();
-                if filter_display.is_empty() {
-                    "None".to_string()
-                } else {
-                    filter_display
-                }
-            }),
+            Span::raw(filter_text),
             Span::raw(" | "),
             Span::styled("View: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(layout_name),
         ]),
         Line::from(vec![
             Span::styled("HTTP: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(truncate_str(endpoints.http_url.as_str(), 40)),
+            Span::raw(truncate_str(params.endpoints.http_url.as_str(), 40)),
             Span::raw(" "),
             Span::styled("WS: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(truncate_str(endpoints.ws_url.as_str(), 40)),
+            Span::raw(truncate_str(params.endpoints.ws_url.as_str(), 40)),
         ]),
-    ];
-
-    let header = Paragraph::new(content)
-        .block(
-            Block::default()
-                .title("Newton Monitor")
-                .borders(Borders::ALL),
-        )
-        .wrap(Wrap { trim: true });
-    frame.render_widget(header, area);
+    ]
 }
 
 fn render_body<B: ratatui::backend::Backend>(
@@ -193,58 +211,13 @@ fn render_stream<B: ratatui::backend::Backend>(
         .collect();
 
     if channels.is_empty() {
-        let block = Block::default()
-            .title("Stream (empty)")
-            .borders(Borders::ALL);
-        let empty = Paragraph::new("No channels match the current filter.")
-            .block(block)
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(empty, area);
+        render_empty_stream(frame, area);
         return;
     }
 
-    let items = if matches!(state.layout, StreamLayout::Tiles) {
-        channels
-            .iter()
-            .map(|channel| {
-                let mut lines = vec![Line::from(vec![Span::styled(
-                    format!("{} / {}", channel.project, channel.branch),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )])];
-                for message in channel.messages.iter().rev().take(4).rev() {
-                    lines.push(render_message_span(message));
-                }
-                ListItem::new(lines)
-            })
-            .collect::<Vec<_>>()
-    } else {
-        let mut entries = Vec::new();
-        for channel in &channels {
-            for message in channel.messages.iter() {
-                entries.push((channel, message));
-            }
-        }
-        entries.sort_by_key(|(_, message)| message.timestamp);
-        entries
-            .into_iter()
-            .rev()
-            .take(80)
-            .map(|(channel, message)| {
-                let line = Line::from(vec![
-                    Span::styled(
-                        format!("[{} / {}] ", channel.project, channel.branch),
-                        Style::default().fg(Color::LightBlue),
-                    ),
-                    Span::styled(
-                        message.summary.clone(),
-                        Style::default().fg(message_color(message)),
-                    ),
-                ]);
-                ListItem::new(vec![line])
-            })
-            .collect::<Vec<_>>()
+    let items = match state.layout {
+        StreamLayout::Tiles => render_tiles_view(&channels),
+        StreamLayout::List => render_list_view(&channels),
     };
 
     let title = match state.layout {
@@ -255,6 +228,67 @@ fn render_stream<B: ratatui::backend::Backend>(
         .block(Block::default().title(title).borders(Borders::ALL))
         .start_corner(Corner::TopLeft);
     frame.render_widget(list, area);
+}
+
+fn render_empty_stream<B: ratatui::backend::Backend>(frame: &mut Frame<B>, area: Rect) {
+    let block = Block::default()
+        .title("Stream (empty)")
+        .borders(Borders::ALL);
+    let empty = Paragraph::new("No channels match the current filter.")
+        .block(block)
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(empty, area);
+}
+
+fn render_tiles_view<'a>(
+    channels: &'a [&'a crate::monitor::state::ChannelState],
+) -> Vec<ListItem<'a>> {
+    channels
+        .iter()
+        .map(|channel| {
+            let mut lines = vec![Line::from(vec![Span::styled(
+                format!("{} / {}", channel.project, channel.branch),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )])];
+            for message in channel.messages.iter().rev().take(4).rev() {
+                lines.push(render_message_span(message));
+            }
+            ListItem::new(lines)
+        })
+        .collect()
+}
+
+fn render_list_view<'a>(
+    channels: &'a [&'a crate::monitor::state::ChannelState],
+) -> Vec<ListItem<'a>> {
+    let mut entries = Vec::new();
+    for channel in channels {
+        for message in channel.messages.iter() {
+            entries.push((*channel, message));
+        }
+    }
+    entries.sort_by_key(|(_, message)| message.timestamp);
+
+    entries
+        .into_iter()
+        .rev()
+        .take(80)
+        .map(|(channel, message)| {
+            let line = Line::from(vec![
+                Span::styled(
+                    format!("[{} / {}] ", channel.project, channel.branch),
+                    Style::default().fg(Color::LightBlue),
+                ),
+                Span::styled(
+                    message.summary.clone(),
+                    Style::default().fg(message_color(message)),
+                ),
+            ]);
+            ListItem::new(vec![line])
+        })
+        .collect()
 }
 
 fn render_queue<B: ratatui::backend::Backend>(
@@ -480,88 +514,100 @@ fn handle_normal_input(
     command_tx: &UnboundedSender<MonitorCommand>,
 ) {
     match key.code {
-        KeyCode::Char('q') => {
-            state.request_exit();
-        }
-        KeyCode::Char('/') => {
-            state.input_mode = InputMode::Filter;
-            state.filter_input = state.filter.display();
-        }
+        KeyCode::Char('q') => state.request_exit(),
+        KeyCode::Char('/') => handle_filter_start(state),
         KeyCode::Char('n') | KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => {
             state.next_queue();
         }
-        KeyCode::Char('k') | KeyCode::Up => {
-            state.previous_queue();
+        KeyCode::Char('k') | KeyCode::Up => state.previous_queue(),
+        KeyCode::Char('g') => state.queue_index = 0,
+        KeyCode::Char('G') => handle_jump_to_end(state),
+        KeyCode::Char('V') | KeyCode::Char('v') => state.toggle_layout(),
+        KeyCode::Char('Q') => state.toggle_queue_tab(),
+        KeyCode::Char('a') => handle_action_key(state, command_tx),
+        KeyCode::Char('d') => handle_deny_key(state, command_tx),
+        KeyCode::Enter => handle_enter_key(state),
+        KeyCode::Esc => handle_escape_key(state),
+        _ => {}
+    }
+}
+
+fn handle_filter_start(state: &mut MonitorState) {
+    state.input_mode = InputMode::Filter;
+    state.filter_input = state.filter.display();
+}
+
+fn handle_jump_to_end(state: &mut MonitorState) {
+    if !state.queue.is_empty() {
+        state.queue_index = state.queue.len() - 1;
+    }
+}
+
+fn handle_action_key(state: &mut MonitorState, command_tx: &UnboundedSender<MonitorCommand>) {
+    let Some(item) = state.queue.get(state.queue_index) else {
+        return;
+    };
+
+    match item.message.kind {
+        MessageKind::Question => {
+            state.input_mode = InputMode::Answer {
+                target: item.message.id,
+            };
+            state.answer_buffer.clear();
         }
-        KeyCode::Char('g') => {
-            state.queue_index = 0;
-        }
-        KeyCode::Char('G') => {
-            if !state.queue.is_empty() {
-                state.queue_index = state.queue.len() - 1;
-            }
-        }
-        KeyCode::Char('V') | KeyCode::Char('v') => {
-            state.toggle_layout();
-        }
-        KeyCode::Char('Q') => {
-            state.toggle_queue_tab();
-        }
-        KeyCode::Char('a') => {
-            if let Some(item) = state.queue.get(state.queue_index) {
-                match item.message.kind {
-                    MessageKind::Question => {
-                        state.input_mode = InputMode::Answer {
-                            target: item.message.id,
-                        };
-                        state.answer_buffer.clear();
-                    }
-                    MessageKind::Authorization => {
-                        send_response(
-                            command_tx,
-                            item.message.id,
-                            None,
-                            ResponseType::AuthorizationApproved,
-                        );
-                        state.next_queue();
-                    }
-                    _ => {}
-                }
-            }
-        }
-        KeyCode::Char('d') => {
-            if let Some(item) = state.queue.get(state.queue_index) {
-                if item.message.kind == MessageKind::Authorization {
-                    send_response(
-                        command_tx,
-                        item.message.id,
-                        None,
-                        ResponseType::AuthorizationDenied,
-                    );
-                    state.next_queue();
-                }
-            }
-        }
-        KeyCode::Enter => {
-            if let Some(item) = state.queue.get(state.queue_index) {
-                if item.message.kind == MessageKind::Question {
-                    state.input_mode = InputMode::Answer {
-                        target: item.message.id,
-                    };
-                    state.answer_buffer.clear();
-                } else if item.message.kind == MessageKind::Authorization {
-                    state.input_mode = InputMode::Authorization {
-                        target: item.message.id,
-                    };
-                }
-            }
-        }
-        KeyCode::Esc => {
-            if state.queue_tab {
-                state.queue_tab = false;
-            }
+        MessageKind::Authorization => {
+            send_response(
+                command_tx,
+                item.message.id,
+                None,
+                ResponseType::AuthorizationApproved,
+            );
+            state.next_queue();
         }
         _ => {}
+    }
+}
+
+fn handle_deny_key(state: &mut MonitorState, command_tx: &UnboundedSender<MonitorCommand>) {
+    let Some(item) = state.queue.get(state.queue_index) else {
+        return;
+    };
+
+    if item.message.kind == MessageKind::Authorization {
+        send_response(
+            command_tx,
+            item.message.id,
+            None,
+            ResponseType::AuthorizationDenied,
+        );
+        state.next_queue();
+    }
+}
+
+fn handle_enter_key(state: &mut MonitorState) {
+    let Some(item) = state.queue.get(state.queue_index) else {
+        return;
+    };
+
+    match item.message.kind {
+        MessageKind::Question => {
+            state.input_mode = InputMode::Answer {
+                target: item.message.id,
+            };
+            state.answer_buffer.clear();
+        }
+        MessageKind::Authorization => {
+            state.input_mode = InputMode::Authorization {
+                target: item.message.id,
+            };
+        }
+        _ => {}
+    }
+}
+
+fn handle_escape_key(state: &mut MonitorState) {
+    if state.queue_tab {
+        state.queue_tab = false;
     }
 }
 

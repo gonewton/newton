@@ -5,6 +5,15 @@ use std::collections::HashMap;
 
 pub struct EnvManager;
 
+/// Context for setting up Newton environment variables
+pub struct NewtonEnvContext<'a> {
+    pub execution_id: &'a str,
+    pub iteration_number: usize,
+    pub evaluator: Option<&'a ToolMetadata>,
+    pub advisor: Option<&'a ToolMetadata>,
+    pub executor: Option<&'a ToolMetadata>,
+}
+
 impl EnvManager {
     pub fn set_newton_env_vars(
         execution_id: &str,
@@ -13,38 +22,37 @@ impl EnvManager {
         advisor: Option<&ToolMetadata>,
         executor: Option<&ToolMetadata>,
     ) -> HashMap<String, String> {
+        let context = NewtonEnvContext {
+            execution_id,
+            iteration_number,
+            evaluator,
+            advisor,
+            executor,
+        };
+        Self::build_env_vars_from_context(&context)
+    }
+
+    fn build_env_vars_from_context(context: &NewtonEnvContext) -> HashMap<String, String> {
         let mut env_vars = HashMap::new();
 
         env_vars.insert(
-            format!("NEWTON_EXECUTION_{}", execution_id.to_uppercase()),
-            execution_id.to_string(),
+            format!("NEWTON_EXECUTION_{}", context.execution_id.to_uppercase()),
+            context.execution_id.to_string(),
         );
         env_vars.insert(
             "NEWTON_ITERATION_NUMBER".to_string(),
-            iteration_number.to_string(),
+            context.iteration_number.to_string(),
         );
 
-        if let Some(evaluator) = evaluator {
-            env_vars.insert("NEWTON_TOOL_TYPE".to_string(), "evaluator".to_string());
-            env_vars.insert("NEWTON_TOOL_NAME".to_string(), "evaluator".to_string());
-            for (key, value) in &evaluator.environment_variables {
-                env_vars.insert(key.clone(), value.clone());
-            }
-        }
+        let tools = [
+            (context.evaluator, "evaluator"),
+            (context.advisor, "advisor"),
+            (context.executor, "executor"),
+        ];
 
-        if let Some(advisor) = advisor {
-            env_vars.insert("NEWTON_TOOL_TYPE".to_string(), "advisor".to_string());
-            env_vars.insert("NEWTON_TOOL_NAME".to_string(), "advisor".to_string());
-            for (key, value) in &advisor.environment_variables {
-                env_vars.insert(key.clone(), value.clone());
-            }
-        }
-
-        if let Some(executor) = executor {
-            env_vars.insert("NEWTON_TOOL_TYPE".to_string(), "executor".to_string());
-            env_vars.insert("NEWTON_TOOL_NAME".to_string(), "executor".to_string());
-            for (key, value) in &executor.environment_variables {
-                env_vars.insert(key.clone(), value.clone());
+        for (tool_opt, tool_name) in tools {
+            if let Some(tool) = tool_opt {
+                add_tool_env_vars(&mut env_vars, tool_name, tool);
             }
         }
 
@@ -60,6 +68,14 @@ impl EnvManager {
     pub fn clear_newton_env_vars() {
         std::env::remove_var("NEWTON_EXECUTION_ID");
         std::env::remove_var("NEWTON_ITERATION_NUMBER");
+    }
+}
+
+fn add_tool_env_vars(env_vars: &mut HashMap<String, String>, tool_name: &str, tool: &ToolMetadata) {
+    env_vars.insert("NEWTON_TOOL_TYPE".to_string(), tool_name.to_string());
+    env_vars.insert("NEWTON_TOOL_NAME".to_string(), tool_name.to_string());
+    for (key, value) in &tool.environment_variables {
+        env_vars.insert(key.clone(), value.clone());
     }
 }
 

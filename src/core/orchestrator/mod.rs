@@ -642,64 +642,117 @@ where
     R: AsyncReadExt + Unpin,
     W: AsyncWriteExt + Unpin,
 {
+    let Some(mut reader) = reader else {
+        return Vec::new();
+    };
+
     let mut buffer = Vec::new();
-    if let Some(mut reader) = reader {
-        let mut chunk = [0u8; 4096];
-        let mut line_buffer = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let mut line_buffer = Vec::new();
 
-        loop {
-            match reader.read(&mut chunk).await {
-                Ok(0) => {
-                    // Flush any remaining line buffer
-                    if !line_buffer.is_empty() && forwarder.is_some() {
-                        let line = String::from_utf8_lossy(&line_buffer).to_string();
-                        if let Some(ref fwd) = forwarder {
-                            let _ = match label {
-                                "stdout" => fwd.forward_stdout(line, execution_id).await,
-                                "stderr" => fwd.forward_stderr(line, execution_id).await,
-                                _ => Ok(()),
-                            };
-                        }
-                    }
+    loop {
+        match reader.read(&mut chunk).await {
+            Ok(0) => {
+                flush_remaining_line(&line_buffer, &forwarder, label, execution_id).await;
+                break;
+            }
+            Ok(n) => {
+                buffer.extend_from_slice(&chunk[..n]);
+
+                if write_chunk_to_output(&mut writer, &chunk[..n], label)
+                    .await
+                    .is_err()
+                {
                     break;
                 }
-                Ok(n) => {
-                    buffer.extend_from_slice(&chunk[..n]);
 
-                    // Write to local output
-                    if let Err(err) = writer.write_all(&chunk[..n]).await {
-                        tracing::error!(%label, ?err, "Failed to forward {label} output");
-                        break;
-                    }
-                    if let Err(err) = writer.flush().await {
-                        tracing::error!(%label, ?err, "Failed to flush parent {label} output");
-                    }
-
-                    // Forward lines to ailoop if enabled
-                    if let Some(ref fwd) = forwarder {
-                        for &byte in &chunk[..n] {
-                            line_buffer.push(byte);
-                            if byte == b'\n' {
-                                let line = String::from_utf8_lossy(&line_buffer).to_string();
-                                let _ = match label {
-                                    "stdout" => fwd.forward_stdout(line, execution_id).await,
-                                    "stderr" => fwd.forward_stderr(line, execution_id).await,
-                                    _ => Ok(()),
-                                };
-                                line_buffer.clear();
-                            }
-                        }
-                    }
-                }
-                Err(err) => {
-                    tracing::error!(%label, ?err, "Failed to read {label} from tool");
-                    break;
-                }
+                forward_lines_to_ailoop(
+                    &chunk[..n],
+                    &mut line_buffer,
+                    &forwarder,
+                    label,
+                    execution_id,
+                )
+                .await;
+            }
+            Err(err) => {
+                tracing::error!(%label, ?err, "Failed to read {label} from tool");
+                break;
             }
         }
     }
 
     buffer
+}
+
+async fn flush_remaining_line(
+    line_buffer: &[u8],
+    forwarder: &Option<OutputForwarder>,
+    label: &'static str,
+    execution_id: Option<uuid::Uuid>,
+) {
+    if line_buffer.is_empty() {
+        return;
+    }
+
+    let Some(fwd) = forwarder else {
+        return;
+    };
+
+    let line = String::from_utf8_lossy(line_buffer).to_string();
+    let _ = forward_line(fwd, label, line, execution_id).await;
+}
+
+async fn write_chunk_to_output<W>(
+    writer: &mut W,
+    chunk: &[u8],
+    label: &'static str,
+) -> Result<(), ()>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    if let Err(err) = writer.write_all(chunk).await {
+        tracing::error!(%label, ?err, "Failed to forward {label} output");
+        return Err(());
+    }
+    if let Err(err) = writer.flush().await {
+        tracing::error!(%label, ?err, "Failed to flush parent {label} output");
+    }
+    Ok(())
+}
+
+async fn forward_lines_to_ailoop(
+    chunk: &[u8],
+    line_buffer: &mut Vec<u8>,
+    forwarder: &Option<OutputForwarder>,
+    label: &'static str,
+    execution_id: Option<uuid::Uuid>,
+) {
+    let Some(fwd) = forwarder else {
+        return;
+    };
+
+    for &byte in chunk {
+        line_buffer.push(byte);
+        if byte == b'\n' {
+            let line = String::from_utf8_lossy(line_buffer).to_string();
+            let _ = forward_line(fwd, label, line, execution_id).await;
+            line_buffer.clear();
+        }
+    }
+}
+
+async fn forward_line(
+    fwd: &OutputForwarder,
+    label: &'static str,
+    line: String,
+    execution_id: Option<uuid::Uuid>,
+) -> Result<(), crate::ailoop_integration::output_forwarder::ForwardError> {
+    match label {
+        "stdout" => fwd.forward_stdout(line, execution_id).await,
+        "stderr" => fwd.forward_stderr(line, execution_id).await,
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
