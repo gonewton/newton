@@ -119,7 +119,9 @@ fn build_run_exec_config(
 
 /// Report the result of the run execution
 fn report_run_result(execution: crate::core::entities::OptimizationExecution) -> Result<()> {
-    if execution.status != ExecutionStatus::Completed {
+    if execution.status != ExecutionStatus::Completed
+        && execution.status != ExecutionStatus::MaxIterationsReached
+    {
         return Err(anyhow!(
             "Optimization ended with status {:?}",
             execution.status
