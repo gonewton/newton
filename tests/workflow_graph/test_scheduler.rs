@@ -155,9 +155,15 @@ async fn transitions_deduplicate_targets_per_tick() {
         max_time_seconds: Some(60),
     };
 
-    let summary = executor::execute_workflow(document, registry, workspace, overrides)
-        .await
-        .expect("execution succeeded");
+    let summary = executor::execute_workflow(
+        document,
+        file.path().to_path_buf(),
+        registry,
+        workspace,
+        overrides,
+    )
+    .await
+    .expect("execution succeeded");
     let done = summary
         .completed_tasks
         .get("done")
@@ -177,7 +183,14 @@ async fn loop_exhausts_iteration_limit() {
         max_time_seconds: Some(60),
     };
 
-    let result = executor::execute_workflow(document, registry, workspace, overrides).await;
+    let result = executor::execute_workflow(
+        document,
+        file.path().to_path_buf(),
+        registry,
+        workspace,
+        overrides,
+    )
+    .await;
     let err = result.expect_err("should hit iteration limit");
     assert_eq!(err.code, "WFG-ITER-002");
 }
@@ -194,9 +207,15 @@ async fn higher_priority_transition_wins() {
         max_time_seconds: Some(60),
     };
 
-    let summary = executor::execute_workflow(document, registry, workspace, overrides)
-        .await
-        .expect("execution succeeded");
+    let summary = executor::execute_workflow(
+        document,
+        file.path().to_path_buf(),
+        registry,
+        workspace,
+        overrides,
+    )
+    .await
+    .expect("execution succeeded");
     // priority=1 beats priority=10; high_prio_target runs, low_prio_target does not.
     assert!(summary.completed_tasks.contains_key("high_prio_target"));
     assert!(!summary.completed_tasks.contains_key("low_prio_target"));
@@ -214,7 +233,14 @@ async fn workflow_exhausts_global_iteration_limit() {
         max_time_seconds: Some(60),
     };
 
-    let result = executor::execute_workflow(document, registry, workspace, overrides).await;
+    let result = executor::execute_workflow(
+        document,
+        file.path().to_path_buf(),
+        registry,
+        workspace,
+        overrides,
+    )
+    .await;
     let err = result.expect_err("should hit global iteration limit");
     assert_eq!(err.code, "WFG-ITER-001");
 }

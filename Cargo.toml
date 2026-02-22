@@ -43,6 +43,9 @@ serde_yaml = "0.9"
 rhai = "1.11"
 petgraph = "0.7"
 async-trait = "0.1"
+sha2 = "0.10"
+hex = "0.4.3"
+humantime = "2.1"
 
 [dev-dependencies]
 assert_cmd = "2.0"
@@ -116,6 +119,14 @@ path = "tests/workflow_graph/test_parse_and_validate.rs"
 [[test]]
 name = "test_workflow_scheduler"
 path = "tests/workflow_graph/test_scheduler.rs"
+
+[[test]]
+name = "test_workflow_checkpoints"
+path = "tests/workflow_graph/test_checkpoints.rs"
+
+[[test]]
+name = "test_workflow_artifacts"
+path = "tests/workflow_graph/test_artifacts.rs"
 
 [[test]]
 name = "test_profile_mode"

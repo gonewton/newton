@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
 
 const SUPPORTED_VERSION: &str = "2.0";
 const SUPPORTED_MODE: &str = "workflow_graph";
@@ -68,6 +69,83 @@ pub struct WorkflowSettings {
     pub continue_on_error: bool,
     pub max_task_iterations: usize,
     pub max_workflow_iterations: usize,
+    #[serde(default)]
+    pub artifact_storage: ArtifactStorageSettings,
+    #[serde(default)]
+    pub checkpoint: CheckpointSettings,
+    #[serde(default)]
+    pub redaction: RedactionSettings,
+}
+
+/// Artifact storage configuration embedded in workflow settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ArtifactStorageSettings {
+    pub base_path: PathBuf,
+    pub max_inline_bytes: usize,
+    pub max_artifact_bytes: usize,
+    pub max_total_bytes: u64,
+    pub retention_hours: u64,
+    pub cleanup_policy: ArtifactCleanupPolicy,
+}
+
+impl Default for ArtifactStorageSettings {
+    fn default() -> Self {
+        Self {
+            base_path: PathBuf::from(".newton/artifacts"),
+            max_inline_bytes: 65_536,
+            max_artifact_bytes: 104_857_600,
+            max_total_bytes: 1_073_741_824,
+            retention_hours: 168,
+            cleanup_policy: ArtifactCleanupPolicy::Lru,
+        }
+    }
+}
+
+/// Checkpointing configuration embedded in workflow settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CheckpointSettings {
+    pub checkpoint_enabled: bool,
+    pub checkpoint_interval_seconds: u64,
+    pub checkpoint_on_task_complete: bool,
+    pub checkpoint_keep_history: bool,
+}
+
+impl Default for CheckpointSettings {
+    fn default() -> Self {
+        Self {
+            checkpoint_enabled: true,
+            checkpoint_interval_seconds: 30,
+            checkpoint_on_task_complete: true,
+            checkpoint_keep_history: false,
+        }
+    }
+}
+
+/// Redaction configuration embedded in workflow settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RedactionSettings {
+    #[serde(default = "default_redact_keys")]
+    pub redact_keys: Vec<String>,
+}
+
+impl Default for RedactionSettings {
+    fn default() -> Self {
+        Self {
+            redact_keys: default_redact_keys(),
+        }
+    }
+}
+
+fn default_redact_keys() -> Vec<String> {
+    vec!["token".into(), "password".into(), "secret".into()]
+}
+
+/// Artifact cleanup policy.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ArtifactCleanupPolicy {
+    #[default]
+    Lru,
 }
 
 /// Task definition consumed by the workflow executor.

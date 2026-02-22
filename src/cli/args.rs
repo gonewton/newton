@@ -1,6 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 use std::str::FromStr;
+use uuid::Uuid;
 
 #[derive(Args, Clone)]
 pub struct RunArgs {
@@ -110,6 +111,12 @@ pub enum WorkflowCommand {
     Validate(WorkflowValidateArgs),
     #[command(about = "Render workflow graph as DOT")]
     Dot(WorkflowDotArgs),
+    #[command(about = "Resume a previously-started workflow execution")]
+    Resume(WorkflowResumeArgs),
+    #[command(about = "Inspect workflow checkpoints")]
+    Checkpoints(WorkflowCheckpointsArgs),
+    #[command(about = "Manage workflow artifacts")]
+    Artifacts(WorkflowArtifactsArgs),
 }
 
 #[derive(Args, Clone)]
@@ -143,6 +150,62 @@ pub struct WorkflowDotArgs {
 
     #[arg(long, value_name = "FILE")]
     pub out: Option<PathBuf>,
+}
+
+#[derive(Args, Clone)]
+pub struct WorkflowResumeArgs {
+    #[arg(long, value_name = "UUID")]
+    pub execution_id: Uuid,
+
+    #[arg(long, value_name = "PATH")]
+    pub workspace: Option<PathBuf>,
+
+    #[arg(long)]
+    pub allow_workflow_change: bool,
+}
+
+#[derive(Args, Clone)]
+pub struct WorkflowCheckpointsArgs {
+    #[command(subcommand)]
+    pub command: WorkflowCheckpointCommand,
+}
+
+#[derive(Subcommand, Clone)]
+pub enum WorkflowCheckpointCommand {
+    #[command(about = "List workflow checkpoints")]
+    List {
+        #[arg(long, value_name = "PATH")]
+        workspace: Option<PathBuf>,
+
+        #[arg(long)]
+        format_json: bool,
+    },
+    #[command(about = "Clean historical checkpoints")]
+    Clean {
+        #[arg(long, value_name = "PATH")]
+        workspace: Option<PathBuf>,
+
+        #[arg(long, value_name = "DURATION")]
+        older_than: String,
+    },
+}
+
+#[derive(Args, Clone)]
+pub struct WorkflowArtifactsArgs {
+    #[command(subcommand)]
+    pub command: WorkflowArtifactCommand,
+}
+
+#[derive(Subcommand, Clone)]
+pub enum WorkflowArtifactCommand {
+    #[command(about = "Clean artifact store files")]
+    Clean {
+        #[arg(long, value_name = "PATH")]
+        workspace: Option<PathBuf>,
+
+        #[arg(long, value_name = "DURATION")]
+        older_than: String,
+    },
 }
 
 #[derive(Clone, Debug)]
