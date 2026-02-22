@@ -5,10 +5,11 @@ use crate::core::types::ErrorCategory;
 use crate::{
     ailoop_integration,
     cli::args::{
-        BatchArgs, ErrorArgs, KeyValuePair, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs,
-        WorkflowArgs, WorkflowArtifactCommand, WorkflowArtifactsArgs, WorkflowCheckpointCommand,
-        WorkflowCheckpointsArgs, WorkflowCommand, WorkflowDotArgs, WorkflowResumeArgs,
-        WorkflowRunArgs, WorkflowValidateArgs,
+        BatchArgs, ErrorArgs, KeyValuePair, MonitorArgs, OutputFormat, ReportArgs, RunArgs,
+        StatusArgs, StepArgs, WorkflowArgs, WorkflowArtifactCommand, WorkflowArtifactsArgs,
+        WorkflowCheckpointCommand, WorkflowCheckpointsArgs, WorkflowCommand, WorkflowDotArgs,
+        WorkflowExplainArgs, WorkflowLintArgs, WorkflowResumeArgs, WorkflowRunArgs,
+        WorkflowValidateArgs,
     },
     cli::Command as CliCommand,
     core::{
@@ -17,6 +18,8 @@ use crate::{
         workflow_graph::{
             artifacts, checkpoint, dot as workflow_dot,
             executor::{self as workflow_executor, ExecutionOverrides},
+            explain,
+            lint::{LintRegistry, LintResult, LintSeverity},
             operator::OperatorRegistry,
             operators as workflow_operators, schema as workflow_schema,
         },
@@ -30,6 +33,7 @@ use crate::{
 use anyhow::{anyhow, Error};
 use chrono::Utc;
 use humantime::{format_duration, parse_duration};
+use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
 use std::{
@@ -477,6 +481,10 @@ pub async fn workflow(args: WorkflowArgs) -> Result<()> {
             workflow_validate(validate_args).map_err(|err| anyhow!(err))
         }
         WorkflowCommand::Dot(dot_args) => workflow_dot(dot_args).map_err(|err| anyhow!(err)),
+        WorkflowCommand::Lint(lint_args) => workflow_lint(lint_args).map_err(|err| anyhow!(err)),
+        WorkflowCommand::Explain(explain_args) => {
+            workflow_explain(explain_args).map_err(|err| anyhow!(err))
+        }
         WorkflowCommand::Resume(resume_args) => workflow_resume(resume_args)
             .await
             .map_err(|err| anyhow!(err)),
@@ -493,6 +501,23 @@ async fn workflow_run(args: WorkflowRunArgs) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(args.workspace)?;
     let workflow_path = args.workflow.clone();
     let mut document = workflow_schema::load_workflow(&workflow_path)?;
+    let lint_results = LintRegistry::new().run(&document);
+    if !lint_results.is_empty() {
+        print_lint_results_text(&lint_results);
+    }
+    let error_count = lint_results
+        .iter()
+        .filter(|result| result.severity == LintSeverity::Error)
+        .count();
+    if error_count > 0 {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "workflow lint detected {} error(s); fix before running",
+                error_count
+            ),
+        ));
+    }
     apply_context_overrides(&mut document.workflow.context, &args.set);
 
     let overrides = ExecutionOverrides {
@@ -541,6 +566,44 @@ fn workflow_dot(args: WorkflowDotArgs) -> StdResult<(), AppError> {
         })?;
     } else {
         println!("{}", dot);
+    }
+    Ok(())
+}
+
+fn workflow_lint(args: WorkflowLintArgs) -> StdResult<(), AppError> {
+    let document = workflow_schema::load_workflow(&args.workflow)?;
+    let results = LintRegistry::new().run(&document);
+    match args.format {
+        OutputFormat::Json => print_lint_results_json(&results)?,
+        OutputFormat::Text => {
+            if results.is_empty() {
+                println!("No lint issues");
+            } else {
+                print_lint_results_text(&results);
+            }
+        }
+    }
+    let error_count = results
+        .iter()
+        .filter(|result| result.severity == LintSeverity::Error)
+        .count();
+    if error_count > 0 {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!("workflow lint found {} error(s)", error_count),
+        ));
+    }
+    Ok(())
+}
+
+fn workflow_explain(args: WorkflowExplainArgs) -> StdResult<(), AppError> {
+    let _workspace = resolve_workflow_workspace(args.workspace)?;
+    let document = workflow_schema::load_workflow(&args.workflow)?;
+    let overrides = parse_set_overrides(&args.set);
+    let output = explain::build_explain_output(&document, &overrides);
+    match args.format {
+        OutputFormat::Json => print_explain_json(&output)?,
+        OutputFormat::Text => print_explain_text(&output)?,
     }
     Ok(())
 }
@@ -698,6 +761,91 @@ fn apply_context_overrides(context: &mut Value, overrides: &[KeyValuePair]) {
             map.insert(pair.key.clone(), Value::String(pair.value.clone()));
         }
     }
+}
+
+fn print_lint_results_text(results: &[LintResult]) {
+    for result in results {
+        if let Some(location) = &result.location {
+            println!(
+                "{} {} ({}) : {}",
+                result.severity, result.code, location, result.message
+            );
+        } else {
+            println!("{} {} : {}", result.severity, result.code, result.message);
+        }
+        if let Some(suggestion) = &result.suggestion {
+            println!("  Suggestion: {}", suggestion);
+        }
+    }
+}
+
+fn print_lint_results_json(results: &[LintResult]) -> StdResult<(), AppError> {
+    let payload = json!({ "results": results });
+    let serialized = serde_json::to_string_pretty(&payload).map_err(|err| {
+        AppError::new(
+            ErrorCategory::SerializationError,
+            format!("failed to serialize lint results: {}", err),
+        )
+    })?;
+    println!("{}", serialized);
+    Ok(())
+}
+
+fn print_explain_text(output: &explain::ExplainOutput) -> StdResult<(), AppError> {
+    println!("Effective settings:");
+    println!("{}", pretty_json(&output.settings)?);
+    println!();
+    println!("Initial context:");
+    println!("{}", pretty_json(&output.context)?);
+    println!();
+    println!("Triggers:");
+    println!("{}", pretty_json(&output.triggers)?);
+    println!();
+    println!("Tasks:");
+    for task in &output.tasks {
+        println!("  {} ({})", task.id, task.operator);
+        println!("    Params:");
+        println!("      {}", pretty_json(&task.params)?);
+        println!("    Transitions:");
+        for transition in &task.transitions {
+            println!(
+                "      - to={} priority={} when={}",
+                transition.target, transition.priority, transition.when
+            );
+        }
+    }
+    Ok(())
+}
+
+fn print_explain_json(output: &explain::ExplainOutput) -> StdResult<(), AppError> {
+    let serialized = serde_json::to_string_pretty(output).map_err(|err| {
+        AppError::new(
+            ErrorCategory::SerializationError,
+            format!("failed to serialize explain output: {}", err),
+        )
+    })?;
+    println!("{}", serialized);
+    Ok(())
+}
+
+fn pretty_json(value: &impl Serialize) -> StdResult<String, AppError> {
+    serde_json::to_string_pretty(value).map_err(|err| {
+        AppError::new(
+            ErrorCategory::SerializationError,
+            format!("failed to serialize explain section: {}", err),
+        )
+    })
+}
+
+fn parse_set_overrides(pairs: &[KeyValuePair]) -> Vec<(String, Value)> {
+    pairs
+        .iter()
+        .map(|pair| {
+            let parsed = serde_json::from_str(&pair.value)
+                .unwrap_or_else(|_| Value::String(pair.value.clone()));
+            (pair.key.clone(), parsed)
+        })
+        .collect()
 }
 
 /// Launch the interactive Newton monitor TUI that watches ailoop channels.

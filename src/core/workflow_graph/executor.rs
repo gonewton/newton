@@ -766,9 +766,9 @@ fn evaluate_transition(
             } else {
                 Err(AppError::new(
                     ErrorCategory::ValidationError,
-                    format!("transition expression '{}' did not return bool", expr),
+                    "expression in `when` evaluated to a non-boolean value at runtime".to_string(),
                 )
-                .with_code("WFG-EXPR-002"))
+                .with_code("WFG-EXPR-BOOL-001"))
             }
         }
     }

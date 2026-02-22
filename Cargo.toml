@@ -129,6 +129,14 @@ name = "test_workflow_artifacts"
 path = "tests/workflow_graph/test_artifacts.rs"
 
 [[test]]
+name = "test_workflow_lint"
+path = "tests/workflow_graph/test_lint.rs"
+
+[[test]]
+name = "test_workflow_explain"
+path = "tests/workflow_graph/test_explain.rs"
+
+[[test]]
 name = "test_profile_mode"
 path = "tests/run/test_profile_mode.rs"
 

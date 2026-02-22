@@ -1,0 +1,149 @@
+---
+source: tests/workflow_graph/test_lint.rs
+expression: results
+---
+[
+    LintResult {
+        code: "WFG-LINT-002",
+        severity: Error,
+        message: "transition 'to' references unknown task 'missing-target'",
+        location: Some(
+            "start",
+        ),
+        suggestion: Some(
+            "Ensure the transition target 'missing-target' exists",
+        ),
+    },
+    LintResult {
+        code: "WFG-LINT-004",
+        severity: Error,
+        message: "AssertCompletedOperator 'check' references unknown task 'missing-dependency'",
+        location: Some(
+            "check",
+        ),
+        suggestion: Some(
+            "Use valid task ids in 'require'",
+        ),
+    },
+    LintResult {
+        code: "WFG-LINT-005",
+        severity: Error,
+        message: "failed to parse expression 'invalid +': expression compile error: Script is incomplete (line 1, position 10)",
+        location: Some(
+            "parse-error",
+        ),
+        suggestion: Some(
+            "Fix expression syntax",
+        ),
+    },
+    LintResult {
+        code: "WFG-LINT-006",
+        severity: Error,
+        message: "when expression '1 + 2' did not evaluate to boolean",
+        location: Some(
+            "when-non-bool",
+        ),
+        suggestion: Some(
+            "Ensure the condition returns a boolean",
+        ),
+    },
+    LintResult {
+        code: "WFG-LINT-008",
+        severity: Error,
+        message: "CommandOperator 'start' enables shell execution without allow_shell opt-in",
+        location: Some(
+            "start",
+        ),
+        suggestion: Some(
+            "Set settings.command_operator.allow_shell to true only when shell usage is intended",
+        ),
+    },
+    LintResult {
+        code: "WFG-LINT-003",
+        severity: Warning,
+        message: "task 'check' is not reachable from entry_task",
+        location: Some(
+            "check",
+        ),
+        suggestion: Some(
+            "Ensure the task is reachable or remove it",
+        ),
+    },
+    LintResult {
+        code: "WFG-LINT-003",
+        severity: Warning,
+        message: "task 'loop-one' is not reachable from entry_task",
+        location: Some(
+            "loop-one",
+        ),
+        suggestion: Some(
+            "Ensure the task is reachable or remove it",
+        ),
+    },
+    LintResult {
+        code: "WFG-LINT-003",
+        severity: Warning,
+        message: "task 'loop-two' is not reachable from entry_task",
+        location: Some(
+            "loop-two",
+        ),
+        suggestion: Some(
+            "Ensure the task is reachable or remove it",
+        ),
+    },
+    LintResult {
+        code: "WFG-LINT-003",
+        severity: Warning,
+        message: "task 'parse-error' is not reachable from entry_task",
+        location: Some(
+            "parse-error",
+        ),
+        suggestion: Some(
+            "Ensure the task is reachable or remove it",
+        ),
+    },
+    LintResult {
+        code: "WFG-LINT-003",
+        severity: Warning,
+        message: "task 'unreachable' is not reachable from entry_task",
+        location: Some(
+            "unreachable",
+        ),
+        suggestion: Some(
+            "Ensure the task is reachable or remove it",
+        ),
+    },
+    LintResult {
+        code: "WFG-LINT-003",
+        severity: Warning,
+        message: "task 'when-non-bool' is not reachable from entry_task",
+        location: Some(
+            "when-non-bool",
+        ),
+        suggestion: Some(
+            "Ensure the task is reachable or remove it",
+        ),
+    },
+    LintResult {
+        code: "WFG-LINT-007",
+        severity: Info,
+        message: "task 'loop-one' participates in a cycle without per-task max_iterations",
+        location: Some(
+            "loop-one",
+        ),
+        suggestion: Some(
+            "Set task.max_iterations to guard loops",
+        ),
+    },
+    LintResult {
+        code: "WFG-LINT-007",
+        severity: Info,
+        message: "task 'loop-two' participates in a cycle without per-task max_iterations",
+        location: Some(
+            "loop-two",
+        ),
+        suggestion: Some(
+            "Set task.max_iterations to guard loops",
+        ),
+    },
+]
