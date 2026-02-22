@@ -6,14 +6,16 @@ use crate::{
     ailoop_integration,
     cli::args::{
         BatchArgs, ErrorArgs, KeyValuePair, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs,
-        WorkflowArgs, WorkflowCommand, WorkflowDotArgs, WorkflowRunArgs, WorkflowValidateArgs,
+        WorkflowArgs, WorkflowArtifactCommand, WorkflowArtifactsArgs, WorkflowCheckpointCommand,
+        WorkflowCheckpointsArgs, WorkflowCommand, WorkflowDotArgs, WorkflowResumeArgs,
+        WorkflowRunArgs, WorkflowValidateArgs,
     },
     cli::Command as CliCommand,
     core::{
         batch_config::{find_workspace_root, BatchProjectConfig},
         entities::ExecutionStatus,
         workflow_graph::{
-            dot as workflow_dot,
+            artifacts, checkpoint, dot as workflow_dot,
             executor::{self as workflow_executor, ExecutionOverrides},
             operator::OperatorRegistry,
             operators as workflow_operators, schema as workflow_schema,
@@ -27,7 +29,8 @@ use crate::{
 };
 use anyhow::{anyhow, Error};
 use chrono::Utc;
-use serde_json::{Map, Value};
+use humantime::{format_duration, parse_duration};
+use serde_json::{json, Map, Value};
 use std::sync::Arc;
 use std::{
     collections::HashMap,
@@ -474,12 +477,22 @@ pub async fn workflow(args: WorkflowArgs) -> Result<()> {
             workflow_validate(validate_args).map_err(|err| anyhow!(err))
         }
         WorkflowCommand::Dot(dot_args) => workflow_dot(dot_args).map_err(|err| anyhow!(err)),
+        WorkflowCommand::Resume(resume_args) => workflow_resume(resume_args)
+            .await
+            .map_err(|err| anyhow!(err)),
+        WorkflowCommand::Checkpoints(checkpoints_args) => {
+            workflow_checkpoints(checkpoints_args).map_err(|err| anyhow!(err))
+        }
+        WorkflowCommand::Artifacts(artifacts_args) => {
+            workflow_artifacts(artifacts_args).map_err(|err| anyhow!(err))
+        }
     }
 }
 
 async fn workflow_run(args: WorkflowRunArgs) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(args.workspace)?;
-    let mut document = workflow_schema::load_workflow(&args.workflow)?;
+    let workflow_path = args.workflow.clone();
+    let mut document = workflow_schema::load_workflow(&workflow_path)?;
     apply_context_overrides(&mut document.workflow.context, &args.set);
 
     let overrides = ExecutionOverrides {
@@ -491,9 +504,14 @@ async fn workflow_run(args: WorkflowRunArgs) -> StdResult<(), AppError> {
     workflow_operators::register_builtins(&mut builder, workspace.clone());
     let registry = builder.build();
 
-    let summary =
-        workflow_executor::execute_workflow(document, registry, workspace.clone(), overrides)
-            .await?;
+    let summary = workflow_executor::execute_workflow(
+        document,
+        workflow_path,
+        registry,
+        workspace.clone(),
+        overrides,
+    )
+    .await?;
     println!(
         "Workflow completed in {} iterations",
         summary.total_iterations
@@ -525,6 +543,138 @@ fn workflow_dot(args: WorkflowDotArgs) -> StdResult<(), AppError> {
         println!("{}", dot);
     }
     Ok(())
+}
+
+async fn workflow_resume(args: WorkflowResumeArgs) -> StdResult<(), AppError> {
+    let workspace = resolve_workflow_workspace(args.workspace)?;
+    let mut builder = OperatorRegistry::builder();
+    workflow_operators::register_builtins(&mut builder, workspace.clone());
+    let registry = builder.build();
+    let summary = workflow_executor::resume_workflow(
+        registry,
+        workspace.clone(),
+        args.execution_id,
+        args.allow_workflow_change,
+    )
+    .await?;
+    println!(
+        "Workflow resumed (execution {}) in {} iterations",
+        summary.execution_id, summary.total_iterations
+    );
+    Ok(())
+}
+
+fn workflow_checkpoints(args: WorkflowCheckpointsArgs) -> StdResult<(), AppError> {
+    match args.command {
+        WorkflowCheckpointCommand::List {
+            workspace,
+            format_json,
+        } => workflow_checkpoints_list(workspace, format_json),
+        WorkflowCheckpointCommand::Clean {
+            workspace,
+            older_than,
+        } => workflow_checkpoints_clean(workspace, older_than),
+    }
+}
+
+fn workflow_checkpoints_list(
+    workspace: Option<PathBuf>,
+    format_json: bool,
+) -> StdResult<(), AppError> {
+    let workspace = resolve_workflow_workspace(workspace)?;
+    let entries = checkpoint::list_checkpoints(&workspace)?;
+    if format_json {
+        let items: Vec<Value> = entries
+            .iter()
+            .map(|summary| {
+                json!({
+                    "execution_id": summary.execution_id.to_string(),
+                    "status": summary.status.as_str(),
+                    "started_at": summary.started_at.to_rfc3339(),
+                    "checkpoint_age": format!("{} ago", format_duration(summary.checkpoint_age)),
+                    "size": summary.checkpoint_size,
+                })
+            })
+            .collect();
+        let serialized = serde_json::to_string_pretty(&items).map_err(|err| {
+            AppError::new(
+                ErrorCategory::SerializationError,
+                format!("failed to serialize checkpoint list: {}", err),
+            )
+        })?;
+        println!("{}", serialized);
+        return Ok(());
+    }
+    println!(
+        "{:<36} {:<10} {:<24} {:<12} {:>7}",
+        "EXECUTION ID", "STATUS", "STARTED AT", "CHECKPOINT AGE", "SIZE"
+    );
+    for summary in entries {
+        println!(
+            "{:<36} {:<10} {:<24} {:<12} {:>7}",
+            summary.execution_id,
+            summary.status.as_str(),
+            summary.started_at.to_rfc3339(),
+            format!("{} ago", format_duration(summary.checkpoint_age)),
+            format_bytes(summary.checkpoint_size),
+        );
+    }
+    Ok(())
+}
+
+fn workflow_checkpoints_clean(
+    workspace: Option<PathBuf>,
+    older_than: String,
+) -> StdResult<(), AppError> {
+    let workspace = resolve_workflow_workspace(workspace)?;
+    let duration = parse_duration_arg(&older_than)?;
+    checkpoint::clean_checkpoints(&workspace, duration)?;
+    println!("Removed checkpoints older than {}", older_than);
+    Ok(())
+}
+
+fn workflow_artifacts(args: WorkflowArtifactsArgs) -> StdResult<(), AppError> {
+    match args.command {
+        WorkflowArtifactCommand::Clean {
+            workspace,
+            older_than,
+        } => workflow_artifacts_clean(workspace, older_than),
+    }
+}
+
+fn workflow_artifacts_clean(
+    workspace: Option<PathBuf>,
+    older_than: String,
+) -> StdResult<(), AppError> {
+    let workspace = resolve_workflow_workspace(workspace)?;
+    let duration = parse_duration_arg(&older_than)?;
+    artifacts::ArtifactStore::clean_artifacts(&workspace, duration)?;
+    println!("Cleaned artifacts older than {}", older_than);
+    Ok(())
+}
+
+fn parse_duration_arg(value: &str) -> StdResult<Duration, AppError> {
+    parse_duration(value).map_err(|err| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            format!("failed to parse duration {}: {}", value, err),
+        )
+    })
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut size = bytes as f64;
+    let mut index = 0;
+    while size >= 1024.0 && index < UNITS.len() - 1 {
+        size /= 1024.0;
+        index += 1;
+    }
+    if index == 0 {
+        format!("{} {}", bytes, UNITS[index])
+    } else {
+        format!("{:.1} {}", size, UNITS[index])
+    }
 }
 
 fn resolve_workflow_workspace(path: Option<PathBuf>) -> StdResult<PathBuf, AppError> {
