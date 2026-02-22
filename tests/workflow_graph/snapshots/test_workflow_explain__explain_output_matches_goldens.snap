@@ -1,0 +1,90 @@
+---
+source: tests/workflow_graph/test_explain.rs
+assertion_line: 65
+expression: serialized
+---
+{
+  "settings": {
+    "entry_task": "start",
+    "max_time_seconds": 120,
+    "parallel_limit": 1,
+    "continue_on_error": false,
+    "max_task_iterations": 2,
+    "max_workflow_iterations": 2,
+    "artifact_storage": {
+      "base_path": ".newton/artifacts",
+      "max_inline_bytes": 65536,
+      "max_artifact_bytes": 104857600,
+      "max_total_bytes": 1073741824,
+      "retention_hours": 168,
+      "cleanup_policy": "lru"
+    },
+    "checkpoint": {
+      "checkpoint_enabled": true,
+      "checkpoint_interval_seconds": 30,
+      "checkpoint_on_task_complete": true,
+      "checkpoint_keep_history": false
+    },
+    "redaction": {
+      "redact_keys": [
+        "token",
+        "password",
+        "secret"
+      ]
+    },
+    "command_operator": {
+      "allow_shell": false
+    }
+  },
+  "context": {
+    "count": 5,
+    "env": "prod"
+  },
+  "triggers": {},
+  "tasks": [
+    {
+      "id": "start",
+      "operator": "CommandOperator",
+      "params": {
+        "checker": "(runtime)",
+        "greeting": "prod-action"
+      },
+      "transitions": [
+        {
+          "target": "next",
+          "priority": 10,
+          "when": "context.env != \"staging\""
+        },
+        {
+          "target": "other",
+          "priority": 20,
+          "when": "context.count > 0"
+        }
+      ]
+    },
+    {
+      "id": "next",
+      "operator": "CommandOperator",
+      "params": {
+        "metadata": {
+          "region": "us"
+        }
+      },
+      "transitions": [
+        {
+          "target": "start",
+          "priority": 5,
+          "when": "(always)"
+        }
+      ]
+    },
+    {
+      "id": "other",
+      "operator": "CommandOperator",
+      "params": {
+        "cwd": "/workspace"
+      },
+      "transitions": []
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -111,6 +111,10 @@ pub enum WorkflowCommand {
     Validate(WorkflowValidateArgs),
     #[command(about = "Render workflow graph as DOT")]
     Dot(WorkflowDotArgs),
+    #[command(about = "Validate workflow lint rules")]
+    Lint(WorkflowLintArgs),
+    #[command(about = "Explain workflow graph settings/transitions")]
+    Explain(WorkflowExplainArgs),
     #[command(about = "Resume a previously-started workflow execution")]
     Resume(WorkflowResumeArgs),
     #[command(about = "Inspect workflow checkpoints")]
@@ -135,6 +139,37 @@ pub struct WorkflowRunArgs {
 
     #[arg(long)]
     pub max_time_seconds: Option<u64>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "lowercase")]
+pub enum OutputFormat {
+    Text,
+    Json,
+}
+
+#[derive(Args, Clone)]
+pub struct WorkflowLintArgs {
+    #[arg(long, value_name = "PATH")]
+    pub workflow: PathBuf,
+
+    #[arg(long, value_enum, default_value = "text")]
+    pub format: OutputFormat,
+}
+
+#[derive(Args, Clone)]
+pub struct WorkflowExplainArgs {
+    #[arg(long, value_name = "PATH")]
+    pub workflow: PathBuf,
+
+    #[arg(long, value_name = "PATH")]
+    pub workspace: Option<PathBuf>,
+
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub set: Vec<KeyValuePair>,
+
+    #[arg(long, value_enum, default_value = "text")]
+    pub format: OutputFormat,
 }
 
 #[derive(Args, Clone)]

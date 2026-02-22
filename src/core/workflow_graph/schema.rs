@@ -75,6 +75,8 @@ pub struct WorkflowSettings {
     pub checkpoint: CheckpointSettings,
     #[serde(default)]
     pub redaction: RedactionSettings,
+    #[serde(default = "default_command_operator_settings")]
+    pub command_operator: CommandOperatorSettings,
 }
 
 /// Artifact storage configuration embedded in workflow settings.
@@ -86,6 +88,16 @@ pub struct ArtifactStorageSettings {
     pub max_total_bytes: u64,
     pub retention_hours: u64,
     pub cleanup_policy: ArtifactCleanupPolicy,
+}
+
+/// Command operator specific settings embedded in workflow settings.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct CommandOperatorSettings {
+    pub allow_shell: bool,
+}
+
+fn default_command_operator_settings() -> CommandOperatorSettings {
+    CommandOperatorSettings::default()
 }
 
 impl Default for ArtifactStorageSettings {
