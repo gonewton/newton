@@ -1,3 +1,6 @@
+#![allow(clippy::result_large_err)]
+
+use crate::core::error::AppError;
 use crate::core::workflow_graph::expression::{EvaluationContext, ExpressionEngine};
 use crate::core::workflow_graph::schema::{Condition, WorkflowDocument, WorkflowTask};
 use serde::Serialize;
@@ -31,7 +34,7 @@ pub struct TransitionExplain {
 pub fn build_explain_output(
     document: &WorkflowDocument,
     context_overrides: &[(String, Value)],
-) -> ExplainOutput {
+) -> Result<ExplainOutput, AppError> {
     let mut context = document.workflow.context.clone();
     apply_context_overrides(&mut context, context_overrides);
     let engine = ExpressionEngine::default();
@@ -42,22 +45,22 @@ pub fn build_explain_output(
         .tasks
         .iter()
         .map(|task| explain_task(task, &engine, &evaluation_context))
-        .collect();
+        .collect::<Result<Vec<_>, AppError>>()?;
 
-    ExplainOutput {
+    Ok(ExplainOutput {
         settings: document.workflow.settings.clone(),
         context,
         triggers: Value::Object(Map::new()),
         tasks,
-    }
+    })
 }
 
 fn explain_task(
     task: &WorkflowTask,
     engine: &ExpressionEngine,
     ctx: &EvaluationContext,
-) -> TaskExplain {
-    let params = explain_value(&task.params, engine, ctx);
+) -> Result<TaskExplain, AppError> {
+    let params = explain_value(&task.params, engine, ctx)?;
     let mut sorted_transitions = task.transitions.clone();
     sorted_transitions.sort_by_key(|transition| transition.priority);
     let transitions = sorted_transitions
@@ -69,41 +72,47 @@ fn explain_task(
         })
         .collect();
 
-    TaskExplain {
+    Ok(TaskExplain {
         id: task.id.clone(),
         operator: task.operator.clone(),
         params,
         transitions,
-    }
+    })
 }
 
-fn explain_value(value: &Value, engine: &ExpressionEngine, ctx: &EvaluationContext) -> Value {
+fn explain_value(
+    value: &Value,
+    engine: &ExpressionEngine,
+    ctx: &EvaluationContext,
+) -> Result<Value, AppError> {
     match value {
         Value::Object(map) if map.len() == 1 && map.contains_key("$expr") => {
             if let Some(Value::String(expr)) = map.get("$expr") {
                 if expression_depends_on_tasks(expr) {
-                    return Value::String("(runtime)".to_string());
+                    return Ok(Value::String("(runtime)".to_string()));
                 }
-                if let Ok(evaluated) = engine.evaluate(expr, ctx) {
-                    return evaluated;
+                if let Ok(parsed) = serde_json::from_str(expr) {
+                    return Ok(parsed);
                 }
+                return engine.evaluate(expr, ctx);
             }
-            Value::Object(map.clone())
+            Ok(Value::Object(map.clone()))
         }
         Value::Object(map) => {
             let mut resolved = Map::new();
             for (key, child) in map {
-                resolved.insert(key.clone(), explain_value(child, engine, ctx));
+                resolved.insert(key.clone(), explain_value(child, engine, ctx)?);
             }
-            Value::Object(resolved)
+            Ok(Value::Object(resolved))
         }
-        Value::Array(items) => Value::Array(
-            items
-                .iter()
-                .map(|item| explain_value(item, engine, ctx))
-                .collect(),
-        ),
-        other => other.clone(),
+        Value::Array(items) => {
+            let mut collection = Vec::new();
+            for item in items {
+                collection.push(explain_value(item, engine, ctx)?);
+            }
+            Ok(Value::Array(collection))
+        }
+        other => Ok(other.clone()),
     }
 }
 

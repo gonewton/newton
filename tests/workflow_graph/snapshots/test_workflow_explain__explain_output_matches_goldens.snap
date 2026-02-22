@@ -1,5 +1,6 @@
 ---
 source: tests/workflow_graph/test_explain.rs
+assertion_line: 65
 expression: serialized
 ---
 {
@@ -66,7 +67,7 @@ expression: serialized
       "operator": "CommandOperator",
       "params": {
         "metadata": {
-          "$expr": "{\"region\":\"us\"}"
+          "region": "us"
         }
       },
       "transitions": [

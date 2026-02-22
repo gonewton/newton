@@ -59,7 +59,8 @@ fn explain_output_matches_goldens() {
         ("env".to_string(), Value::String("prod".to_string())),
         ("count".to_string(), json!(5)),
     ];
-    let output = explain::build_explain_output(&document, &overrides);
+    let output = explain::build_explain_output(&document, &overrides)
+        .expect("failed to build explain output");
     let serialized = serde_json::to_string_pretty(&output).expect("serialize explain output");
     assert_snapshot!(serialized);
 }

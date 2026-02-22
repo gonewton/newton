@@ -600,7 +600,7 @@ fn workflow_explain(args: WorkflowExplainArgs) -> StdResult<(), AppError> {
     let _workspace = resolve_workflow_workspace(args.workspace)?;
     let document = workflow_schema::load_workflow(&args.workflow)?;
     let overrides = parse_set_overrides(&args.set);
-    let output = explain::build_explain_output(&document, &overrides);
+    let output = explain::build_explain_output(&document, &overrides)?;
     match args.format {
         OutputFormat::Json => print_explain_json(&output)?,
         OutputFormat::Text => print_explain_text(&output)?,
