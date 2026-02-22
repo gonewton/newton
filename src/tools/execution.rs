@@ -1,5 +1,11 @@
-use crate::{core::error::AppError, core::types::ErrorCategory, tools::ToolResult, Result};
+use crate::{
+    core::error::AppError,
+    core::types::{ErrorCategory, ToolType},
+    tools::ToolResult,
+    Result,
+};
 use std::collections::HashMap;
+use std::time::Instant;
 
 pub async fn execute_command(
     cmd: &str,
@@ -7,6 +13,7 @@ pub async fn execute_command(
     timeout_ms: Option<u64>,
 ) -> Result<ToolResult> {
     let max_retries = 3;
+    let start = Instant::now();
     for attempt in 0..max_retries {
         let timeout_duration = timeout_ms.map(std::time::Duration::from_millis);
         let result = if let Some(duration) = timeout_duration {
@@ -34,7 +41,7 @@ pub async fn execute_command(
 
         let success = result.status.success();
         let exit_code = result.status.code().unwrap_or(-1);
-        let execution_time_ms = 100; // TODO: measure actual time
+        let execution_time_ms = start.elapsed().as_millis() as u64;
         let stdout = String::from_utf8_lossy(&result.stdout).to_string();
         let stderr = String::from_utf8_lossy(&result.stderr).to_string();
 
@@ -49,7 +56,7 @@ pub async fn execute_command(
                 error: None,
                 metadata: crate::core::entities::ToolMetadata {
                     tool_version: None,
-                    tool_type: crate::core::entities::ToolType::Evaluator,
+                    tool_type: ToolType::Evaluator,
                     arguments: vec![],
                     environment_variables: vec![],
                 },
@@ -69,14 +76,14 @@ pub async fn execute_command(
     Ok(ToolResult {
         tool_name: cmd.to_string(),
         exit_code: -1,
-        execution_time_ms: 100,
+        execution_time_ms: start.elapsed().as_millis() as u64,
         stdout: "".to_string(),
         stderr: "Command failed after retries".to_string(),
         success: false,
         error: Some("Command failed after retries".to_string()),
         metadata: crate::core::entities::ToolMetadata {
             tool_version: None,
-            tool_type: crate::core::entities::ToolType::Evaluator,
+            tool_type: ToolType::Evaluator,
             arguments: vec![],
             environment_variables: vec![],
         },

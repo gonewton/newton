@@ -1,3 +1,4 @@
+//! Utility helpers: environment variable management, artifact storage, and serialization helpers (JSON/file serializers).
 mod env;
 mod files;
 pub mod serialization;

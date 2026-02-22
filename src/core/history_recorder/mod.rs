@@ -1,4 +1,4 @@
-#![allow(clippy::result_large_err)]
+#![allow(clippy::result_large_err)] // Recording operations propagate AppError to keep serializer/reporter context intact without boxing.
 
 use crate::core::entities::OptimizationExecution;
 use crate::core::error::{AppError, DefaultErrorReporter, ErrorReporter};

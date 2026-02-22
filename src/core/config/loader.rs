@@ -1,4 +1,4 @@
-#![allow(clippy::result_large_err)]
+#![allow(clippy::result_large_err)] // Config loader returns AppError with rich context so we keep the concrete type instead of boxing.
 
 use super::NewtonConfig;
 use crate::core::error::AppError;

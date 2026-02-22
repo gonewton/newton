@@ -3,6 +3,12 @@ name = "newton"
 version = "0.5.26"
 edition = "2021"
 authors = ["Newton Loop Framework"]
+description = "CLI orchestrator for AI-driven optimization workflows."
+repository = "https://github.com/gonewton/newton.git"
+readme = "README.md"
+categories = ["development-tools", "command-line-utilities"]
+keywords = ["newton", "optimization", "ai", "cli"]
+publish = false
 
 [dependencies]
 clap = { version = "4.4", features = ["derive", "cargo"] }

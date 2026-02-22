@@ -1,4 +1,4 @@
-#![allow(clippy::result_large_err)]
+#![allow(clippy::result_large_err)] // Context manager returns AppError so callers can log detailed IO issues without trait objects.
 
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;

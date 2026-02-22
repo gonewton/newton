@@ -1,8 +1,8 @@
-#![allow(clippy::result_large_err)]
+#![allow(clippy::result_large_err)] // AppError contains rich context; boxing would discard diagnostics needed for reporting.
 
 use crate::core::entities::OptimizationExecution;
-use crate::core::entities::{ExecutionStatus, IterationPhase};
 use crate::core::error::{AppError, ErrorReporter};
+use crate::core::types::{ExecutionStatus, IterationPhase};
 use crate::utils::serialization::JsonSerializer;
 use serde::{Deserialize, Serialize};
 
@@ -108,7 +108,7 @@ impl ResultsProcessor {
         execution: &OptimizationExecution,
     ) -> Result<ExecutionStatistics, AppError> {
         let execution_id = execution.execution_id;
-        let status = execution.status.clone();
+        let status = execution.status;
         let total_iterations = execution.total_iterations_completed;
         let successful_iterations = execution
             .iterations

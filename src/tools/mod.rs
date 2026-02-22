@@ -1,3 +1,4 @@
+//! Tool execution helpers, results, and strict mode runners shared across Newton commands.
 pub mod execution;
 pub mod strict_toolchain;
 

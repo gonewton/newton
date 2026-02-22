@@ -1,4 +1,4 @@
-#![allow(clippy::result_large_err)]
+#![allow(clippy::result_large_err)] // Git manager methods return AppError so callers see structured failure information.
 
 mod branch;
 mod commit;

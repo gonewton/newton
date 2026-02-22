@@ -1,3 +1,4 @@
+//! Tracing-based logging setup that writes to append-only files, mirrors console output, and optionally wires OpenTelemetry exporters.
 pub mod config;
 pub mod context;
 pub mod layers;

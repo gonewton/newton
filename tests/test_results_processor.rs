@@ -1,4 +1,5 @@
 use newton::core::error::DefaultErrorReporter;
+use newton::core::types::ExecutionStatus;
 use newton::core::OutputFormat;
 use newton::core::ResultsProcessor;
 use newton::utils::serialization::JsonSerializer;
@@ -20,7 +21,7 @@ fn test_results_processor_generate_report() {
         id: uuid::Uuid::new_v4(),
         workspace_path: std::path::PathBuf::from("/test"),
         execution_id: uuid::Uuid::new_v4(),
-        status: newton::core::entities::ExecutionStatus::Completed,
+        status: ExecutionStatus::Completed,
         started_at: chrono::Utc::now(),
         completed_at: Some(chrono::Utc::now()),
         resource_limits: Default::default(),

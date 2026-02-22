@@ -1,8 +1,8 @@
-#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::unnecessary_cast)] // casts keep tool exit codes and environment conversions predictable across platforms.
 
-use crate::core::entities::ToolType;
 use crate::core::entities::{ExecutionConfiguration, ToolMetadata};
 use crate::core::error::AppError;
+use crate::core::types::ToolType;
 use crate::tools::ToolResult;
 use std::collections::HashMap;
 use std::path::Path;

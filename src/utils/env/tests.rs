@@ -1,5 +1,6 @@
 use super::EnvManager;
-use crate::core::entities::{ToolMetadata, ToolType};
+use crate::core::entities::ToolMetadata;
+use crate::core::types::ToolType;
 use serial_test::serial;
 use std::collections::HashMap;
 use std::env;

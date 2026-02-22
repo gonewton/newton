@@ -1,4 +1,4 @@
-#![allow(clippy::result_large_err)]
+#![allow(clippy::result_large_err)] // Pull request helpers keep AppError for detailed CLI failure reporting instead of boxing.
 
 use crate::core::error::AppError;
 use std::path::{Path, PathBuf};

@@ -1,4 +1,4 @@
-#![allow(clippy::result_large_err)]
+#![allow(clippy::result_large_err)] // Git commit helpers return AppError directly to preserve CLI diagnostics without boxing.
 
 use crate::core::error::AppError;
 use std::path::{Path, PathBuf};
@@ -97,7 +97,7 @@ impl CommitManager {
         Ok(())
     }
 
-    /// Push branch to remote (git push -u origin <branch>)
+    /// Push branch to remote (git push -u origin &lt;branch&gt;)
     pub fn push(&self, branch_name: &str) -> Result<(), AppError> {
         let output = Command::new("git")
             .args(["push", "-u", "origin", branch_name])
