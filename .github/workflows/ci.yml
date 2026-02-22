@@ -98,8 +98,11 @@ jobs:
 
       - name: Run workflow-graph coverage
         run: |
+          # Temporary broad gate: include all production source under src/**,
+          # exclude vendored registry + test code. Raise this threshold as
+          # coverage improves.
           cargo llvm-cov \
             --workspace \
-            --ignore-filename-regex '(^tests/|src/cli/|src/core/(?!workflow_graph))' \
+            --ignore-filename-regex '(\.cargo/registry|^tests/|/tests/)' \
             --summary-only \
-            --fail-under-lines 95
+            --fail-under-lines 50

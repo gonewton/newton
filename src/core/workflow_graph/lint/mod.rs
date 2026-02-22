@@ -1,12 +1,15 @@
-use crate::core::workflow_graph::expression::ExpressionEngine;
+#![allow(clippy::result_large_err)] // Lint module surfaces rich diagnostics via AppError without boxing.
+
 use crate::core::workflow_graph::schema::WorkflowDocument;
 use serde::Serialize;
+use std::cmp::Ordering;
 use std::fmt;
 
-pub mod rules;
-pub use rules::*;
+mod rules;
 
-/// Diagnostic severity levels emitted by workflow lint rules.
+pub use rules::built_in_rules;
+
+/// Lint severity for workflow diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LintSeverity {
@@ -16,7 +19,7 @@ pub enum LintSeverity {
 }
 
 impl LintSeverity {
-    fn rank(&self) -> u8 {
+    fn rank(self) -> u8 {
         match self {
             LintSeverity::Error => 3,
             LintSeverity::Warning => 2,
@@ -27,16 +30,17 @@ impl LintSeverity {
 
 impl fmt::Display for LintSeverity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LintSeverity::Error => write!(f, "Error"),
-            LintSeverity::Warning => write!(f, "Warning"),
-            LintSeverity::Info => write!(f, "Info"),
-        }
+        let value = match self {
+            LintSeverity::Error => "error",
+            LintSeverity::Warning => "warning",
+            LintSeverity::Info => "info",
+        };
+        write!(f, "{}", value)
     }
 }
 
-/// Individual lint/validation result emitted by a rule.
-#[derive(Debug, Clone, Serialize)]
+/// A single lint finding for a workflow document.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LintResult {
     pub code: String,
     pub severity: LintSeverity,
@@ -46,7 +50,6 @@ pub struct LintResult {
 }
 
 impl LintResult {
-    /// Create a new lint result with optional location and suggestion.
     pub fn new(
         code: impl Into<String>,
         severity: LintSeverity,
@@ -64,49 +67,29 @@ impl LintResult {
     }
 }
 
-/// Trait implemented by workflow lint rules.
-pub trait WorkflowLintRule {
-    fn validate(&self, workflow: &WorkflowDocument, engine: &ExpressionEngine) -> Vec<LintResult>;
+/// A lint rule that validates a workflow and returns zero or more findings.
+pub trait WorkflowLintRule: Send + Sync {
+    fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult>;
 }
 
-/// Registry that runs all built-in workflow lint rules.
+/// Registry for built-in workflow lint rules.
 pub struct LintRegistry {
-    engine: ExpressionEngine,
     rules: Vec<Box<dyn WorkflowLintRule>>,
 }
 
 impl LintRegistry {
-    /// Construct a registry populated with the built-in rules.
     pub fn new() -> Self {
-        let rules: Vec<Box<dyn WorkflowLintRule>> = vec![
-            Box::new(DuplicateTaskIdsRule),
-            Box::new(UnknownTransitionTargetsRule),
-            Box::new(UnreachableTaskRule),
-            Box::new(AssertCompletedRequireRule),
-            Box::new(ExpressionParseRule),
-            Box::new(WhenConditionBooleanRule),
-            Box::new(SuspiciousLoopRule),
-            Box::new(CommandOperatorShellRule),
-        ];
         Self {
-            engine: ExpressionEngine::default(),
-            rules,
+            rules: built_in_rules(),
         }
     }
 
-    /// Run all registered lint rules against the workflow document.
-    /// The results are already sorted by `(severity desc, code asc, location asc)`.
     pub fn run(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
         let mut results = Vec::new();
         for rule in &self.rules {
-            results.extend(rule.validate(workflow, &self.engine));
+            results.extend(rule.validate(workflow));
         }
-        results.sort_by(|a, b| {
-            let severity_cmp = b.severity.rank().cmp(&a.severity.rank());
-            severity_cmp
-                .then(a.code.cmp(&b.code))
-                .then(a.location.cmp(&b.location))
-        });
+        sort_results(&mut results);
         results
     }
 }
@@ -115,4 +98,16 @@ impl Default for LintRegistry {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn sort_results(results: &mut [LintResult]) {
+    results.sort_by(compare_result);
+}
+
+fn compare_result(a: &LintResult, b: &LintResult) -> Ordering {
+    b.severity
+        .rank()
+        .cmp(&a.severity.rank())
+        .then_with(|| a.code.cmp(&b.code))
+        .then_with(|| a.location.cmp(&b.location))
 }
