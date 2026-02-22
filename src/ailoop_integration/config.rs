@@ -225,6 +225,8 @@ fn load_ailoop_config(workspace_root: &Path) -> Result<AiloopConfig> {
         ws_url,
         channel,
         enabled,
+        // Known limitation: the file-based configuration path always sets `fail_fast` to false,
+        // so `NEWTON_AILOOP_FAIL_FAST` only applies when all endpoints plus channel come from env vars.
         fail_fast: false,
     })
 }
