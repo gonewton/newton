@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)] // Command operator returns AppError to surface shell execution diagnostics without boxing.
+
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::core::workflow_graph::operator::{ExecutionContext, Operator};

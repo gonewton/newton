@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)] // Workflow schema APIs return AppError to preserve structured validation context without boxing.
+
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::core::workflow_graph::expression::ExpressionEngine;

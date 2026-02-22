@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)] // CLI command handlers return AppError directly to preserve diagnostic context without boxing.
+
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::{
@@ -161,7 +163,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
         Ok(RunMode::Workspace(workspace_path)) => run_workspace(args, workspace_path)
             .await
             .map_err(|err| anyhow!(err)),
-        Ok(RunMode::Profile(context)) => run_profile_mode(args, context)
+        Ok(RunMode::Profile(context)) => run_profile_mode(args, *context)
             .await
             .map_err(|err| anyhow!(err)),
         Err(err) => Err(anyhow!(err)),
@@ -445,17 +447,17 @@ fn resolve_run_mode(args: &RunArgs) -> StdResult<RunMode, AppError> {
         })?;
     }
 
-    Ok(RunMode::Profile(ProfileRunContext {
+    Ok(RunMode::Profile(Box::new(ProfileRunContext {
         project_id,
         workspace_root,
         batch_config,
         control_file_path,
-    }))
+    })))
 }
 
 enum RunMode {
     Workspace(PathBuf),
-    Profile(ProfileRunContext),
+    Profile(Box<ProfileRunContext>),
 }
 
 struct ProfileRunContext {
@@ -500,7 +502,11 @@ async fn workflow_run(args: WorkflowRunArgs) -> StdResult<(), AppError> {
 }
 
 fn workflow_validate(args: WorkflowValidateArgs) -> StdResult<(), AppError> {
-    workflow_schema::load_workflow(&args.workflow)?;
+    let document = workflow_schema::load_workflow(&args.workflow)?;
+    let unreachable = workflow_dot::reachability_warnings(&document);
+    for id in &unreachable {
+        eprintln!("warning: task '{}' is not reachable from entry_task", id);
+    }
     println!("Workflow definition is valid");
     Ok(())
 }

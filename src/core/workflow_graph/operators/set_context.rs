@@ -6,6 +6,12 @@ use serde_json::{json, Value};
 
 pub struct SetContextOperator;
 
+impl Default for SetContextOperator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SetContextOperator {
     pub fn new() -> Self {
         Self

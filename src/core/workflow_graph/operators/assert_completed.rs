@@ -6,6 +6,12 @@ use serde_json::{json, Map, Value};
 
 pub struct AssertCompletedOperator;
 
+impl Default for AssertCompletedOperator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AssertCompletedOperator {
     pub fn new() -> Self {
         Self

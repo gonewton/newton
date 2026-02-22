@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)] // Operator trait and registry return AppError directly for structured diagnostics without boxing.
+
 use crate::core::error::AppError;
 use crate::core::workflow_graph::expression::EvaluationContext;
 use async_trait::async_trait;
@@ -55,6 +57,12 @@ pub struct OperatorRegistryBuilder {
     operators: HashMap<String, Arc<dyn Operator>>,
 }
 
+impl Default for OperatorRegistryBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OperatorRegistryBuilder {
     pub fn new() -> Self {
         Self {
@@ -82,6 +90,12 @@ impl OperatorRegistryBuilder {
 #[derive(Clone)]
 pub struct OperatorRegistry {
     inner: Arc<HashMap<String, Arc<dyn Operator>>>,
+}
+
+impl Default for OperatorRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl OperatorRegistry {

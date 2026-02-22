@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)] // Executor returns AppError to preserve full diagnostic context; boxing would discard run-time state.
+
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::core::workflow_graph::expression::{EvaluationContext, ExpressionEngine};
@@ -112,6 +114,8 @@ pub async fn execute_workflow(
         max_workflow_iterations: settings.max_workflow_iterations,
     };
 
+    // ExpressionEngine is not Send+Sync (Rhai Engine); tasks are joined in-place, never spawned.
+    #[allow(clippy::arc_with_non_send_sync)]
     let engine = Arc::new(ExpressionEngine::default());
     let context = resolve_initial_context(&document.workflow.context, engine.as_ref())?;
     let execution_id = Uuid::new_v4().to_string();

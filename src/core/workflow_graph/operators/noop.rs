@@ -6,6 +6,12 @@ use serde_json::{json, Value};
 
 pub struct NoOpOperator;
 
+impl Default for NoOpOperator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NoOpOperator {
     pub fn new() -> Self {
         Self

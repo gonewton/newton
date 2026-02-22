@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)] // Expression engine returns AppError to preserve compile/eval diagnostics without boxing.
+
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use rhai::{Array, Dynamic, Engine, Map, Scope, AST};
