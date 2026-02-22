@@ -1,4 +1,3 @@
-use assert_cmd::Command;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -109,7 +108,7 @@ fn run_profile_mode_applies_config_and_hooks() -> Result<(), Box<dyn std::error:
     let workspace = workspace_dir.path();
     setup_profile_workspace(workspace)?;
 
-    let mut cmd = Command::cargo_bin("newton")?;
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("newton");
     cmd.current_dir(workspace).arg("run").arg("newton");
     cmd.assert().success();
 
