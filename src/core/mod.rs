@@ -14,6 +14,7 @@ pub mod success_policy;
 pub mod template;
 pub mod tool_executor;
 pub mod types;
+pub mod workflow_graph;
 pub mod workspace;
 
 pub use crate::tools::ToolResult;

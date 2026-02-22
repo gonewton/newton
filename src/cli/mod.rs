@@ -5,6 +5,7 @@ pub mod init;
 
 pub use args::{
     BatchArgs, ErrorArgs, InitArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs,
+    WorkflowArgs,
 };
 use clap::{Parser, Subcommand};
 
@@ -106,6 +107,11 @@ Run 'newton init' in your workspace root to create the .newton directory structu
 or manually create .newton/configs/ and add a monitor.conf file."
     )]
     Monitor(MonitorArgs),
+    #[command(
+        about = "Operate workflow graphs via deterministic runner",
+        long_about = "Workflow graphs defined in YAML describe deterministic scheduleable tasks executed inside Newton. Use `newton workflow <COMMAND>` for run/validate/dot."
+    )]
+    Workflow(WorkflowArgs),
 }
 
 pub async fn run(args: Args) -> crate::Result<()> {
@@ -118,5 +124,6 @@ pub async fn run(args: Args) -> crate::Result<()> {
         Command::Report(report_args) => commands::report(report_args).await,
         Command::Error(error_args) => commands::error(error_args).await,
         Command::Monitor(monitor_args) => commands::monitor(monitor_args).await,
+        Command::Workflow(workflow_args) => commands::workflow(workflow_args).await,
     }
 }

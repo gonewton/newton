@@ -1,10 +1,21 @@
+use crate::core::error::AppError;
+use crate::core::types::ErrorCategory;
 use crate::{
     ailoop_integration,
-    cli::args::{BatchArgs, ErrorArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs},
+    cli::args::{
+        BatchArgs, ErrorArgs, KeyValuePair, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs,
+        WorkflowArgs, WorkflowCommand, WorkflowDotArgs, WorkflowRunArgs, WorkflowValidateArgs,
+    },
     cli::Command as CliCommand,
     core::{
         batch_config::{find_workspace_root, BatchProjectConfig},
         entities::ExecutionStatus,
+        workflow_graph::{
+            dot as workflow_dot,
+            executor::{self as workflow_executor, ExecutionOverrides},
+            operator::OperatorRegistry,
+            operators as workflow_operators, schema as workflow_schema,
+        },
         ConfigLoader, ConfigValidator, DefaultErrorReporter, OptimizationOrchestrator,
         SuccessPolicy,
     },
@@ -14,6 +25,7 @@ use crate::{
 };
 use anyhow::{anyhow, Error};
 use chrono::Utc;
+use serde_json::{Map, Value};
 use std::sync::Arc;
 use std::{
     collections::HashMap,
@@ -21,6 +33,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::Command,
+    result::Result as StdResult,
     time::Duration,
 };
 use tokio::time::sleep;
@@ -144,8 +157,18 @@ fn report_run_result(execution: crate::core::entities::OptimizationExecution) ->
 pub async fn run(args: RunArgs) -> Result<()> {
     tracing::info!("Starting Newton Loop optimization run");
 
-    let workspace_path = args.path.clone();
+    match resolve_run_mode(&args) {
+        Ok(RunMode::Workspace(workspace_path)) => run_workspace(args, workspace_path)
+            .await
+            .map_err(|err| anyhow!(err)),
+        Ok(RunMode::Profile(context)) => run_profile_mode(args, context)
+            .await
+            .map_err(|err| anyhow!(err)),
+        Err(err) => Err(anyhow!(err)),
+    }
+}
 
+async fn run_workspace(args: RunArgs, workspace_path: PathBuf) -> Result<()> {
     let newton_config = if let Some(ref path) = args.config {
         ConfigLoader::load_from_file(path)?.unwrap_or_default()
     } else {
@@ -161,7 +184,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
         .control_file
         .clone()
         .unwrap_or_else(|| workspace_path.join("newton_control.json"));
-    let success_policy = SuccessPolicy::from_path(control_file_path);
+    let success_policy = SuccessPolicy::from_path(control_file_path.clone());
 
     // Initialize ailoop context
     let ailoop_context =
@@ -204,6 +227,319 @@ pub async fn run(args: RunArgs) -> Result<()> {
             tracing::error!("Optimization failed: {}", e);
             eprintln!("Optimization failed: {}", e);
             Err(e.into())
+        }
+    }
+}
+
+async fn run_profile_mode(_args: RunArgs, context: ProfileRunContext) -> StdResult<(), AppError> {
+    tracing::info!("Running Newton project profile '{}'", context.project_id);
+
+    let env_pairs = [
+        ("CODING_AGENT", context.batch_config.coding_agent.as_str()),
+        (
+            "CODING_AGENT_MODEL",
+            context.batch_config.coding_model.as_str(),
+        ),
+        (
+            "NEWTON_EXECUTOR_CODING_AGENT",
+            context.batch_config.coding_agent.as_str(),
+        ),
+        (
+            "NEWTON_EXECUTOR_CODING_AGENT_MODEL",
+            context.batch_config.coding_model.as_str(),
+        ),
+    ];
+    let overrides = apply_env_overrides(&env_pairs);
+
+    let result = run_profile_inner(&context).await;
+    restore_env_vars(overrides);
+
+    result
+}
+
+async fn run_profile_inner(context: &ProfileRunContext) -> StdResult<(), AppError> {
+    let hook_env = build_profile_hook_env(context);
+    run_profile_pre_hook(context, &hook_env)?;
+
+    let run_args = RunArgs::for_batch_with_tools(
+        context.batch_config.project_root.clone(),
+        None,
+        context.batch_config.evaluator_cmd.clone(),
+        context.batch_config.advisor_cmd.clone(),
+        context.batch_config.executor_cmd.clone(),
+        context.batch_config.max_iterations,
+        context.batch_config.max_time,
+        context.batch_config.verbose,
+        Some(context.control_file_path.clone()),
+    );
+    if let Err(err) = run_workspace(run_args, context.batch_config.project_root.clone()).await {
+        run_profile_post_fail_hook(context, &hook_env);
+        return Err(err.into());
+    }
+
+    if let Some(script) = context.batch_config.post_success_script.as_ref() {
+        let status = run_batch_hook_script(&context.batch_config.project_root, script, &hook_env)?;
+        if !status.success() {
+            run_profile_post_fail_hook(context, &hook_env);
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                format!(
+                    "post_success_script '{}' exited {}",
+                    script,
+                    status.code().unwrap_or(-1)
+                ),
+            )
+            .with_code("WFG-RUN-POST-001"));
+        }
+    }
+
+    Ok(())
+}
+
+fn run_profile_pre_hook(
+    context: &ProfileRunContext,
+    hook_env: &HashMap<String, String>,
+) -> StdResult<(), AppError> {
+    if let Some(script) = context.batch_config.pre_run_script.as_ref() {
+        let status = run_batch_hook_script(&context.batch_config.project_root, script, hook_env)?;
+        if !status.success() {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                format!(
+                    "pre_run_script '{}' exited {}",
+                    script,
+                    status.code().unwrap_or(-1)
+                ),
+            )
+            .with_code("WFG-RUN-PRE-001"));
+        }
+    }
+    Ok(())
+}
+
+fn run_profile_post_fail_hook(context: &ProfileRunContext, hook_env: &HashMap<String, String>) {
+    if let Some(script) = context.batch_config.post_fail_script.as_ref() {
+        match run_batch_hook_script(&context.batch_config.project_root, script, hook_env) {
+            Ok(status) => {
+                if !status.success() {
+                    tracing::warn!(
+                        "post_fail_script '{}' exited {}",
+                        script,
+                        status.code().unwrap_or(-1)
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::warn!("post_fail_script '{}' failed to start: {}", script, err);
+            }
+        }
+    }
+}
+
+fn build_profile_hook_env(context: &ProfileRunContext) -> HashMap<String, String> {
+    let mut env_vars = HashMap::new();
+    env_vars.insert(
+        "CODING_AGENT".to_string(),
+        context.batch_config.coding_agent.clone(),
+    );
+    env_vars.insert(
+        "CODING_AGENT_MODEL".to_string(),
+        context.batch_config.coding_model.clone(),
+    );
+    env_vars.insert(
+        "NEWTON_EXECUTOR_CODING_AGENT".to_string(),
+        context.batch_config.coding_agent.clone(),
+    );
+    env_vars.insert(
+        "NEWTON_EXECUTOR_CODING_AGENT_MODEL".to_string(),
+        context.batch_config.coding_model.clone(),
+    );
+    env_vars.insert(
+        "NEWTON_PROJECT_ROOT".to_string(),
+        context.batch_config.project_root.display().to_string(),
+    );
+    env_vars.insert("NEWTON_PROJECT_ID".to_string(), context.project_id.clone());
+    env_vars.insert(
+        "NEWTON_WS_ROOT".to_string(),
+        context.workspace_root.display().to_string(),
+    );
+    env_vars.insert(
+        "NEWTON_CONTROL_FILE".to_string(),
+        context.control_file_path.display().to_string(),
+    );
+    env_vars
+}
+
+fn resolve_run_mode(args: &RunArgs) -> StdResult<RunMode, AppError> {
+    let workspace_candidate = args.path.clone();
+    let base_message = match fs::metadata(&workspace_candidate) {
+        Ok(metadata) => {
+            if metadata.is_dir() {
+                return Ok(RunMode::Workspace(workspace_candidate));
+            }
+            format!(
+                "workspace path {} is not a directory",
+                workspace_candidate.display()
+            )
+        }
+        Err(err) => format!("workspace path {}: {}", workspace_candidate.display(), err),
+    };
+
+    let current_dir = env::current_dir().map_err(|err| {
+        AppError::with_source(
+            ErrorCategory::IoError,
+            "failed to determine current directory",
+            Box::new(err),
+        )
+    })?;
+    let workspace_root = find_workspace_root(&current_dir).map_err(|err| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            format!("{}; workspace root discovery failed: {}", base_message, err),
+        )
+    })?;
+
+    let project_id = workspace_candidate.display().to_string();
+    let conf_path = workspace_root
+        .join(".newton")
+        .join("configs")
+        .join(format!("{}.conf", project_id));
+    if !conf_path.exists() {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "{}; workflow profile {} not found",
+                base_message,
+                conf_path.display()
+            ),
+        ));
+    }
+
+    let batch_config = BatchProjectConfig::load(&workspace_root, &project_id).map_err(|err| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            format!("failed to load profile {}: {}", project_id, err),
+        )
+    })?;
+
+    let control_file_name = batch_config
+        .control_file
+        .as_deref()
+        .unwrap_or("newton_control.json");
+    let control_file_path = if Path::new(control_file_name).is_absolute() {
+        PathBuf::from(control_file_name)
+    } else {
+        batch_config.project_root.join(control_file_name)
+    };
+
+    if let Some(parent) = control_file_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            AppError::with_source(
+                ErrorCategory::IoError,
+                format!(
+                    "failed to create control file directory {}",
+                    parent.display()
+                ),
+                Box::new(err),
+            )
+        })?;
+    }
+
+    Ok(RunMode::Profile(ProfileRunContext {
+        project_id,
+        workspace_root,
+        batch_config,
+        control_file_path,
+    }))
+}
+
+enum RunMode {
+    Workspace(PathBuf),
+    Profile(ProfileRunContext),
+}
+
+struct ProfileRunContext {
+    project_id: String,
+    workspace_root: PathBuf,
+    batch_config: BatchProjectConfig,
+    control_file_path: PathBuf,
+}
+
+pub async fn workflow(args: WorkflowArgs) -> Result<()> {
+    match args.command {
+        WorkflowCommand::Run(run_args) => workflow_run(run_args).await.map_err(|err| anyhow!(err)),
+        WorkflowCommand::Validate(validate_args) => {
+            workflow_validate(validate_args).map_err(|err| anyhow!(err))
+        }
+        WorkflowCommand::Dot(dot_args) => workflow_dot(dot_args).map_err(|err| anyhow!(err)),
+    }
+}
+
+async fn workflow_run(args: WorkflowRunArgs) -> StdResult<(), AppError> {
+    let workspace = resolve_workflow_workspace(args.workspace)?;
+    let mut document = workflow_schema::load_workflow(&args.workflow)?;
+    apply_context_overrides(&mut document.workflow.context, &args.set);
+
+    let overrides = ExecutionOverrides {
+        parallel_limit: args.parallel_limit,
+        max_time_seconds: args.max_time_seconds,
+    };
+
+    let mut builder = OperatorRegistry::builder();
+    workflow_operators::register_builtins(&mut builder, workspace.clone());
+    let registry = builder.build();
+
+    let summary =
+        workflow_executor::execute_workflow(document, registry, workspace.clone(), overrides)
+            .await?;
+    println!(
+        "Workflow completed in {} iterations",
+        summary.total_iterations
+    );
+    Ok(())
+}
+
+fn workflow_validate(args: WorkflowValidateArgs) -> StdResult<(), AppError> {
+    workflow_schema::load_workflow(&args.workflow)?;
+    println!("Workflow definition is valid");
+    Ok(())
+}
+
+fn workflow_dot(args: WorkflowDotArgs) -> StdResult<(), AppError> {
+    let document = workflow_schema::load_workflow(&args.workflow)?;
+    let dot = workflow_dot::workflow_to_dot(&document);
+    if let Some(path) = args.out {
+        fs::write(path, dot).map_err(|err| {
+            AppError::new(
+                ErrorCategory::IoError,
+                format!("failed to write DOT: {}", err),
+            )
+        })?;
+    } else {
+        println!("{}", dot);
+    }
+    Ok(())
+}
+
+fn resolve_workflow_workspace(path: Option<PathBuf>) -> StdResult<PathBuf, AppError> {
+    match path {
+        Some(p) => Ok(p),
+        None => Ok(env::current_dir().map_err(|err| {
+            AppError::new(
+                ErrorCategory::IoError,
+                format!("failed to resolve workspace path: {}", err),
+            )
+        })?),
+    }
+}
+
+fn apply_context_overrides(context: &mut Value, overrides: &[KeyValuePair]) {
+    if !context.is_object() {
+        *context = Value::Object(Map::new());
+    }
+    if let Some(map) = context.as_object_mut() {
+        for pair in overrides {
+            map.insert(pair.key.clone(), Value::String(pair.value.clone()));
         }
     }
 }

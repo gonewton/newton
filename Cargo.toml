@@ -39,6 +39,10 @@ opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
 opentelemetry_sdk = "0.31"
 futures = "0.3"
+serde_yaml = "0.9"
+rhai = "1.11"
+petgraph = "0.7"
+async-trait = "0.1"
 
 [dev-dependencies]
 assert_cmd = "2.0"
@@ -104,6 +108,18 @@ path = "tests/unit/test_config_comprehensive.rs"
 [[test]]
 name = "test_config_loading"
 path = "tests/integration/test_config_loading.rs"
+
+[[test]]
+name = "test_workflow_parse_and_validate"
+path = "tests/workflow_graph/test_parse_and_validate.rs"
+
+[[test]]
+name = "test_workflow_scheduler"
+path = "tests/workflow_graph/test_scheduler.rs"
+
+[[test]]
+name = "test_profile_mode"
+path = "tests/run/test_profile_mode.rs"
 
 [[bin]]
 name = "logging_integration_helper"

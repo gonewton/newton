@@ -41,7 +41,8 @@ pub fn detect_context(command: &Command) -> ExecutionContext {
         | Command::Status(_)
         | Command::Report(_)
         | Command::Error(_)
-        | Command::Init(_) => ExecutionContext::LocalDev,
+        | Command::Init(_)
+        | Command::Workflow(_) => ExecutionContext::LocalDev,
         Command::Monitor(_) => ExecutionContext::Tui,
     }
 }
