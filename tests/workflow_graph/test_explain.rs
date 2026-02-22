@@ -1,66 +1,156 @@
 use insta::assert_snapshot;
-use newton::core::workflow_graph::{explain, schema::WorkflowDocument};
-use serde_json::{json, Value};
-use serde_yaml::from_str;
+use newton::core::workflow_graph::{explain, schema};
+use serde_json::json;
+use std::fs;
+use tempfile::NamedTempFile;
 
-fn load_document(yaml: &str) -> WorkflowDocument {
-    from_str(yaml).expect("failed to parse workflow YAML")
-}
-
-const EXPLAIN_WORKFLOW: &str = r#"
+#[test]
+fn explain_evaluates_context_and_marks_runtime_expressions() {
+    let workflow = r#"
 version: "2.0"
-mode: "workflow_graph"
+mode: workflow_graph
 workflow:
   context:
     env: "dev"
-    count: 1
   settings:
     entry_task: start
-    max_time_seconds: 120
+    max_time_seconds: 60
     parallel_limit: 1
     continue_on_error: false
-    max_task_iterations: 2
-    max_workflow_iterations: 2
+    max_task_iterations: 3
+    max_workflow_iterations: 10
   tasks:
     - id: start
-      operator: CommandOperator
+      operator: SetContextOperator
       params:
-        greeting:
-          $expr: "context.env + \"-action\""
-        checker:
-          $expr: "tasks.next.status == \"success\""
+        computed:
+          $expr: "context.build_number + 1"
+        runtime_only:
+          $expr: "tasks.start.status == 'success'"
       transitions:
-        - to: next
+        - to: done
           priority: 10
           when:
-            $expr: "context.env != \"staging\""
-        - to: other
-          priority: 20
-          when:
-            $expr: "context.count > 0"
-    - id: next
-      operator: CommandOperator
-      params:
-        metadata:
-          $expr: "{\"region\":\"us\"}"
-      transitions:
-        - to: start
-          priority: 5
-    - id: other
-      operator: CommandOperator
-      params:
-        cwd: "/workspace"
+            $expr: "context.env == 'prod'"
+        - to: done
+          priority: 1
+    - id: done
+      operator: NoOpOperator
+      params: {}
 "#;
 
-#[test]
-fn explain_output_matches_goldens() {
-    let document = load_document(EXPLAIN_WORKFLOW);
+    let file = NamedTempFile::new().expect("temp file");
+    fs::write(file.path(), workflow).expect("write workflow");
+    let document = schema::parse_workflow(file.path()).expect("parse workflow");
+
     let overrides = vec![
-        ("env".to_string(), Value::String("prod".to_string())),
-        ("count".to_string(), json!(5)),
+        ("build_number".to_string(), json!(7)),
+        ("env".to_string(), json!("prod")),
     ];
-    let output = explain::build_explain_output(&document, &overrides)
-        .expect("failed to build explain output");
-    let serialized = serde_json::to_string_pretty(&output).expect("serialize explain output");
-    assert_snapshot!(serialized);
+    let outcome =
+        explain::build_explain_outcome(&document, &overrides).expect("build explain output");
+    assert!(!outcome.has_blocking_diagnostics());
+
+    assert_snapshot!(
+        serde_json::to_string_pretty(&outcome.output).expect("serialize explain output"),
+        @r###"
+    {
+      "settings": {
+        "artifact_storage": {
+          "base_path": ".newton/artifacts",
+          "cleanup_policy": "lru",
+          "max_artifact_bytes": 104857600,
+          "max_inline_bytes": 65536,
+          "max_total_bytes": 1073741824,
+          "retention_hours": 168
+        },
+        "checkpoint": {
+          "checkpoint_enabled": true,
+          "checkpoint_interval_seconds": 30,
+          "checkpoint_keep_history": false,
+          "checkpoint_on_task_complete": true
+        },
+        "command_operator": {
+          "allow_shell": false
+        },
+        "continue_on_error": false,
+        "entry_task": "start",
+        "max_task_iterations": 3,
+        "max_time_seconds": 60,
+        "max_workflow_iterations": 10,
+        "parallel_limit": 1,
+        "redaction": {
+          "redact_keys": [
+            "token",
+            "password",
+            "secret"
+          ]
+        }
+      },
+      "context": {
+        "build_number": 7,
+        "env": "prod"
+      },
+      "triggers": {},
+      "tasks": [
+        {
+          "id": "start",
+          "operator": "SetContextOperator",
+          "params": {
+            "computed": 8,
+            "runtime_only": "(runtime)"
+          },
+          "transitions": [
+            {
+              "target": "done",
+              "priority": 1,
+              "when": "(always)"
+            },
+            {
+              "target": "done",
+              "priority": 10,
+              "when": "context.env == 'prod'"
+            }
+          ]
+        },
+        {
+          "id": "done",
+          "operator": "NoOpOperator",
+          "params": {},
+          "transitions": []
+        }
+      ]
+    }
+    "###);
+}
+
+#[test]
+fn explain_reports_blocking_expression_errors() {
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: start
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+  tasks:
+    - id: start
+      operator: SetContextOperator
+      params:
+        invalid:
+          $expr: "context.foo +"
+"#;
+
+    let file = NamedTempFile::new().expect("temp file");
+    fs::write(file.path(), workflow).expect("write workflow");
+    let document = schema::parse_workflow(file.path()).expect("parse workflow");
+
+    let outcome = explain::build_explain_outcome(&document, &[]).expect("build explain outcome");
+    assert!(outcome.has_blocking_diagnostics());
+    assert_eq!(outcome.diagnostics.len(), 1);
 }

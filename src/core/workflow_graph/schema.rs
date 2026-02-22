@@ -241,20 +241,25 @@ impl Condition {
 }
 
 impl WorkflowDocument {
-    /// Load and validate a workflow document from a YAML file.
-    pub fn load_from_file(path: &Path) -> Result<Self, AppError> {
+    /// Parse a workflow document from a YAML file without semantic validation.
+    pub fn parse_from_file(path: &Path) -> Result<Self, AppError> {
         let text = fs::read_to_string(path).map_err(|err| {
             AppError::new(
                 ErrorCategory::IoError,
                 format!("failed to read {}: {}", path.display(), err),
             )
         })?;
-        let doc: WorkflowDocument = serde_yaml::from_str(&text).map_err(|err| {
+        serde_yaml::from_str(&text).map_err(|err| {
             AppError::new(
                 ErrorCategory::ValidationError,
                 format!("failed to parse {}: {}", path.display(), err),
             )
-        })?;
+        })
+    }
+
+    /// Load and validate a workflow document from a YAML file.
+    pub fn load_from_file(path: &Path) -> Result<Self, AppError> {
+        let doc = Self::parse_from_file(path)?;
         let engine = ExpressionEngine::default();
         doc.validate(&engine)?;
         Ok(doc)
@@ -393,6 +398,10 @@ fn collect_expression_strings(value: &Value, expressions: &mut Vec<String>) {
 
 pub fn load_workflow(path: &Path) -> Result<WorkflowDocument, AppError> {
     WorkflowDocument::load_from_file(path)
+}
+
+pub fn parse_workflow(path: &Path) -> Result<WorkflowDocument, AppError> {
+    WorkflowDocument::parse_from_file(path)
 }
 
 #[cfg(test)]

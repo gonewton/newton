@@ -19,6 +19,7 @@ use crate::{
             artifacts, checkpoint, dot as workflow_dot,
             executor::{self as workflow_executor, ExecutionOverrides},
             explain,
+            expression::ExpressionEngine,
             lint::{LintRegistry, LintResult, LintSeverity},
             operator::OperatorRegistry,
             operators as workflow_operators, schema as workflow_schema,
@@ -500,7 +501,7 @@ pub async fn workflow(args: WorkflowArgs) -> Result<()> {
 async fn workflow_run(args: WorkflowRunArgs) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(args.workspace)?;
     let workflow_path = args.workflow.clone();
-    let mut document = workflow_schema::load_workflow(&workflow_path)?;
+    let mut document = workflow_schema::parse_workflow(&workflow_path)?;
     let lint_results = LintRegistry::new().run(&document);
     if !lint_results.is_empty() {
         print_lint_results_text(&lint_results);
@@ -519,6 +520,7 @@ async fn workflow_run(args: WorkflowRunArgs) -> StdResult<(), AppError> {
         ));
     }
     apply_context_overrides(&mut document.workflow.context, &args.set);
+    document.validate(&ExpressionEngine::default())?;
 
     let overrides = ExecutionOverrides {
         parallel_limit: args.parallel_limit,
@@ -571,7 +573,7 @@ fn workflow_dot(args: WorkflowDotArgs) -> StdResult<(), AppError> {
 }
 
 fn workflow_lint(args: WorkflowLintArgs) -> StdResult<(), AppError> {
-    let document = workflow_schema::load_workflow(&args.workflow)?;
+    let document = workflow_schema::parse_workflow(&args.workflow)?;
     let results = LintRegistry::new().run(&document);
     match args.format {
         OutputFormat::Json => print_lint_results_json(&results)?,
@@ -598,12 +600,25 @@ fn workflow_lint(args: WorkflowLintArgs) -> StdResult<(), AppError> {
 
 fn workflow_explain(args: WorkflowExplainArgs) -> StdResult<(), AppError> {
     let _workspace = resolve_workflow_workspace(args.workspace)?;
-    let document = workflow_schema::load_workflow(&args.workflow)?;
+    let document = workflow_schema::parse_workflow(&args.workflow)?;
     let overrides = parse_set_overrides(&args.set);
-    let output = explain::build_explain_output(&document, &overrides)?;
+    let outcome = explain::build_explain_outcome(&document, &overrides)?;
     match args.format {
-        OutputFormat::Json => print_explain_json(&output)?,
-        OutputFormat::Text => print_explain_text(&output)?,
+        OutputFormat::Json => print_explain_json(&outcome.output)?,
+        OutputFormat::Text => print_explain_text(&outcome.output)?,
+    }
+    for diagnostic in &outcome.diagnostics {
+        if let Some(location) = &diagnostic.location {
+            eprintln!("explain diagnostic ({}): {}", location, diagnostic.message);
+        } else {
+            eprintln!("explain diagnostic: {}", diagnostic.message);
+        }
+    }
+    if outcome.has_blocking_diagnostics() {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            "workflow explain found blocking expression diagnostics",
+        ));
     }
     Ok(())
 }
@@ -758,7 +773,9 @@ fn apply_context_overrides(context: &mut Value, overrides: &[KeyValuePair]) {
     }
     if let Some(map) = context.as_object_mut() {
         for pair in overrides {
-            map.insert(pair.key.clone(), Value::String(pair.value.clone()));
+            let parsed = serde_json::from_str(&pair.value)
+                .unwrap_or_else(|_| Value::String(pair.value.clone()));
+            map.insert(pair.key.clone(), parsed);
         }
     }
 }
