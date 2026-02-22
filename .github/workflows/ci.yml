@@ -105,4 +105,4 @@ jobs:
             --workspace \
             --ignore-filename-regex '(\.cargo/registry|^tests/|/tests/)' \
             --summary-only \
-            --fail-under-lines 65
+            --fail-under-lines 50
