@@ -181,6 +181,7 @@ fn workspace_root_for_command(command: &Command) -> Result<Option<PathBuf>> {
                 None
             }
         }
+        Command::Workflow(_) => env::current_dir().ok(),
         Command::Monitor(_) => {
             let cwd = env::current_dir()?;
             Some(find_workspace_root(&cwd)?)

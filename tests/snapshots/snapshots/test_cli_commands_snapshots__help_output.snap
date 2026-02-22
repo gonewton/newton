@@ -1,5 +1,6 @@
 ---
 source: tests/snapshots/test_cli_commands_snapshots.rs
+assertion_line: 35
 expression: normalized
 ---
 newton
@@ -15,12 +16,13 @@ OPTIONS:
   -V, --version
           Print version
 WORKFLOW COMMANDS:
-  run      Execute a full optimization loop
-  init     Initialize a Newton workspace with the default template
-  batch    Process queued work items for a project
-  step     Advance loop by one cycle
-  status   Inspect progress of an execution
-  report   Summarize learnings from an execution
-  error    Diagnose failures during optimization
-  monitor  Monitor live ailoop channels via a terminal UI
-  help     Print this message or the help of the given subcommand(s)
+  run       Execute a full optimization loop
+  init      Initialize a Newton workspace with the default template
+  batch     Process queued work items for a project
+  step      Advance loop by one cycle
+  status    Inspect progress of an execution
+  report    Summarize learnings from an execution
+  error     Diagnose failures during optimization
+  monitor   Monitor live ailoop channels via a terminal UI
+  workflow  Operate workflow graphs via deterministic runner
+  help      Print this message or the help of the given subcommand(s)

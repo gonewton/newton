@@ -1,5 +1,6 @@
-use clap::Args;
+use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 #[derive(Args, Clone)]
 pub struct RunArgs {
@@ -93,6 +94,83 @@ pub struct RunArgs {
     /// User feedback passed to tools via NEWTON_USER_FEEDBACK
     #[arg(long, value_name = "TEXT", help_heading = "User Interaction")]
     pub feedback: Option<String>,
+}
+
+#[derive(Parser, Clone)]
+pub struct WorkflowArgs {
+    #[command(subcommand)]
+    pub command: WorkflowCommand,
+}
+
+#[derive(Subcommand, Clone)]
+pub enum WorkflowCommand {
+    #[command(about = "Execute a workflow graph")]
+    Run(WorkflowRunArgs),
+    #[command(about = "Validate a workflow graph definition")]
+    Validate(WorkflowValidateArgs),
+    #[command(about = "Render workflow graph as DOT")]
+    Dot(WorkflowDotArgs),
+}
+
+#[derive(Args, Clone)]
+pub struct WorkflowRunArgs {
+    #[arg(long, value_name = "PATH")]
+    pub workflow: PathBuf,
+
+    #[arg(long, value_name = "PATH")]
+    pub workspace: Option<PathBuf>,
+
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub set: Vec<KeyValuePair>,
+
+    #[arg(long)]
+    pub parallel_limit: Option<usize>,
+
+    #[arg(long)]
+    pub max_time_seconds: Option<u64>,
+}
+
+#[derive(Args, Clone)]
+pub struct WorkflowValidateArgs {
+    #[arg(long, value_name = "PATH")]
+    pub workflow: PathBuf,
+}
+
+#[derive(Args, Clone)]
+pub struct WorkflowDotArgs {
+    #[arg(long, value_name = "PATH")]
+    pub workflow: PathBuf,
+
+    #[arg(long, value_name = "FILE")]
+    pub out: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug)]
+pub struct KeyValuePair {
+    pub key: String,
+    pub value: String,
+}
+
+impl FromStr for KeyValuePair {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.splitn(2, '=');
+        let key = parts
+            .next()
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .ok_or_else(|| "missing key".to_string())?;
+        let value = parts
+            .next()
+            .ok_or_else(|| "missing value".to_string())?
+            .trim()
+            .to_string();
+        Ok(KeyValuePair {
+            key: key.to_string(),
+            value,
+        })
+    }
 }
 
 impl RunArgs {
