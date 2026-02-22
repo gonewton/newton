@@ -8,6 +8,10 @@ pub enum ExecutionStatus {
     Running,
     Completed,
     Failed,
+    Cancelled,
+    Timeout,
+    MaxIterationsReached,
+    /// Legacy marker retained for backward compatibility with older persisted executions.
     Terminated,
 }
 
@@ -51,8 +55,9 @@ pub enum ErrorSeverity {
 }
 
 /// Iteration phase enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum IterationPhase {
+    #[default]
     Evaluator,
     Advisor,
     Executor,

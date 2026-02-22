@@ -5,6 +5,10 @@ use uuid::Uuid;
 
 use crate::tools::ToolResult;
 
+pub use crate::core::types::{
+    ErrorCategory, ErrorSeverity, ExecutionStatus, IterationPhase, ToolType,
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationExecution {
     pub id: Uuid,
@@ -23,84 +27,6 @@ pub struct OptimizationExecution {
     pub iterations: Vec<Iteration>,
     pub artifacts: Vec<ArtifactMetadata>,
     pub configuration: ExecutionConfiguration,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub enum ExecutionStatus {
-    #[default]
-    Pending,
-    Running,
-    Completed,
-    Failed,
-    Cancelled,
-    Timeout,
-    MaxIterationsReached,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub enum IterationPhase {
-    #[default]
-    Evaluator,
-    Advisor,
-    Executor,
-    Complete,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ErrorCategory {
-    ValidationError,
-    ToolExecutionError,
-    TimeoutError,
-    ResourceError,
-    WorkspaceError,
-    IterationError,
-    SerializationError,
-    IoError,
-    InternalError,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ErrorSeverity {
-    Error,
-    Warning,
-    Info,
-    Debug,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ToolType {
-    Evaluator,
-    Advisor,
-    Executor,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_optimization_execution_creation() {
-        let execution = OptimizationExecution {
-            id: Uuid::new_v4(),
-            workspace_path: PathBuf::from("/tmp/test"),
-            execution_id: Uuid::new_v4(),
-            status: ExecutionStatus::Running,
-            started_at: Utc::now(),
-            completed_at: None,
-            resource_limits: Default::default(),
-            max_iterations: None,
-            current_iteration: None,
-            final_solution_path: None,
-            current_iteration_path: None,
-            total_iterations_completed: 0,
-            total_iterations_failed: 0,
-            iterations: Vec::new(),
-            artifacts: Vec::new(),
-            configuration: Default::default(),
-        };
-        assert_eq!(execution.id, execution.id);
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

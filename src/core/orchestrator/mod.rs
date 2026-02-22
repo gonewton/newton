@@ -1,4 +1,4 @@
-#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::unnecessary_cast)] // legacy data structures rely on explicit casts to normalize persisted numeric values.
 
 use crate::ailoop_integration::{AiloopContext, OrchestratorNotifier, OutputForwarder};
 use crate::core::entities::*;
@@ -228,7 +228,7 @@ impl OptimizationOrchestrator {
         if let Some(ref notifier) = notifier {
             if let Err(e) = notifier.execution_completed(
                 execution_id,
-                execution.status.clone(),
+                execution.status,
                 execution.total_iterations_completed,
             ) {
                 tracing::warn!("Failed to emit execution_completed event: {}", e);

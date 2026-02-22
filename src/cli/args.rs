@@ -122,7 +122,7 @@ impl RunArgs {
     }
 
     /// Produce batch arguments when tooling overrides and limits should come from config.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)] // Batch helper mirrors CLI overrides so the argument count reflects user-facing flags.
     pub fn for_batch_with_tools(
         project_root: PathBuf,
         goal_file: Option<PathBuf>,

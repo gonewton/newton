@@ -1,5 +1,5 @@
 use crate::ailoop_integration::AiloopContext;
-use crate::core::entities::ExecutionStatus;
+use crate::core::types::ExecutionStatus;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

@@ -1,3 +1,4 @@
+//! Core Newton domain models, configuration, and orchestration utilities that drive workspace executions.
 pub mod batch_config;
 pub mod config;
 pub mod context;
@@ -19,10 +20,7 @@ pub use crate::tools::ToolResult;
 pub use batch_config::{find_workspace_root, parse_conf, BatchProjectConfig};
 pub use config::{ConfigLoader, ConfigValidator, NewtonConfig};
 pub use context::ContextManager;
-pub use entities::{
-    ArtifactMetadata, ErrorCategory, ExecutionStatus, IterationPhase, OptimizationExecution,
-    ToolType,
-};
+pub use entities::{ArtifactMetadata, OptimizationExecution};
 pub use error::{AppError, DefaultErrorReporter, ErrorReporter};
 pub use git::{BranchManager, CommitManager, GitManager, PullRequestManager};
 pub use history_recorder::ExecutionHistoryRecorder;

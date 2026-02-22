@@ -14,3 +14,5 @@ repomix-output.xml
 .newton
 specs
 tarpaulin-report.html.gitignore
+# Auto-release workflow trigger file
+auto_release_trigger.txt

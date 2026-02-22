@@ -1,4 +1,4 @@
-#![allow(clippy::result_large_err)]
+#![allow(clippy::result_large_err)] // Template rendering surface returns AppError to preserve detailed context (no boxing).
 
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;

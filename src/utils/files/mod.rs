@@ -1,4 +1,4 @@
-#![allow(clippy::result_large_err)]
+#![allow(clippy::result_large_err)] // Artifacts storage APIs return AppError to keep serialization context intact rather than boxing.
 
 use crate::core::entities::ArtifactMetadata;
 use crate::core::error::AppError;

@@ -4,7 +4,7 @@ use crate::core::error::AppError;
 pub struct ConfigValidator;
 
 impl ConfigValidator {
-    #[allow(clippy::result_large_err)]
+    #[allow(clippy::result_large_err)] // AppError carries validation context; we keep the concrete type for clarity.
     pub fn validate(config: &NewtonConfig) -> Result<(), AppError> {
         if config.project.name.is_empty() {
             return Err(AppError::new(

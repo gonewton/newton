@@ -1,4 +1,4 @@
-#![allow(clippy::result_large_err)]
+#![allow(clippy::result_large_err)] // Git branch operations bubble AppError for command failures so extra boxing is unnecessary.
 
 use crate::core::error::AppError;
 use std::collections::HashMap;

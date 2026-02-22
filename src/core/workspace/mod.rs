@@ -1,4 +1,4 @@
-#![allow(clippy::result_large_err)]
+#![allow(clippy::result_large_err)] // Validation returns AppError directly so callers can inspect context-rich errors without extra boxing.
 
 use crate::core::error::AppError;
 

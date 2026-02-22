@@ -1,3 +1,4 @@
+//! Monitor command wiring: HTTP/WebSocket polling plus a ratatui terminal UI for observing ailoop channels and responding to events.
 pub mod client;
 pub mod config;
 pub mod event;

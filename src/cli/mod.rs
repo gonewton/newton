@@ -1,3 +1,4 @@
+//! CLI scaffolding for Newton: argument parsing, command definitions, and command dispatch logic.
 pub mod args;
 pub mod commands;
 pub mod init;
@@ -28,7 +29,7 @@ pub struct Args {
 }
 
 #[derive(Subcommand)]
-#[allow(clippy::large_enum_variant)]
+#[allow(clippy::large_enum_variant)] // Command variants mirror the CLI styling structs, so matching variants stay large by design.
 pub enum Command {
     #[command(
         about = "Execute a full optimization loop",

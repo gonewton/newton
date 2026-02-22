@@ -1,4 +1,4 @@
-#![allow(clippy::result_large_err)]
+#![allow(clippy::result_large_err)] // Control file logic propagates AppError directly so structured context survives to callers.
 
 use crate::core::error::AppError;
 use serde::{Deserialize, Serialize};

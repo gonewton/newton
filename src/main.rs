@@ -12,4 +12,3 @@ async fn main() -> Result<()> {
     // Run the chosen command
     newton::cli::run(args).await
 }
-// Test auto-release workflow
