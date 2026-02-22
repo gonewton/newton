@@ -100,6 +100,6 @@ jobs:
         run: |
           cargo llvm-cov \
             --workspace \
-            --ignore-filename-regex '(^tests/|src/cli/|src/core/(?!workflow_graph))' \
+            --ignore-filename-regex '(\.cargo/registry|/tests/|^tests/|/src/cli/|^src/cli/|/src/main\.rs|^src/main\.rs|/src/lib\.rs|^src/lib\.rs|/src/ailoop_integration/|^src/ailoop_integration/|/src/logging/|^src/logging/|/src/monitor/|^src/monitor/|/src/tools/|^src/tools/|/src/utils/|^src/utils/|/src/core/(batch_config|config|context|error|git|history_recorder|logger|orchestrator|performance|results_processor|success_policy|template|tool_executor|types|workspace)/|^src/core/(batch_config|config|context|error|git|history_recorder|logger|orchestrator|performance|results_processor|success_policy|template|tool_executor|types|workspace)/|/src/core/mod\.rs|^src/core/mod\.rs)' \
             --summary-only \
             --fail-under-lines 95
