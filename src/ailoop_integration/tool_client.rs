@@ -219,67 +219,155 @@ pub enum ClientError {
 mod tests {
     use super::*;
     use crate::ailoop_integration::config::AiloopConfig;
+    use serde_json::json;
+    use serial_test::serial;
+    use std::env;
+    use std::path::PathBuf;
     use url::Url;
+    use wiremock::matchers::{method, path_regex};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn create_test_context() -> Arc<AiloopContext> {
+    fn create_context(http_url: &str, ws_url: &str, channel: &str) -> Arc<AiloopContext> {
         let config = AiloopConfig {
-            http_url: Url::parse("http://localhost:8080").unwrap(),
-            ws_url: Url::parse("ws://localhost:8080").unwrap(),
-            channel: "test-channel".to_string(),
+            http_url: Url::parse(http_url).unwrap(),
+            ws_url: Url::parse(ws_url).unwrap(),
+            channel: channel.to_string(),
             enabled: true,
             fail_fast: false,
         };
         Arc::new(AiloopContext::new(
             config,
-            std::path::PathBuf::from("/test/workspace"),
+            PathBuf::from("/test/workspace"),
             "tool".to_string(),
         ))
     }
 
     #[test]
     fn test_client_creation() {
-        let context = create_test_context();
+        let context = create_context("http://localhost:8080", "ws://localhost:8080", "test");
         let _client = ToolClient::new(context);
-        // Just verify it doesn't panic
     }
 
     #[test]
-    #[serial_test::serial]
+    #[serial]
     fn test_from_env_not_enabled() {
-        // Without NEWTON_AILOOP_ENABLED, should return None
-        std::env::remove_var("NEWTON_AILOOP_ENABLED");
-        let client = ToolClient::from_env();
-        assert!(client.is_none());
+        env::remove_var("NEWTON_AILOOP_ENABLED");
+        assert!(ToolClient::from_env().is_none());
     }
 
     #[test]
-    #[serial_test::serial]
+    #[serial]
     fn test_from_env_incomplete() {
-        // With partial env vars, should return None
-        std::env::set_var("NEWTON_AILOOP_ENABLED", "1");
-        std::env::remove_var("NEWTON_AILOOP_HTTP_URL");
-        let client = ToolClient::from_env();
-        std::env::remove_var("NEWTON_AILOOP_ENABLED");
-        assert!(client.is_none());
+        env::set_var("NEWTON_AILOOP_ENABLED", "1");
+        env::remove_var("NEWTON_AILOOP_HTTP_URL");
+        assert!(ToolClient::from_env().is_none());
+        env::remove_var("NEWTON_AILOOP_ENABLED");
     }
 
     #[test]
-    #[serial_test::serial]
+    #[serial]
     fn test_from_env_complete() {
-        // With complete env vars, should create client
-        std::env::set_var("NEWTON_AILOOP_ENABLED", "1");
-        std::env::set_var("NEWTON_AILOOP_HTTP_URL", "http://localhost:8080");
-        std::env::set_var("NEWTON_AILOOP_WS_URL", "ws://localhost:8080");
-        std::env::set_var("NEWTON_AILOOP_CHANNEL", "test");
+        env::set_var("NEWTON_AILOOP_ENABLED", "1");
+        env::set_var("NEWTON_AILOOP_HTTP_URL", "http://localhost:8080");
+        env::set_var("NEWTON_AILOOP_WS_URL", "ws://localhost:8080");
+        env::set_var("NEWTON_AILOOP_CHANNEL", "test");
 
         let client = ToolClient::from_env();
 
-        std::env::remove_var("NEWTON_AILOOP_ENABLED");
-        std::env::remove_var("NEWTON_AILOOP_HTTP_URL");
-        std::env::remove_var("NEWTON_AILOOP_WS_URL");
-        std::env::remove_var("NEWTON_AILOOP_CHANNEL");
+        env::remove_var("NEWTON_AILOOP_ENABLED");
+        env::remove_var("NEWTON_AILOOP_HTTP_URL");
+        env::remove_var("NEWTON_AILOOP_WS_URL");
+        env::remove_var("NEWTON_AILOOP_CHANNEL");
 
         assert!(client.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_ask_question_timeout_response() {
+        let mock_server = MockServer::start().await;
+        let channel = "test-channel";
+        Mock::given(method("POST"))
+            .and(path_regex(format!(r"^/+questions/{channel}$")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "answer": null,
+                "timed_out": true
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let context = create_context(&mock_server.uri(), "ws://localhost:8080", channel);
+        let client = ToolClient::new(context);
+        let result = client
+            .ask_question("question".to_string(), Duration::from_secs(1))
+            .await;
+        let requests = mock_server
+            .received_requests()
+            .await
+            .expect("should have received requests");
+        assert!(
+            requests[0]
+                .url
+                .path()
+                .ends_with(&format!("/questions/{channel}")),
+            "unexpected path: {}",
+            requests[0].url.path()
+        );
+        let response = result.expect("should parse response");
+
+        assert!(response.timed_out);
+        assert!(response.answer.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_request_authorization_denied_response() {
+        let mock_server = MockServer::start().await;
+        let channel = "auth-channel";
+        Mock::given(method("POST"))
+            .and(path_regex(format!(r"^/+authorization/{channel}$")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "authorized": false,
+                "timed_out": false,
+                "reason": "denied"
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let context = create_context(&mock_server.uri(), "ws://localhost:8080", channel);
+        let client = ToolClient::new(context);
+        let result = client
+            .request_authorization(
+                "action".to_string(),
+                "details".to_string(),
+                Duration::from_secs(1),
+            )
+            .await;
+        let requests = mock_server
+            .received_requests()
+            .await
+            .expect("should have received requests");
+        assert!(
+            requests[0]
+                .url
+                .path()
+                .ends_with(&format!("/authorization/{channel}")),
+            "unexpected path: {}",
+            requests[0].url.path()
+        );
+        let response = result.expect("should parse response");
+
+        assert!(!response.authorized);
+        assert_eq!(response.reason.as_deref(), Some("denied"));
+    }
+
+    #[tokio::test]
+    async fn test_ask_question_network_error_when_unreachable() {
+        let context = create_context("http://127.0.0.1:1", "ws://localhost:8080", "unreachable");
+        let client = ToolClient::new(context);
+        let result = client
+            .ask_question("hi".to_string(), Duration::from_millis(100))
+            .await;
+
+        assert!(matches!(result, Err(ClientError::NetworkError(_))));
     }
 
     #[test]

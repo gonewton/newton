@@ -256,6 +256,7 @@ pub enum SendError {
 mod tests {
     use super::*;
     use crate::ailoop_integration::config::AiloopConfig;
+    use serde_json::Value;
     use url::Url;
 
     fn create_test_context() -> Arc<AiloopContext> {
@@ -343,5 +344,101 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("execution_started"));
         assert!(json.contains("schema_version"));
+    }
+
+    fn assert_schema(value: &Value) {
+        assert_eq!(
+            value["schema_version"],
+            Value::String(EVENT_SCHEMA_VERSION.to_string())
+        );
+        assert!(value["timestamp"].is_string());
+    }
+
+    #[test]
+    fn execution_started_contains_required_fields() {
+        let event = OrchestratorEvent::ExecutionStarted {
+            execution_id: Uuid::new_v4(),
+            workspace_path: "/test/workspace".to_string(),
+            command: "run".to_string(),
+            timestamp: Utc::now(),
+            schema_version: EVENT_SCHEMA_VERSION.to_string(),
+        };
+
+        let value = serde_json::to_value(&event).unwrap();
+        assert_schema(&value);
+        assert!(value["execution_id"].is_string());
+        assert_eq!(
+            value["workspace_path"],
+            Value::String("/test/workspace".to_string())
+        );
+        assert_eq!(value["command"], Value::String("run".to_string()));
+    }
+
+    #[test]
+    fn iteration_started_contains_required_fields() {
+        let event = OrchestratorEvent::IterationStarted {
+            execution_id: Uuid::new_v4(),
+            iteration_number: 2,
+            timestamp: Utc::now(),
+            schema_version: EVENT_SCHEMA_VERSION.to_string(),
+        };
+
+        let value = serde_json::to_value(&event).unwrap();
+        assert_schema(&value);
+        assert_eq!(
+            value["iteration_number"],
+            Value::Number(serde_json::Number::from(2))
+        );
+    }
+
+    #[test]
+    fn iteration_completed_contains_required_fields() {
+        let event = OrchestratorEvent::IterationCompleted {
+            execution_id: Uuid::new_v4(),
+            iteration_number: 3,
+            timestamp: Utc::now(),
+            schema_version: EVENT_SCHEMA_VERSION.to_string(),
+        };
+
+        let value = serde_json::to_value(&event).unwrap();
+        assert_schema(&value);
+        assert_eq!(
+            value["iteration_number"],
+            Value::Number(serde_json::Number::from(3))
+        );
+    }
+
+    #[test]
+    fn execution_failed_contains_required_fields() {
+        let event = OrchestratorEvent::ExecutionFailed {
+            execution_id: Uuid::new_v4(),
+            error_message: "failure".to_string(),
+            timestamp: Utc::now(),
+            schema_version: EVENT_SCHEMA_VERSION.to_string(),
+        };
+
+        let value = serde_json::to_value(&event).unwrap();
+        assert_schema(&value);
+        assert_eq!(value["error_message"], Value::String("failure".to_string()));
+    }
+
+    #[test]
+    fn execution_completed_contains_required_fields() {
+        let event = OrchestratorEvent::ExecutionCompleted {
+            execution_id: Uuid::new_v4(),
+            status: ExecutionStatus::Completed,
+            total_iterations: 5,
+            timestamp: Utc::now(),
+            schema_version: EVENT_SCHEMA_VERSION.to_string(),
+        };
+
+        let value = serde_json::to_value(&event).unwrap();
+        assert_schema(&value);
+        assert_eq!(
+            value["total_iterations"],
+            Value::Number(serde_json::Number::from(5))
+        );
+        let expected_status = serde_json::to_value(ExecutionStatus::Completed).unwrap();
+        assert_eq!(value["status"], expected_status);
     }
 }

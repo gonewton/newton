@@ -4,6 +4,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 const FORWARDER_QUEUE_SIZE: usize = 10000;
+// The bounded channel rejects sends with QueueFull when receivers are gone. Instead of dropping
+// the oldest message, we surface a deterministic QueueFull error to callers when buffering fails.
 const MAX_MESSAGE_LENGTH: usize = 8192;
 
 /// Priority level for output messages.
@@ -51,6 +53,18 @@ impl OutputForwarder {
         Self {
             context,
             message_tx,
+        }
+    }
+
+    #[cfg(test)]
+    /// Construct a forwarder with a provided sender for testing queue behavior.
+    pub fn new_with_sender(
+        context: Arc<AiloopContext>,
+        sender: mpsc::Sender<OutputMessage>,
+    ) -> Self {
+        Self {
+            context,
+            message_tx: sender,
         }
     }
 
@@ -169,6 +183,7 @@ pub enum ForwardError {
 mod tests {
     use super::*;
     use crate::ailoop_integration::config::AiloopConfig;
+    use tokio::sync::mpsc;
     use url::Url;
 
     fn create_test_context() -> Arc<AiloopContext> {
@@ -187,34 +202,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_forwarder_creation() {
+    async fn test_forward_stdout_assigns_normal_priority() {
         let context = create_test_context();
-        let _forwarder = OutputForwarder::new(context);
-        // Just verify it doesn't panic
+        let (tx, mut rx) = mpsc::channel(1);
+        let forwarder = OutputForwarder::new_with_sender(context, tx);
+
+        forwarder
+            .forward_stdout("Test output".to_string(), None)
+            .await
+            .expect("forward should succeed");
+
+        let message = rx.recv().await.expect("Message should arrive");
+        assert_eq!(message.priority, MessagePriority::Normal);
+        assert_eq!(message.source, "stdout");
     }
 
     #[tokio::test]
-    async fn test_forward_stdout() {
+    async fn test_forward_stderr_assigns_high_priority() {
         let context = create_test_context();
-        let forwarder = OutputForwarder::new(context);
-        let execution_id = uuid::Uuid::new_v4();
+        let (tx, mut rx) = mpsc::channel(1);
+        let forwarder = OutputForwarder::new_with_sender(context, tx);
 
-        let result = forwarder
-            .forward_stdout("Test output".to_string(), Some(execution_id))
-            .await;
-        assert!(result.is_ok());
+        forwarder
+            .forward_stderr("Test error".to_string(), None)
+            .await
+            .expect("forward should succeed");
+
+        let message = rx.recv().await.expect("Message should arrive");
+        assert_eq!(message.priority, MessagePriority::High);
+        assert_eq!(message.source, "stderr");
     }
 
     #[tokio::test]
-    async fn test_forward_stderr() {
+    async fn test_send_message_returns_queue_full_when_receiver_dropped() {
         let context = create_test_context();
-        let forwarder = OutputForwarder::new(context);
-        let execution_id = uuid::Uuid::new_v4();
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
 
-        let result = forwarder
-            .forward_stderr("Test error".to_string(), Some(execution_id))
-            .await;
-        assert!(result.is_ok());
+        let forwarder = OutputForwarder::new_with_sender(context, tx);
+        let result = forwarder.forward_stdout("overflow".to_string(), None).await;
+
+        assert!(matches!(result, Err(ForwardError::QueueFull)));
     }
 
     #[test]
