@@ -13,7 +13,7 @@ struct TaskNode {
 
 impl fmt::Display for TaskNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}\\n{}", self.id, self.operator)
+        write!(f, "{}\n{}", self.id, self.operator)
     }
 }
 
@@ -113,4 +113,45 @@ fn truncate(value: &str, limit: usize) -> String {
 
 fn escape_label(value: &str) -> String {
     value.replace('\"', "\\\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::workflow_to_dot;
+    use crate::core::workflow_graph::schema::WorkflowDocument;
+
+    #[test]
+    fn node_labels_use_graphviz_newline_escape() {
+        let yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: init
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 10
+  tasks:
+    - id: init
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: done
+          priority: 100
+    - id: done
+      operator: NoOpOperator
+      params: {}
+"#;
+        let document: WorkflowDocument =
+            serde_yaml::from_str(yaml).expect("workflow should deserialize");
+
+        let dot = workflow_to_dot(&document);
+
+        assert!(!dot.contains(r#"init\\nNoOpOperator"#), "dot output: {dot}");
+        assert!(dot.contains("init"));
+        assert!(dot.contains("NoOpOperator"));
+    }
 }

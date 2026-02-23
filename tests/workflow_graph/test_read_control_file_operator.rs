@@ -13,6 +13,19 @@ fn execution_context(workspace: std::path::PathBuf) -> ExecutionContext {
     }
 }
 
+fn execution_context_with_triggers(
+    workspace: std::path::PathBuf,
+    triggers: serde_json::Value,
+) -> ExecutionContext {
+    ExecutionContext {
+        workspace_path: workspace,
+        execution_id: "exec".to_string(),
+        task_id: "read".to_string(),
+        iteration: 1,
+        state_view: StateView::new(json!({}), json!({}), triggers),
+    }
+}
+
 #[tokio::test]
 async fn g6_missing_file_returns_done_false() {
     let workspace = tempdir().expect("workspace");
@@ -42,4 +55,46 @@ async fn g7_invalid_json_returns_wfg_ctrl_001() {
         .await
         .expect_err("invalid json");
     assert_eq!(err.code, "WFG-CTRL-001");
+}
+
+#[test]
+fn g8_validate_allows_missing_path_for_fallback_resolution() {
+    let op = ReadControlFileOperator::new();
+    op.validate_params(&json!({})).expect("validate");
+    op.validate_params(&json!({ "path": null }))
+        .expect("validate");
+}
+
+#[tokio::test]
+async fn g9_resolves_control_file_from_triggers_when_path_missing() {
+    let workspace = tempdir().expect("workspace");
+    let control_file = workspace.path().join("trigger-control.json");
+    std::fs::write(&control_file, r#"{"done": true}"#).expect("write");
+    let op = ReadControlFileOperator::new();
+    let output = op
+        .execute(
+            json!({}),
+            execution_context_with_triggers(
+                workspace.path().to_path_buf(),
+                json!({ "control_file": control_file.display().to_string() }),
+            ),
+        )
+        .await
+        .expect("execute");
+    assert_eq!(output["exists"], true);
+    assert_eq!(output["done"], true);
+}
+
+#[tokio::test]
+async fn g10_defaults_to_workspace_newton_control_file() {
+    let workspace = tempdir().expect("workspace");
+    let control_file = workspace.path().join("newton_control.json");
+    std::fs::write(&control_file, r#"{"done": true}"#).expect("write");
+    let op = ReadControlFileOperator::new();
+    let output = op
+        .execute(json!({}), execution_context(workspace.path().to_path_buf()))
+        .await
+        .expect("execute");
+    assert_eq!(output["exists"], true);
+    assert_eq!(output["done"], true);
 }

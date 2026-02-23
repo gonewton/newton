@@ -28,17 +28,22 @@ impl Operator for ReadControlFileOperator {
     }
 
     fn validate_params(&self, params: &Value) -> Result<(), AppError> {
-        let Some(path) = params.get("path").and_then(Value::as_str) else {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "ReadControlFileOperator requires params.path string",
-            ));
-        };
-        if path.trim().is_empty() {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "ReadControlFileOperator requires non-empty params.path",
-            ));
+        if let Some(path_value) = params.get("path") {
+            if path_value.is_null() {
+                return Ok(());
+            }
+            let Some(path) = path_value.as_str() else {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    "ReadControlFileOperator params.path must be a string when provided",
+                ));
+            };
+            if path.trim().is_empty() {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    "ReadControlFileOperator requires non-empty params.path",
+                ));
+            }
         }
         Ok(())
     }
@@ -47,15 +52,27 @@ impl Operator for ReadControlFileOperator {
         let path = params
             .get("path")
             .and_then(Value::as_str)
-            .ok_or_else(|| {
-                AppError::new(
-                    ErrorCategory::ValidationError,
-                    "ReadControlFileOperator requires params.path string",
-                )
-            })?
-            .trim();
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                ctx.state_view
+                    .triggers
+                    .get("control_file")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+            })
+            .or_else(|| {
+                std::env::var("NEWTON_CONTROL_FILE")
+                    .ok()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            })
+            .unwrap_or_else(|| "newton_control.json".to_string());
 
-        let resolved = resolve_path(path, &ctx.workspace_path);
+        let resolved = resolve_path(&path, &ctx.workspace_path);
         if !resolved.exists() {
             return Ok(Value::Object(Map::from_iter([
                 ("exists".to_string(), Value::Bool(false)),
