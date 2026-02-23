@@ -20,8 +20,7 @@ pub struct WorkflowStatePaths {
 }
 
 impl WorkflowStatePaths {
-    pub fn new(workspace_root: &Path, execution_id: &Uuid) -> Self {
-        let base = workspace_root.join(".newton/state/workflows");
+    pub fn from_base(base: &Path, execution_id: &Uuid) -> Self {
         let execution_dir = base.join(execution_id.to_string());
         let execution_file = execution_dir.join("execution.json");
         let checkpoint_file = execution_dir.join("checkpoint.json");
@@ -32,6 +31,11 @@ impl WorkflowStatePaths {
             checkpoint_file,
             checkpoints_dir,
         }
+    }
+
+    pub fn new(workspace_root: &Path, execution_id: &Uuid) -> Self {
+        let base = workspace_root.join(".newton/state/workflows");
+        Self::from_base(&base, execution_id)
     }
 
     pub fn workspace_root(workspace_root: &Path) -> PathBuf {
@@ -74,7 +78,16 @@ pub fn save_execution(
     execution_id: &Uuid,
     execution: &WorkflowExecution,
 ) -> Result<(), AppError> {
-    let paths = WorkflowStatePaths::new(workspace_root, execution_id);
+    let base = WorkflowStatePaths::workspace_root(workspace_root);
+    save_execution_at(&base, execution_id, execution)
+}
+
+pub fn save_execution_at(
+    base_path: &Path,
+    execution_id: &Uuid,
+    execution: &WorkflowExecution,
+) -> Result<(), AppError> {
+    let paths = WorkflowStatePaths::from_base(base_path, execution_id);
     let content = serde_json::to_vec_pretty(execution).map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::SerializationError,
@@ -90,7 +103,17 @@ pub fn save_checkpoint(
     checkpoint: &WorkflowCheckpoint,
     keep_history: bool,
 ) -> Result<(), AppError> {
-    let paths = WorkflowStatePaths::new(workspace_root, execution_id);
+    let base = WorkflowStatePaths::workspace_root(workspace_root);
+    save_checkpoint_at(&base, execution_id, checkpoint, keep_history)
+}
+
+pub fn save_checkpoint_at(
+    base_path: &Path,
+    execution_id: &Uuid,
+    checkpoint: &WorkflowCheckpoint,
+    keep_history: bool,
+) -> Result<(), AppError> {
+    let paths = WorkflowStatePaths::from_base(base_path, execution_id);
     let content = serde_json::to_vec_pretty(checkpoint).map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::SerializationError,

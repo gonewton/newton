@@ -42,6 +42,31 @@ workflow:
       params: {}
 "#;
 
+const GOAL_GATE_GROUP_WORKFLOW: &str = r#"
+version: 2.0
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: start
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: gate
+    - id: gate
+      operator: NoOpOperator
+      params: {}
+      goal_gate: true
+      goal_gate_group: critical
+"#;
+
 fn build_registry(workspace: PathBuf, settings: state::GraphSettings) -> OperatorRegistry {
     let mut builder = OperatorRegistry::builder();
     operators::register_builtins(&mut builder, workspace, settings);
@@ -74,6 +99,8 @@ async fn resume_skips_completed_tasks() {
     let overrides = ExecutionOverrides {
         parallel_limit: None,
         max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
     };
 
     let summary = executor::execute_workflow(
@@ -167,6 +194,8 @@ async fn resume_hash_mismatch_blocks_resume() {
     let overrides = ExecutionOverrides {
         parallel_limit: None,
         max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
     };
 
     let summary = executor::execute_workflow(
@@ -193,4 +222,43 @@ async fn resume_hash_mismatch_blocks_resume() {
     .await
     .expect_err("hash mismatch should fail");
     assert_eq!(err.code, "WFG-CKPT-001");
+}
+
+#[tokio::test]
+async fn checkpoint_records_goal_gate_group() {
+    let workspace = tempdir().expect("workspace");
+    let workflow_file = write_workflow(GOAL_GATE_GROUP_WORKFLOW);
+    let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings.clone());
+    let overrides = ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
+    };
+
+    let summary = executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry,
+        workspace.path().to_path_buf(),
+        overrides,
+    )
+    .await
+    .expect("workflow succeeded");
+
+    let checkpoint_path = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(summary.execution_id.to_string())
+        .join("checkpoint.json");
+
+    let checkpoint_value = read_json(&checkpoint_path);
+    assert_eq!(
+        checkpoint_value["completed"]["gate"]["goal_gate_group"],
+        Value::String("critical".to_string())
+    );
 }

@@ -74,6 +74,12 @@ workflow:
         "command_operator": {
           "allow_shell": false
         },
+        "completion": {
+          "goal_gate_failure_behavior": "fail",
+          "require_goal_gates": true,
+          "stop_on_terminal": true,
+          "success_requires_no_task_failures": true
+        },
         "continue_on_error": false,
         "entry_task": "start",
         "human": {

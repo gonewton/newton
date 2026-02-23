@@ -55,10 +55,7 @@ impl ExpressionEngine {
     /// Evaluate the given expression string against the provided context.
     pub fn evaluate(&self, expr: &str, ctx: &EvaluationContext) -> Result<Value, AppError> {
         let mut scope = Scope::new();
-        scope.push_dynamic("context", to_dynamic(&ctx.context));
-        scope.push_dynamic("tasks", to_dynamic(&ctx.tasks));
-        scope.push_dynamic("triggers", to_dynamic(&ctx.triggers));
-
+        populate_scope(&mut scope, ctx);
         let result = self
             .engine
             .eval_with_scope::<Dynamic>(&mut scope, expr)
@@ -70,6 +67,85 @@ impl ExpressionEngine {
                 .with_code("WFG-EXPR-001")
             })?;
         Ok(from_dynamic(result))
+    }
+
+    /// Interpolate `{{ expr }}` segments in a string using the evaluation context.
+    pub fn interpolate_string(
+        &self,
+        value: &str,
+        ctx: &EvaluationContext,
+    ) -> Result<String, AppError> {
+        if !value.contains("{{") {
+            return Ok(value.to_string());
+        }
+        let mut result = String::new();
+        let mut remaining = value;
+        while let Some(start) = remaining.find("{{") {
+            result.push_str(&remaining[..start]);
+            let after_start = &remaining[start + 2..];
+            let end = after_start.find("}}").ok_or_else(|| {
+                AppError::new(
+                    ErrorCategory::ValidationError,
+                    "missing closing '}}' in template string",
+                )
+                .with_code("WFG-TPL-001")
+            })?;
+            let expr = after_start[..end].trim();
+            if expr.is_empty() {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    "empty template interpolation expression",
+                )
+                .with_code("WFG-TPL-001"));
+            }
+            self.compile(expr).map_err(|err| {
+                AppError::new(
+                    ErrorCategory::ValidationError,
+                    format!("template interpolation compile error: {}", err.message),
+                )
+                .with_code("WFG-TPL-001")
+            })?;
+            let mut scope = Scope::new();
+            populate_scope(&mut scope, ctx);
+            let dynamic = self
+                .engine
+                .eval_with_scope::<Dynamic>(&mut scope, expr)
+                .map_err(|err| {
+                    AppError::new(
+                        ErrorCategory::ValidationError,
+                        format!("template interpolation execution error: {}", err),
+                    )
+                    .with_code("WFG-TPL-001")
+                })?;
+            let json_value = from_dynamic(dynamic);
+            match json_value {
+                Value::String(text) => result.push_str(&text),
+                other => {
+                    let encoded = serde_json::to_string(&other).map_err(|err| {
+                        AppError::new(
+                            ErrorCategory::SerializationError,
+                            format!("template interpolation stringify failed: {}", err),
+                        )
+                        .with_code("WFG-TPL-001")
+                    })?;
+                    result.push_str(&encoded);
+                }
+            }
+            remaining = &after_start[end + 2..];
+        }
+        result.push_str(remaining);
+        Ok(result)
+    }
+}
+
+fn populate_scope(scope: &mut Scope<'_>, ctx: &EvaluationContext) {
+    scope.push_dynamic("context", to_dynamic(&ctx.context));
+    scope.push_dynamic("tasks", to_dynamic(&ctx.tasks));
+    scope.push_dynamic("triggers", to_dynamic(&ctx.triggers));
+    if let Some(map) = ctx.context.as_object() {
+        for (key, value) in map {
+            scope.push_dynamic(key.clone(), to_dynamic(value));
+        }
     }
 }
 

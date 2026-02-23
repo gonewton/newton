@@ -115,6 +115,8 @@ async fn spawn_webhook_server(
     let overrides = ExecutionOverrides {
         parallel_limit: None,
         max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
     };
     let (addr_tx, addr_rx) = oneshot::channel();
     let handle = tokio::spawn(async move {
@@ -173,6 +175,8 @@ async fn manual_trigger_payload_available() -> Result<()> {
     let overrides = executor::ExecutionOverrides {
         parallel_limit: Some(1),
         max_time_seconds: Some(60),
+        checkpoint_base_path: None,
+        artifact_base_path: None,
     };
     let summary = executor::execute_workflow(
         document,
