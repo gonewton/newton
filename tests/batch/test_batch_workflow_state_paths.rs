@@ -1,4 +1,3 @@
-use assert_cmd::Command;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
@@ -109,7 +108,7 @@ workflow_file = .newton/workflows/wf.yaml
 fn g5_workflow_batch_paths_are_under_task_state_dir() {
     let workspace = setup_workspace();
     let root = workspace.path();
-    let mut cmd = Command::cargo_bin("newton").expect("bin");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("newton");
     cmd.arg("batch")
         .arg("proj")
         .arg("--workspace")

@@ -1,4 +1,3 @@
-use assert_cmd::Command;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -131,7 +130,7 @@ workflow_file = .newton/workflows/wf.yaml
     )
     .expect("plan");
 
-    let mut cmd = Command::cargo_bin("newton").expect("bin");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("newton");
     cmd.arg("batch")
         .arg("proj")
         .arg("--workspace")
@@ -172,7 +171,7 @@ spec
     )
     .expect("plan");
 
-    let mut cmd = Command::cargo_bin("newton").expect("bin");
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("newton");
     cmd.arg("batch")
         .arg("proj")
         .arg("--workspace")
