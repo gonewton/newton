@@ -9,7 +9,8 @@ use crate::{
         StatusArgs, StepArgs, WorkflowArgs, WorkflowArtifactCommand, WorkflowArtifactsArgs,
         WorkflowCheckpointCommand, WorkflowCheckpointsArgs, WorkflowCommand, WorkflowDotArgs,
         WorkflowExplainArgs, WorkflowLintArgs, WorkflowResumeArgs, WorkflowRunArgs,
-        WorkflowValidateArgs,
+        WorkflowValidateArgs, WorkflowWebhookArgs, WorkflowWebhookCommand,
+        WorkflowWebhookServeArgs, WorkflowWebhookStatusArgs,
     },
     cli::Command as CliCommand,
     core::{
@@ -22,7 +23,7 @@ use crate::{
             expression::ExpressionEngine,
             lint::{LintRegistry, LintResult, LintSeverity},
             operator::OperatorRegistry,
-            operators as workflow_operators, schema as workflow_schema,
+            operators as workflow_operators, schema as workflow_schema, webhook,
         },
         ConfigLoader, ConfigValidator, DefaultErrorReporter, OptimizationOrchestrator,
         SuccessPolicy,
@@ -495,6 +496,9 @@ pub async fn workflow(args: WorkflowArgs) -> Result<()> {
         WorkflowCommand::Artifacts(artifacts_args) => {
             workflow_artifacts(artifacts_args).map_err(|err| anyhow!(err))
         }
+        WorkflowCommand::Webhook(webhook_args) => workflow_webhook(webhook_args)
+            .await
+            .map_err(|err| anyhow!(err)),
     }
 }
 
@@ -522,13 +526,25 @@ async fn workflow_run(args: WorkflowRunArgs) -> StdResult<(), AppError> {
     apply_context_overrides(&mut document.workflow.context, &args.set);
     document.validate(&ExpressionEngine::default())?;
 
+    if let Some(payload) = try_load_trigger_payload(&args.trigger_json)? {
+        document.triggers = Some(workflow_schema::WorkflowTrigger {
+            trigger_type: workflow_schema::TriggerType::Manual,
+            schema_version: "1".to_string(),
+            payload,
+        });
+    }
+
     let overrides = ExecutionOverrides {
         parallel_limit: args.parallel_limit,
         max_time_seconds: args.max_time_seconds,
     };
 
     let mut builder = OperatorRegistry::builder();
-    workflow_operators::register_builtins(&mut builder, workspace.clone());
+    workflow_operators::register_builtins(
+        &mut builder,
+        workspace.clone(),
+        document.workflow.settings.clone(),
+    );
     let registry = builder.build();
 
     let summary = workflow_executor::execute_workflow(
@@ -602,7 +618,9 @@ fn workflow_explain(args: WorkflowExplainArgs) -> StdResult<(), AppError> {
     let _workspace = resolve_workflow_workspace(args.workspace)?;
     let document = workflow_schema::parse_workflow(&args.workflow)?;
     let overrides = parse_set_overrides(&args.set);
-    let outcome = explain::build_explain_outcome(&document, &overrides)?;
+    let trigger_payload = try_load_trigger_payload(&args.trigger_json)?
+        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+    let outcome = explain::build_explain_outcome(&document, &overrides, &trigger_payload)?;
     match args.format {
         OutputFormat::Json => print_explain_json(&outcome.output)?,
         OutputFormat::Text => print_explain_text(&outcome.output)?,
@@ -625,8 +643,13 @@ fn workflow_explain(args: WorkflowExplainArgs) -> StdResult<(), AppError> {
 
 async fn workflow_resume(args: WorkflowResumeArgs) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(args.workspace)?;
+    let execution = checkpoint::load_execution(&workspace, &args.execution_id)?;
     let mut builder = OperatorRegistry::builder();
-    workflow_operators::register_builtins(&mut builder, workspace.clone());
+    workflow_operators::register_builtins(
+        &mut builder,
+        workspace.clone(),
+        execution.settings_effective.clone(),
+    );
     let registry = builder.build();
     let summary = workflow_executor::resume_workflow(
         registry,
@@ -731,6 +754,82 @@ fn workflow_artifacts_clean(
     Ok(())
 }
 
+async fn workflow_webhook(args: WorkflowWebhookArgs) -> StdResult<(), AppError> {
+    match args.command {
+        WorkflowWebhookCommand::Serve(serve_args) => workflow_webhook_serve(serve_args).await,
+        WorkflowWebhookCommand::Status(status_args) => workflow_webhook_status(status_args),
+    }
+}
+
+async fn workflow_webhook_serve(args: WorkflowWebhookServeArgs) -> StdResult<(), AppError> {
+    let workspace = resolve_workflow_workspace(Some(args.workspace))?;
+    let workflow_path = args.workflow.clone();
+    let document = workflow_schema::parse_workflow(&workflow_path)?;
+    let lint_results = LintRegistry::new().run(&document);
+    if !lint_results.is_empty() {
+        print_lint_results_text(&lint_results);
+    }
+    let error_count = lint_results
+        .iter()
+        .filter(|result| result.severity == LintSeverity::Error)
+        .count();
+    if error_count > 0 {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "workflow lint detected {} error(s); fix before starting webhook",
+                error_count
+            ),
+        ));
+    }
+    document.validate(&ExpressionEngine::default())?;
+
+    let mut builder = OperatorRegistry::builder();
+    workflow_operators::register_builtins(
+        &mut builder,
+        workspace.clone(),
+        document.workflow.settings.clone(),
+    );
+    let registry = builder.build();
+    let overrides = ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+    };
+
+    webhook::serve_webhook(
+        document,
+        workflow_path,
+        registry,
+        workspace.clone(),
+        overrides,
+    )
+    .await?;
+    Ok(())
+}
+
+fn workflow_webhook_status(args: WorkflowWebhookStatusArgs) -> StdResult<(), AppError> {
+    let workspace = resolve_workflow_workspace(Some(args.workspace))?;
+    let workflow_path = resolve_workspace_workflow_path(&workspace, args.workflow)?;
+    let document = workflow_schema::parse_workflow(&workflow_path)?;
+    let settings = document.workflow.settings.webhook;
+    if !settings.enabled {
+        println!("Webhook not configured.");
+        return Ok(());
+    }
+    let token_set = env::var(&settings.auth_token_env)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    println!("{:<16} {}", "Bind address:", settings.bind);
+    println!(
+        "{:<16} {} (set: {})",
+        "Auth token env:",
+        settings.auth_token_env,
+        if token_set { "yes" } else { "no" }
+    );
+    println!("{:<16} {}", "Max body bytes:", settings.max_body_bytes);
+    Ok(())
+}
+
 fn parse_duration_arg(value: &str) -> StdResult<Duration, AppError> {
     parse_duration(value).map_err(|err| {
         AppError::new(
@@ -765,6 +864,28 @@ fn resolve_workflow_workspace(path: Option<PathBuf>) -> StdResult<PathBuf, AppEr
             )
         })?),
     }
+}
+
+fn resolve_workspace_workflow_path(
+    workspace: &Path,
+    override_path: Option<PathBuf>,
+) -> StdResult<PathBuf, AppError> {
+    if let Some(path) = override_path {
+        return Ok(path);
+    }
+    for candidate in &["workflow.yaml", "workflow.yml"] {
+        let candidate_path = workspace.join(candidate);
+        if candidate_path.exists() {
+            return Ok(candidate_path);
+        }
+    }
+    Err(AppError::new(
+        ErrorCategory::ValidationError,
+        format!(
+            "workflow file not found under {}; pass --workflow to specify",
+            workspace.display()
+        ),
+    ))
 }
 
 fn apply_context_overrides(context: &mut Value, overrides: &[KeyValuePair]) {
@@ -863,6 +984,35 @@ fn parse_set_overrides(pairs: &[KeyValuePair]) -> Vec<(String, Value)> {
             (pair.key.clone(), parsed)
         })
         .collect()
+}
+
+fn try_load_trigger_payload(path: &Option<PathBuf>) -> StdResult<Option<Value>, AppError> {
+    match path {
+        Some(path) => Ok(Some(load_trigger_payload(path)?)),
+        None => Ok(None),
+    }
+}
+
+fn load_trigger_payload(path: &Path) -> StdResult<Value, AppError> {
+    let content = fs::read_to_string(path).map_err(|err| {
+        AppError::new(
+            ErrorCategory::IoError,
+            format!("failed to read trigger JSON {}: {}", path.display(), err),
+        )
+    })?;
+    let value: Value = serde_json::from_str(&content).map_err(|err| {
+        AppError::new(
+            ErrorCategory::SerializationError,
+            format!("failed to parse trigger JSON {}: {}", path.display(), err),
+        )
+    })?;
+    if !value.is_object() {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            "trigger JSON must be an object",
+        ));
+    }
+    Ok(value)
 }
 
 /// Launch the interactive Newton monitor TUI that watches ailoop channels.

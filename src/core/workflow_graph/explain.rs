@@ -54,17 +54,19 @@ impl ExplainOutcome {
 pub fn build_explain_output(
     document: &WorkflowDocument,
     set_overrides: &[(String, Value)],
+    triggers: &Value,
 ) -> Result<ExplainOutput, AppError> {
-    Ok(build_explain_outcome(document, set_overrides)?.output)
+    Ok(build_explain_outcome(document, set_overrides, triggers)?.output)
 }
 
 pub fn build_explain_outcome(
     document: &WorkflowDocument,
     set_overrides: &[(String, Value)],
+    triggers: &Value,
 ) -> Result<ExplainOutcome, AppError> {
     let mut context = document.workflow.context.clone();
     apply_context_set_overrides(&mut context, set_overrides);
-    let triggers = Value::Object(Map::new());
+    let triggers = triggers.clone();
 
     let settings = serde_json::to_value(&document.workflow.settings).map_err(|err| {
         AppError::new(

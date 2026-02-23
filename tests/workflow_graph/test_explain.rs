@@ -47,8 +47,9 @@ workflow:
         ("build_number".to_string(), json!(7)),
         ("env".to_string(), json!("prod")),
     ];
-    let outcome =
-        explain::build_explain_outcome(&document, &overrides).expect("build explain output");
+    let triggers = json!({});
+    let outcome = explain::build_explain_outcome(&document, &overrides, &triggers)
+        .expect("build explain output");
     assert!(!outcome.has_blocking_diagnostics());
 
     assert_snapshot!(
@@ -75,6 +76,10 @@ workflow:
         },
         "continue_on_error": false,
         "entry_task": "start",
+        "human": {
+          "audit_path": ".newton/state/workflows",
+          "default_timeout_seconds": 86400
+        },
         "max_task_iterations": 3,
         "max_time_seconds": 60,
         "max_workflow_iterations": 10,
@@ -85,6 +90,13 @@ workflow:
             "password",
             "secret"
           ]
+        },
+        "required_triggers": [],
+        "webhook": {
+          "auth_token_env": "NEWTON_WEBHOOK_TOKEN",
+          "bind": "127.0.0.1:8787",
+          "enabled": false,
+          "max_body_bytes": 1048576
         }
       },
       "context": {
@@ -150,7 +162,9 @@ workflow:
     fs::write(file.path(), workflow).expect("write workflow");
     let document = schema::parse_workflow(file.path()).expect("parse workflow");
 
-    let outcome = explain::build_explain_outcome(&document, &[]).expect("build explain outcome");
+    let triggers = json!({});
+    let outcome =
+        explain::build_explain_outcome(&document, &[], &triggers).expect("build explain outcome");
     assert!(outcome.has_blocking_diagnostics());
     assert_eq!(outcome.diagnostics.len(), 1);
 }

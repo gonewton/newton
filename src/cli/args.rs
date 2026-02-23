@@ -121,6 +121,40 @@ pub enum WorkflowCommand {
     Checkpoints(WorkflowCheckpointsArgs),
     #[command(about = "Manage workflow artifacts")]
     Artifacts(WorkflowArtifactsArgs),
+    #[command(about = "Manage workflow webhook listener")]
+    Webhook(WorkflowWebhookArgs),
+}
+
+#[derive(Args, Clone)]
+pub struct WorkflowWebhookArgs {
+    #[command(subcommand)]
+    pub command: WorkflowWebhookCommand,
+}
+
+#[derive(Subcommand, Clone)]
+pub enum WorkflowWebhookCommand {
+    #[command(about = "Serve a webhook listener")]
+    Serve(WorkflowWebhookServeArgs),
+    #[command(about = "Show webhook configuration status")]
+    Status(WorkflowWebhookStatusArgs),
+}
+
+#[derive(Args, Clone)]
+pub struct WorkflowWebhookServeArgs {
+    #[arg(long, value_name = "PATH")]
+    pub workflow: PathBuf,
+
+    #[arg(long, value_name = "PATH")]
+    pub workspace: PathBuf,
+}
+
+#[derive(Args, Clone)]
+pub struct WorkflowWebhookStatusArgs {
+    #[arg(long, value_name = "PATH")]
+    pub workspace: PathBuf,
+
+    #[arg(long, value_name = "PATH")]
+    pub workflow: Option<PathBuf>,
 }
 
 #[derive(Args, Clone)]
@@ -130,6 +164,10 @@ pub struct WorkflowRunArgs {
 
     #[arg(long, value_name = "PATH")]
     pub workspace: Option<PathBuf>,
+
+    /// Path to JSON file containing manual trigger payload
+    #[arg(long, value_name = "PATH")]
+    pub trigger_json: Option<PathBuf>,
 
     #[arg(long, value_name = "KEY=VALUE")]
     pub set: Vec<KeyValuePair>,
@@ -170,6 +208,10 @@ pub struct WorkflowExplainArgs {
 
     #[arg(long, value_enum, default_value = "text")]
     pub format: OutputFormat,
+
+    /// Path to JSON file containing manual trigger payload
+    #[arg(long, value_name = "PATH")]
+    pub trigger_json: Option<PathBuf>,
 }
 
 #[derive(Args, Clone)]
