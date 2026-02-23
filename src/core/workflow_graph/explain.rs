@@ -79,8 +79,7 @@ pub fn build_explain_outcome(
 
     let tasks = document
         .workflow
-        .tasks
-        .iter()
+        .tasks()
         .map(|task| explain_task(task, &context, &triggers, &engine, &mut diagnostics))
         .collect::<Result<Vec<_>, AppError>>()?;
 

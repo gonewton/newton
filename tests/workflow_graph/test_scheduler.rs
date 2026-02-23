@@ -158,6 +158,8 @@ async fn transitions_deduplicate_targets_per_tick() {
     let overrides = executor::ExecutionOverrides {
         parallel_limit: Some(2),
         max_time_seconds: Some(60),
+        checkpoint_base_path: None,
+        artifact_base_path: None,
     };
 
     let summary = executor::execute_workflow(
@@ -186,6 +188,8 @@ async fn loop_exhausts_iteration_limit() {
     let overrides = executor::ExecutionOverrides {
         parallel_limit: Some(1),
         max_time_seconds: Some(60),
+        checkpoint_base_path: None,
+        artifact_base_path: None,
     };
 
     let result = executor::execute_workflow(
@@ -210,6 +214,8 @@ async fn higher_priority_transition_wins() {
     let overrides = executor::ExecutionOverrides {
         parallel_limit: Some(1),
         max_time_seconds: Some(60),
+        checkpoint_base_path: None,
+        artifact_base_path: None,
     };
 
     let summary = executor::execute_workflow(
@@ -236,6 +242,8 @@ async fn workflow_exhausts_global_iteration_limit() {
     let overrides = executor::ExecutionOverrides {
         parallel_limit: Some(1),
         max_time_seconds: Some(60),
+        checkpoint_base_path: None,
+        artifact_base_path: None,
     };
 
     let result = executor::execute_workflow(

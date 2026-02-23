@@ -35,6 +35,8 @@ use uuid::Uuid;
 pub struct ExecutionOverrides {
     pub parallel_limit: Option<usize>,
     pub max_time_seconds: Option<u64>,
+    pub checkpoint_base_path: Option<PathBuf>,
+    pub artifact_base_path: Option<PathBuf>,
 }
 
 /// Resolved execution configuration used by the runner.
@@ -101,6 +103,7 @@ struct ExecutionState {
 
 struct WorkflowRuntime {
     workspace_root: PathBuf,
+    checkpoint_root: PathBuf,
     registry: OperatorRegistry,
     tasks_by_id: Arc<HashMap<String, WorkflowTask>>,
     engine: Arc<ExpressionEngine>,
@@ -484,8 +487,8 @@ impl WorkflowRuntime {
             self.total_iterations,
             checkpoint_records,
         );
-        checkpoint::save_checkpoint(
-            &self.workspace_root,
+        checkpoint::save_checkpoint_at(
+            &self.checkpoint_root,
             &self.workflow_execution.execution_id,
             &checkpoint,
             self.graph_settings.checkpoint.checkpoint_keep_history,
@@ -504,8 +507,8 @@ impl WorkflowRuntime {
     }
 
     fn save_execution(&self) -> Result<(), AppError> {
-        checkpoint::save_execution(
-            &self.workspace_root,
+        checkpoint::save_execution_at(
+            &self.checkpoint_root,
             &self.workflow_execution.execution_id,
             &self.workflow_execution,
         )
@@ -560,6 +563,25 @@ fn build_workflow_runtime(
     if let Some(max_time) = overrides.max_time_seconds {
         graph_settings.max_time_seconds = max_time;
     }
+    if let Some(artifact_base_path) = &overrides.artifact_base_path {
+        graph_settings.artifact_storage.base_path = artifact_base_path.clone();
+    }
+    let checkpoint_root = overrides
+        .checkpoint_base_path
+        .as_ref()
+        .map(|path| {
+            if path.is_absolute() {
+                path.clone()
+            } else {
+                workspace_root.join(path)
+            }
+        })
+        .unwrap_or_else(|| {
+            workspace_root
+                .join(".newton")
+                .join("state")
+                .join("workflows")
+        });
     validate_required_triggers(&graph_settings.required_triggers, &trigger_payload)?;
     let workflow_file = canonicalize_workflow_path(&workflow_path)?;
     let workflow_bytes = fs::read(&workflow_file).map_err(|err| {
@@ -578,8 +600,18 @@ fn build_workflow_runtime(
             .workflow
             .tasks
             .into_iter()
-            .map(|task| (task.id.clone(), task))
-            .collect::<HashMap<_, _>>(),
+            .map(|task| match task {
+                schema::TaskOrMacro::Task(task) => Ok((task.id.clone(), task)),
+                schema::TaskOrMacro::Macro(invocation) => Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    format!(
+                        "unexpanded macro invocation '{}' reached executor",
+                        invocation.macro_name
+                    ),
+                )
+                .with_code("WFG-MACRO-002")),
+            })
+            .collect::<Result<HashMap<_, _>, _>>()?,
     );
 
     let config = ExecutionConfig {
@@ -626,6 +658,7 @@ fn build_workflow_runtime(
     };
     Ok(WorkflowRuntime {
         workspace_root: workspace_root.clone(),
+        checkpoint_root,
         registry,
         tasks_by_id,
         engine,
@@ -695,8 +728,18 @@ pub async fn resume_workflow(
             .workflow
             .tasks
             .into_iter()
-            .map(|task| (task.id.clone(), task))
-            .collect::<HashMap<_, _>>(),
+            .map(|task| match task {
+                schema::TaskOrMacro::Task(task) => Ok((task.id.clone(), task)),
+                schema::TaskOrMacro::Macro(invocation) => Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    format!(
+                        "unexpanded macro invocation '{}' reached executor",
+                        invocation.macro_name
+                    ),
+                )
+                .with_code("WFG-MACRO-002")),
+            })
+            .collect::<Result<HashMap<_, _>, _>>()?,
     );
 
     let engine = Arc::new(ExpressionEngine::default());
@@ -716,6 +759,10 @@ pub async fn resume_workflow(
         ArtifactStore::new(workspace_root.clone(), &graph_settings.artifact_storage);
     let runtime = WorkflowRuntime {
         workspace_root: workspace_root.clone(),
+        checkpoint_root: workspace_root
+            .join(".newton")
+            .join("state")
+            .join("workflows"),
         registry,
         tasks_by_id,
         engine,

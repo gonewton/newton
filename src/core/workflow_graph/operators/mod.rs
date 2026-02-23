@@ -3,6 +3,7 @@ pub mod command;
 pub mod human_approval;
 pub mod human_decision;
 pub mod noop;
+pub mod read_control_file;
 pub mod set_context;
 
 use crate::core::workflow_graph::human::{ConsoleInterviewer, Interviewer};
@@ -25,6 +26,7 @@ pub fn register_builtins(
         .register(command::CommandOperator::new(workspace))
         .register(assert_completed::AssertCompletedOperator::new())
         .register(set_context::SetContextOperator::new())
+        .register(read_control_file::ReadControlFileOperator::new())
         .register(human_approval::HumanApprovalOperator::new(
             interviewer.clone(),
             human_settings.clone(),

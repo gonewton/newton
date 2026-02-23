@@ -99,6 +99,8 @@ async fn resume_skips_completed_tasks() {
     let overrides = ExecutionOverrides {
         parallel_limit: None,
         max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
     };
 
     let summary = executor::execute_workflow(
@@ -192,6 +194,8 @@ async fn resume_hash_mismatch_blocks_resume() {
     let overrides = ExecutionOverrides {
         parallel_limit: None,
         max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
     };
 
     let summary = executor::execute_workflow(
@@ -230,6 +234,8 @@ async fn checkpoint_records_goal_gate_group() {
     let overrides = ExecutionOverrides {
         parallel_limit: None,
         max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
     };
 
     let summary = executor::execute_workflow(

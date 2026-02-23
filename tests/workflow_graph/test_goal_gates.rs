@@ -77,6 +77,8 @@ fn default_overrides() -> ExecutionOverrides {
     ExecutionOverrides {
         parallel_limit: Some(4),
         max_time_seconds: Some(30),
+        checkpoint_base_path: None,
+        artifact_base_path: None,
     }
 }
 
@@ -519,6 +521,8 @@ async fn e8_terminal_success_stops_executor_queued_tasks_not_run() {
     let overrides = ExecutionOverrides {
         parallel_limit: Some(1),
         max_time_seconds: Some(30),
+        checkpoint_base_path: None,
+        artifact_base_path: None,
     };
     let registry = build_registry(workspace.clone(), document.workflow.settings.clone());
 

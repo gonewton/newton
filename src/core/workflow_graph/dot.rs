@@ -34,7 +34,7 @@ fn build_graph(
     let mut graph = DiGraph::new();
     let mut node_map: HashMap<String, NodeIndex> = HashMap::new();
 
-    for task in &document.workflow.tasks {
+    for task in document.workflow.tasks() {
         let idx = graph.add_node(TaskNode {
             id: task.id.clone(),
             operator: task.operator.clone(),
@@ -42,7 +42,7 @@ fn build_graph(
         node_map.insert(task.id.clone(), idx);
     }
 
-    for task in &document.workflow.tasks {
+    for task in document.workflow.tasks() {
         let from = node_map[&task.id];
         for transition in &task.transitions {
             if let Some(&to) = node_map.get(&transition.to) {

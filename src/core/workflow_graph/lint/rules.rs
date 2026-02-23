@@ -29,7 +29,7 @@ struct DuplicateTaskIdsRule;
 impl WorkflowLintRule for DuplicateTaskIdsRule {
     fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
         let mut counts: HashMap<String, usize> = HashMap::new();
-        for task in &workflow.workflow.tasks {
+        for task in workflow.workflow.tasks() {
             *counts.entry(task.id.clone()).or_insert(0) += 1;
         }
 
@@ -55,13 +55,12 @@ impl WorkflowLintRule for UnknownTransitionTargetsRule {
     fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
         let known_ids: HashSet<&str> = workflow
             .workflow
-            .tasks
-            .iter()
+            .tasks()
             .map(|task| task.id.as_str())
             .collect();
         let mut out = Vec::new();
 
-        for task in &workflow.workflow.tasks {
+        for task in workflow.workflow.tasks() {
             for transition in &task.transitions {
                 if !known_ids.contains(transition.to.as_str()) {
                     out.push(LintResult::new(
@@ -87,10 +86,10 @@ struct UnreachableTasksRule;
 impl WorkflowLintRule for UnreachableTasksRule {
     fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
         let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
-        for task in &workflow.workflow.tasks {
+        for task in workflow.workflow.tasks() {
             adjacency.entry(task.id.as_str()).or_default();
         }
-        for task in &workflow.workflow.tasks {
+        for task in workflow.workflow.tasks() {
             for transition in &task.transitions {
                 adjacency
                     .entry(task.id.as_str())
@@ -114,7 +113,7 @@ impl WorkflowLintRule for UnreachableTasksRule {
         }
 
         let mut out = Vec::new();
-        for task in &workflow.workflow.tasks {
+        for task in workflow.workflow.tasks() {
             if !reachable.contains(task.id.as_str()) {
                 out.push(LintResult::new(
                     "WFG-LINT-003",
@@ -135,13 +134,12 @@ impl WorkflowLintRule for AssertCompletedUnknownRequireRule {
     fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
         let known_ids: HashSet<&str> = workflow
             .workflow
-            .tasks
-            .iter()
+            .tasks()
             .map(|task| task.id.as_str())
             .collect();
         let mut out = Vec::new();
 
-        for task in &workflow.workflow.tasks {
+        for task in workflow.workflow.tasks() {
             if task.operator != "AssertCompletedOperator" {
                 continue;
             }
@@ -175,7 +173,7 @@ impl WorkflowLintRule for ExpressionParseFailureRule {
         let engine = ExpressionEngine::default();
         let mut exprs = Vec::new();
         collect_expr_values(&workflow.workflow.context, &mut exprs, None);
-        for task in &workflow.workflow.tasks {
+        for task in workflow.workflow.tasks() {
             collect_expr_values(&task.params, &mut exprs, Some(task.id.as_str()));
             for transition in &task.transitions {
                 if let Some(Condition::Expr { expr }) = &transition.when {
@@ -207,7 +205,7 @@ impl WorkflowLintRule for WhenExpressionBoolRule {
         let engine = ExpressionEngine::default();
         let mut out = Vec::new();
 
-        for task in &workflow.workflow.tasks {
+        for task in workflow.workflow.tasks() {
             for transition in &task.transitions {
                 let Some(Condition::Expr { expr }) = &transition.when else {
                     continue;
@@ -247,7 +245,8 @@ struct SuspiciousLoopRiskRule;
 
 impl WorkflowLintRule for SuspiciousLoopRiskRule {
     fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
-        let (graph, tasks_by_idx) = build_task_graph(&workflow.workflow.tasks);
+        let tasks: Vec<WorkflowTask> = workflow.workflow.tasks().cloned().collect();
+        let (graph, tasks_by_idx) = build_task_graph(&tasks);
         let mut out = Vec::new();
 
         for component in tarjan_scc(&graph) {
@@ -295,7 +294,7 @@ impl WorkflowLintRule for ShellOptInRule {
         }
 
         let mut out = Vec::new();
-        for task in &workflow.workflow.tasks {
+        for task in workflow.workflow.tasks() {
             if task.operator != "CommandOperator" {
                 continue;
             }
@@ -346,7 +345,7 @@ impl WorkflowLintRule for TerminalTaskMissingRule {
         if !workflow.workflow.settings.completion.stop_on_terminal {
             return Vec::new();
         }
-        let has_terminal = workflow.workflow.tasks.iter().any(|t| t.terminal.is_some());
+        let has_terminal = workflow.workflow.tasks().any(|t| t.terminal.is_some());
         if has_terminal {
             return Vec::new();
         }
@@ -375,8 +374,7 @@ impl WorkflowLintRule for GoalGateUnreachableRule {
 
         let goal_gates: Vec<&str> = workflow
             .workflow
-            .tasks
-            .iter()
+            .tasks()
             .filter(|t| t.goal_gate)
             .map(|t| t.id.as_str())
             .collect();
@@ -387,7 +385,7 @@ impl WorkflowLintRule for GoalGateUnreachableRule {
 
         // BFS from entry_task to find reachable nodes.
         let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
-        for task in &workflow.workflow.tasks {
+        for task in workflow.workflow.tasks() {
             adjacency.entry(task.id.as_str()).or_default();
             for transition in &task.transitions {
                 adjacency
@@ -448,8 +446,7 @@ impl WorkflowLintRule for GoalGateNoRemediationRule {
 
         let goal_gate_ids: HashSet<&str> = workflow
             .workflow
-            .tasks
-            .iter()
+            .tasks()
             .filter(|t| t.goal_gate)
             .map(|t| t.id.as_str())
             .collect();
@@ -458,7 +455,8 @@ impl WorkflowLintRule for GoalGateNoRemediationRule {
             return Vec::new();
         }
 
-        let (graph, node_map) = build_task_graph_with_node_map(&workflow.workflow.tasks);
+        let tasks: Vec<WorkflowTask> = workflow.workflow.tasks().cloned().collect();
+        let (graph, node_map) = build_task_graph_with_node_map(&tasks);
 
         let mut out = Vec::new();
         for gate_id in &goal_gate_ids {
@@ -507,8 +505,7 @@ impl WorkflowLintRule for ConflictingTerminalTasksRule {
 
         let terminal_tasks: Vec<&WorkflowTask> = workflow
             .workflow
-            .tasks
-            .iter()
+            .tasks()
             .filter(|t| t.terminal.is_some())
             .collect();
 
@@ -516,7 +513,8 @@ impl WorkflowLintRule for ConflictingTerminalTasksRule {
             return Vec::new();
         }
 
-        let (graph, node_map) = build_task_graph_with_node_map(&workflow.workflow.tasks);
+        let tasks: Vec<WorkflowTask> = workflow.workflow.tasks().cloned().collect();
+        let (graph, node_map) = build_task_graph_with_node_map(&tasks);
 
         let mut out = Vec::new();
         for i in 0..terminal_tasks.len() {

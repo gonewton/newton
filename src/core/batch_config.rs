@@ -3,6 +3,12 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunnerKind {
+    Classic,
+    WorkflowGraph,
+}
+
 /// Batch configuration derived from `.newton/configs/<project>.conf`.
 #[derive(Debug, Clone)]
 pub struct BatchProjectConfig {
@@ -50,6 +56,12 @@ pub struct BatchProjectConfig {
 
     /// Control file name stored under the state directory. Defaults to `newton_control.json` when None.
     pub control_file: Option<String>,
+
+    /// Runner mode for batch task execution.
+    pub runner: RunnerKind,
+
+    /// Optional workflow file path for workflow runner mode.
+    pub workflow_file: Option<PathBuf>,
 }
 
 impl BatchProjectConfig {
@@ -92,6 +104,8 @@ impl BatchProjectConfig {
             max_time: runtime_config.max_time,
             verbose: runtime_config.verbose,
             control_file: runtime_config.control_file,
+            runner: runtime_config.runner,
+            workflow_file: runtime_config.workflow_file,
         })
     }
 }
@@ -222,6 +236,8 @@ struct RuntimeConfig {
     max_iterations: Option<usize>,
     max_time: Option<u64>,
     control_file: Option<String>,
+    runner: RunnerKind,
+    workflow_file: Option<PathBuf>,
 }
 
 fn load_runtime_config(settings: &HashMap<String, String>) -> Result<RuntimeConfig> {
@@ -251,12 +267,31 @@ fn load_runtime_config(settings: &HashMap<String, String>) -> Result<RuntimeConf
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
 
+    let runner = settings
+        .get("runner")
+        .map(|value| value.trim().to_lowercase())
+        .map(|value| match value.as_str() {
+            "classic" => Ok(RunnerKind::Classic),
+            "workflow_graph" => Ok(RunnerKind::WorkflowGraph),
+            _ => Err(anyhow::anyhow!("invalid runner value '{}'", value)),
+        })
+        .transpose()?
+        .unwrap_or(RunnerKind::Classic);
+
+    let workflow_file = settings
+        .get("workflow_file")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+
     Ok(RuntimeConfig {
         resume: parse_flag(settings, "resume"),
         verbose: parse_flag(settings, "verbose"),
         max_iterations,
         max_time,
         control_file,
+        runner,
+        workflow_file,
     })
 }
 

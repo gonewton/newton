@@ -3,6 +3,7 @@
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::core::workflow_graph::expression::ExpressionEngine;
+use crate::core::workflow_graph::transform;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -39,6 +40,8 @@ pub struct WorkflowDocument {
     pub version: String,
     pub mode: String,
     #[serde(default)]
+    pub macros: Option<Vec<MacroDefinition>>,
+    #[serde(default)]
     pub triggers: Option<WorkflowTrigger>,
     #[serde(default)]
     pub metadata: Option<WorkflowMetadata>,
@@ -59,7 +62,7 @@ pub struct WorkflowDefinition {
     #[serde(default = "default_context_value")]
     pub context: Value,
     pub settings: WorkflowSettings,
-    pub tasks: Vec<WorkflowTask>,
+    pub tasks: Vec<TaskOrMacro>,
 }
 
 /// Execution settings for a workflow graph.
@@ -324,6 +327,8 @@ pub struct WorkflowTask {
     pub retry: Option<RetryPolicy>,
     pub max_iterations: Option<usize>,
     pub parallel_group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_if: Option<Condition>,
     #[serde(default = "default_transitions")]
     pub transitions: Vec<Transition>,
     #[serde(default)]
@@ -338,6 +343,78 @@ impl WorkflowTask {
     /// Return the max iterations for this task, falling back to the global default.
     pub fn iteration_limit(&self, global: usize) -> usize {
         self.max_iterations.unwrap_or(global)
+    }
+}
+
+/// Reusable macro definition containing one or more task templates.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MacroDefinition {
+    pub name: String,
+    pub tasks: Vec<WorkflowTask>,
+}
+
+/// Invocation of a named macro from the workflow task list.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MacroInvocation {
+    #[serde(rename = "macro")]
+    pub macro_name: String,
+    #[serde(default)]
+    pub with: Map<String, Value>,
+}
+
+/// Workflow task entries can be concrete tasks or macro invocations pre-transform.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[allow(clippy::large_enum_variant)] // Task variant intentionally carries full task payload pre-transform.
+#[serde(untagged)]
+pub enum TaskOrMacro {
+    Task(WorkflowTask),
+    Macro(MacroInvocation),
+}
+
+impl TaskOrMacro {
+    pub fn as_task(&self) -> Option<&WorkflowTask> {
+        match self {
+            TaskOrMacro::Task(task) => Some(task),
+            TaskOrMacro::Macro(_) => None,
+        }
+    }
+
+    pub fn as_task_mut(&mut self) -> Option<&mut WorkflowTask> {
+        match self {
+            TaskOrMacro::Task(task) => Some(task),
+            TaskOrMacro::Macro(_) => None,
+        }
+    }
+}
+
+impl WorkflowDefinition {
+    pub fn tasks(&self) -> impl Iterator<Item = &WorkflowTask> {
+        self.tasks.iter().filter_map(TaskOrMacro::as_task)
+    }
+
+    pub fn tasks_mut(&mut self) -> impl Iterator<Item = &mut WorkflowTask> {
+        self.tasks.iter_mut().filter_map(TaskOrMacro::as_task_mut)
+    }
+
+    pub fn macro_invocation_count(&self) -> usize {
+        self.tasks
+            .iter()
+            .filter(|item| matches!(item, TaskOrMacro::Macro(_)))
+            .count()
+    }
+
+    pub fn macro_names_referenced(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .tasks
+            .iter()
+            .filter_map(|item| match item {
+                TaskOrMacro::Macro(invocation) => Some(invocation.macro_name.clone()),
+                TaskOrMacro::Task(_) => None,
+            })
+            .collect();
+        names.sort();
+        names.dedup();
+        names
     }
 }
 
@@ -369,6 +446,8 @@ impl RetryPolicy {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Transition {
     pub to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_if: Option<Condition>,
     #[serde(default)]
     pub when: Option<Condition>,
     #[serde(default = "default_priority")]
@@ -415,7 +494,8 @@ impl WorkflowDocument {
 
     /// Load and validate a workflow document from a YAML file.
     pub fn load_from_file(path: &Path) -> Result<Self, AppError> {
-        let doc = Self::parse_from_file(path)?;
+        let raw = Self::parse_from_file(path)?;
+        let doc = transform::apply_default_pipeline(raw)?;
         let engine = ExpressionEngine::default();
         doc.validate(&engine)?;
         Ok(doc)
@@ -442,7 +522,7 @@ impl WorkflowDocument {
             ));
         }
 
-        if self.workflow.tasks.is_empty() {
+        if self.workflow.tasks().next().is_none() {
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
                 "workflow must define at least one task",
@@ -450,7 +530,20 @@ impl WorkflowDocument {
         }
 
         let mut ids = HashSet::new();
-        for task in &self.workflow.tasks {
+        for item in &self.workflow.tasks {
+            let task = match item {
+                TaskOrMacro::Task(task) => task,
+                TaskOrMacro::Macro(invocation) => {
+                    return Err(AppError::new(
+                        ErrorCategory::ValidationError,
+                        format!(
+                            "unexpanded macro invocation '{}' found during validation",
+                            invocation.macro_name
+                        ),
+                    )
+                    .with_code("WFG-MACRO-002"));
+                }
+            };
             if !ids.insert(task.id.clone()) {
                 return Err(AppError::new(
                     ErrorCategory::ValidationError,
@@ -520,14 +613,24 @@ impl WorkflowDocument {
 
         let mut exprs = Vec::new();
         collect_expression_strings(&self.workflow.context, &mut exprs);
-        for task in &self.workflow.tasks {
+        for task in self.workflow.tasks() {
             collect_expression_strings(&task.params, &mut exprs);
+            if let Some(include_if) = &task.include_if {
+                if let Some(expr) = include_if.expression() {
+                    exprs.push(expr.to_string());
+                }
+            }
             for transition in &task.transitions {
                 if !ids.contains(&transition.to) {
                     return Err(AppError::new(
                         ErrorCategory::ValidationError,
                         format!("transition 'to' references unknown task: {}", transition.to),
                     ));
+                }
+                if let Some(include_if) = &transition.include_if {
+                    if let Some(expr) = include_if.expression() {
+                        exprs.push(expr.to_string());
+                    }
                 }
                 if let Some(condition) = &transition.when {
                     if let Some(expr) = condition.expression() {
