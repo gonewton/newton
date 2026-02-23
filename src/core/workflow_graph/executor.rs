@@ -8,7 +8,9 @@ use crate::core::workflow_graph::expression::{EvaluationContext, ExpressionEngin
 use crate::core::workflow_graph::operator::{
     ExecutionContext as OperatorContext, OperatorRegistry, StateView,
 };
-use crate::core::workflow_graph::schema::{self, Condition, WorkflowDocument, WorkflowTask};
+use crate::core::workflow_graph::schema::{
+    self, Condition, GoalGateFailureBehavior, TerminalKind, WorkflowDocument, WorkflowTask,
+};
 use crate::core::workflow_graph::state::{
     canonicalize_workflow_path, compute_sha256_hex, redact_value, summarize_error, AppErrorSummary,
     GraphSettings, WorkflowCheckpoint, WorkflowExecution, WorkflowExecutionStatus,
@@ -140,6 +142,7 @@ struct TaskOutcome {
 impl WorkflowRuntime {
     async fn run(mut self) -> Result<ExecutionSummary, AppError> {
         self.save_execution()?;
+        let mut terminal_stop_triggered = false;
         while !self.ready_queue.is_empty() {
             if self.start_time.elapsed().as_secs() >= self.config.max_time_seconds {
                 self.workflow_execution.status = WorkflowExecutionStatus::Failed;
@@ -216,9 +219,24 @@ impl WorkflowRuntime {
                 ));
             }
 
-            let mut frontier = Vec::new();
-            for result in join_all(futures).await {
-                frontier.push(result?);
+            let mut frontier: Vec<TaskOutcome> = join_all(futures)
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()?;
+
+            // Sort frontier by task_id alphabetically for deterministic ordering.
+            frontier.sort_by(|a, b| a.task_id.cmp(&b.task_id));
+
+            // Detect terminal tasks in this tick before processing.
+            let mut tick_terminal_ids: Vec<String> = Vec::new();
+            if self.graph_settings.completion.stop_on_terminal {
+                for outcome in &frontier {
+                    if let Some(task) = self.tasks_by_id.get(&outcome.task_id) {
+                        if task.terminal.is_some() {
+                            tick_terminal_ids.push(outcome.task_id.clone());
+                        }
+                    }
+                }
             }
 
             let frontier_len = frontier.len();
@@ -228,11 +246,44 @@ impl WorkflowRuntime {
                 self.persist_checkpoint_force().await?;
                 return Err(err);
             }
+
+            // Handle terminal stop after processing so all outcomes are recorded.
+            if !tick_terminal_ids.is_empty() {
+                if tick_terminal_ids.len() > 1 {
+                    // WFG-TERM-001: multiple terminal tasks in same tick (informational).
+                    let affected = tick_terminal_ids[1..].to_vec();
+                    let warning = serde_json::json!({
+                        "code": "WFG-TERM-001",
+                        "message": format!(
+                            "multiple terminal tasks completed in the same tick; \
+                             tie-broken by task-id alphabetical order; \
+                             first terminal: {}",
+                            tick_terminal_ids[0]
+                        ),
+                        "affected_tasks": affected
+                    });
+                    self.workflow_execution.warnings.push(warning);
+                }
+                terminal_stop_triggered = true;
+                self.persist_checkpoint_force().await?;
+                break;
+            }
+
             self.maybe_checkpoint(frontier_len).await?;
         }
 
-        self.workflow_execution.status = WorkflowExecutionStatus::Completed;
+        // Compute final status per completion policy.
+        let final_state = self.state.read().await;
+        let (final_exec_status, maybe_err) =
+            self.compute_final_status(&final_state, terminal_stop_triggered);
+        drop(final_state);
+
+        self.workflow_execution.status = final_exec_status;
         self.workflow_execution.completed_at = Some(Utc::now());
+        if let Some(err) = maybe_err {
+            self.persist_checkpoint_force().await?;
+            return Err(err);
+        }
         if self.graph_settings.checkpoint.checkpoint_enabled {
             self.persist_checkpoint().await?;
         } else {
@@ -244,6 +295,99 @@ impl WorkflowRuntime {
             total_iterations: self.total_iterations,
             completed_tasks: final_state.completed.clone(),
         })
+    }
+
+    /// Compute the final workflow status according to the completion policy.
+    /// Returns (status, optional error) where error is Some when the workflow fails.
+    fn compute_final_status(
+        &self,
+        state: &ExecutionState,
+        _terminal_stop: bool,
+    ) -> (WorkflowExecutionStatus, Option<AppError>) {
+        let completion = &self.graph_settings.completion;
+
+        // Collect all goal gate tasks.
+        let goal_gate_tasks: Vec<&WorkflowTask> =
+            self.tasks_by_id.values().filter(|t| t.goal_gate).collect();
+
+        // Rules 2a and 2b: evaluate goal gates.
+        if !goal_gate_tasks.is_empty() {
+            let mut failing_gates: Vec<String> = Vec::new();
+
+            for gate in &goal_gate_tasks {
+                if let Some(record) = state.completed.get(&gate.id) {
+                    // Gate was reached — check if it passed.
+                    let passed = record.status == TaskStatus::Success;
+                    if !passed
+                        && completion.goal_gate_failure_behavior == GoalGateFailureBehavior::Fail
+                    {
+                        // Rule 2b: reached but not passed.
+                        let status_str = record.status.as_str();
+                        let entry = if let Some(group) = &gate.goal_gate_group {
+                            format!("{}(group={})={}", gate.id, group, status_str)
+                        } else {
+                            format!("{}={}", gate.id, status_str)
+                        };
+                        failing_gates.push(entry);
+                    }
+                } else if completion.require_goal_gates {
+                    // Rule 2a: gate not reached.
+                    let entry = if let Some(group) = &gate.goal_gate_group {
+                        format!("{}(group={})=not_reached", gate.id, group)
+                    } else {
+                        format!("{}=not_reached", gate.id)
+                    };
+                    failing_gates.push(entry);
+                }
+            }
+
+            if !failing_gates.is_empty() {
+                failing_gates.sort();
+                let err = AppError::new(
+                    ErrorCategory::ValidationError,
+                    format!("goal gates not passed: {}", failing_gates.join(", ")),
+                )
+                .with_code("WFG-GATE-001");
+                return (WorkflowExecutionStatus::Failed, Some(err));
+            }
+        }
+
+        // Rule 3: success_requires_no_task_failures.
+        if completion.success_requires_no_task_failures
+            && state
+                .completed
+                .values()
+                .any(|r| r.status == TaskStatus::Failed)
+        {
+            let err = AppError::new(
+                ErrorCategory::ValidationError,
+                "workflow failed: one or more tasks failed",
+            )
+            .with_code("WFG-EXEC-001");
+            return (WorkflowExecutionStatus::Failed, Some(err));
+        }
+
+        // Rule 4: any completed terminal:failure task causes failure.
+        let mut terminal_failure_task: Option<&str> = None;
+        for task_id in state.completed.keys() {
+            if let Some(task) = self.tasks_by_id.get(task_id) {
+                if task.terminal == Some(TerminalKind::Failure) {
+                    terminal_failure_task = Some(task_id.as_str());
+                    break;
+                }
+            }
+        }
+        if let Some(task_id) = terminal_failure_task {
+            let err = AppError::new(
+                ErrorCategory::ValidationError,
+                format!("workflow terminated at failure terminal task '{}'", task_id),
+            )
+            .with_code("WFG-EXEC-002");
+            return (WorkflowExecutionStatus::Failed, Some(err));
+        }
+
+        // Rule 5: Completed.
+        (WorkflowExecutionStatus::Completed, None)
     }
 
     async fn process_frontier(&mut self, frontier: Vec<TaskOutcome>) -> Result<(), AppError> {
@@ -264,6 +408,9 @@ impl WorkflowRuntime {
             }
             let record = build_workflow_task_run_record(
                 outcome,
+                self.tasks_by_id
+                    .get(&outcome.task_id)
+                    .and_then(|task| task.goal_gate_group.clone()),
                 &mut self.artifact_store,
                 &self.graph_settings,
                 &self.workflow_execution.execution_id,
@@ -468,6 +615,7 @@ fn build_workflow_runtime(
         settings_effective: graph_settings.clone(),
         trigger_payload: trigger_payload.clone(),
         task_runs: Vec::new(),
+        warnings: Vec::new(),
     };
     let artifact_store =
         ArtifactStore::new(workspace_root.clone(), &graph_settings.artifact_storage);
@@ -737,6 +885,7 @@ async fn run_task(
 
 fn build_workflow_task_run_record(
     outcome: &TaskOutcome,
+    goal_gate_group: Option<String>,
     artifact_store: &mut ArtifactStore,
     graph_settings: &GraphSettings,
     execution_id: &Uuid,
@@ -758,6 +907,7 @@ fn build_workflow_task_run_record(
         started_at: outcome.started_at,
         completed_at: outcome.completed_at,
         status: WorkflowTaskStatus::from_execution(outcome.record.status.clone()),
+        goal_gate_group,
         output_ref,
         error: outcome.error_summary.clone(),
     })

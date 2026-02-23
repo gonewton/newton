@@ -85,6 +85,61 @@ pub struct WorkflowSettings {
     pub human: HumanSettings,
     #[serde(default)]
     pub webhook: WebhookSettings,
+    #[serde(default)]
+    pub completion: CompletionSettings,
+}
+
+/// Terminal task kind — determines how the workflow outcome is affected by a terminal task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalKind {
+    Success,
+    Failure,
+}
+
+/// Controls whether a reached-but-failed goal gate causes the workflow to fail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GoalGateFailureBehavior {
+    #[default]
+    Fail,
+    Allow,
+}
+
+fn default_stop_on_terminal() -> bool {
+    true
+}
+
+fn default_require_goal_gates() -> bool {
+    true
+}
+
+fn default_success_requires_no_task_failures() -> bool {
+    true
+}
+
+/// Completion policy configuration for workflow graphs.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CompletionSettings {
+    #[serde(default = "default_stop_on_terminal")]
+    pub stop_on_terminal: bool,
+    #[serde(default = "default_require_goal_gates")]
+    pub require_goal_gates: bool,
+    #[serde(default)]
+    pub goal_gate_failure_behavior: GoalGateFailureBehavior,
+    #[serde(default = "default_success_requires_no_task_failures")]
+    pub success_requires_no_task_failures: bool,
+}
+
+impl Default for CompletionSettings {
+    fn default() -> Self {
+        Self {
+            stop_on_terminal: true,
+            require_goal_gates: true,
+            goal_gate_failure_behavior: GoalGateFailureBehavior::Fail,
+            success_requires_no_task_failures: true,
+        }
+    }
 }
 
 /// Artifact storage configuration embedded in workflow settings.
@@ -271,6 +326,12 @@ pub struct WorkflowTask {
     pub parallel_group: Option<String>,
     #[serde(default = "default_transitions")]
     pub transitions: Vec<Transition>,
+    #[serde(default)]
+    pub goal_gate: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_gate_group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<TerminalKind>,
 }
 
 impl WorkflowTask {

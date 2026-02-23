@@ -119,6 +119,13 @@ workflow:
         "message": "CommandOperator uses shell=true but settings.command_operator.allow_shell is not true",
         "location": "start",
         "suggestion": "set settings.command_operator.allow_shell=true to opt in explicitly"
+      },
+      {
+        "code": "WFG-LINT-101",
+        "severity": "warning",
+        "message": "completion.stop_on_terminal is true but no task has a terminal field set; the workflow can only stop via timeout, iteration limit, or empty ready queue",
+        "location": null,
+        "suggestion": "define at least one task with `terminal: success` or `terminal: failure`"
       }
     ]
     "###

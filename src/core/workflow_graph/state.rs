@@ -37,6 +37,8 @@ pub struct WorkflowExecution {
     pub trigger_payload: Value,
     #[serde(default)]
     pub task_runs: Vec<WorkflowTaskRunSummary>,
+    #[serde(default)]
+    pub warnings: Vec<Value>,
 }
 
 /// Execution status enumeration for workflow graphs.
@@ -87,6 +89,8 @@ pub struct WorkflowTaskRunRecord {
     pub started_at: DateTime<Utc>,
     pub completed_at: DateTime<Utc>,
     pub status: WorkflowTaskStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_gate_group: Option<String>,
     pub output_ref: OutputRef,
     pub error: Option<AppErrorSummary>,
 }

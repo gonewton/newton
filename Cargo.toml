@@ -149,6 +149,10 @@ name = "test_workflow_webhook"
 path = "tests/workflow_graph/test_webhook.rs"
 
 [[test]]
+name = "test_workflow_goal_gates"
+path = "tests/workflow_graph/test_goal_gates.rs"
+
+[[test]]
 name = "test_profile_mode"
 path = "tests/run/test_profile_mode.rs"
 
