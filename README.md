@@ -1,10 +1,12 @@
-# Newton Loop - Anytime Optimization Framework
+# Newton
 
-**Newton Loop** is a generic anytime optimization framework that orchestrates evaluation-advice-execution cycles to solve domain-agnostic problems through iterative improvement.
+**Newton** is a CLI for iterative optimization and workflow automation. It supports both:
+- The classic evaluator-advisor-executor loop (`newton run`, `newton step`, `newton batch`)
+- A deterministic workflow-graph runner (`newton workflow ...`) with linting, explain output, checkpointing, artifacts, goal gates, terminal tasks, and completion policy controls.
 
-## What is Newton Loop?
+## What is Newton?
 
-Newton Loop is an iterative optimization framework for any agentic AI goal that can be well-defined in terms of goals and feedback (semantic gradients). It orchestrates a three-phase optimization cycle:
+Newton is an iterative optimization framework for agentic AI goals that benefit from structured feedback and controlled execution. The classic loop orchestrates three phases:
 
 - **Evaluator**: Assesses the current state/solution and provides quality metrics
 - **Advisor**: Generates improvement recommendations based on evaluation
@@ -13,6 +15,16 @@ Newton Loop is an iterative optimization framework for any agentic AI goal that 
 This evaluation-advice-execution loop continues until goals are met or iteration limits are reached.
 
 Instead of just trying the same thing over and over and hoping it gets better, this kind of loop pauses to check how things are going, think about what could improve, and then make targeted changes. Each round learns from the last, so progress is more guided than random. It also keeps track of what worked best so far, which is helpful when goals involve trade-offs or gradual improvements rather than a simple yes/no result. Overall, it feels less like “try again” and more like “let’s see what happened and do a bit better next time,” which makes it a good fit for a wide range of problems.
+
+## Workflow Graph Capabilities
+
+Newton includes a production workflow runner with YAML-defined tasks and deterministic execution semantics:
+
+- Workflow commands: `newton workflow run|lint|validate|dot|explain|resume|checkpoints|artifacts|webhook`
+- Safety checks: lint rules, expression precompile validation, shell opt-in, reachability analysis
+- Deterministic completion: goal gates, terminal tasks, explicit completion policy, stable error codes
+- Runtime durability: checkpoint persistence, resume support, artifact routing/cleanup, execution warnings
+- Authoring ergonomics: transform pipeline with macro expansion, `include_if` filtering, `{{ ... }}` interpolation, and `$expr` evaluation
 
 ## Installation
 
@@ -92,7 +104,7 @@ newton 0.3.8
 
 $ newton --help
 newton 0.3.8
-Newton Loop optimization framework in Rust
+Newton CLI for optimization and workflow automation
 
 Usage: newton <COMMAND>
 ```
@@ -192,7 +204,7 @@ Workspace discovery and the `.conf` parser in `core/batch_config` are shared wit
 
 ### Plan-Based Batch Processing Architecture
 
-Newton Loop uses a plan-based queue system for processing multiple tasks through batch mode:
+Newton uses a plan-based queue system for processing multiple tasks through batch mode:
 
 #### Plan File Structure
 
@@ -450,7 +462,7 @@ newton init . --template basic --interactive
 
 ### Custom Tool Configuration
 
-Newton Loop allows you to specify custom commands for each optimization phase:
+Newton allows you to specify custom commands for each optimization phase:
 
 ```bash
 newton run . \
@@ -523,7 +535,7 @@ newton report <execution-id> --include-stats
 
 ### Git Integration
 
-Newton Loop includes built-in git integration for batch processing workflows:
+Newton includes built-in git integration for batch processing workflows:
 
 #### Automatic Branch Management
 
@@ -578,7 +590,7 @@ Your custom scripts can use these for:
 
 ### Workspace Structure
 
-Newton Loop expects the following workspace structure:
+Newton expects the following workspace structure:
 
 ```
 workspace/
@@ -630,7 +642,7 @@ Each tool script receives environment variables:
 
 ### Batch Configuration File (.newton/configs/*.conf)
 
-Newton Loop uses simple key=value configuration files for batch processing:
+Newton uses simple key=value configuration files for batch processing:
 
 ```conf
 # Required settings
@@ -843,7 +855,7 @@ git reset --hard HEAD
 
 ### Environment Variables Available to Tools
 
-Tools can access Newton Loop's environment variables:
+Tools can access Newton's environment variables:
 
 #### Basic Environment Variables
 
@@ -890,7 +902,7 @@ Configure resource limits to control optimization runs:
 
 ### Generated Artifacts
 
-Newton Loop generates several artifacts during execution:
+Newton generates several artifacts during execution:
 
 **Evaluator Outputs:**
 - `evaluator_status.md`: Evaluation results and metrics

@@ -2,6 +2,6 @@
 id = "newton-cli-commands"
 version = "1.0.0"
 description = "Newton CLI command reference skill"
-author = "Newton Loop"
+author = "Newton"
 
 [dependencies]
