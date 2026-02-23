@@ -40,12 +40,16 @@ opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
 opentelemetry_sdk = "0.31"
 futures = "0.3"
 serde_yaml = "0.9"
-rhai = "1.11"
+rhai = { version = "1.11", features = ["sync"] }
 petgraph = "0.7"
 async-trait = "0.1"
 sha2 = "0.10"
 hex = "0.4.3"
 humantime = "2.1"
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["limit"] }
+subtle = "2"
 
 [dev-dependencies]
 assert_cmd = "2.0"
@@ -135,6 +139,14 @@ path = "tests/workflow_graph/test_lint.rs"
 [[test]]
 name = "test_workflow_explain"
 path = "tests/workflow_graph/test_explain.rs"
+
+[[test]]
+name = "test_workflow_human_ops"
+path = "tests/workflow_graph/test_human_ops.rs"
+
+[[test]]
+name = "test_workflow_webhook"
+path = "tests/workflow_graph/test_webhook.rs"
 
 [[test]]
 name = "test_profile_mode"

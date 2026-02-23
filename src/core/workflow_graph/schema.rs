@@ -39,6 +39,8 @@ pub struct WorkflowDocument {
     pub version: String,
     pub mode: String,
     #[serde(default)]
+    pub triggers: Option<WorkflowTrigger>,
+    #[serde(default)]
     pub metadata: Option<WorkflowMetadata>,
     pub workflow: WorkflowDefinition,
 }
@@ -77,6 +79,12 @@ pub struct WorkflowSettings {
     pub redaction: RedactionSettings,
     #[serde(default = "default_command_operator_settings")]
     pub command_operator: CommandOperatorSettings,
+    #[serde(default)]
+    pub required_triggers: Vec<String>,
+    #[serde(default)]
+    pub human: HumanSettings,
+    #[serde(default)]
+    pub webhook: WebhookSettings,
 }
 
 /// Artifact storage configuration embedded in workflow settings.
@@ -98,6 +106,93 @@ pub struct CommandOperatorSettings {
 
 fn default_command_operator_settings() -> CommandOperatorSettings {
     CommandOperatorSettings::default()
+}
+
+/// Human interaction configuration for workflows.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct HumanSettings {
+    pub default_timeout_seconds: u64,
+    pub audit_path: PathBuf,
+}
+
+impl Default for HumanSettings {
+    fn default() -> Self {
+        Self {
+            default_timeout_seconds: 86_400,
+            audit_path: PathBuf::from(".newton/state/workflows"),
+        }
+    }
+}
+
+/// Webhook server configuration embedded in workflow settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WebhookSettings {
+    pub enabled: bool,
+    pub bind: String,
+    pub auth_token_env: String,
+    pub max_body_bytes: usize,
+}
+
+impl Default for WebhookSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bind: "127.0.0.1:8787".to_string(),
+            auth_token_env: "NEWTON_WEBHOOK_TOKEN".to_string(),
+            max_body_bytes: 1_048_576,
+        }
+    }
+}
+
+/// Workflow trigger definition supporting manual and webhook workflows.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorkflowTrigger {
+    #[serde(rename = "type")]
+    pub trigger_type: TriggerType,
+    pub schema_version: String,
+    #[serde(default = "default_trigger_payload")]
+    pub payload: Value,
+}
+
+impl WorkflowTrigger {
+    pub fn payload_object(&self) -> Option<&serde_json::Map<String, Value>> {
+        self.payload.as_object()
+    }
+
+    pub fn to_value(&self) -> Value {
+        let mut map = serde_json::Map::new();
+        map.insert(
+            "type".to_string(),
+            Value::String(self.trigger_type.as_str().to_string()),
+        );
+        map.insert(
+            "schema_version".to_string(),
+            Value::String(self.schema_version.clone()),
+        );
+        map.insert("payload".to_string(), self.payload.clone());
+        Value::Object(map)
+    }
+}
+
+fn default_trigger_payload() -> Value {
+    Value::Object(Map::new())
+}
+
+/// Allowed trigger types for workflow graphs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TriggerType {
+    Manual,
+    Webhook,
+}
+
+impl TriggerType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TriggerType::Manual => "manual",
+            TriggerType::Webhook => "webhook",
+        }
+    }
 }
 
 impl Default for ArtifactStorageSettings {
@@ -345,6 +440,21 @@ impl WorkflowDocument {
                 ErrorCategory::ValidationError,
                 "settings.max_time_seconds must be >= 1",
             ));
+        }
+
+        if let Some(triggers) = &self.triggers {
+            if triggers.schema_version.trim().is_empty() {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    "triggers.schema_version must be set",
+                ));
+            }
+            if !triggers.payload.is_object() {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    "triggers.payload must be an object",
+                ));
+            }
         }
 
         let mut exprs = Vec::new();

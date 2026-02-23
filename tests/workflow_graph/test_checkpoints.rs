@@ -1,7 +1,7 @@
 use newton::core::workflow_graph::{
     executor::{self, ExecutionOverrides},
     operator::OperatorRegistry,
-    operators, schema,
+    operators, schema, state,
 };
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -42,9 +42,9 @@ workflow:
       params: {}
 "#;
 
-fn build_registry(workspace: PathBuf) -> OperatorRegistry {
+fn build_registry(workspace: PathBuf, settings: state::GraphSettings) -> OperatorRegistry {
     let mut builder = OperatorRegistry::builder();
-    operators::register_builtins(&mut builder, workspace);
+    operators::register_builtins(&mut builder, workspace, settings);
     builder.build()
 }
 
@@ -69,7 +69,8 @@ async fn resume_skips_completed_tasks() {
     let workspace = tempdir().expect("workspace");
     let workflow_file = write_workflow(RESUME_WORKFLOW);
     let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
-    let registry = build_registry(workspace.path().to_path_buf());
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings.clone());
     let overrides = ExecutionOverrides {
         parallel_limit: None,
         max_time_seconds: None,
@@ -121,7 +122,7 @@ async fn resume_skips_completed_tasks() {
     }
     write_json(&checkpoint_path, &checkpoint_value);
 
-    let resume_registry = build_registry(workspace.path().to_path_buf());
+    let resume_registry = build_registry(workspace.path().to_path_buf(), settings.clone());
     let resume_summary = executor::resume_workflow(
         resume_registry,
         workspace.path().to_path_buf(),
@@ -161,7 +162,8 @@ async fn resume_hash_mismatch_blocks_resume() {
     let workspace = tempdir().expect("workspace");
     let workflow_file = write_workflow(RESUME_WORKFLOW);
     let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
-    let registry = build_registry(workspace.path().to_path_buf());
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings.clone());
     let overrides = ExecutionOverrides {
         parallel_limit: None,
         max_time_seconds: None,
@@ -181,7 +183,7 @@ async fn resume_hash_mismatch_blocks_resume() {
     contents.push('\n');
     fs::write(workflow_file.path(), contents).expect("rewrite workflow");
 
-    let resume_registry = build_registry(workspace.path().to_path_buf());
+    let resume_registry = build_registry(workspace.path().to_path_buf(), settings.clone());
     let err = executor::resume_workflow(
         resume_registry,
         workspace.path().to_path_buf(),

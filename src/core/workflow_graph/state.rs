@@ -5,7 +5,7 @@ use crate::core::types::ErrorCategory;
 use crate::core::workflow_graph::schema::WorkflowSettings;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
@@ -18,6 +18,9 @@ pub const WORKFLOW_EXECUTION_FORMAT_VERSION: &str = "1";
 pub const WORKFLOW_CHECKPOINT_FORMAT_VERSION: &str = "1";
 
 pub type GraphSettings = WorkflowSettings;
+fn default_trigger_payload_value() -> Value {
+    Value::Object(Map::new())
+}
 /// Workflow execution metadata persisted under `.newton/state/workflows`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowExecution {
@@ -30,6 +33,8 @@ pub struct WorkflowExecution {
     pub completed_at: Option<DateTime<Utc>>,
     pub status: WorkflowExecutionStatus,
     pub settings_effective: GraphSettings,
+    #[serde(default = "default_trigger_payload_value")]
+    pub trigger_payload: Value,
     #[serde(default)]
     pub task_runs: Vec<WorkflowTaskRunSummary>,
 }
@@ -142,16 +147,20 @@ pub struct WorkflowCheckpoint {
     pub created_at: DateTime<Utc>,
     pub ready_queue: Vec<String>,
     pub context: Value,
+    #[serde(default = "default_trigger_payload_value")]
+    pub trigger_payload: Value,
     pub task_iterations: HashMap<String, usize>,
     pub total_iterations: usize,
     pub completed: HashMap<String, WorkflowTaskRunRecord>,
 }
 
 impl WorkflowCheckpoint {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         execution_id: Uuid,
         workflow_hash: String,
         context: Value,
+        trigger_payload: Value,
         ready_queue: Vec<String>,
         task_iterations: HashMap<String, usize>,
         total_iterations: usize,
@@ -164,6 +173,7 @@ impl WorkflowCheckpoint {
             created_at: Utc::now(),
             ready_queue,
             context,
+            trigger_payload,
             task_iterations,
             total_iterations,
             completed,

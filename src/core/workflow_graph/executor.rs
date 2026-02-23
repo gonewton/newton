@@ -17,7 +17,7 @@ use crate::core::workflow_graph::state::{
 };
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
-use rand::Rng;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde_json::{Map, Number, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
@@ -94,6 +94,7 @@ struct ExecutionState {
     context: Value,
     completed: HashMap<String, TaskRunRecord>,
     checkpoint_records: HashMap<String, WorkflowTaskRunRecord>,
+    triggers: Value,
 }
 
 struct WorkflowRuntime {
@@ -109,6 +110,7 @@ struct WorkflowRuntime {
     task_iterations: HashMap<String, usize>,
     total_iterations: usize,
     workflow_execution: WorkflowExecution,
+    triggers: Value,
     redact_keys: Arc<Vec<String>>,
     last_checkpoint: Instant,
     start_time: Instant,
@@ -116,7 +118,11 @@ struct WorkflowRuntime {
 
 impl ExecutionState {
     fn snapshot(&self) -> StateView {
-        StateView::new(self.context.clone(), build_tasks_value(&self.completed))
+        StateView::new(
+            self.context.clone(),
+            build_tasks_value(&self.completed),
+            self.triggers.clone(),
+        )
     }
 }
 
@@ -325,6 +331,7 @@ impl WorkflowRuntime {
             self.workflow_execution.execution_id,
             self.workflow_execution.workflow_hash.clone(),
             redacted_context,
+            self.triggers.clone(),
             ready_queue,
             self.task_iterations.clone(),
             self.total_iterations,
@@ -366,6 +373,39 @@ pub async fn execute_workflow(
     workspace_root: PathBuf,
     overrides: ExecutionOverrides,
 ) -> Result<ExecutionSummary, AppError> {
+    let runtime =
+        build_workflow_runtime(document, workflow_path, registry, workspace_root, overrides)?;
+    runtime.run().await
+}
+
+pub fn spawn_workflow_execution(
+    document: WorkflowDocument,
+    workflow_path: PathBuf,
+    registry: OperatorRegistry,
+    workspace_root: PathBuf,
+    overrides: ExecutionOverrides,
+) -> Result<
+    (
+        Uuid,
+        tokio::task::JoinHandle<Result<ExecutionSummary, AppError>>,
+    ),
+    AppError,
+> {
+    let runtime =
+        build_workflow_runtime(document, workflow_path, registry, workspace_root, overrides)?;
+    let execution_id = runtime.workflow_execution.execution_id;
+    let handle = tokio::spawn(async move { runtime.run().await });
+    Ok((execution_id, handle))
+}
+
+fn build_workflow_runtime(
+    document: WorkflowDocument,
+    workflow_path: PathBuf,
+    registry: OperatorRegistry,
+    workspace_root: PathBuf,
+    overrides: ExecutionOverrides,
+) -> Result<WorkflowRuntime, AppError> {
+    let trigger_payload = extract_trigger_payload(&document);
     let mut graph_settings = document.workflow.settings;
     if let Some(parallel) = overrides.parallel_limit {
         graph_settings.parallel_limit = parallel;
@@ -373,6 +413,7 @@ pub async fn execute_workflow(
     if let Some(max_time) = overrides.max_time_seconds {
         graph_settings.max_time_seconds = max_time;
     }
+    validate_required_triggers(&graph_settings.required_triggers, &trigger_payload)?;
     let workflow_file = canonicalize_workflow_path(&workflow_path)?;
     let workflow_bytes = fs::read(&workflow_file).map_err(|err| {
         AppError::new(
@@ -402,14 +443,18 @@ pub async fn execute_workflow(
         max_workflow_iterations: graph_settings.max_workflow_iterations,
     };
 
-    #[allow(clippy::arc_with_non_send_sync)]
     let engine = Arc::new(ExpressionEngine::default());
-    let context = resolve_initial_context(&document.workflow.context, engine.as_ref())?;
+    let context = resolve_initial_context(
+        &document.workflow.context,
+        engine.as_ref(),
+        &trigger_payload,
+    )?;
     let execution_uuid = Uuid::new_v4();
     let state = Arc::new(tokio::sync::RwLock::new(ExecutionState {
         context,
         completed: HashMap::new(),
         checkpoint_records: HashMap::new(),
+        triggers: trigger_payload.clone(),
     }));
     let workflow_execution = WorkflowExecution {
         format_version: WORKFLOW_EXECUTION_FORMAT_VERSION.to_string(),
@@ -421,6 +466,7 @@ pub async fn execute_workflow(
         completed_at: None,
         status: WorkflowExecutionStatus::Running,
         settings_effective: graph_settings.clone(),
+        trigger_payload: trigger_payload.clone(),
         task_runs: Vec::new(),
     };
     let artifact_store =
@@ -430,7 +476,7 @@ pub async fn execute_workflow(
         queue.push_back(graph_settings.entry_task.clone());
         queue
     };
-    let runtime = WorkflowRuntime {
+    Ok(WorkflowRuntime {
         workspace_root: workspace_root.clone(),
         registry,
         tasks_by_id,
@@ -443,11 +489,11 @@ pub async fn execute_workflow(
         task_iterations: HashMap::new(),
         total_iterations: 0,
         workflow_execution,
+        triggers: trigger_payload.clone(),
         redact_keys: Arc::new(graph_settings.redaction.redact_keys.clone()),
         last_checkpoint: Instant::now(),
         start_time: Instant::now(),
-    };
-    runtime.run().await
+    })
 }
 
 /// Resume a workflow execution from the latest checkpoint.
@@ -505,13 +551,13 @@ pub async fn resume_workflow(
             .collect::<HashMap<_, _>>(),
     );
 
-    #[allow(clippy::arc_with_non_send_sync)]
     let engine = Arc::new(ExpressionEngine::default());
     let completed_records = hydrate_completed_records(&checkpoint_data.completed, &workspace_root)?;
     let state = Arc::new(tokio::sync::RwLock::new(ExecutionState {
         context: checkpoint_data.context.clone(),
         completed: completed_records,
         checkpoint_records: checkpoint_data.completed.clone(),
+        triggers: checkpoint_data.trigger_payload.clone(),
     }));
 
     let mut workflow_execution = execution.clone();
@@ -533,6 +579,7 @@ pub async fn resume_workflow(
         task_iterations: checkpoint_data.task_iterations.clone(),
         total_iterations: checkpoint_data.total_iterations,
         workflow_execution,
+        triggers: checkpoint_data.trigger_payload.clone(),
         redact_keys: Arc::new(graph_settings.redaction.redact_keys.clone()),
         last_checkpoint: Instant::now(),
         start_time: Instant::now(),
@@ -540,12 +587,36 @@ pub async fn resume_workflow(
     runtime.run().await
 }
 
-fn resolve_initial_context(context: &Value, engine: &ExpressionEngine) -> Result<Value, AppError> {
-    let eval = EvaluationContext::new(
-        context.clone(),
-        Value::Object(Map::new()),
-        Value::Object(Map::new()),
-    );
+fn extract_trigger_payload(document: &WorkflowDocument) -> Value {
+    document
+        .triggers
+        .as_ref()
+        .map(|trigger| trigger.payload.clone())
+        .unwrap_or_else(|| Value::Object(Map::new()))
+}
+
+fn validate_required_triggers(required: &[String], payload: &Value) -> Result<(), AppError> {
+    if required.is_empty() {
+        return Ok(());
+    }
+    for key in required {
+        if payload.as_object().and_then(|map| map.get(key)).is_none() {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                format!("trigger payload missing required key '{}'", key),
+            )
+            .with_code("WFG-TRIG-001"));
+        }
+    }
+    Ok(())
+}
+
+fn resolve_initial_context(
+    context: &Value,
+    engine: &ExpressionEngine,
+    triggers: &Value,
+) -> Result<Value, AppError> {
+    let eval = EvaluationContext::new(context.clone(), Value::Object(Map::new()), triggers.clone());
     resolve_value(context, engine, &eval)
 }
 
@@ -581,7 +652,7 @@ async fn run_task(
         .and_then(|r| r.backoff_multiplier)
         .unwrap_or(1.0);
     let jitter_ms = task.retry.as_ref().and_then(|r| r.jitter_ms).unwrap_or(0);
-    let mut rng = rand::thread_rng();
+    let mut rng = StdRng::from_entropy();
 
     loop {
         attempts += 1;
@@ -758,7 +829,7 @@ fn evaluate_transition(
             let ctx = EvaluationContext::new(
                 snapshot.context.clone(),
                 snapshot.tasks.clone(),
-                Value::Object(Map::new()),
+                snapshot.triggers.clone(),
             );
             let result = engine.evaluate(expr, &ctx)?;
             if let Value::Bool(flag) = result {

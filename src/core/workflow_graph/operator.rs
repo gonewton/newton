@@ -3,7 +3,7 @@
 use crate::core::error::AppError;
 use crate::core::workflow_graph::expression::EvaluationContext;
 use async_trait::async_trait;
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,18 +13,23 @@ use std::sync::Arc;
 pub struct StateView {
     pub context: Value,
     pub tasks: Value,
+    pub triggers: Value,
 }
 
 impl StateView {
-    pub fn new(context: Value, tasks: Value) -> Self {
-        Self { context, tasks }
+    pub fn new(context: Value, tasks: Value, triggers: Value) -> Self {
+        Self {
+            context,
+            tasks,
+            triggers,
+        }
     }
 
     pub fn evaluation_context(&self) -> EvaluationContext {
         EvaluationContext::new(
             self.context.clone(),
             self.tasks.clone(),
-            Value::Object(Map::new()),
+            self.triggers.clone(),
         )
     }
 }

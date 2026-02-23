@@ -1,4 +1,6 @@
-use newton::core::workflow_graph::{executor, operator::OperatorRegistry, operators, schema};
+use newton::core::workflow_graph::{
+    executor, operator::OperatorRegistry, operators, schema, state,
+};
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -130,9 +132,12 @@ workflow:
             $expr: "true"
 "#;
 
-fn build_registry(workspace: std::path::PathBuf) -> OperatorRegistry {
+fn build_registry(
+    workspace: std::path::PathBuf,
+    settings: state::GraphSettings,
+) -> OperatorRegistry {
     let mut builder = OperatorRegistry::builder();
-    operators::register_builtins(&mut builder, workspace);
+    operators::register_builtins(&mut builder, workspace, settings);
     builder.build()
 }
 
@@ -149,7 +154,7 @@ async fn transitions_deduplicate_targets_per_tick() {
     let file = write_workflow(DEDUPE_WORKFLOW);
     let document = schema::load_workflow(file.path()).expect("valid workflow");
     let workspace = std::env::current_dir().expect("workspace");
-    let registry = build_registry(workspace.clone());
+    let registry = build_registry(workspace.clone(), document.workflow.settings.clone());
     let overrides = executor::ExecutionOverrides {
         parallel_limit: Some(2),
         max_time_seconds: Some(60),
@@ -177,7 +182,7 @@ async fn loop_exhausts_iteration_limit() {
     let file = write_workflow(LOOP_WORKFLOW);
     let document = schema::load_workflow(file.path()).expect("valid workflow");
     let workspace = std::env::current_dir().expect("workspace");
-    let registry = build_registry(workspace.clone());
+    let registry = build_registry(workspace.clone(), document.workflow.settings.clone());
     let overrides = executor::ExecutionOverrides {
         parallel_limit: Some(1),
         max_time_seconds: Some(60),
@@ -201,7 +206,7 @@ async fn higher_priority_transition_wins() {
     let file = write_workflow(PRIORITY_WORKFLOW);
     let document = schema::load_workflow(file.path()).expect("valid workflow");
     let workspace = std::env::current_dir().expect("workspace");
-    let registry = build_registry(workspace.clone());
+    let registry = build_registry(workspace.clone(), document.workflow.settings.clone());
     let overrides = executor::ExecutionOverrides {
         parallel_limit: Some(1),
         max_time_seconds: Some(60),
@@ -227,7 +232,7 @@ async fn workflow_exhausts_global_iteration_limit() {
     let file = write_workflow(GLOBAL_ITER_WORKFLOW);
     let document = schema::load_workflow(file.path()).expect("valid workflow");
     let workspace = std::env::current_dir().expect("workspace");
-    let registry = build_registry(workspace.clone());
+    let registry = build_registry(workspace.clone(), document.workflow.settings.clone());
     let overrides = executor::ExecutionOverrides {
         parallel_limit: Some(1),
         max_time_seconds: Some(60),

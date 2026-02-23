@@ -16,6 +16,7 @@ pub fn built_in_rules() -> Vec<Box<dyn WorkflowLintRule>> {
         Box::new(WhenExpressionBoolRule),
         Box::new(SuspiciousLoopRiskRule),
         Box::new(ShellOptInRule),
+        Box::new(RequiredTriggersRule),
     ]
 }
 
@@ -310,6 +311,26 @@ impl WorkflowLintRule for ShellOptInRule {
             }
         }
         out
+    }
+}
+
+struct RequiredTriggersRule;
+
+impl WorkflowLintRule for RequiredTriggersRule {
+    fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
+        if workflow.workflow.settings.required_triggers.is_empty() {
+            return Vec::new();
+        }
+        if workflow.triggers.is_some() {
+            return Vec::new();
+        }
+        vec![LintResult::new(
+            "WFG-LINT-009",
+            LintSeverity::Warning,
+            "required_triggers is set but workflow has no triggers block",
+            None,
+            Some("add a triggers block or provide trigger payloads at run time".to_string()),
+        )]
     }
 }
 
