@@ -161,6 +161,10 @@ name = "test_workflow_read_control_file_operator"
 path = "tests/workflow_graph/test_read_control_file_operator.rs"
 
 [[test]]
+name = "test_workflow_comprehensive_matrix"
+path = "tests/workflow_graph/test_workflow_comprehensive_matrix.rs"
+
+[[test]]
 name = "test_profile_mode"
 path = "tests/run/test_profile_mode.rs"
 

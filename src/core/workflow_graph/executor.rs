@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::{sleep, timeout};
+use tracing;
 use uuid::Uuid;
 
 /// Optional overrides supplied by CLI flags.
@@ -144,6 +145,11 @@ struct TaskOutcome {
 
 impl WorkflowRuntime {
     async fn run(mut self) -> Result<ExecutionSummary, AppError> {
+        tracing::info!(
+            execution_id = %self.workflow_execution.execution_id,
+            entry_task = %self.graph_settings.entry_task,
+            "workflow starting"
+        );
         self.save_execution()?;
         let mut terminal_stop_triggered = false;
         while !self.ready_queue.is_empty() {
@@ -293,6 +299,12 @@ impl WorkflowRuntime {
             self.save_execution()?;
         }
         let final_state = self.state.read().await;
+        tracing::info!(
+            execution_id = %self.workflow_execution.execution_id,
+            iterations = self.total_iterations,
+            status = self.workflow_execution.status.as_str(),
+            "workflow finished"
+        );
         Ok(ExecutionSummary {
             execution_id: self.workflow_execution.execution_id,
             total_iterations: self.total_iterations,
@@ -851,6 +863,15 @@ async fn run_task(
 
     loop {
         attempts += 1;
+        tracing::info!(
+            task_id = %task.id,
+            task_name = task.name.as_deref().unwrap_or("-"),
+            operator = %task.operator,
+            attempt = attempts,
+            max_attempts = max_attempts,
+            timeout_ms = task.timeout_ms.map(|t| t.to_string()).as_deref().unwrap_or("-"),
+            "task starting"
+        );
         let ctx = OperatorContext {
             workspace_path: workspace_root.clone(),
             execution_id: execution_id.clone(),
@@ -880,6 +901,11 @@ async fn run_task(
 
         match execution_result {
             Ok(output) => {
+                tracing::info!(
+                    task_id = %task.id,
+                    duration_ms = duration_ms,
+                    "task completed"
+                );
                 let patch = extract_context_patch(&output);
                 return Ok(TaskOutcome {
                     task_id: task.id.clone(),
@@ -899,6 +925,12 @@ async fn run_task(
             }
             Err(err) => {
                 if attempts >= max_attempts {
+                    tracing::warn!(
+                        task_id = %task.id,
+                        error_code = %err.code,
+                        error = %err.message,
+                        "task failed"
+                    );
                     return Ok(TaskOutcome {
                         task_id: task.id.clone(),
                         record: TaskRunRecord {
