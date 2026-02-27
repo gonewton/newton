@@ -91,6 +91,13 @@ pub struct WorkflowSettings {
     pub webhook: WebhookSettings,
     #[serde(default)]
     pub completion: CompletionSettings,
+    /// Default coding engine for all agent operators in this workflow.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_engine: Option<String>,
+    /// Default model configuration for agent operators.
+    /// Allowed and silently ignored when the workflow has no AgentOperator tasks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_stylesheet: Option<ModelStylesheet>,
 }
 
 impl Default for WorkflowSettings {
@@ -110,8 +117,31 @@ impl Default for WorkflowSettings {
             human: HumanSettings::default(),
             webhook: WebhookSettings::default(),
             completion: CompletionSettings::default(),
+            default_engine: None,
+            model_stylesheet: None,
         }
     }
+}
+
+/// Workflow-level model configuration for agent operators.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelStylesheet {
+    /// Model identifier (e.g. "gpt-4o", "claude-sonnet-4-6").
+    pub model: String,
+    /// Conversation history retention policy.
+    /// Schema-only in 017-h — does not affect prompt construction or operator behavior.
+    #[serde(default)]
+    pub context_fidelity: ContextFidelity,
+}
+
+/// Context fidelity policy for agent operators (schema-only; not yet implemented).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextFidelity {
+    Full,
+    #[default]
+    Summary,
+    Truncate,
 }
 
 /// Terminal task kind — determines how the workflow outcome is affected by a terminal task.

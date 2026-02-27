@@ -1568,7 +1568,7 @@ dependencies = [
 
 [[package]]
 name = "newton"
-version = "0.5.34"
+version = "0.5.35"
 dependencies = [
  "aikit-sdk",
  "anyhow",
@@ -1582,6 +1582,7 @@ dependencies = [
  "futures",
  "hex",
  "humantime",
+ "indexmap",
  "insta",
  "opentelemetry",
  "opentelemetry-otlp",

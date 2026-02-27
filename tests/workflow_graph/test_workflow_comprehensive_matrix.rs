@@ -332,6 +332,7 @@ workflow:
             let deps = BuiltinOperatorDeps {
                 interviewer: None,
                 command_runner: Some(Arc::new(MockCommandRunner::new(plans))),
+                engine_registry: None,
             };
             let summary = execute_yaml(
                 workspace.path(),
@@ -395,6 +396,7 @@ workflow:
             let deps = BuiltinOperatorDeps {
                 interviewer: None,
                 command_runner: Some(Arc::new(MockCommandRunner::new(plans))),
+                engine_registry: None,
             };
             let summary = execute_yaml(
                 workspace.path(),
@@ -579,6 +581,7 @@ workflow:
             let deps = BuiltinOperatorDeps {
                 interviewer: Some(Arc::new(FakeInterviewer::approve_and_choose("ship"))),
                 command_runner: None,
+                engine_registry: None,
             };
             let summary = execute_yaml(
                 workspace.path(),
@@ -730,6 +733,7 @@ workflow:
             let deps = BuiltinOperatorDeps {
                 interviewer: None,
                 command_runner: Some(Arc::new(MockCommandRunner::new(plans))),
+                engine_registry: None,
             };
             let err = execute_yaml(
                 workspace.path(),
