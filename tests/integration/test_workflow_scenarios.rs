@@ -48,6 +48,7 @@ pub struct MockCommandRunner {
 }
 
 impl MockCommandRunner {
+    #[must_use]
     pub fn new(plans: HashMap<String, VecDeque<MockCommandStep>>) -> Self {
         Self {
             plans: Arc::new(Mutex::new(plans)),
@@ -65,7 +66,7 @@ impl CommandRunner for MockCommandRunner {
             let mut guard = self.plans.lock().expect("lock command plans");
             guard
                 .get_mut(request.cmd.trim())
-                .and_then(|queue| queue.pop_front())
+                .and_then(VecDeque::pop_front)
                 .unwrap_or(MockCommandStep::Success {
                     stdout: "",
                     stderr: "",
@@ -116,6 +117,7 @@ impl Default for FakeInterviewer {
 }
 
 impl FakeInterviewer {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             approval_result: ApprovalResult {
@@ -135,6 +137,7 @@ impl FakeInterviewer {
         }
     }
 
+    #[must_use]
     pub fn approve_and_choose(choice: &str) -> Self {
         let mut interviewer = Self::new();
         interviewer.decision_result.choice = choice.to_string();
@@ -175,6 +178,8 @@ pub struct WorkflowTestHarness {
 }
 
 impl WorkflowTestHarness {
+    #[must_use]
+    #[allow(clippy::missing_panics_doc)]
     pub fn new(
         cmd_plans: HashMap<String, VecDeque<MockCommandStep>>,
         interviewer: FakeInterviewer,
@@ -183,11 +188,12 @@ impl WorkflowTestHarness {
         let cmd_runner = MockCommandRunner::new(cmd_plans);
         Self {
             temp_dir,
-            cmd_runner: cmd_runner.clone(),
+            cmd_runner,
             interviewer,
         }
     }
 
+    #[allow(clippy::missing_errors_doc)]
     pub async fn run_fixture(
         &self,
         fixture_name: &str,
@@ -516,8 +522,7 @@ async fn test_scenario_13_parallel_limits() {
     // Total should be ~300ms + overhead. If parallel, it would be ~100ms.
     assert!(
         duration >= 200,
-        "Duration was {}ms, expected >= 200ms",
-        duration
+        "Duration was {duration}ms, expected >= 200ms",
     );
 
     assert_yaml_snapshot!(summary, {
@@ -650,8 +655,7 @@ async fn test_scenario_17_checkpoint_resume() {
         let err = res.expect_err("initially must fail at step2");
         assert!(
             err.message.contains("task step2 failed"),
-            "Error was: {:?}",
-            err
+            "Error was: {err:?}",
         );
 
         let state_dir = harness.temp_dir.path().join(".newton/state/workflows");
@@ -1023,8 +1027,7 @@ async fn test_scenario_29_history_audit() {
         assert_eq!(
             record.status,
             newton::core::workflow_graph::executor::TaskStatus::Success,
-            "task {} must have succeeded",
-            task_id
+            "task {task_id} must have succeeded",
         );
         // duration_ms is u64 — the field is always present (structural check)
         let _ = record.duration_ms;
