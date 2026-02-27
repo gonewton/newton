@@ -101,7 +101,7 @@ cd "$NEWTON_DIR"
 
 # Run clippy linter to check code quality
 echo -e "${YELLOW}Running clippy linter...${NC}" >&2
-if ! cargo clippy --all-targets --all-features -- -D warnings 2>&1; then
+if ! cargo clippy --all-targets --all-features --locked -- -D warnings 2>&1; then
     echo -e "${RED}Clippy found issues. Please fix the warnings above before running tests.${NC}" >&2
     echo -e "${YELLOW}Note: Use -D warnings to treat all warnings as errors${NC}" >&2
     exit 1
@@ -111,7 +111,7 @@ echo "" >&2
 
 # Run tests and capture output
 echo -e "${YELLOW}Running tests with cargo-nextest...${NC}" >&2
-if TEST_OUTPUT=$(cargo nextest run --all-features 2>&1); then
+if TEST_OUTPUT=$(cargo nextest run --all-features --locked 2>&1); then
     OVERALL_STATUS="PASSED"
     EXIT_CODE=0
     echo -e "${GREEN}Tests completed successfully!${NC}" >&2
