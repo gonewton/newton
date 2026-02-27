@@ -26,6 +26,18 @@ Newton includes a production workflow runner with YAML-defined tasks and determi
 - Runtime durability: checkpoint persistence, resume support, artifact routing/cleanup, execution warnings
 - Authoring ergonomics: transform pipeline with macro expansion, `include_if` filtering, `{{ ... }}` interpolation, and `$expr` evaluation
 
+### Built-in Workflow Operators
+
+| Operator | Purpose |
+|---|---|
+| `NoOpOperator` | Pass-through step; useful for routing and branching |
+| `CommandOperator` | Run shell commands; captures stdout/stderr as JSON output |
+| `SetContextOperator` | Deep-merge a patch object into the global workflow context |
+| `ReadControlFileOperator` | Read and parse a JSON file from a path resolved at runtime |
+| `AssertCompletedOperator` | Assert that a set of task IDs have completed before proceeding |
+| `HumanApprovalOperator` | Pause for a boolean approve/reject decision from a human operator |
+| `HumanDecisionOperator` | Pause for a multiple-choice selection from a human operator |
+
 ## Installation
 
 ### macOS / Linux (Homebrew)
@@ -100,10 +112,10 @@ To swap in custom evaluators, advisors, or executors, either pass `--evaluator`,
 
 ```bash
 newton --version
-newton 0.3.8
+newton 0.5.33
 
 $ newton --help
-newton 0.3.8
+newton 0.5.33
 Newton CLI for optimization and workflow automation
 
 Usage: newton <COMMAND>
