@@ -528,7 +528,7 @@ async fn workflow_run(args: WorkflowRunArgs) -> StdResult<(), AppError> {
     apply_context_overrides(&mut document.workflow.context, &args.set);
     document.validate(&ExpressionEngine::default())?;
 
-    if let Some(payload) = try_load_trigger_payload(&args.trigger_json)? {
+    if let Some(payload) = build_trigger_payload(&args.trigger_json, &args.arg)? {
         document.triggers = Some(workflow_schema::WorkflowTrigger {
             trigger_type: workflow_schema::TriggerType::Manual,
             schema_version: "1".to_string(),
@@ -627,7 +627,7 @@ fn workflow_explain(args: WorkflowExplainArgs) -> StdResult<(), AppError> {
     let source_macro_names = raw_document.workflow.macro_names_referenced();
     let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
     let overrides = parse_set_overrides(&args.set);
-    let trigger_payload = try_load_trigger_payload(&args.trigger_json)?
+    let trigger_payload = build_trigger_payload(&args.trigger_json, &args.arg)?
         .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
     if !trigger_payload.is_null() {
         document.triggers = Some(workflow_schema::WorkflowTrigger {
@@ -1034,6 +1034,53 @@ fn try_load_trigger_payload(path: &Option<PathBuf>) -> StdResult<Option<Value>, 
         Some(path) => Ok(Some(load_trigger_payload(path)?)),
         None => Ok(None),
     }
+}
+
+fn build_trigger_payload(
+    trigger_json: &Option<PathBuf>,
+    args: &[KeyValuePair],
+) -> StdResult<Option<Value>, AppError> {
+    if trigger_json.is_none() && args.is_empty() {
+        return Ok(None);
+    }
+
+    let mut payload =
+        try_load_trigger_payload(trigger_json)?.unwrap_or_else(|| Value::Object(Map::new()));
+    let map = payload.as_object_mut().ok_or_else(|| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            "trigger JSON must be an object",
+        )
+    })?;
+
+    for pair in args {
+        map.insert(pair.key.clone(), resolve_trigger_arg_value(&pair.value)?);
+    }
+
+    Ok(Some(payload))
+}
+
+fn resolve_trigger_arg_value(value: &str) -> StdResult<Value, AppError> {
+    if let Some(path) = value.strip_prefix("@@") {
+        return Ok(Value::String(format!("@{}", path)));
+    }
+    if let Some(path) = value.strip_prefix('@') {
+        if path.trim().is_empty() {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "trigger arg file path is empty",
+            ));
+        }
+        let content = fs::read_to_string(path).map_err(|err| {
+            AppError::new(
+                ErrorCategory::IoError,
+                format!("failed to read trigger arg file {}: {}", path, err),
+            )
+        })?;
+        return Ok(Value::String(content));
+    }
+
+    Ok(Value::String(value.to_string()))
 }
 
 fn load_trigger_payload(path: &Path) -> StdResult<Value, AppError> {
@@ -2177,4 +2224,101 @@ fn write_run_log(state_dir: &Path, message: &str) -> Result<()> {
         .open(&log_path)?;
     writeln!(file, "[{}] {}", Utc::now(), message)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn build_trigger_payload_returns_none_without_inputs() {
+        let payload = build_trigger_payload(&None, &[]).expect("build payload");
+        assert!(payload.is_none());
+    }
+
+    #[test]
+    fn build_trigger_payload_merges_json_and_args_last_wins() {
+        let temp = tempdir().expect("tempdir");
+        let json_path = temp.path().join("trigger.json");
+        fs::write(&json_path, r#"{"prompt":"base","env":"dev"}"#).expect("write trigger json");
+
+        let args = vec![
+            KeyValuePair {
+                key: "prompt".to_string(),
+                value: "override".to_string(),
+            },
+            KeyValuePair {
+                key: "new_key".to_string(),
+                value: "new_value".to_string(),
+            },
+        ];
+        let payload =
+            build_trigger_payload(&Some(json_path), &args).expect("build trigger payload");
+        assert_eq!(
+            payload.expect("payload"),
+            json!({"prompt":"override","env":"dev","new_key":"new_value"})
+        );
+    }
+
+    #[test]
+    fn build_trigger_payload_reads_arg_value_from_file() {
+        let temp = tempdir().expect("tempdir");
+        let prompt_path = temp.path().join("prompt.md");
+        fs::write(&prompt_path, "line1\nline2\n").expect("write prompt");
+        let arg_value = format!("@{}", prompt_path.display());
+        let args = vec![KeyValuePair {
+            key: "prompt".to_string(),
+            value: arg_value,
+        }];
+
+        let payload = build_trigger_payload(&None, &args)
+            .expect("build trigger payload")
+            .expect("payload");
+        assert_eq!(payload, json!({"prompt":"line1\nline2\n"}));
+    }
+
+    #[test]
+    fn build_trigger_payload_supports_literal_at_escape() {
+        let args = vec![KeyValuePair {
+            key: "prompt".to_string(),
+            value: "@@literal".to_string(),
+        }];
+        let payload = build_trigger_payload(&None, &args)
+            .expect("build trigger payload")
+            .expect("payload");
+        assert_eq!(payload, json!({"prompt":"@literal"}));
+    }
+
+    #[test]
+    fn build_trigger_payload_rejects_empty_file_path() {
+        let args = vec![KeyValuePair {
+            key: "prompt".to_string(),
+            value: "@".to_string(),
+        }];
+        let err = build_trigger_payload(&None, &args).expect_err("expected error");
+        assert!(
+            err.to_string().contains("trigger arg file path is empty"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn build_trigger_payload_rejects_non_utf8_file() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join("binary.bin");
+        fs::write(&path, [0xff, 0xfe]).expect("write bytes");
+        let arg_value = format!("@{}", path.display());
+        let args = vec![KeyValuePair {
+            key: "prompt".to_string(),
+            value: arg_value,
+        }];
+        let err = build_trigger_payload(&None, &args).expect_err("expected error");
+        assert!(
+            err.to_string().contains("failed to read trigger arg file"),
+            "unexpected error: {}",
+            err
+        );
+    }
 }
