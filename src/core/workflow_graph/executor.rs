@@ -1,4 +1,5 @@
 #![allow(clippy::result_large_err)] // Executor returns AppError to preserve full diagnostic context; boxing would discard run-time state.
+use serde::Serialize;
 
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
@@ -9,7 +10,7 @@ use crate::core::workflow_graph::operator::{
     ExecutionContext as OperatorContext, OperatorRegistry, StateView,
 };
 use crate::core::workflow_graph::schema::{
-    self, Condition, GoalGateFailureBehavior, TerminalKind, WorkflowDocument, WorkflowTask,
+    self, GoalGateFailureBehavior, TerminalKind, WorkflowDocument, WorkflowTask,
 };
 use crate::core::workflow_graph::state::{
     canonicalize_workflow_path, compute_sha256_hex, redact_value, summarize_error, AppErrorSummary,
@@ -21,7 +22,7 @@ use chrono::{DateTime, Utc};
 use futures::future::join_all;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde_json::{Map, Number, Value};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -51,15 +52,15 @@ pub struct ExecutionConfig {
 }
 
 /// Summary of a workflow execution run.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ExecutionSummary {
     pub execution_id: Uuid,
     pub total_iterations: usize,
-    pub completed_tasks: HashMap<String, TaskRunRecord>,
+    pub completed_tasks: BTreeMap<String, TaskRunRecord>,
 }
 
 /// Record describing the last completed run of a task.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct TaskRunRecord {
     pub status: TaskStatus,
     pub output: Value,
@@ -68,7 +69,8 @@ pub struct TaskRunRecord {
     pub run_seq: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TaskStatus {
     Success,
     Failed,
@@ -305,10 +307,18 @@ impl WorkflowRuntime {
             status = self.workflow_execution.status.as_str(),
             "workflow finished"
         );
+        let mut completed_tasks = BTreeMap::from_iter(final_state.completed.clone());
+        for record in completed_tasks.values_mut() {
+            redact_value(
+                &mut record.output,
+                &self.graph_settings.redaction.redact_keys,
+            );
+        }
+
         Ok(ExecutionSummary {
             execution_id: self.workflow_execution.execution_id,
             total_iterations: self.total_iterations,
-            completed_tasks: final_state.completed.clone(),
+            completed_tasks,
         })
     }
 
@@ -445,12 +455,30 @@ impl WorkflowRuntime {
             if let Some(task) = self.tasks_by_id.get(&outcome.task_id) {
                 let mut transitions = task.transitions.clone();
                 transitions.sort_by_key(|t| t.priority);
-                for transition in transitions {
-                    if evaluate_transition(&transition, self.engine.as_ref(), &snapshot)? {
-                        if seen.insert(transition.to.clone()) {
+
+                // If any transition has a `when` condition, the task uses exclusive/priority-
+                // selection mode: transitions are evaluated in priority order and the first
+                // matching one wins (including unconditional fallbacks).
+                //
+                // If no transitions have a `when` condition, the task fans out: all
+                // unconditional transitions that pass `include_if` fire in parallel.
+                let has_conditional = transitions.iter().any(|t| t.when.is_some());
+                if has_conditional {
+                    for transition in transitions {
+                        if evaluate_transition(&transition, self.engine.as_ref(), &snapshot)? {
+                            if seen.insert(transition.to.clone()) {
+                                self.ready_queue.push_back(transition.to.clone());
+                            }
+                            break;
+                        }
+                    }
+                } else {
+                    for transition in transitions {
+                        if evaluate_transition(&transition, self.engine.as_ref(), &snapshot)?
+                            && seen.insert(transition.to.clone())
+                        {
                             self.ready_queue.push_back(transition.to.clone());
                         }
-                        break;
                     }
                 }
             }
@@ -607,24 +635,52 @@ fn build_workflow_runtime(
         )
     })?;
     let workflow_hash = compute_sha256_hex(&workflow_bytes);
-    let tasks_by_id = Arc::new(
-        document
-            .workflow
-            .tasks
-            .into_iter()
-            .map(|task| match task {
-                schema::TaskOrMacro::Task(task) => Ok((task.id.clone(), task)),
-                schema::TaskOrMacro::Macro(invocation) => Err(AppError::new(
+
+    let engine = Arc::new(ExpressionEngine::default());
+    let eval_ctx = resolve_initial_evaluation_context(
+        &document.workflow.context,
+        engine.as_ref(),
+        &trigger_payload,
+    )?;
+
+    let mut tasks_map = HashMap::new();
+    for item in &document.workflow.tasks {
+        match item {
+            schema::TaskOrMacro::Task(task) => {
+                let mut included = true;
+                if let Some(ref guard) = task.include_if {
+                    included = evaluate_condition(guard, engine.as_ref(), &eval_ctx)?;
+                }
+                if included {
+                    let mut task_clone = task.clone();
+                    task_clone.transitions = task
+                        .transitions
+                        .iter()
+                        .filter(|t| {
+                            if let Some(ref g) = t.include_if {
+                                evaluate_condition(g, engine.as_ref(), &eval_ctx).unwrap_or(true)
+                            } else {
+                                true
+                            }
+                        })
+                        .cloned()
+                        .collect();
+                    tasks_map.insert(task.id.clone(), task_clone);
+                }
+            }
+            schema::TaskOrMacro::Macro(invocation) => {
+                return Err(AppError::new(
                     ErrorCategory::ValidationError,
                     format!(
                         "unexpanded macro invocation '{}' reached executor",
                         invocation.macro_name
                     ),
                 )
-                .with_code("WFG-MACRO-002")),
-            })
-            .collect::<Result<HashMap<_, _>, _>>()?,
-    );
+                .with_code("WFG-MACRO-002"));
+            }
+        }
+    }
+    let tasks_by_id = Arc::new(tasks_map);
 
     let config = ExecutionConfig {
         parallel_limit: graph_settings.parallel_limit,
@@ -634,12 +690,7 @@ fn build_workflow_runtime(
         max_workflow_iterations: graph_settings.max_workflow_iterations,
     };
 
-    let engine = Arc::new(ExpressionEngine::default());
-    let context = resolve_initial_context(
-        &document.workflow.context,
-        engine.as_ref(),
-        &trigger_payload,
-    )?;
+    let context = eval_ctx.context.clone();
     let execution_uuid = Uuid::new_v4();
     let state = Arc::new(tokio::sync::RwLock::new(ExecutionState {
         context,
@@ -1051,27 +1102,57 @@ fn evaluate_transition(
     engine: &ExpressionEngine,
     snapshot: &StateView,
 ) -> Result<bool, AppError> {
+    let ctx = snapshot.evaluation_context();
+
+    // Check include_if (compile-time/init-time condition, but we evaluate here if not already filtered)
+    if let Some(ref guard) = transition.include_if {
+        if !evaluate_condition(guard, engine, &ctx)? {
+            return Ok(false);
+        }
+    }
+
     match &transition.when {
         None => Ok(true),
-        Some(Condition::Bool(flag)) => Ok(*flag),
-        Some(Condition::Expr { expr }) => {
-            let ctx = EvaluationContext::new(
-                snapshot.context.clone(),
-                snapshot.tasks.clone(),
-                snapshot.triggers.clone(),
-            );
-            let result = engine.evaluate(expr, &ctx)?;
+        Some(cond) => evaluate_condition(cond, engine, &ctx),
+    }
+}
+
+fn evaluate_condition(
+    condition: &crate::core::workflow_graph::schema::Condition,
+    engine: &ExpressionEngine,
+    ctx: &EvaluationContext,
+) -> Result<bool, AppError> {
+    match condition {
+        crate::core::workflow_graph::schema::Condition::Bool(flag) => Ok(*flag),
+        crate::core::workflow_graph::schema::Condition::Expr { expr } => {
+            let result = engine.evaluate(expr, ctx)?;
             if let Value::Bool(flag) = result {
                 Ok(flag)
             } else {
                 Err(AppError::new(
                     ErrorCategory::ValidationError,
-                    "expression in `when` evaluated to a non-boolean value at runtime".to_string(),
+                    format!(
+                        "expression in condition evaluated to a non-boolean value at runtime: {:?}",
+                        result
+                    ),
                 )
                 .with_code("WFG-EXPR-BOOL-001"))
             }
         }
     }
+}
+
+fn resolve_initial_evaluation_context(
+    context: &Value,
+    engine: &ExpressionEngine,
+    triggers: &Value,
+) -> Result<EvaluationContext, AppError> {
+    let resolved_context = resolve_initial_context(context, engine, triggers)?;
+    Ok(EvaluationContext::new(
+        resolved_context,
+        Value::Object(Map::new()),
+        triggers.clone(),
+    ))
 }
 
 fn apply_patch(target: &mut Value, patch: &Value) {

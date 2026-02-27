@@ -67,6 +67,7 @@ pub struct WorkflowDefinition {
 
 /// Execution settings for a workflow graph.
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct WorkflowSettings {
     pub entry_task: String,
     pub max_time_seconds: u64,
@@ -90,6 +91,27 @@ pub struct WorkflowSettings {
     pub webhook: WebhookSettings,
     #[serde(default)]
     pub completion: CompletionSettings,
+}
+
+impl Default for WorkflowSettings {
+    fn default() -> Self {
+        Self {
+            entry_task: "start".to_string(),
+            max_time_seconds: 3600,
+            parallel_limit: 1,
+            continue_on_error: false,
+            max_task_iterations: 100,
+            max_workflow_iterations: 1000,
+            artifact_storage: ArtifactStorageSettings::default(),
+            checkpoint: CheckpointSettings::default(),
+            redaction: RedactionSettings::default(),
+            command_operator: CommandOperatorSettings::default(),
+            required_triggers: Vec::new(),
+            human: HumanSettings::default(),
+            webhook: WebhookSettings::default(),
+            completion: CompletionSettings::default(),
+        }
+    }
 }
 
 /// Terminal task kind — determines how the workflow outcome is affected by a terminal task.

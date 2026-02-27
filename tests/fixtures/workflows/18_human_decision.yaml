@@ -1,0 +1,29 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Scenario 18: Human Decision"
+workflow:
+  settings:
+    entry_task: "ask_choice"
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 100
+  tasks:
+    - id: "ask_choice"
+      operator: "HumanDecisionOperator"
+      params:
+        prompt: "Release to production?"
+        choices: ["yes", "no"]
+      transitions:
+        - to: "deploy"
+          when: { $expr: 'tasks.ask_choice.output.choice == "yes"' }
+        - to: "abort"
+          when: { $expr: 'tasks.ask_choice.output.choice == "no"' }
+    - id: "deploy"
+      operator: "NoOpOperator"
+      terminal: success
+    - id: "abort"
+      operator: "NoOpOperator"
+      terminal: success

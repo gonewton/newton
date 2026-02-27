@@ -34,6 +34,9 @@ impl Default for ExpressionEngine {
         engine.set_max_operations(50_000);
         engine.set_max_call_levels(64);
         engine.set_max_expr_depths(64, 64);
+        engine.register_fn("contains", |s1: String, s2: String| -> bool {
+            s1.contains(&s2)
+        });
         engine.on_print(|_| {});
         engine.on_debug(|_, _, _| {});
         ExpressionEngine { engine }
