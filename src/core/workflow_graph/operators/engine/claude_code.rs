@@ -30,6 +30,7 @@ impl EngineDriver for ClaudeCodeDriver {
         })?;
 
         let mut cmd = vec!["claude".to_string()];
+        cmd.push("--dangerously-skip-permissions".to_string());
         cmd.push("--model".to_string());
         cmd.push(model.to_string());
         cmd.push("--output-format".to_string());
@@ -66,5 +67,67 @@ impl EngineDriver for ClaudeCodeDriver {
             ],
             output_format: OutputFormat::StreamJson,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_invocation_includes_skip_permissions_flag() {
+        let driver = ClaudeCodeDriver;
+        let prompt = PromptSource::Inline("Solve task".to_string());
+        let config = DriverConfig {
+            model: Some("claude-3-7-sonnet"),
+            prompt_source: Some(&prompt),
+            engine_command: None,
+        };
+
+        let invocation = driver
+            .build_invocation(&config, Path::new("/tmp/workspace"))
+            .unwrap();
+
+        assert_eq!(
+            invocation.command,
+            vec![
+                "claude".to_string(),
+                "--dangerously-skip-permissions".to_string(),
+                "--model".to_string(),
+                "claude-3-7-sonnet".to_string(),
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+                "--verbose".to_string(),
+                "-p".to_string(),
+                "Solve task".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_invocation_sets_expected_env() {
+        let driver = ClaudeCodeDriver;
+        let prompt = PromptSource::Inline("Ping".to_string());
+        let config = DriverConfig {
+            model: Some("claude-3-7-sonnet"),
+            prompt_source: Some(&prompt),
+            engine_command: None,
+        };
+
+        let invocation = driver
+            .build_invocation(&config, Path::new("/repo/project"))
+            .unwrap();
+
+        assert_eq!(
+            invocation.env,
+            vec![
+                (
+                    "ANTHROPIC_MODEL".to_string(),
+                    "claude-3-7-sonnet".to_string(),
+                ),
+                ("PROJECT_ROOT".to_string(), "/repo/project".to_string()),
+            ]
+        );
+        assert_eq!(invocation.output_format, OutputFormat::StreamJson);
     }
 }
