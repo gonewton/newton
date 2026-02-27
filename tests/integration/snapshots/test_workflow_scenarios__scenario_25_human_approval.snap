@@ -1,0 +1,24 @@
+---
+source: tests/integration/test_workflow_scenarios.rs
+assertion_line: 897
+expression: summary
+---
+execution_id: "[uuid]"
+total_iterations: 2
+completed_tasks:
+  approved_action:
+    status: success
+    output:
+      status: ok
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1
+  request_approval:
+    status: success
+    output:
+      approved: true
+      reason: approved by test
+      timestamp: "[timestamp]"
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1

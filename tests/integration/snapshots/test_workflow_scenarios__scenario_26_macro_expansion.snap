@@ -1,0 +1,36 @@
+---
+source: tests/integration/test_workflow_scenarios.rs
+assertion_line: 926
+expression: summary
+---
+execution_id: "[uuid]"
+total_iterations: 4
+completed_tasks:
+  done:
+    status: success
+    output:
+      status: ok
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1
+  start:
+    status: success
+    output:
+      status: ok
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1
+  step_one:
+    status: success
+    output:
+      status: ok
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1
+  step_two:
+    status: success
+    output:
+      status: ok
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1

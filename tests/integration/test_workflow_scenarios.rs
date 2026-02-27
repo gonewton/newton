@@ -872,3 +872,183 @@ async fn test_scenario_24_webhook() {
 
     assert!(summary.completed_tasks.contains_key("handle_webhook"));
 }
+
+// -----------------------------------------------------------------------------
+// Scenario 25: Human Approval Operator
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_25_human_approval() {
+    // FakeInterviewer defaults to approved: true
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let summary = harness
+        .run_fixture("25_human_approval.yaml", None)
+        .await
+        .expect("workflow must succeed");
+
+    assert!(
+        summary.completed_tasks.contains_key("approved_action"),
+        "Expected approved_action to be completed"
+    );
+    assert!(
+        !summary.completed_tasks.contains_key("denied_action"),
+        "denied_action should not have run"
+    );
+
+    assert_yaml_snapshot!(summary, {
+        ".execution_id" => "[uuid]",
+        ".completed_tasks.*.duration_ms" => "[duration]",
+        ".completed_tasks.request_approval.output.timestamp" => "[timestamp]",
+    });
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 26: Macro Expansion
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_26_macro_expansion() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let summary = harness
+        .run_fixture("26_macro_expansion.yaml", None)
+        .await
+        .expect("workflow must succeed after macro expansion");
+
+    // 4 tasks: start, step_one (macro), step_two (macro), done
+    assert_eq!(
+        summary.completed_tasks.len(),
+        4,
+        "Expected 4 completed tasks, got: {:?}",
+        summary.completed_tasks.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        summary.completed_tasks.contains_key("step_one"),
+        "step_one must exist after expansion"
+    );
+    assert!(
+        summary.completed_tasks.contains_key("step_two"),
+        "step_two must exist after expansion"
+    );
+    assert!(summary.completed_tasks.contains_key("done"));
+
+    assert_yaml_snapshot!(summary, {
+        ".execution_id" => "[uuid]",
+        ".completed_tasks.*.duration_ms" => "[duration]",
+    });
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 27: Goal Gates Failure (WFG-GATE-001)
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_27_goal_gates_fail() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let err = harness
+        .run_fixture("27_goal_gates_fail.yaml", None)
+        .await
+        .expect_err("workflow must fail because required goal gate was never reached");
+
+    assert_eq!(err.category, ErrorCategory::ValidationError);
+    assert_eq!(err.code, "WFG-GATE-001");
+    assert!(
+        err.message.contains("required_gate"),
+        "Error should name the failing gate: {}",
+        err.message
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 28: Artifact Persistence
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_28_artifact_persistence() {
+    // Return > 10 bytes so ArtifactStore routes it to disk (max_inline_bytes: 10 in fixture)
+    let large_stdout = r#"{"result":"this output is deliberately longer than ten bytes"}"#;
+    let mut plans = HashMap::new();
+    plans.insert(
+        "large_output".to_string(),
+        VecDeque::from(vec![MockCommandStep::Success {
+            stdout: large_stdout,
+            stderr: "",
+            exit_code: 0,
+        }]),
+    );
+
+    let harness = WorkflowTestHarness::new(plans, FakeInterviewer::new());
+    let summary = harness
+        .run_fixture("28_artifact_persistence.yaml", None)
+        .await
+        .expect("workflow must succeed; artifact should route to disk then materialize");
+
+    let record = summary
+        .completed_tasks
+        .get("gen_data")
+        .expect("gen_data must have run");
+    assert_eq!(
+        record.status,
+        newton::core::workflow_graph::executor::TaskStatus::Success
+    );
+
+    // Output must have been materialized back from the artifact file
+    let output = record
+        .output
+        .as_object()
+        .expect("output must be a JSON object");
+    assert!(
+        output.contains_key("stdout"),
+        "materialized output must contain stdout key, got: {:?}",
+        output.keys().collect::<Vec<_>>()
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 29: History Audit (5-task chain, all durations recorded)
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_29_history_audit() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let summary = harness
+        .run_fixture("29_history_audit.yaml", None)
+        .await
+        .expect("workflow must succeed");
+
+    assert_eq!(
+        summary.completed_tasks.len(),
+        5,
+        "All 5 tasks must have completed: {:?}",
+        summary.completed_tasks.keys().collect::<Vec<_>>()
+    );
+
+    for (task_id, record) in &summary.completed_tasks {
+        assert_eq!(
+            record.status,
+            newton::core::workflow_graph::executor::TaskStatus::Success,
+            "task {} must have succeeded",
+            task_id
+        );
+        // duration_ms is u64 — the field is always present (structural check)
+        let _ = record.duration_ms;
+    }
+
+    assert_yaml_snapshot!(summary, {
+        ".execution_id" => "[uuid]",
+        ".completed_tasks.*.duration_ms" => "[duration]",
+    });
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 30: Assert Completed (success path)
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_30_assert_completed_pass() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let summary = harness
+        .run_fixture("30_assert_completed_pass.yaml", None)
+        .await
+        .expect("workflow must succeed; step1 ran before checker");
+
+    assert!(summary.completed_tasks.contains_key("step1"));
+    assert!(summary.completed_tasks.contains_key("checker"));
+    assert_eq!(
+        summary.completed_tasks["checker"].status,
+        newton::core::workflow_graph::executor::TaskStatus::Success
+    );
+}
