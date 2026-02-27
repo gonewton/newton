@@ -169,6 +169,10 @@ pub struct WorkflowRunArgs {
     #[arg(long, value_name = "PATH")]
     pub trigger_json: Option<PathBuf>,
 
+    /// Trigger payload override in KEY=VALUE form (supports VALUE=@path)
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub arg: Vec<KeyValuePair>,
+
     #[arg(long, value_name = "KEY=VALUE")]
     pub set: Vec<KeyValuePair>,
 
@@ -205,6 +209,10 @@ pub struct WorkflowExplainArgs {
 
     #[arg(long, value_name = "KEY=VALUE")]
     pub set: Vec<KeyValuePair>,
+
+    /// Trigger payload override in KEY=VALUE form (supports VALUE=@path)
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub arg: Vec<KeyValuePair>,
 
     #[arg(long, value_enum, default_value = "text")]
     pub format: OutputFormat,
