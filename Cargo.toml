@@ -43,6 +43,8 @@ serde_yaml = "0.9"
 rhai = { version = "1.11", features = ["sync"] }
 petgraph = "0.7"
 async-trait = "0.1"
+regex = "1"
+indexmap = "2"
 sha2 = "0.10"
 hex = "0.4.3"
 humantime = "2.1"
@@ -163,6 +165,10 @@ path = "tests/workflow_graph/test_read_control_file_operator.rs"
 [[test]]
 name = "test_workflow_comprehensive_matrix"
 path = "tests/workflow_graph/test_workflow_comprehensive_matrix.rs"
+
+[[test]]
+name = "test_agent_operator"
+path = "tests/workflow_graph/test_agent_operator.rs"
 
 [[test]]
 name = "test_workflow_scenarios"

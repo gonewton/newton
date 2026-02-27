@@ -63,7 +63,7 @@ impl CommandRunner for MockCommandRunner {
             let mut guard = self.plans.lock().expect("lock command plans");
             guard
                 .get_mut(request.cmd.trim())
-                .and_then(|queue| queue.pop_front())
+                .and_then(VecDeque::pop_front)
                 .unwrap_or(MockCommandStep::Success {
                     stdout: "",
                     stderr: "",
@@ -232,43 +232,25 @@ async fn comprehensive_workflow_matrix_covers_builtin_operators_and_complexities
 
 async fn run_scenario(name: &str) -> Result<(), String> {
     match name {
-        "basic_single_noop_success" => {
-            let workspace = tempdir().map_err(|err| scenario_err(name, err.to_string()))?;
-            let summary = execute_yaml(
-                workspace.path(),
-                r#"
-version: "2.0"
-mode: workflow_graph
-workflow:
-  context: {}
-  settings:
-    entry_task: start
-    max_time_seconds: 30
-    parallel_limit: 1
-    continue_on_error: false
-    max_task_iterations: 5
-    max_workflow_iterations: 10
-  tasks:
-    - id: start
-      operator: NoOpOperator
-      terminal: success
-      params: {}
-"#,
-                BuiltinOperatorDeps::default(),
-                None,
-            )
-            .await
-            .map_err(|err| scenario_err(name, err.to_string()))?;
-            if !summary.completed_tasks.contains_key("start") {
-                return Err(scenario_err(name, "expected start task to complete"));
-            }
-            Ok(())
+        "basic_single_noop_success" => scenario_basic_single_noop_success().await,
+        "set_context_and_expression_branch" => scenario_set_context_and_expression_branch().await,
+        "command_success_path" => scenario_command_success_path().await,
+        "command_retry_after_timeout" => scenario_command_retry_after_timeout().await,
+        "read_control_from_trigger_path" => scenario_read_control_from_trigger_path().await,
+        "assert_completed_pass" => scenario_assert_completed_pass().await,
+        "assert_completed_missing_dependency_fails" => {
+            scenario_assert_completed_missing_dependency_fails().await
         }
-        "set_context_and_expression_branch" => {
-            let workspace = tempdir().map_err(|err| scenario_err(name, err.to_string()))?;
-            let summary = execute_yaml(
-                workspace.path(),
-                r#"
+        "human_approval_and_decision_path" => scenario_human_approval_and_decision_path().await,
+        "priority_branching" => scenario_priority_branching().await,
+        "command_execution_error_fails_workflow" => {
+            scenario_command_execution_error_fails_workflow().await
+        }
+        _ => Err(format!("unknown scenario {name}")),
+    }
+}
+
+const SCENARIO_SET_CONTEXT_AND_EXPRESSION_BRANCH_YAML: &str = r#"
 version: "2.0"
 mode: workflow_graph
 workflow:
@@ -304,38 +286,9 @@ workflow:
       operator: NoOpOperator
       terminal: failure
       params: {}
-"#,
-                BuiltinOperatorDeps::default(),
-                None,
-            )
-            .await
-            .map_err(|err| scenario_err(name, err.to_string()))?;
-            if !summary.completed_tasks.contains_key("success") {
-                return Err(scenario_err(name, "expected success branch to execute"));
-            }
-            if summary.completed_tasks.contains_key("failure") {
-                return Err(scenario_err(name, "failure branch should not execute"));
-            }
-            Ok(())
-        }
-        "command_success_path" => {
-            let workspace = tempdir().map_err(|err| scenario_err(name, err.to_string()))?;
-            let mut plans = HashMap::new();
-            plans.insert(
-                "ok_cmd".to_string(),
-                VecDeque::from([MockCommandStep::Success {
-                    stdout: "hello",
-                    stderr: "",
-                    exit_code: 0,
-                }]),
-            );
-            let deps = BuiltinOperatorDeps {
-                interviewer: None,
-                command_runner: Some(Arc::new(MockCommandRunner::new(plans))),
-            };
-            let summary = execute_yaml(
-                workspace.path(),
-                r#"
+"#;
+
+const SCENARIO_COMMAND_SUCCESS_PATH_YAML: &str = r#"
 version: "2.0"
 mode: workflow_graph
 workflow:
@@ -358,47 +311,9 @@ workflow:
       operator: NoOpOperator
       terminal: success
       params: {}
-"#,
-                deps,
-                None,
-            )
-            .await
-            .map_err(|err| scenario_err(name, err.to_string()))?;
-            let run = summary
-                .completed_tasks
-                .get("run")
-                .ok_or_else(|| scenario_err(name, "missing run task result"))?;
-            if run.output["stdout"] != "hello" {
-                return Err(scenario_err(name, "unexpected command stdout"));
-            }
-            Ok(())
-        }
-        "command_retry_after_timeout" => {
-            let workspace = tempdir().map_err(|err| scenario_err(name, err.to_string()))?;
-            let mut plans = HashMap::new();
-            plans.insert(
-                "flaky".to_string(),
-                VecDeque::from([
-                    MockCommandStep::DelaySuccess {
-                        delay_ms: 50,
-                        stdout: "late",
-                        stderr: "",
-                        exit_code: 0,
-                    },
-                    MockCommandStep::Success {
-                        stdout: "recovered",
-                        stderr: "",
-                        exit_code: 0,
-                    },
-                ]),
-            );
-            let deps = BuiltinOperatorDeps {
-                interviewer: None,
-                command_runner: Some(Arc::new(MockCommandRunner::new(plans))),
-            };
-            let summary = execute_yaml(
-                workspace.path(),
-                r#"
+"#;
+
+const SCENARIO_COMMAND_RETRY_AFTER_TIMEOUT_YAML: &str = r#"
 version: "2.0"
 mode: workflow_graph
 workflow:
@@ -425,164 +340,9 @@ workflow:
       operator: NoOpOperator
       terminal: success
       params: {}
-"#,
-                deps,
-                None,
-            )
-            .await
-            .map_err(|err| scenario_err(name, err.to_string()))?;
-            let run = summary
-                .completed_tasks
-                .get("run")
-                .ok_or_else(|| scenario_err(name, "missing run task result"))?;
-            if run.output["stdout"] != "recovered" {
-                return Err(scenario_err(
-                    name,
-                    "expected second retry attempt to produce recovered output",
-                ));
-            }
-            Ok(())
-        }
-        "read_control_from_trigger_path" => {
-            let workspace = tempdir().map_err(|err| scenario_err(name, err.to_string()))?;
-            let control_file = workspace.path().join("control.json");
-            fs::write(&control_file, r#"{"done": true, "message": "ok"}"#)
-                .map_err(|err| scenario_err(name, err.to_string()))?;
-            let summary = execute_yaml(
-                workspace.path(),
-                r#"
-version: "2.0"
-mode: workflow_graph
-workflow:
-  context: {}
-  settings:
-    entry_task: read
-    max_time_seconds: 30
-    parallel_limit: 1
-    continue_on_error: false
-    max_task_iterations: 5
-    max_workflow_iterations: 10
-  tasks:
-    - id: read
-      operator: ReadControlFileOperator
-      params:
-        path:
-          $expr: "triggers.control_file"
-      transitions:
-        - to: done
-          when:
-            $expr: "tasks.read.output.done == true"
-        - to: fail
-    - id: done
-      operator: NoOpOperator
-      terminal: success
-      params: {}
-    - id: fail
-      operator: NoOpOperator
-      terminal: failure
-      params: {}
-"#,
-                BuiltinOperatorDeps::default(),
-                Some(json!({ "control_file": control_file.display().to_string() })),
-            )
-            .await
-            .map_err(|err| scenario_err(name, err.to_string()))?;
-            let read = summary
-                .completed_tasks
-                .get("read")
-                .ok_or_else(|| scenario_err(name, "missing read task result"))?;
-            if read.output["done"] != true {
-                return Err(scenario_err(name, "expected control-file done=true"));
-            }
-            Ok(())
-        }
-        "assert_completed_pass" => {
-            let workspace = tempdir().map_err(|err| scenario_err(name, err.to_string()))?;
-            let summary = execute_yaml(
-                workspace.path(),
-                r#"
-version: "2.0"
-mode: workflow_graph
-workflow:
-  context: {}
-  settings:
-    entry_task: prep
-    max_time_seconds: 30
-    parallel_limit: 1
-    continue_on_error: false
-    max_task_iterations: 5
-    max_workflow_iterations: 10
-  tasks:
-    - id: prep
-      operator: NoOpOperator
-      params: {}
-      transitions:
-        - to: verify
-    - id: verify
-      operator: AssertCompletedOperator
-      params:
-        require: ["prep"]
-      transitions:
-        - to: done
-    - id: done
-      operator: NoOpOperator
-      terminal: success
-      params: {}
-"#,
-                BuiltinOperatorDeps::default(),
-                None,
-            )
-            .await
-            .map_err(|err| scenario_err(name, err.to_string()))?;
-            if !summary.completed_tasks.contains_key("verify") {
-                return Err(scenario_err(name, "assert-completed task did not run"));
-            }
-            Ok(())
-        }
-        "assert_completed_missing_dependency_fails" => {
-            let workspace = tempdir().map_err(|err| scenario_err(name, err.to_string()))?;
-            let err = execute_yaml(
-                workspace.path(),
-                r#"
-version: "2.0"
-mode: workflow_graph
-workflow:
-  context: {}
-  settings:
-    entry_task: verify
-    max_time_seconds: 30
-    parallel_limit: 1
-    continue_on_error: false
-    max_task_iterations: 5
-    max_workflow_iterations: 10
-  tasks:
-    - id: verify
-      operator: AssertCompletedOperator
-      params:
-        require: ["ghost"]
-"#,
-                BuiltinOperatorDeps::default(),
-                None,
-            )
-            .await
-            .expect_err("scenario should fail");
-            if err.code != "WFG-EXEC-001" {
-                return Err(scenario_err(
-                    name,
-                    format!("expected WFG-EXEC-001, got {}", err.code),
-                ));
-            }
-            Ok(())
-        }
-        "human_approval_and_decision_path" => {
-            let workspace = tempdir().map_err(|err| scenario_err(name, err.to_string()))?;
-            let deps = BuiltinOperatorDeps {
-                interviewer: Some(Arc::new(FakeInterviewer::approve_and_choose("ship"))),
-                command_runner: None,
-            };
-            let summary = execute_yaml(
-                workspace.path(),
-                r#"
+"#;
+
+const SCENARIO_HUMAN_APPROVAL_AND_DECISION_PATH_YAML: &str = r#"
 version: "2.0"
 mode: workflow_graph
 workflow:
@@ -622,55 +382,9 @@ workflow:
       operator: NoOpOperator
       terminal: failure
       params: {}
-"#,
-                deps,
-                None,
-            )
-            .await
-            .map_err(|err| scenario_err(name, err.to_string()))?;
+"#;
 
-            if !summary.completed_tasks.contains_key("done") {
-                return Err(scenario_err(name, "workflow did not reach done"));
-            }
-            let approval = summary
-                .completed_tasks
-                .get("approval")
-                .ok_or_else(|| scenario_err(name, "missing approval output"))?;
-            if approval.output["approved"] != true {
-                return Err(scenario_err(name, "approval output should be true"));
-            }
-            let decision = summary
-                .completed_tasks
-                .get("decision")
-                .ok_or_else(|| scenario_err(name, "missing decision output"))?;
-            if decision.output["choice"] != "ship" {
-                return Err(scenario_err(name, "decision output should be ship"));
-            }
-            let audit_path = workspace
-                .path()
-                .join(".newton")
-                .join("state")
-                .join("workflows")
-                .join(summary.execution_id.to_string())
-                .join("audit.jsonl");
-            let audit_contents = fs::read_to_string(&audit_path)
-                .map_err(|err| scenario_err(name, err.to_string()))?;
-            if audit_contents.lines().count() != 2 {
-                return Err(scenario_err(
-                    name,
-                    format!(
-                        "expected 2 audit entries, got {}",
-                        audit_contents.lines().count()
-                    ),
-                ));
-            }
-            Ok(())
-        }
-        "priority_branching" => {
-            let workspace = tempdir().map_err(|err| scenario_err(name, err.to_string()))?;
-            let summary = execute_yaml(
-                workspace.path(),
-                r#"
+const SCENARIO_PRIORITY_BRANCHING_YAML: &str = r#"
 version: "2.0"
 mode: workflow_graph
 workflow:
@@ -703,37 +417,391 @@ workflow:
       operator: NoOpOperator
       terminal: success
       params: {}
+"#;
+
+fn scenario_workspace(name: &str) -> Result<tempfile::TempDir, String> {
+    tempdir().map_err(|err| scenario_err(name, err.to_string()))
+}
+
+async fn run_yaml_scenario(
+    name: &str,
+    workspace: &tempfile::TempDir,
+    yaml: &str,
+    deps: BuiltinOperatorDeps,
+    trigger_payload: Option<Value>,
+) -> Result<ExecutionSummary, String> {
+    execute_yaml(workspace.path(), yaml, deps, trigger_payload)
+        .await
+        .map_err(|err| scenario_err(name, err.to_string()))
+}
+
+fn expect_task_present(summary: &ExecutionSummary, name: &str, task: &str) -> Result<(), String> {
+    if summary.completed_tasks.contains_key(task) {
+        return Ok(());
+    }
+    Err(scenario_err(
+        name,
+        format!("expected {task} task to complete"),
+    ))
+}
+
+fn expect_task_absent(summary: &ExecutionSummary, name: &str, task: &str) -> Result<(), String> {
+    if summary.completed_tasks.contains_key(task) {
+        return Err(scenario_err(
+            name,
+            format!("{task} task should not complete"),
+        ));
+    }
+    Ok(())
+}
+
+fn task_output<'a>(
+    summary: &'a ExecutionSummary,
+    name: &str,
+    task: &str,
+) -> Result<&'a Value, String> {
+    summary
+        .completed_tasks
+        .get(task)
+        .map(|result| &result.output)
+        .ok_or_else(|| scenario_err(name, format!("missing {task} task result")))
+}
+
+fn command_deps(plans: HashMap<String, VecDeque<MockCommandStep>>) -> BuiltinOperatorDeps {
+    BuiltinOperatorDeps {
+        interviewer: None,
+        command_runner: Some(Arc::new(MockCommandRunner::new(plans))),
+        engine_registry: None,
+    }
+}
+
+async fn scenario_basic_single_noop_success() -> Result<(), String> {
+    const NAME: &str = "basic_single_noop_success";
+    let workspace = tempdir().map_err(|err| scenario_err(NAME, err.to_string()))?;
+    let summary = execute_yaml(
+        workspace.path(),
+        r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: start
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      terminal: success
+      params: {}
 "#,
-                BuiltinOperatorDeps::default(),
-                None,
-            )
-            .await
-            .map_err(|err| scenario_err(name, err.to_string()))?;
-            if !summary.completed_tasks.contains_key("high") {
-                return Err(scenario_err(name, "expected high priority target to run"));
-            }
-            if summary.completed_tasks.contains_key("low") {
-                return Err(scenario_err(name, "low priority target should not run"));
-            }
-            Ok(())
-        }
-        "command_execution_error_fails_workflow" => {
-            let workspace = tempdir().map_err(|err| scenario_err(name, err.to_string()))?;
-            let mut plans = HashMap::new();
-            plans.insert(
-                "fail_cmd".to_string(),
-                VecDeque::from([MockCommandStep::Error {
-                    code: "WFG-CMD-MOCK",
-                    message: "mock failure",
-                }]),
-            );
-            let deps = BuiltinOperatorDeps {
-                interviewer: None,
-                command_runner: Some(Arc::new(MockCommandRunner::new(plans))),
-            };
-            let err = execute_yaml(
-                workspace.path(),
-                r#"
+        BuiltinOperatorDeps::default(),
+        None,
+    )
+    .await
+    .map_err(|err| scenario_err(NAME, err.to_string()))?;
+    if !summary.completed_tasks.contains_key("start") {
+        return Err(scenario_err(NAME, "expected start task to complete"));
+    }
+    Ok(())
+}
+
+async fn scenario_set_context_and_expression_branch() -> Result<(), String> {
+    const NAME: &str = "set_context_and_expression_branch";
+    let workspace = scenario_workspace(NAME)?;
+    let summary = run_yaml_scenario(
+        NAME,
+        &workspace,
+        SCENARIO_SET_CONTEXT_AND_EXPRESSION_BRANCH_YAML,
+        BuiltinOperatorDeps::default(),
+        None,
+    )
+    .await?;
+    expect_task_present(&summary, NAME, "success")?;
+    expect_task_absent(&summary, NAME, "failure")
+}
+
+async fn scenario_command_success_path() -> Result<(), String> {
+    const NAME: &str = "command_success_path";
+    let workspace = scenario_workspace(NAME)?;
+    let mut plans = HashMap::new();
+    plans.insert(
+        "ok_cmd".to_string(),
+        VecDeque::from([MockCommandStep::Success {
+            stdout: "hello",
+            stderr: "",
+            exit_code: 0,
+        }]),
+    );
+    let summary = run_yaml_scenario(
+        NAME,
+        &workspace,
+        SCENARIO_COMMAND_SUCCESS_PATH_YAML,
+        command_deps(plans),
+        None,
+    )
+    .await?;
+    if task_output(&summary, NAME, "run")?["stdout"] != "hello" {
+        return Err(scenario_err(NAME, "unexpected command stdout"));
+    }
+    Ok(())
+}
+
+async fn scenario_command_retry_after_timeout() -> Result<(), String> {
+    const NAME: &str = "command_retry_after_timeout";
+    let workspace = scenario_workspace(NAME)?;
+    let mut plans = HashMap::new();
+    plans.insert(
+        "flaky".to_string(),
+        VecDeque::from([
+            MockCommandStep::DelaySuccess {
+                delay_ms: 50,
+                stdout: "late",
+                stderr: "",
+                exit_code: 0,
+            },
+            MockCommandStep::Success {
+                stdout: "recovered",
+                stderr: "",
+                exit_code: 0,
+            },
+        ]),
+    );
+    let summary = run_yaml_scenario(
+        NAME,
+        &workspace,
+        SCENARIO_COMMAND_RETRY_AFTER_TIMEOUT_YAML,
+        command_deps(plans),
+        None,
+    )
+    .await?;
+    if task_output(&summary, NAME, "run")?["stdout"] != "recovered" {
+        return Err(scenario_err(
+            NAME,
+            "expected second retry attempt to produce recovered output",
+        ));
+    }
+    Ok(())
+}
+
+async fn scenario_read_control_from_trigger_path() -> Result<(), String> {
+    const NAME: &str = "read_control_from_trigger_path";
+    let workspace = tempdir().map_err(|err| scenario_err(NAME, err.to_string()))?;
+    let control_file = workspace.path().join("control.json");
+    fs::write(&control_file, r#"{"done": true, "message": "ok"}"#)
+        .map_err(|err| scenario_err(NAME, err.to_string()))?;
+    let summary = execute_yaml(
+        workspace.path(),
+        r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: read
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+  tasks:
+    - id: read
+      operator: ReadControlFileOperator
+      params:
+        path:
+          $expr: "triggers.control_file"
+      transitions:
+        - to: done
+          when:
+            $expr: "tasks.read.output.done == true"
+        - to: fail
+    - id: done
+      operator: NoOpOperator
+      terminal: success
+      params: {}
+    - id: fail
+      operator: NoOpOperator
+      terminal: failure
+      params: {}
+"#,
+        BuiltinOperatorDeps::default(),
+        Some(json!({ "control_file": control_file.display().to_string() })),
+    )
+    .await
+    .map_err(|err| scenario_err(NAME, err.to_string()))?;
+    let read = summary
+        .completed_tasks
+        .get("read")
+        .ok_or_else(|| scenario_err(NAME, "missing read task result"))?;
+    if read.output["done"] != true {
+        return Err(scenario_err(NAME, "expected control-file done=true"));
+    }
+    Ok(())
+}
+
+async fn scenario_assert_completed_pass() -> Result<(), String> {
+    const NAME: &str = "assert_completed_pass";
+    let workspace = tempdir().map_err(|err| scenario_err(NAME, err.to_string()))?;
+    let summary = execute_yaml(
+        workspace.path(),
+        r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: prep
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+  tasks:
+    - id: prep
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: verify
+    - id: verify
+      operator: AssertCompletedOperator
+      params:
+        require: ["prep"]
+      transitions:
+        - to: done
+    - id: done
+      operator: NoOpOperator
+      terminal: success
+      params: {}
+"#,
+        BuiltinOperatorDeps::default(),
+        None,
+    )
+    .await
+    .map_err(|err| scenario_err(NAME, err.to_string()))?;
+    if !summary.completed_tasks.contains_key("verify") {
+        return Err(scenario_err(NAME, "assert-completed task did not run"));
+    }
+    Ok(())
+}
+
+async fn scenario_assert_completed_missing_dependency_fails() -> Result<(), String> {
+    const NAME: &str = "assert_completed_missing_dependency_fails";
+    let workspace = tempdir().map_err(|err| scenario_err(NAME, err.to_string()))?;
+    let err = execute_yaml(
+        workspace.path(),
+        r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: verify
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+  tasks:
+    - id: verify
+      operator: AssertCompletedOperator
+      params:
+        require: ["ghost"]
+"#,
+        BuiltinOperatorDeps::default(),
+        None,
+    )
+    .await
+    .expect_err("scenario should fail");
+    if err.code != "WFG-EXEC-001" {
+        return Err(scenario_err(
+            NAME,
+            format!("expected WFG-EXEC-001, got {}", err.code),
+        ));
+    }
+    Ok(())
+}
+
+async fn scenario_human_approval_and_decision_path() -> Result<(), String> {
+    const NAME: &str = "human_approval_and_decision_path";
+    let workspace = scenario_workspace(NAME)?;
+    let deps = BuiltinOperatorDeps {
+        interviewer: Some(Arc::new(FakeInterviewer::approve_and_choose("ship"))),
+        command_runner: None,
+        engine_registry: None,
+    };
+    let summary = run_yaml_scenario(
+        NAME,
+        &workspace,
+        SCENARIO_HUMAN_APPROVAL_AND_DECISION_PATH_YAML,
+        deps,
+        None,
+    )
+    .await?;
+    expect_task_present(&summary, NAME, "done")?;
+    if task_output(&summary, NAME, "approval")?["approved"] != true {
+        return Err(scenario_err(NAME, "approval output should be true"));
+    }
+    if task_output(&summary, NAME, "decision")?["choice"] != "ship" {
+        return Err(scenario_err(NAME, "decision output should be ship"));
+    }
+    let audit_path = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(summary.execution_id.to_string())
+        .join("audit.jsonl");
+    let audit_contents =
+        fs::read_to_string(&audit_path).map_err(|err| scenario_err(NAME, err.to_string()))?;
+    if audit_contents.lines().count() != 2 {
+        return Err(scenario_err(
+            NAME,
+            format!(
+                "expected 2 audit entries, got {}",
+                audit_contents.lines().count()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+async fn scenario_priority_branching() -> Result<(), String> {
+    const NAME: &str = "priority_branching";
+    let workspace = scenario_workspace(NAME)?;
+    let summary = run_yaml_scenario(
+        NAME,
+        &workspace,
+        SCENARIO_PRIORITY_BRANCHING_YAML,
+        BuiltinOperatorDeps::default(),
+        None,
+    )
+    .await?;
+    expect_task_present(&summary, NAME, "high")?;
+    expect_task_absent(&summary, NAME, "low")
+}
+
+async fn scenario_command_execution_error_fails_workflow() -> Result<(), String> {
+    const NAME: &str = "command_execution_error_fails_workflow";
+    let workspace = tempdir().map_err(|err| scenario_err(NAME, err.to_string()))?;
+    let mut plans = HashMap::new();
+    plans.insert(
+        "fail_cmd".to_string(),
+        VecDeque::from([MockCommandStep::Error {
+            code: "WFG-CMD-MOCK",
+            message: "mock failure",
+        }]),
+    );
+    let deps = BuiltinOperatorDeps {
+        interviewer: None,
+        command_runner: Some(Arc::new(MockCommandRunner::new(plans))),
+        engine_registry: None,
+    };
+    let err = execute_yaml(
+        workspace.path(),
+        r#"
 version: "2.0"
 mode: workflow_graph
 workflow:
@@ -751,19 +819,16 @@ workflow:
       params:
         cmd: "fail_cmd"
 "#,
-                deps,
-                None,
-            )
-            .await
-            .expect_err("scenario should fail");
-            if err.code != "WFG-EXEC-001" {
-                return Err(scenario_err(
-                    name,
-                    format!("expected WFG-EXEC-001, got {}", err.code),
-                ));
-            }
-            Ok(())
-        }
-        _ => Err(format!("unknown scenario {name}")),
+        deps,
+        None,
+    )
+    .await
+    .expect_err("scenario should fail");
+    if err.code != "WFG-EXEC-001" {
+        return Err(scenario_err(
+            NAME,
+            format!("expected WFG-EXEC-001, got {}", err.code),
+        ));
     }
+    Ok(())
 }
