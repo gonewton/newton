@@ -248,7 +248,23 @@ pub fn redact_value(value: &mut Value, redact_keys: &[String]) {
 fn should_redact(key: &str, redact_keys: &[String]) -> bool {
     let key_lower = key.to_lowercase();
     for pattern in redact_keys {
-        if key_lower.contains(&pattern.to_lowercase()) {
+        let pattern_lower = pattern.to_lowercase();
+        if pattern_lower.contains('*') {
+            let parts: Vec<&str> = pattern_lower.split('*').collect();
+            if parts.len() == 2 {
+                if pattern_lower.starts_with('*') {
+                    if key_lower.ends_with(parts[1]) {
+                        return true;
+                    }
+                } else if pattern_lower.ends_with('*') {
+                    if key_lower.starts_with(parts[0]) {
+                        return true;
+                    }
+                } else if key_lower.starts_with(parts[0]) && key_lower.ends_with(parts[1]) {
+                    return true;
+                }
+            }
+        } else if key_lower == pattern_lower {
             return true;
         }
     }

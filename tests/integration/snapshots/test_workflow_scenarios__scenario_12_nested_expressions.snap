@@ -1,0 +1,30 @@
+---
+source: tests/integration/test_workflow_scenarios.rs
+expression: summary
+---
+execution_id: "[uuid]"
+total_iterations: 3
+completed_tasks:
+  calculate:
+    status: success
+    output:
+      applied: true
+      patch:
+        result: 52
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1
+  check_result:
+    status: success
+    output:
+      status: ok
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1
+  success:
+    status: success
+    output:
+      status: ok
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1

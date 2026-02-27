@@ -1,0 +1,37 @@
+---
+source: tests/integration/test_workflow_scenarios.rs
+expression: summary
+---
+execution_id: "[uuid]"
+total_iterations: 3
+completed_tasks:
+  t1:
+    status: success
+    output:
+      duration_ms: "[duration]"
+      exit_code: 0
+      stderr: ""
+      stdout: ""
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1
+  t2:
+    status: success
+    output:
+      duration_ms: "[duration]"
+      exit_code: 0
+      stderr: ""
+      stdout: ""
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1
+  t3:
+    status: success
+    output:
+      duration_ms: "[duration]"
+      exit_code: 0
+      stderr: ""
+      stdout: ""
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1

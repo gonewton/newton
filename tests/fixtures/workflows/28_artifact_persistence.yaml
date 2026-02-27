@@ -1,0 +1,20 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Scenario 28: Artifact Persistence"
+workflow:
+  settings:
+    entry_task: "gen_data"
+    artifact_storage:
+      base_path: ".newton/artifacts"
+      max_inline_bytes: 10
+      max_artifact_bytes: 104857600
+      max_total_bytes: 1073741824
+      retention_hours: 168
+      cleanup_policy: lru
+  tasks:
+    - id: "gen_data"
+      operator: "CommandOperator"
+      params:
+        cmd: "large_output"
+      terminal: success

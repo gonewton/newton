@@ -1,0 +1,17 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Scenario 06: Task Iteration Cap"
+workflow:
+  settings:
+    entry_task: "loop_task"
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 100
+  tasks:
+    - id: "loop_task"
+      operator: "NoOpOperator"
+      transitions:
+        - to: "loop_task"

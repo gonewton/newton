@@ -1,0 +1,30 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Scenario 13: Parallel Execution Limits"
+workflow:
+  settings:
+    entry_task: "t1"
+    max_time_seconds: 60
+    parallel_limit: 2
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 100
+  tasks:
+    - id: "t1"
+      operator: "CommandOperator"
+      params:
+        cmd: "sleep 0.1"
+      transitions:
+        - to: "t2"
+        - to: "t3"
+    - id: "t2"
+      operator: "CommandOperator"
+      params:
+        cmd: "sleep 0.1"
+      terminal: success
+    - id: "t3"
+      operator: "CommandOperator"
+      params:
+        cmd: "sleep 0.1"
+      terminal: success

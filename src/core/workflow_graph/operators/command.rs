@@ -140,7 +140,7 @@ impl Operator for CommandOperator {
             })?;
         }
 
-        Ok(Value::Object(Map::from_iter([
+        let value = Value::Object(Map::from_iter([
             (
                 "exit_code".to_string(),
                 Value::Number(Number::from(output.exit_code)),
@@ -151,7 +151,19 @@ impl Operator for CommandOperator {
                 "duration_ms".to_string(),
                 Value::Number(Number::from(duration_ms)),
             ),
-        ])))
+        ]));
+
+        if output.exit_code != 0 {
+            let mut err = AppError::new(
+                ErrorCategory::ToolExecutionError,
+                format!("command failed with exit code {}", output.exit_code),
+            )
+            .with_code("WFG-CMD-001");
+            err.add_context("output", &serde_json::to_string(&value).unwrap_or_default());
+            return Err(err);
+        }
+
+        Ok(value)
     }
 }
 
@@ -207,12 +219,12 @@ impl CommandRunner for TokioCommandRunner {
         if request.capture_stdout {
             command.stdout(Stdio::piped());
         } else {
-            command.stdout(Stdio::null());
+            command.stdout(Stdio::inherit());
         }
         if request.capture_stderr {
             command.stderr(Stdio::piped());
         } else {
-            command.stderr(Stdio::null());
+            command.stderr(Stdio::inherit());
         }
 
         command.current_dir(request.cwd.clone());

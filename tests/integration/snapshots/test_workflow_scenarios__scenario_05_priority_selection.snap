@@ -1,0 +1,21 @@
+---
+source: tests/integration/test_workflow_scenarios.rs
+expression: summary
+---
+execution_id: "[uuid]"
+total_iterations: 2
+completed_tasks:
+  high_priority:
+    status: success
+    output:
+      status: ok
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1
+  start:
+    status: success
+    output:
+      status: ok
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1

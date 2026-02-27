@@ -1,0 +1,17 @@
+---
+source: tests/integration/test_workflow_scenarios.rs
+expression: summary
+---
+execution_id: "[uuid]"
+total_iterations: 1
+completed_tasks:
+  run_echo:
+    status: success
+    output:
+      duration_ms: 0
+      exit_code: 0
+      stderr: ""
+      stdout: "{\"cpu\": 45}"
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1
