@@ -98,6 +98,10 @@ pub struct WorkflowSettings {
     /// Allowed and silently ignored when the workflow has no AgentOperator tasks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_stylesheet: Option<ModelStylesheet>,
+    /// Whether to stream agent engine stdout to the terminal by default.
+    /// Individual agent tasks can override this setting.
+    #[serde(default)]
+    pub stream_agent_stdout: bool,
 }
 
 impl Default for WorkflowSettings {
@@ -119,6 +123,7 @@ impl Default for WorkflowSettings {
             completion: CompletionSettings::default(),
             default_engine: None,
             model_stylesheet: None,
+            stream_agent_stdout: false,
         }
     }
 }

@@ -251,6 +251,50 @@ impl WorkflowTestHarness {
     }
 }
 
+/// Result of executing a workflow via CLI command
+pub struct WorkflowCliResult {
+    pub output: std::process::Output,
+    pub stdout_text: String,
+    pub stderr_text: String,
+    pub temp_dir: tempfile::TempDir,
+}
+
+/// Helper function to execute a workflow via CLI and return parsed output
+fn execute_workflow_cli(workflow_filename: &str) -> WorkflowCliResult {
+    use std::process::{Command, Stdio};
+
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_newton"))
+        .arg("workflow")
+        .arg("run")
+        .arg("--workflow")
+        .arg(format!("tests/fixtures/workflows/{}", workflow_filename))
+        .arg("--workspace")
+        .arg(temp_dir.path())
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("Failed to execute newton command");
+
+    let stdout_text = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr_text = String::from_utf8_lossy(&output.stderr).to_string();
+
+    // Debug output for troubleshooting
+    println!("=== STDOUT ===");
+    println!("{}", stdout_text);
+    println!("=== STDERR ===");
+    println!("{}", stderr_text);
+
+    WorkflowCliResult {
+        output,
+        stdout_text,
+        stderr_text,
+        temp_dir,
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Scenario 01: Minimal Success
 // -----------------------------------------------------------------------------
@@ -1055,5 +1099,130 @@ async fn test_scenario_30_assert_completed_pass() {
     assert_eq!(
         summary.completed_tasks["checker"].status,
         newton::core::workflow_graph::executor::TaskStatus::Success
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 31: Agent Streaming On
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_31_agent_streaming_on() {
+    // For agent streaming tests, we need to actually run the process and capture stdout
+    // since AgentOperator uses real process execution (not mocked)
+    let result = execute_workflow_cli("31_agent_streaming_on.yaml");
+
+    // The agent engine output should be streamed to process stdout
+    assert!(
+        result.stdout_text.contains("STREAMED_LINE_1"),
+        "Expected 'STREAMED_LINE_1' in stdout, got: {}",
+        result.stdout_text
+    );
+    assert!(
+        result.stdout_text.contains("STREAMED_LINE_2"),
+        "Expected 'STREAMED_LINE_2' in stdout, got: {}",
+        result.stdout_text
+    );
+
+    // Workflow should complete successfully
+    assert!(result.output.status.success(), "Workflow should succeed");
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 32: Agent Streaming Off
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_32_agent_streaming_off() {
+    let result = execute_workflow_cli("32_agent_streaming_off.yaml");
+
+    // The agent engine output should NOT appear on process stdout
+    assert!(
+        !result.stdout_text.contains("SHOULD_NOT_APPEAR_ON_STDOUT"),
+        "Agent output should not appear on process stdout when streaming is disabled, got: {}",
+        result.stdout_text
+    );
+
+    // Workflow should complete successfully
+    assert!(result.output.status.success(), "Workflow should succeed");
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 33: Agent Task Override
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_33_agent_task_override() {
+    let result = execute_workflow_cli("33_agent_task_override.yaml");
+
+    // Task override should enable streaming even when workflow default is off
+    assert!(
+        result.stdout_text.contains("TASK_OVERRIDE_STREAMED"),
+        "Expected task override to enable streaming, got: {}",
+        result.stdout_text
+    );
+
+    // Workflow should complete successfully
+    assert!(result.output.status.success(), "Workflow should succeed");
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 34: Agent Streaming Artifact Unchanged
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_34_agent_streaming_artifact_unchanged() {
+    use std::fs;
+
+    let result = execute_workflow_cli("31_agent_streaming_on.yaml");
+
+    // Workflow should complete successfully
+    assert!(result.output.status.success(), "Workflow should succeed");
+
+    // Find the artifact file
+    let artifacts_dir = result.temp_dir.path().join(".newton/artifacts/workflows");
+
+    // Find execution directory (should be only one)
+    let mut execution_dirs = fs::read_dir(&artifacts_dir)
+        .expect("Failed to read artifacts dir")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_type()
+                .ok()
+                .map(|ft| ft.is_dir())
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        execution_dirs.len(),
+        1,
+        "Expected exactly one execution directory"
+    );
+    let execution_dir = execution_dirs.pop().unwrap().path();
+
+    // Find task artifact directory
+    let task_dir = execution_dir.join("task/agent_task/1");
+    let stdout_artifact = task_dir.join("stdout.txt");
+
+    assert!(
+        stdout_artifact.exists(),
+        "stdout artifact file should exist"
+    );
+
+    // Read the artifact file content
+    let artifact_content =
+        fs::read_to_string(&stdout_artifact).expect("Failed to read stdout artifact");
+
+    println!("=== ARTIFACT CONTENT ===");
+    println!("{}", artifact_content);
+
+    // The artifact file should contain the same output even with streaming enabled
+    assert!(
+        artifact_content.contains("STREAMED_LINE_1"),
+        "Artifact should contain 'STREAMED_LINE_1', got: {}",
+        artifact_content
+    );
+    assert!(
+        artifact_content.contains("STREAMED_LINE_2"),
+        "Artifact should contain 'STREAMED_LINE_2', got: {}",
+        artifact_content
     );
 }

@@ -14,11 +14,10 @@ use indexmap::IndexMap;
 use regex::Regex;
 use serde_json::{Map, Number, Value};
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::AsyncBufReadExt;
 use tokio::process::Command;
 
 const OUTPUT_CAPTURE_LIMIT_BYTES: usize = 1_048_576;
@@ -63,6 +62,8 @@ struct AgentOperatorConfig {
     max_iterations: Option<u32>,
     /// Required when engine = "command".
     engine_command: Option<Vec<String>>,
+    /// Whether to stream stdout to the terminal. If None, uses workflow setting.
+    stream_stdout: Option<bool>,
 }
 
 impl AgentOperatorConfig {
@@ -78,64 +79,22 @@ impl AgentOperatorConfig {
             .get("engine")
             .and_then(Value::as_str)
             .map(str::to_string);
-
         let model = map.get("model").and_then(Value::as_str).map(str::to_string);
-
-        // Prompt source: prompt_file takes priority over prompt
-        let prompt_source = if let Some(pf) = map.get("prompt_file").and_then(Value::as_str) {
-            Some(PromptSource::File(pf.to_string()))
-        } else {
-            map.get("prompt")
-                .and_then(Value::as_str)
-                .map(|p| PromptSource::Inline(p.to_string()))
-        };
-
+        let prompt_source = Self::parse_prompt_source(map);
         let working_dir = map
             .get("working_dir")
             .and_then(Value::as_str)
             .map(str::to_string);
-
-        let env = map
-            .get("env")
-            .and_then(Value::as_object)
-            .map(|env_map| {
-                env_map
-                    .iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                    .collect::<HashMap<_, _>>()
-            })
-            .unwrap_or_default();
-
+        let env = Self::parse_env_variables(map);
         let timeout_seconds = map.get("timeout_seconds").and_then(Value::as_u64);
-
-        // Parse signals: ordered map
-        let mut signals = IndexMap::new();
-        if let Some(signals_obj) = map.get("signals").and_then(Value::as_object) {
-            for (k, v) in signals_obj {
-                if let Some(pattern) = v.as_str() {
-                    signals.insert(k.clone(), pattern.to_string());
-                }
-            }
-        }
-
-        // `loop` is a Rust keyword, parse it directly from the map
+        let signals = Self::parse_signals(map);
         let loop_mode = map.get("loop").and_then(Value::as_bool).unwrap_or(false);
-
         let max_iterations = map
             .get("max_iterations")
             .and_then(Value::as_u64)
             .map(|v| v as u32);
-
-        // engine_command: array of strings
-        let engine_command = map
-            .get("engine_command")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect::<Vec<_>>()
-            });
+        let engine_command = Self::parse_engine_command(map);
+        let stream_stdout = map.get("stream_stdout").and_then(Value::as_bool);
 
         Ok(AgentOperatorConfig {
             engine,
@@ -148,7 +107,57 @@ impl AgentOperatorConfig {
             loop_mode,
             max_iterations,
             engine_command,
+            stream_stdout,
         })
+    }
+
+    /// Parse prompt source: prompt_file takes priority over prompt
+    fn parse_prompt_source(map: &serde_json::Map<String, Value>) -> Option<PromptSource> {
+        if let Some(pf) = map.get("prompt_file").and_then(Value::as_str) {
+            Some(PromptSource::File(pf.to_string()))
+        } else {
+            map.get("prompt")
+                .and_then(Value::as_str)
+                .map(|p| PromptSource::Inline(p.to_string()))
+        }
+    }
+
+    /// Parse environment variables from the params map
+    fn parse_env_variables(map: &serde_json::Map<String, Value>) -> HashMap<String, String> {
+        map.get("env")
+            .and_then(Value::as_object)
+            .map(|env_map| {
+                env_map
+                    .iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Parse signals into an ordered map
+    fn parse_signals(map: &serde_json::Map<String, Value>) -> IndexMap<String, String> {
+        let mut signals = IndexMap::new();
+        if let Some(signals_obj) = map.get("signals").and_then(Value::as_object) {
+            for (k, v) in signals_obj {
+                if let Some(pattern) = v.as_str() {
+                    signals.insert(k.clone(), pattern.to_string());
+                }
+            }
+        }
+        signals
+    }
+
+    /// Parse engine_command: array of strings
+    fn parse_engine_command(map: &serde_json::Map<String, Value>) -> Option<Vec<String>> {
+        map.get("engine_command")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
     }
 }
 
@@ -212,6 +221,17 @@ struct ExecPaths<'a> {
     working_dir: &'a Path,
     stdout_path: &'a Path,
     stderr_path: &'a Path,
+}
+
+/// Execution parameters for agent operations.
+struct ExecParams<'a> {
+    invocation: &'a EngineInvocation,
+    compiled_signals: &'a IndexMap<String, Regex>,
+    paths: &'a ExecPaths<'a>,
+    extra_env: &'a HashMap<String, String>,
+    timeout: Duration,
+    start: Instant,
+    stream_to_terminal: bool,
 }
 
 #[async_trait]
@@ -400,6 +420,11 @@ impl Operator for AgentOperator {
             .map(|d| self.workspace_root.join(d))
             .unwrap_or_else(|| self.workspace_root.clone());
 
+        // Resolve effective streaming setting
+        let stream_to_terminal = config
+            .stream_stdout
+            .unwrap_or(self.settings.stream_agent_stdout);
+
         let exec_paths = ExecPaths {
             working_dir: &working_dir,
             stdout_path: &stdout_abs_path,
@@ -408,27 +433,20 @@ impl Operator for AgentOperator {
 
         // Execute
         let start = Instant::now();
+        let exec_params = ExecParams {
+            invocation: &invocation,
+            compiled_signals: &compiled_signals,
+            paths: &exec_paths,
+            extra_env: &interpolated_env,
+            timeout: timeout_duration,
+            start,
+            stream_to_terminal,
+        };
+
         let (signal, signal_data, exit_code, final_iteration) = if config.loop_mode {
-            execute_loop(
-                &invocation,
-                &compiled_signals,
-                &config,
-                &exec_paths,
-                &interpolated_env,
-                timeout_duration,
-                start,
-            )
-            .await?
+            execute_loop(&config, &exec_params).await?
         } else {
-            let result = execute_single(
-                &invocation,
-                &compiled_signals,
-                &exec_paths,
-                &interpolated_env,
-                timeout_duration,
-                start,
-            )
-            .await?;
+            let result = execute_single(&exec_params).await?;
             (result.signal, result.signal_data, result.exit_code, 1u32)
         };
 
@@ -501,24 +519,36 @@ fn interpolate_env(
     Ok(result)
 }
 
-/// Execute a single engine invocation and stream output.
-async fn execute_single(
-    invocation: &EngineInvocation,
-    compiled_signals: &IndexMap<String, Regex>,
-    paths: &ExecPaths<'_>,
-    extra_env: &HashMap<String, String>,
-    timeout: Duration,
-    start: Instant,
-) -> Result<SingleExecResult, AppError> {
-    if start.elapsed() >= timeout {
+/// Check if timeout has been exceeded before starting execution.
+fn check_timeout_before_execution(params: &ExecParams<'_>) -> Result<(), AppError> {
+    if params.start.elapsed() >= params.timeout {
         return Err(AppError::new(
             ErrorCategory::TimeoutError,
             "agent operator timeout exceeded before execution",
         )
         .with_code("WFG-AGENT-005"));
     }
+    Ok(())
+}
 
-    let mut cmd_builder = build_command(invocation, paths.working_dir, extra_env)?;
+/// Spawn the engine process and set up stderr capture.
+async fn spawn_engine_process(
+    params: &ExecParams<'_>,
+) -> Result<
+    (
+        tokio::process::Child,
+        tokio::process::ChildStdout,
+        tokio::task::JoinHandle<()>,
+    ),
+    AppError,
+> {
+    use tokio::io::{AsyncReadExt, BufReader};
+
+    let mut cmd_builder = build_command(
+        params.invocation,
+        params.paths.working_dir,
+        params.extra_env,
+    )?;
 
     let mut child = cmd_builder.spawn().map_err(|err| {
         AppError::new(
@@ -532,7 +562,7 @@ async fn execute_single(
     let stderr = child.stderr.take().expect("stderr must be piped");
 
     // Spawn stderr capture task
-    let stderr_path_owned = paths.stderr_path.to_owned();
+    let stderr_path_owned = params.paths.stderr_path.to_owned();
     let stderr_task = tokio::spawn(async move {
         let mut reader = BufReader::new(stderr);
         let mut buf = Vec::new();
@@ -543,27 +573,48 @@ async fn execute_single(
         }
     });
 
-    // Open stdout artifact file
-    let mut stdout_file = std::fs::OpenOptions::new()
+    Ok((child, stdout, stderr_task))
+}
+
+/// Open the stdout artifact file for writing.
+fn open_stdout_artifact_file(stdout_path: &std::path::Path) -> Result<std::fs::File, AppError> {
+    std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(paths.stdout_path)
+        .open(stdout_path)
         .map_err(|err| {
             AppError::new(
                 ErrorCategory::IoError,
                 format!("failed to open stdout artifact: {}", err),
             )
-        })?;
+        })
+}
+
+/// Result of streaming stdout from the engine process.
+struct StreamingResult {
+    signal: Option<String>,
+    signal_data: HashMap<String, String>,
+}
+
+/// Stream and process stdout from the engine process.
+async fn stream_and_process_output(
+    stdout: tokio::process::ChildStdout,
+    stdout_file: &mut std::fs::File,
+    child: &mut tokio::process::Child,
+    params: &ExecParams<'_>,
+) -> Result<StreamingResult, AppError> {
+    use std::io::Write;
+    use tokio::io::{AsyncWriteExt, BufReader};
 
     let mut stdout_bytes_written: usize = 0;
     let mut signal: Option<String> = None;
     let mut signal_data: HashMap<String, String> = HashMap::new();
-    let output_format = invocation.output_format.clone();
+    let output_format = params.invocation.output_format.clone();
 
     let mut lines = BufReader::new(stdout).lines();
 
     // Stream stdout with timeout
-    let remaining = timeout.saturating_sub(start.elapsed());
+    let remaining = params.timeout.saturating_sub(params.start.elapsed());
     let stream_result = tokio::time::timeout(remaining, async {
         while let Some(line_result) = lines.next_line().await.transpose() {
             let line = match line_result {
@@ -584,6 +635,9 @@ async fn execute_single(
                             let _ = stdout_file.write_all(b"\n");
                             stdout_bytes_written += text.len() + 1;
                         }
+
+                        // For stream-json, we don't stream raw lines that aren't content
+                        // Only the extracted text should be streamed
                         continue;
                     }
                 }
@@ -598,8 +652,19 @@ async fn execute_single(
                 stdout_bytes_written += text_for_matching.len() + 1;
             }
 
+            // Stream to terminal if enabled
+            if params.stream_to_terminal {
+                let mut terminal_stdout = tokio::io::stdout();
+                let _ = terminal_stdout
+                    .write_all(text_for_matching.as_bytes())
+                    .await;
+                let _ = terminal_stdout.write_all(b"\n").await;
+                let _ = terminal_stdout.flush().await;
+            }
+
             // Signal matching
-            if let Some((sig_name, sig_data)) = match_signals(&text_for_matching, compiled_signals)
+            if let Some((sig_name, sig_data)) =
+                match_signals(&text_for_matching, params.compiled_signals)
             {
                 signal = Some(sig_name);
                 signal_data = sig_data;
@@ -621,6 +686,17 @@ async fn execute_single(
         .with_code("WFG-AGENT-005"));
     }
 
+    Ok(StreamingResult {
+        signal,
+        signal_data,
+    })
+}
+
+/// Wait for the process to complete and return the exit code.
+async fn wait_for_process_completion(
+    mut child: tokio::process::Child,
+    stderr_task: tokio::task::JoinHandle<()>,
+) -> Result<i32, AppError> {
     let exit_status = child.wait().await.map_err(|err| {
         AppError::new(
             ErrorCategory::IoError,
@@ -630,24 +706,32 @@ async fn execute_single(
 
     let _ = stderr_task.await;
 
-    let exit_code = exit_status.code().unwrap_or(-1);
+    Ok(exit_status.code().unwrap_or(-1))
+}
+
+/// Execute a single engine invocation and stream output.
+async fn execute_single(params: &ExecParams<'_>) -> Result<SingleExecResult, AppError> {
+    check_timeout_before_execution(params)?;
+
+    let (mut child, stdout, stderr_task) = spawn_engine_process(params).await?;
+    let mut stdout_file = open_stdout_artifact_file(params.paths.stdout_path)?;
+
+    let streaming_result =
+        stream_and_process_output(stdout, &mut stdout_file, &mut child, params).await?;
+
+    let exit_code = wait_for_process_completion(child, stderr_task).await?;
 
     Ok(SingleExecResult {
-        signal,
-        signal_data,
+        signal: streaming_result.signal,
+        signal_data: streaming_result.signal_data,
         exit_code,
     })
 }
 
 /// Execute in loop mode.
 async fn execute_loop(
-    invocation: &EngineInvocation,
-    compiled_signals: &IndexMap<String, Regex>,
     config: &AgentOperatorConfig,
-    paths: &ExecPaths<'_>,
-    extra_env: &HashMap<String, String>,
-    timeout: Duration,
-    start: Instant,
+    params: &ExecParams<'_>,
 ) -> Result<(Option<String>, HashMap<String, String>, i32, u32), AppError> {
     let max_iters = config.max_iterations.unwrap_or(u32::MAX);
     let mut iteration: u32 = 0;
@@ -669,15 +753,7 @@ async fn execute_loop(
         last_signal = None;
         last_signal_data = HashMap::new();
 
-        let result = execute_single(
-            invocation,
-            compiled_signals,
-            paths,
-            extra_env,
-            timeout,
-            start,
-        )
-        .await?;
+        let result = execute_single(params).await?;
 
         last_exit_code = result.exit_code;
 

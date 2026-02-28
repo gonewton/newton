@@ -1,0 +1,17 @@
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: agent_task
+    max_time_seconds: 60
+    stream_agent_stdout: false  # workflow default is off
+  tasks:
+    - id: agent_task
+      operator: "AgentOperator"
+      params:
+        engine: command
+        engine_command: ["sh", "-c", "echo 'TASK_OVERRIDE_STREAMED'; echo '<status>DONE</status>'"]
+        stream_stdout: true  # task overrides to enable streaming
+        signals:
+          done: "<status>DONE</status>"
+      terminal: success
