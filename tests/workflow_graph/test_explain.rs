@@ -54,7 +54,7 @@ workflow:
 
     assert_snapshot!(
         serde_json::to_string_pretty(&outcome.output).expect("serialize explain output"),
-        @r###"
+        @r#"
     {
       "settings": {
         "artifact_storage": {
@@ -98,6 +98,7 @@ workflow:
           ]
         },
         "required_triggers": [],
+        "stream_agent_stdout": false,
         "webhook": {
           "auth_token_env": "NEWTON_WEBHOOK_TOKEN",
           "bind": "127.0.0.1:8787",
@@ -139,7 +140,7 @@ workflow:
         }
       ]
     }
-    "###);
+    "#);
 }
 
 #[test]
