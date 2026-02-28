@@ -101,6 +101,7 @@ async fn resume_skips_completed_tasks() {
         max_time_seconds: None,
         checkpoint_base_path: None,
         artifact_base_path: None,
+        verbose: false,
     };
 
     let summary = executor::execute_workflow(
@@ -196,6 +197,7 @@ async fn resume_hash_mismatch_blocks_resume() {
         max_time_seconds: None,
         checkpoint_base_path: None,
         artifact_base_path: None,
+        verbose: false,
     };
 
     let summary = executor::execute_workflow(
@@ -236,6 +238,7 @@ async fn checkpoint_records_goal_gate_group() {
         max_time_seconds: None,
         checkpoint_base_path: None,
         artifact_base_path: None,
+        verbose: false,
     };
 
     let summary = executor::execute_workflow(

@@ -192,6 +192,7 @@ async fn execute_yaml(
             max_time_seconds: None,
             checkpoint_base_path: None,
             artifact_base_path: None,
+            verbose: false,
         },
     )
     .await

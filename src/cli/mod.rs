@@ -4,8 +4,10 @@ pub mod commands;
 pub mod init;
 
 pub use args::{
-    BatchArgs, ErrorArgs, InitArgs, MonitorArgs, ReportArgs, RunArgs, StatusArgs, StepArgs,
-    WorkflowArgs,
+    ArtifactCommand, ArtifactsArgs, BatchArgs, CheckpointCommand, CheckpointsArgs, DotArgs,
+    ExplainArgs, InitArgs, LintArgs, MonitorArgs, ResumeArgs, RunArgs, ValidateArgs, WebhookArgs,
+    WebhookCommand, WebhookServeArgs, WebhookStatusArgs, WorkflowArgs, WorkflowCommand,
+    WorkflowRunArgs,
 };
 use clap::{Parser, Subcommand};
 
@@ -33,11 +35,16 @@ pub struct Args {
 #[allow(clippy::large_enum_variant)] // Command variants mirror the CLI styling structs, so matching variants stay large by design.
 pub enum Command {
     #[command(
-        about = "Execute a full optimization loop",
-        long_about = "Run iterates evaluation, advice, and execution phases until convergence or resource caps are hit.",
-        after_help = "Example:\n    newton run ./workspace --max-iterations 5"
+        about = "Execute a workflow graph",
+        long_about = "Run executes a workflow graph defined in YAML, with optional trigger payload from input file or arguments.",
+        after_help = "Example:\n    newton run workflow.yaml input.txt --workspace ./workspace --arg key=value"
     )]
     Run(RunArgs),
+    #[command(
+        about = "Workflow command group (compatibility alias)",
+        after_help = "Example:\n    newton workflow run --workflow workflow.yaml --workspace ./workspace"
+    )]
+    Workflow(WorkflowArgs),
     #[command(
         about = "Initialize a Newton workspace with the default template",
         long_about = "Init creates the .newton workspace layout, installs the Newton template with aikit-sdk, and writes default configs so you can run immediately.",
@@ -46,34 +53,10 @@ pub enum Command {
     Init(InitArgs),
     #[command(
         about = "Process queued work items for a project",
-        long_about = "Batch reads plan files from .newton/plan/<project_id> and drives headless orchestration.",
+        long_about = "Batch reads plan files from .newton/plan/<project_id> and drives headless workflow orchestration.",
         after_help = "Example:\n    newton batch project-alpha --workspace ./workspace"
     )]
     Batch(BatchArgs),
-    #[command(
-        about = "Advance loop by one cycle",
-        long_about = "Step performs exactly one evaluation/advice/execution round using current workspace state.",
-        after_help = "Example:\n    newton step ./workspace --execution-id exec_123"
-    )]
-    Step(StepArgs),
-    #[command(
-        about = "Inspect progress of an execution",
-        long_about = "Status queries persisted artifacts for a given execution ID and surfaces current phase, iteration counts, and blockers.",
-        after_help = "Example:\n    newton status exec_123 --workspace ./workspace"
-    )]
-    Status(StatusArgs),
-    #[command(
-        about = "Summarize learnings from an execution",
-        long_about = "Report renders structured output (text or JSON) describing performance metrics, recommendations, and anomalies for the requested execution.",
-        after_help = "Example:\n    newton report exec_123 --format json"
-    )]
-    Report(ReportArgs),
-    #[command(
-        about = "Diagnose failures during optimization",
-        long_about = "Error traces tool crashes, timeouts, and incompatible artifacts for a specific execution, with optional verbose stack traces.",
-        after_help = "Example:\n    newton error exec_123 --verbose"
-    )]
-    Error(ErrorArgs),
     #[command(
         about = "Monitor live ailoop channels via a terminal UI",
         long_about = "Monitor listens to every project/branch channel from the workspace using a WebSocket/HTTP mix and lets you answer questions or approve authorizations in a queue.\n\n\
@@ -108,22 +91,75 @@ or manually create .newton/configs/ and add a monitor.conf file."
     )]
     Monitor(MonitorArgs),
     #[command(
-        about = "Operate workflow graphs via deterministic runner",
-        long_about = "Workflow graphs defined in YAML describe deterministic scheduleable tasks executed inside Newton. Use `newton workflow <COMMAND>` for run/validate/dot."
+        about = "Validate a workflow graph definition",
+        after_help = "Example:\n    newton validate --workflow workflow.yaml"
     )]
-    Workflow(WorkflowArgs),
+    Validate(ValidateArgs),
+    #[command(
+        about = "Render workflow graph as DOT",
+        after_help = "Example:\n    newton dot --workflow workflow.yaml --out graph.dot"
+    )]
+    Dot(DotArgs),
+    #[command(
+        about = "Validate workflow lint rules",
+        after_help = "Example:\n    newton lint --workflow workflow.yaml --format json"
+    )]
+    Lint(LintArgs),
+    #[command(
+        about = "Explain workflow graph settings/transitions",
+        after_help = "Example:\n    newton explain --workflow workflow.yaml --format text"
+    )]
+    Explain(ExplainArgs),
+    #[command(
+        about = "Resume a previously-started workflow execution",
+        after_help = "Example:\n    newton resume --execution-id 12345678-1234-1234-1234-123456789abc"
+    )]
+    Resume(ResumeArgs),
+    #[command(
+        about = "Inspect workflow checkpoints",
+        after_help = "Example:\n    newton checkpoints list --workspace ./workspace"
+    )]
+    Checkpoints(CheckpointsArgs),
+    #[command(
+        about = "Manage workflow artifacts",
+        after_help = "Example:\n    newton artifacts clean --workspace ./workspace --older-than 7d"
+    )]
+    Artifacts(ArtifactsArgs),
+    #[command(
+        about = "Manage workflow webhook listener",
+        after_help = "Example:\n    newton webhook serve --workflow workflow.yaml --workspace ./workspace"
+    )]
+    Webhook(WebhookArgs),
 }
 
 pub async fn run(args: Args) -> crate::Result<()> {
     match args.command {
         Command::Run(run_args) => commands::run(run_args).await,
+        Command::Workflow(workflow_args) => match workflow_args.command {
+            WorkflowCommand::Run(run_args) => commands::run(run_args.into()).await,
+        },
         Command::Init(init_args) => init::run(init_args).await,
         Command::Batch(batch_args) => commands::batch(batch_args).await,
-        Command::Step(step_args) => commands::step(step_args).await,
-        Command::Status(status_args) => commands::status(status_args).await,
-        Command::Report(report_args) => commands::report(report_args).await,
-        Command::Error(error_args) => commands::error(error_args).await,
         Command::Monitor(monitor_args) => commands::monitor(monitor_args).await,
-        Command::Workflow(workflow_args) => commands::workflow(workflow_args).await,
+        Command::Validate(validate_args) => {
+            commands::validate(validate_args).map_err(anyhow::Error::from)
+        }
+        Command::Dot(dot_args) => commands::dot(dot_args).map_err(anyhow::Error::from),
+        Command::Lint(lint_args) => commands::lint(lint_args).map_err(anyhow::Error::from),
+        Command::Explain(explain_args) => {
+            commands::explain(explain_args).map_err(anyhow::Error::from)
+        }
+        Command::Resume(resume_args) => commands::resume(resume_args)
+            .await
+            .map_err(anyhow::Error::from),
+        Command::Checkpoints(checkpoints_args) => {
+            commands::checkpoints(checkpoints_args).map_err(anyhow::Error::from)
+        }
+        Command::Artifacts(artifacts_args) => {
+            commands::artifacts(artifacts_args).map_err(anyhow::Error::from)
+        }
+        Command::Webhook(webhook_args) => commands::webhook(webhook_args)
+            .await
+            .map_err(anyhow::Error::from),
     }
 }

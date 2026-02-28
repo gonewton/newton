@@ -79,6 +79,7 @@ fn default_overrides() -> ExecutionOverrides {
         max_time_seconds: Some(30),
         checkpoint_base_path: None,
         artifact_base_path: None,
+        verbose: false,
     }
 }
 
@@ -523,6 +524,7 @@ async fn e8_terminal_success_stops_executor_queued_tasks_not_run() {
         max_time_seconds: Some(30),
         checkpoint_base_path: None,
         artifact_base_path: None,
+        verbose: false,
     };
     let registry = build_registry(workspace.clone(), document.workflow.settings.clone());
 

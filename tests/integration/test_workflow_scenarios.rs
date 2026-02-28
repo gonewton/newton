@@ -245,6 +245,7 @@ impl WorkflowTestHarness {
                 max_time_seconds: None,
                 checkpoint_base_path: Some(self.temp_dir.path().join(".newton/state/workflows")),
                 artifact_base_path: Some(self.temp_dir.path().join(".newton/artifacts")),
+                verbose: false,
             },
         )
         .await

@@ -8,7 +8,14 @@ pub use context::{detect_context, ExecutionContext};
 use crate::logging::config::{load_logging_config, ConsoleOutput, LoggingConfigFile};
 use crate::logging::layers as layers_mod;
 use crate::logging::layers::{console, file, opentelemetry};
-use crate::{cli::Command, core::find_workspace_root, Result};
+use crate::{
+    cli::{
+        args::{ArtifactCommand, CheckpointCommand, WebhookCommand, WorkflowCommand},
+        Command,
+    },
+    core::find_workspace_root,
+    Result,
+};
 use anyhow::{anyhow, Context};
 use dirs_next::home_dir;
 use std::env;
@@ -164,13 +171,14 @@ pub(crate) fn build_effective_settings(
 
 fn workspace_root_for_command(command: &Command) -> Result<Option<PathBuf>> {
     let candidate = match command {
-        Command::Run(args) => Some(args.path.clone()),
-        Command::Step(args) => Some(args.path.clone()),
-        Command::Status(args) => Some(args.path.clone()),
-        Command::Report(args) => Some(args.path.clone()),
-        Command::Error(_) => env::current_dir()
-            .ok()
-            .and_then(|cwd| find_workspace_root(&cwd).ok()),
+        Command::Run(args) => args.workspace.clone(),
+        Command::Workflow(args) => match &args.command {
+            WorkflowCommand::Run(run_args) => run_args
+                .workspace
+                .clone()
+                .or_else(|| run_args.workflow.parent().map(|p| p.to_path_buf()))
+                .or_else(|| env::current_dir().ok()),
+        },
         Command::Init(args) => args.path.clone().or_else(|| env::current_dir().ok()),
         Command::Batch(args) => {
             if let Some(ws) = &args.workspace {
@@ -181,7 +189,34 @@ fn workspace_root_for_command(command: &Command) -> Result<Option<PathBuf>> {
                 None
             }
         }
-        Command::Workflow(_) => env::current_dir().ok(),
+        Command::Validate(args) => args
+            .workflow
+            .parent()
+            .map(|p| p.to_path_buf())
+            .or_else(|| env::current_dir().ok()),
+        Command::Dot(args) => args
+            .workflow
+            .parent()
+            .map(|p| p.to_path_buf())
+            .or_else(|| env::current_dir().ok()),
+        Command::Lint(args) => args
+            .workflow
+            .parent()
+            .map(|p| p.to_path_buf())
+            .or_else(|| env::current_dir().ok()),
+        Command::Explain(args) => args.workspace.clone(),
+        Command::Resume(args) => args.workspace.clone(),
+        Command::Checkpoints(args) => match &args.command {
+            CheckpointCommand::List { workspace, .. } => workspace.clone(),
+            CheckpointCommand::Clean { workspace, .. } => workspace.clone(),
+        },
+        Command::Artifacts(args) => match &args.command {
+            ArtifactCommand::Clean { workspace, .. } => workspace.clone(),
+        },
+        Command::Webhook(args) => match &args.command {
+            WebhookCommand::Serve(serve_args) => Some(serve_args.workspace.clone()),
+            WebhookCommand::Status(status_args) => Some(status_args.workspace.clone()),
+        },
         Command::Monitor(_) => {
             let cwd = env::current_dir()?;
             Some(find_workspace_root(&cwd)?)
@@ -375,17 +410,24 @@ fn clean_relative_within(base: &Path, path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::args::{
-        BatchArgs, ErrorArgs, InitArgs, MonitorArgs, ReportArgs, ReportFormat, RunArgs, StatusArgs,
-        StepArgs,
-    };
+    use crate::cli::args::{BatchArgs, InitArgs, MonitorArgs, RunArgs};
     use crate::logging::config::OpenTelemetryConfig;
     use serial_test::serial;
     use std::env;
     use std::path::PathBuf;
 
     fn make_run_command() -> Command {
-        Command::Run(RunArgs::for_batch(PathBuf::from("."), None))
+        Command::Run(RunArgs {
+            workflow: PathBuf::from("test.yaml"),
+            input_file: None,
+            workspace: Some(PathBuf::from(".")),
+            arg: Vec::new(),
+            set: Vec::new(),
+            trigger_json: None,
+            parallel_limit: None,
+            max_time_seconds: None,
+            verbose: false,
+        })
     }
 
     fn make_batch_command() -> Command {
@@ -394,36 +436,6 @@ mod tests {
             workspace: Some(PathBuf::from(".")),
             once: false,
             sleep: 60,
-        })
-    }
-
-    fn make_step_command() -> Command {
-        Command::Step(StepArgs {
-            path: PathBuf::from("."),
-            execution_id: None,
-            verbose: false,
-        })
-    }
-
-    fn make_status_command() -> Command {
-        Command::Status(StatusArgs {
-            execution_id: "id".into(),
-            path: PathBuf::from("."),
-        })
-    }
-
-    fn make_report_command() -> Command {
-        Command::Report(ReportArgs {
-            execution_id: "id".into(),
-            path: PathBuf::from("."),
-            format: ReportFormat::Text,
-        })
-    }
-
-    fn make_error_command() -> Command {
-        Command::Error(ErrorArgs {
-            execution_id: "id".into(),
-            verbose: false,
         })
     }
 
@@ -447,10 +459,6 @@ mod tests {
         env::remove_var("NEWTON_REMOTE_AGENT");
         let mapping = vec![
             (make_run_command(), ExecutionContext::LocalDev),
-            (make_step_command(), ExecutionContext::LocalDev),
-            (make_status_command(), ExecutionContext::LocalDev),
-            (make_report_command(), ExecutionContext::LocalDev),
-            (make_error_command(), ExecutionContext::LocalDev),
             (make_init_command(), ExecutionContext::LocalDev),
             (make_batch_command(), ExecutionContext::Batch),
             (make_monitor_command(), ExecutionContext::Tui),
@@ -474,7 +482,7 @@ mod tests {
             ExecutionContext::RemoteAgent
         );
         assert_eq!(
-            detect_context(&make_error_command()),
+            detect_context(&make_run_command()),
             ExecutionContext::RemoteAgent
         );
         assert_eq!(
