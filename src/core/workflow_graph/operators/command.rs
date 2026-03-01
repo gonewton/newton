@@ -227,6 +227,8 @@ impl CommandRunner for TokioCommandRunner {
             command.stderr(Stdio::inherit());
         }
 
+        command.stdin(Stdio::null());
+
         command.current_dir(request.cwd.clone());
         if let Some(env_map) = &request.env {
             command.envs(env_map);

@@ -792,6 +792,7 @@ fn build_command(
     cmd.current_dir(working_dir);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
+    cmd.stdin(Stdio::null());
 
     // Apply driver env
     for (k, v) in &invocation.env {
