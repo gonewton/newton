@@ -3,19 +3,13 @@
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::{
-    ailoop_integration,
     cli::args::{
-        BatchArgs, ErrorArgs, KeyValuePair, MonitorArgs, OutputFormat, ReportArgs, RunArgs,
-        StatusArgs, StepArgs, WorkflowArgs, WorkflowArtifactCommand, WorkflowArtifactsArgs,
-        WorkflowCheckpointCommand, WorkflowCheckpointsArgs, WorkflowCommand, WorkflowDotArgs,
-        WorkflowExplainArgs, WorkflowLintArgs, WorkflowResumeArgs, WorkflowRunArgs,
-        WorkflowValidateArgs, WorkflowWebhookArgs, WorkflowWebhookCommand,
-        WorkflowWebhookServeArgs, WorkflowWebhookStatusArgs,
+        ArtifactCommand, ArtifactsArgs, BatchArgs, CheckpointCommand, CheckpointsArgs, DotArgs,
+        ExplainArgs, KeyValuePair, LintArgs, MonitorArgs, OutputFormat, ResumeArgs, RunArgs,
+        ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
     },
-    cli::Command as CliCommand,
     core::{
-        batch_config::{find_workspace_root, BatchProjectConfig, RunnerKind},
-        entities::ExecutionStatus,
+        batch_config::BatchProjectConfig,
         workflow_graph::{
             artifacts, checkpoint, dot as workflow_dot,
             executor::{self as workflow_executor, ExecutionOverrides},
@@ -26,484 +20,104 @@ use crate::{
             operators as workflow_operators, schema as workflow_schema,
             transform as workflow_transform, webhook,
         },
-        ConfigLoader, ConfigValidator, DefaultErrorReporter, OptimizationOrchestrator,
-        SuccessPolicy,
     },
-    monitor,
-    utils::serialization::{FileUtils, JsonSerializer},
-    Result,
+    monitor, Result,
 };
-use anyhow::{anyhow, Error};
-use chrono::Utc;
+use anyhow::anyhow;
 use humantime::{format_duration, parse_duration};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Map, Value};
-use std::sync::Arc;
 use std::{
-    collections::HashMap,
     env, fs,
-    io::Write,
     path::{Path, PathBuf},
-    process::Command,
     result::Result as StdResult,
     time::Duration,
 };
 use tokio::time::sleep;
 
-/// Context struct to hold batch task information, reducing function argument counts
-struct BatchTaskContext {
-    batch_config: BatchProjectConfig,
-    project_id: String,
-    task_id: String,
-    goal_file: PathBuf,
-    workspace_root: PathBuf,
-    state_dir: PathBuf,
-    control_file: PathBuf,
-    branch_name: String,
-    base_branch: String,
-}
-
 /// Build additional environment variables for the run, returns (goal_file, env map)
-fn build_run_additional_env(
-    args: &RunArgs,
-    workspace_path: &Path,
-) -> Result<(Option<PathBuf>, HashMap<String, String>)> {
-    let goal_file = prepare_goal_file(args, workspace_path)?;
-
-    let user_feedback = args
-        .feedback
-        .clone()
-        .or_else(|| env::var("NEWTON_USER_FEEDBACK").ok());
-
-    let mut additional_env = HashMap::new();
-    if let Some(ref path) = goal_file {
-        additional_env.insert("NEWTON_GOAL_FILE".to_string(), path.display().to_string());
-    }
-    if let Some(ref feedback) = user_feedback {
-        additional_env.insert("NEWTON_USER_FEEDBACK".to_string(), feedback.clone());
-    }
-
-    let control_file_path = args
-        .control_file
-        .clone()
-        .unwrap_or_else(|| workspace_path.join("newton_control.json"));
-    additional_env.insert(
-        "NEWTON_CONTROL_FILE".to_string(),
-        control_file_path.display().to_string(),
-    );
-
-    for key in &[
-        "NEWTON_STATE_DIR",
-        "NEWTON_WS_ROOT",
-        "NEWTON_CODER_CMD",
-        "NEWTON_BRANCH_NAME",
-    ] {
-        if let Ok(value) = env::var(key) {
-            additional_env.insert(key.to_string(), value);
-        }
-    }
-
-    Ok((goal_file, additional_env))
-}
-
-/// Build the execution configuration for the run
-fn build_run_exec_config(
-    args: &RunArgs,
-    workspace_path: &Path,
-) -> crate::core::entities::ExecutionConfiguration {
-    let evaluator_cmd = args
-        .evaluator_cmd
-        .clone()
-        .or_else(|| default_workspace_script(workspace_path, "evaluator.sh"));
-    let advisor_cmd = args
-        .advisor_cmd
-        .clone()
-        .or_else(|| default_workspace_script(workspace_path, "advisor.sh"));
-    let executor_cmd = args
-        .executor_cmd
-        .clone()
-        .or_else(|| default_workspace_script(workspace_path, "executor.sh"));
-    let strict_toolchain_mode =
-        args.evaluator_cmd.is_some() || args.advisor_cmd.is_some() || args.executor_cmd.is_some();
-
-    crate::core::entities::ExecutionConfiguration {
-        evaluator_cmd,
-        advisor_cmd,
-        executor_cmd,
-        max_iterations: Some(args.max_iterations),
-        max_time_seconds: Some(args.max_time),
-        evaluator_timeout_ms: args.evaluator_timeout.map(|t| t * 1000),
-        advisor_timeout_ms: args.advisor_timeout.map(|t| t * 1000),
-        executor_timeout_ms: args.executor_timeout.map(|t| t * 1000),
-        global_timeout_ms: Some(args.max_time * 1000),
-        strict_toolchain_mode,
-        resource_monitoring: false,
-        verbose: args.verbose,
-    }
-}
-
-/// Report the result of the run execution
-fn report_run_result(execution: crate::core::entities::OptimizationExecution) -> Result<()> {
-    if execution.status != ExecutionStatus::Completed
-        && execution.status != ExecutionStatus::MaxIterationsReached
-    {
-        return Err(anyhow!(
-            "Optimization ended with status {:?}",
-            execution.status
-        ));
-    }
-    tracing::info!("Optimization completed successfully");
-    println!(
-        "Optimization completed with {} iterations",
-        execution.total_iterations_completed
-    );
-    if let Some(completed_at) = execution.completed_at {
-        println!(
-            "Duration: {}",
-            completed_at.signed_duration_since(execution.started_at)
-        );
-    }
-    Ok(())
-}
-
 pub async fn run(args: RunArgs) -> Result<()> {
-    tracing::info!("Starting Newton Loop optimization run");
+    tracing::info!("Starting Newton workflow run");
 
-    match resolve_run_mode(&args) {
-        Ok(RunMode::Workspace(workspace_path)) => run_workspace(args, workspace_path)
-            .await
-            .map_err(|err| anyhow!(err)),
-        Ok(RunMode::Profile(context)) => run_profile_mode(args, *context)
-            .await
-            .map_err(|err| anyhow!(err)),
-        Err(err) => Err(anyhow!(err)),
+    let workspace = resolve_workflow_workspace(args.workspace.clone())?;
+    let workflow_path = args.workflow.clone();
+    let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
+    let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
+    let lint_results = LintRegistry::new().run(&document);
+    if !lint_results.is_empty() {
+        print_lint_results_text(&lint_results);
     }
-}
-
-async fn run_workspace(args: RunArgs, workspace_path: PathBuf) -> Result<()> {
-    let newton_config = if let Some(ref path) = args.config {
-        ConfigLoader::load_from_file(path)?.unwrap_or_default()
-    } else {
-        ConfigLoader::load_from_workspace(&workspace_path)?
-    };
-
-    ConfigValidator::validate(&newton_config)?;
-
-    let (_goal_file, additional_env) = build_run_additional_env(&args, &workspace_path)?;
-    let exec_config = build_run_exec_config(&args, &workspace_path);
-
-    let control_file_path = args
-        .control_file
-        .clone()
-        .unwrap_or_else(|| workspace_path.join("newton_control.json"));
-    let success_policy = SuccessPolicy::from_path(control_file_path.clone());
-
-    // Initialize ailoop context
-    let ailoop_context =
-        match ailoop_integration::init_context(&workspace_path, &CliCommand::Run(args.clone())) {
-            Ok(ctx) => {
-                if let Some(ref context) = ctx {
-                    tracing::info!(
-                        "Ailoop integration enabled for channel: {}",
-                        context.channel()
-                    );
-                }
-                ctx.map(Arc::new)
-            }
-            Err(e) => {
-                tracing::warn!("Failed to initialize ailoop integration: {}", e);
-                None
-            }
-        };
-
-    let reporter = Box::new(DefaultErrorReporter);
-    let orchestrator = OptimizationOrchestrator::with_ailoop_context(
-        JsonSerializer,
-        FileUtils,
-        reporter,
-        ailoop_context,
-    );
-
-    let execution = orchestrator
-        .run_optimization_with_policy(
-            &workspace_path,
-            exec_config,
-            &additional_env,
-            Some(&success_policy),
-        )
-        .await;
-
-    match execution {
-        Ok(execution) => report_run_result(execution),
-        Err(e) => {
-            tracing::error!("Optimization failed: {}", e);
-            eprintln!("Optimization failed: {}", e);
-            Err(e.into())
-        }
-    }
-}
-
-async fn run_profile_mode(_args: RunArgs, context: ProfileRunContext) -> StdResult<(), AppError> {
-    tracing::info!("Running Newton project profile '{}'", context.project_id);
-
-    let env_pairs = [
-        ("CODING_AGENT", context.batch_config.coding_agent.as_str()),
-        (
-            "CODING_AGENT_MODEL",
-            context.batch_config.coding_model.as_str(),
-        ),
-        (
-            "NEWTON_EXECUTOR_CODING_AGENT",
-            context.batch_config.coding_agent.as_str(),
-        ),
-        (
-            "NEWTON_EXECUTOR_CODING_AGENT_MODEL",
-            context.batch_config.coding_model.as_str(),
-        ),
-    ];
-    let overrides = apply_env_overrides(&env_pairs);
-
-    let result = run_profile_inner(&context).await;
-    restore_env_vars(overrides);
-
-    result
-}
-
-async fn run_profile_inner(context: &ProfileRunContext) -> StdResult<(), AppError> {
-    let hook_env = build_profile_hook_env(context);
-    run_profile_pre_hook(context, &hook_env)?;
-
-    let run_args = RunArgs::for_batch_with_tools(
-        context.batch_config.project_root.clone(),
-        None,
-        context.batch_config.evaluator_cmd.clone(),
-        context.batch_config.advisor_cmd.clone(),
-        context.batch_config.executor_cmd.clone(),
-        context.batch_config.max_iterations,
-        context.batch_config.max_time,
-        context.batch_config.verbose,
-        Some(context.control_file_path.clone()),
-    );
-    if let Err(err) = run_workspace(run_args, context.batch_config.project_root.clone()).await {
-        run_profile_post_fail_hook(context, &hook_env);
-        return Err(err.into());
-    }
-
-    if let Some(script) = context.batch_config.post_success_script.as_ref() {
-        let status = run_batch_hook_script(&context.batch_config.project_root, script, &hook_env)?;
-        if !status.success() {
-            run_profile_post_fail_hook(context, &hook_env);
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                format!(
-                    "post_success_script '{}' exited {}",
-                    script,
-                    status.code().unwrap_or(-1)
-                ),
-            )
-            .with_code("WFG-RUN-POST-001"));
-        }
-    }
-
-    Ok(())
-}
-
-fn run_profile_pre_hook(
-    context: &ProfileRunContext,
-    hook_env: &HashMap<String, String>,
-) -> StdResult<(), AppError> {
-    if let Some(script) = context.batch_config.pre_run_script.as_ref() {
-        let status = run_batch_hook_script(&context.batch_config.project_root, script, hook_env)?;
-        if !status.success() {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                format!(
-                    "pre_run_script '{}' exited {}",
-                    script,
-                    status.code().unwrap_or(-1)
-                ),
-            )
-            .with_code("WFG-RUN-PRE-001"));
-        }
-    }
-    Ok(())
-}
-
-fn run_profile_post_fail_hook(context: &ProfileRunContext, hook_env: &HashMap<String, String>) {
-    if let Some(script) = context.batch_config.post_fail_script.as_ref() {
-        match run_batch_hook_script(&context.batch_config.project_root, script, hook_env) {
-            Ok(status) => {
-                if !status.success() {
-                    tracing::warn!(
-                        "post_fail_script '{}' exited {}",
-                        script,
-                        status.code().unwrap_or(-1)
-                    );
-                }
-            }
-            Err(err) => {
-                tracing::warn!("post_fail_script '{}' failed to start: {}", script, err);
-            }
-        }
-    }
-}
-
-fn build_profile_hook_env(context: &ProfileRunContext) -> HashMap<String, String> {
-    let mut env_vars = HashMap::new();
-    env_vars.insert(
-        "CODING_AGENT".to_string(),
-        context.batch_config.coding_agent.clone(),
-    );
-    env_vars.insert(
-        "CODING_AGENT_MODEL".to_string(),
-        context.batch_config.coding_model.clone(),
-    );
-    env_vars.insert(
-        "NEWTON_EXECUTOR_CODING_AGENT".to_string(),
-        context.batch_config.coding_agent.clone(),
-    );
-    env_vars.insert(
-        "NEWTON_EXECUTOR_CODING_AGENT_MODEL".to_string(),
-        context.batch_config.coding_model.clone(),
-    );
-    env_vars.insert(
-        "NEWTON_PROJECT_ROOT".to_string(),
-        context.batch_config.project_root.display().to_string(),
-    );
-    env_vars.insert("NEWTON_PROJECT_ID".to_string(), context.project_id.clone());
-    env_vars.insert(
-        "NEWTON_WS_ROOT".to_string(),
-        context.workspace_root.display().to_string(),
-    );
-    env_vars.insert(
-        "NEWTON_CONTROL_FILE".to_string(),
-        context.control_file_path.display().to_string(),
-    );
-    env_vars
-}
-
-fn resolve_run_mode(args: &RunArgs) -> StdResult<RunMode, AppError> {
-    let workspace_candidate = args.path.clone();
-    let base_message = match fs::metadata(&workspace_candidate) {
-        Ok(metadata) => {
-            if metadata.is_dir() {
-                return Ok(RunMode::Workspace(workspace_candidate));
-            }
-            format!(
-                "workspace path {} is not a directory",
-                workspace_candidate.display()
-            )
-        }
-        Err(err) => format!("workspace path {}: {}", workspace_candidate.display(), err),
-    };
-
-    let current_dir = env::current_dir().map_err(|err| {
-        AppError::with_source(
-            ErrorCategory::IoError,
-            "failed to determine current directory",
-            Box::new(err),
-        )
-    })?;
-    let workspace_root = find_workspace_root(&current_dir).map_err(|err| {
-        AppError::new(
-            ErrorCategory::ValidationError,
-            format!("{}; workspace root discovery failed: {}", base_message, err),
-        )
-    })?;
-
-    let project_id = workspace_candidate.display().to_string();
-    let conf_path = workspace_root
-        .join(".newton")
-        .join("configs")
-        .join(format!("{}.conf", project_id));
-    if !conf_path.exists() {
-        return Err(AppError::new(
-            ErrorCategory::ValidationError,
-            format!(
-                "{}; workflow profile {} not found",
-                base_message,
-                conf_path.display()
-            ),
+    let error_count = lint_results
+        .iter()
+        .filter(|result| result.severity == LintSeverity::Error)
+        .count();
+    if error_count > 0 {
+        return Err(anyhow!(
+            "workflow lint detected {} error(s); fix before running",
+            error_count
         ));
     }
 
-    let batch_config = BatchProjectConfig::load(&workspace_root, &project_id).map_err(|err| {
-        AppError::new(
-            ErrorCategory::ValidationError,
-            format!("failed to load profile {}: {}", project_id, err),
-        )
-    })?;
+    apply_context_overrides(&mut document.workflow.context, &args.set);
+    document.validate(&ExpressionEngine::default())?;
 
-    let control_file_name = batch_config
-        .control_file
-        .as_deref()
-        .unwrap_or("newton_control.json");
-    let control_file_path = if Path::new(control_file_name).is_absolute() {
-        PathBuf::from(control_file_name)
-    } else {
-        batch_config.project_root.join(control_file_name)
+    // Build trigger payload with input_file and --arg overrides
+    let mut trigger_payload =
+        build_trigger_payload(&args.trigger_json, &args.arg)?.unwrap_or_else(|| json!({}));
+
+    // Add input_file to payload if provided
+    if let Some(input_file) = &args.input_file {
+        let input_file_path = if input_file.is_absolute() {
+            input_file.clone()
+        } else {
+            std::env::current_dir()?.join(input_file)
+        };
+        trigger_payload["input_file"] = json!(input_file_path.display().to_string());
+    }
+
+    // Add workspace to payload
+    trigger_payload["workspace"] = json!(workspace.display().to_string());
+
+    if !trigger_payload.as_object().unwrap().is_empty() {
+        document.triggers = Some(workflow_schema::WorkflowTrigger {
+            trigger_type: workflow_schema::TriggerType::Manual,
+            schema_version: "1".to_string(),
+            payload: trigger_payload,
+        });
+    }
+
+    let overrides = ExecutionOverrides {
+        parallel_limit: args.parallel_limit,
+        max_time_seconds: args.max_time_seconds,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
+        verbose: args.verbose,
     };
 
-    if let Some(parent) = control_file_path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            AppError::with_source(
-                ErrorCategory::IoError,
-                format!(
-                    "failed to create control file directory {}",
-                    parent.display()
-                ),
-                Box::new(err),
-            )
-        })?;
-    }
+    let mut builder = OperatorRegistry::builder();
+    workflow_operators::register_builtins(
+        &mut builder,
+        workspace.clone(),
+        document.workflow.settings.clone(),
+    );
+    let registry = builder.build();
 
-    Ok(RunMode::Profile(Box::new(ProfileRunContext {
-        project_id,
-        workspace_root,
-        batch_config,
-        control_file_path,
-    })))
+    let summary = workflow_executor::execute_workflow(
+        document,
+        workflow_path,
+        registry,
+        workspace.clone(),
+        overrides,
+    )
+    .await?;
+    println!(
+        "Workflow completed in {} iterations",
+        summary.total_iterations
+    );
+    Ok(())
 }
 
-enum RunMode {
-    Workspace(PathBuf),
-    Profile(Box<ProfileRunContext>),
-}
-
-struct ProfileRunContext {
-    project_id: String,
-    workspace_root: PathBuf,
-    batch_config: BatchProjectConfig,
-    control_file_path: PathBuf,
-}
-
-pub async fn workflow(args: WorkflowArgs) -> Result<()> {
-    match args.command {
-        WorkflowCommand::Run(run_args) => workflow_run(run_args).await.map_err(|err| anyhow!(err)),
-        WorkflowCommand::Validate(validate_args) => {
-            workflow_validate(validate_args).map_err(|err| anyhow!(err))
-        }
-        WorkflowCommand::Dot(dot_args) => workflow_dot(dot_args).map_err(|err| anyhow!(err)),
-        WorkflowCommand::Lint(lint_args) => workflow_lint(lint_args).map_err(|err| anyhow!(err)),
-        WorkflowCommand::Explain(explain_args) => {
-            workflow_explain(explain_args).map_err(|err| anyhow!(err))
-        }
-        WorkflowCommand::Resume(resume_args) => workflow_resume(resume_args)
-            .await
-            .map_err(|err| anyhow!(err)),
-        WorkflowCommand::Checkpoints(checkpoints_args) => {
-            workflow_checkpoints(checkpoints_args).map_err(|err| anyhow!(err))
-        }
-        WorkflowCommand::Artifacts(artifacts_args) => {
-            workflow_artifacts(artifacts_args).map_err(|err| anyhow!(err))
-        }
-        WorkflowCommand::Webhook(webhook_args) => workflow_webhook(webhook_args)
-            .await
-            .map_err(|err| anyhow!(err)),
-    }
-}
-
-async fn workflow_run(args: WorkflowRunArgs) -> StdResult<(), AppError> {
+pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(args.workspace)?;
     let workflow_path = args.workflow.clone();
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
@@ -541,6 +155,7 @@ async fn workflow_run(args: WorkflowRunArgs) -> StdResult<(), AppError> {
         max_time_seconds: args.max_time_seconds,
         checkpoint_base_path: None,
         artifact_base_path: None,
+        verbose: false,
     };
 
     let mut builder = OperatorRegistry::builder();
@@ -566,7 +181,7 @@ async fn workflow_run(args: WorkflowRunArgs) -> StdResult<(), AppError> {
     Ok(())
 }
 
-fn workflow_validate(args: WorkflowValidateArgs) -> StdResult<(), AppError> {
+pub fn validate(args: ValidateArgs) -> StdResult<(), AppError> {
     let document = workflow_schema::load_workflow(&args.workflow)?;
     let unreachable = workflow_dot::reachability_warnings(&document);
     for id in &unreachable {
@@ -576,7 +191,7 @@ fn workflow_validate(args: WorkflowValidateArgs) -> StdResult<(), AppError> {
     Ok(())
 }
 
-fn workflow_dot(args: WorkflowDotArgs) -> StdResult<(), AppError> {
+pub fn dot(args: DotArgs) -> StdResult<(), AppError> {
     let document = workflow_schema::load_workflow(&args.workflow)?;
     let dot = workflow_dot::workflow_to_dot(&document);
     if let Some(path) = args.out {
@@ -592,7 +207,7 @@ fn workflow_dot(args: WorkflowDotArgs) -> StdResult<(), AppError> {
     Ok(())
 }
 
-fn workflow_lint(args: WorkflowLintArgs) -> StdResult<(), AppError> {
+pub fn lint(args: LintArgs) -> StdResult<(), AppError> {
     let raw_document = workflow_schema::parse_workflow(&args.workflow)?;
     let document = workflow_transform::apply_default_pipeline(raw_document)?;
     let results = LintRegistry::new().run(&document);
@@ -619,7 +234,7 @@ fn workflow_lint(args: WorkflowLintArgs) -> StdResult<(), AppError> {
     Ok(())
 }
 
-fn workflow_explain(args: WorkflowExplainArgs) -> StdResult<(), AppError> {
+pub fn explain(args: ExplainArgs) -> StdResult<(), AppError> {
     let _workspace = resolve_workflow_workspace(args.workspace)?;
     let raw_document = workflow_schema::parse_workflow(&args.workflow)?;
     let source_tasks = raw_document.workflow.tasks.len();
@@ -664,7 +279,7 @@ fn workflow_explain(args: WorkflowExplainArgs) -> StdResult<(), AppError> {
     Ok(())
 }
 
-async fn workflow_resume(args: WorkflowResumeArgs) -> StdResult<(), AppError> {
+pub async fn resume(args: ResumeArgs) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(args.workspace)?;
     let execution = checkpoint::load_execution(&workspace, &args.execution_id)?;
     let mut builder = OperatorRegistry::builder();
@@ -688,13 +303,13 @@ async fn workflow_resume(args: WorkflowResumeArgs) -> StdResult<(), AppError> {
     Ok(())
 }
 
-fn workflow_checkpoints(args: WorkflowCheckpointsArgs) -> StdResult<(), AppError> {
+pub fn checkpoints(args: CheckpointsArgs) -> StdResult<(), AppError> {
     match args.command {
-        WorkflowCheckpointCommand::List {
+        CheckpointCommand::List {
             workspace,
             format_json,
         } => workflow_checkpoints_list(workspace, format_json),
-        WorkflowCheckpointCommand::Clean {
+        CheckpointCommand::Clean {
             workspace,
             older_than,
         } => workflow_checkpoints_clean(workspace, older_than),
@@ -757,9 +372,9 @@ fn workflow_checkpoints_clean(
     Ok(())
 }
 
-fn workflow_artifacts(args: WorkflowArtifactsArgs) -> StdResult<(), AppError> {
+pub fn artifacts(args: ArtifactsArgs) -> StdResult<(), AppError> {
     match args.command {
-        WorkflowArtifactCommand::Clean {
+        ArtifactCommand::Clean {
             workspace,
             older_than,
         } => workflow_artifacts_clean(workspace, older_than),
@@ -777,14 +392,14 @@ fn workflow_artifacts_clean(
     Ok(())
 }
 
-async fn workflow_webhook(args: WorkflowWebhookArgs) -> StdResult<(), AppError> {
+pub async fn webhook(args: WebhookArgs) -> StdResult<(), AppError> {
     match args.command {
-        WorkflowWebhookCommand::Serve(serve_args) => workflow_webhook_serve(serve_args).await,
-        WorkflowWebhookCommand::Status(status_args) => workflow_webhook_status(status_args),
+        WebhookCommand::Serve(serve_args) => workflow_webhook_serve(serve_args).await,
+        WebhookCommand::Status(status_args) => workflow_webhook_status(status_args),
     }
 }
 
-async fn workflow_webhook_serve(args: WorkflowWebhookServeArgs) -> StdResult<(), AppError> {
+async fn workflow_webhook_serve(args: WebhookServeArgs) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(Some(args.workspace))?;
     let workflow_path = args.workflow.clone();
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
@@ -820,6 +435,7 @@ async fn workflow_webhook_serve(args: WorkflowWebhookServeArgs) -> StdResult<(),
         max_time_seconds: None,
         checkpoint_base_path: None,
         artifact_base_path: None,
+        verbose: false,
     };
 
     webhook::serve_webhook(
@@ -833,7 +449,7 @@ async fn workflow_webhook_serve(args: WorkflowWebhookServeArgs) -> StdResult<(),
     Ok(())
 }
 
-fn workflow_webhook_status(args: WorkflowWebhookStatusArgs) -> StdResult<(), AppError> {
+fn workflow_webhook_status(args: WebhookStatusArgs) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(Some(args.workspace))?;
     let workflow_path = resolve_workspace_workflow_path(&workspace, args.workflow)?;
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
@@ -1153,190 +769,11 @@ fn ensure_batch_dirs(workspace_root: &Path, project_id: &str) -> Result<BatchDir
     })
 }
 
-/// Setup task directories and state, returns (spec_path, state_dir, control_file_path)
-fn setup_task_dirs_and_state(
-    batch_config: &BatchProjectConfig,
-    task_id: &str,
-    plan_file: &Path,
-    resume: bool,
-) -> Result<(PathBuf, PathBuf, PathBuf)> {
-    let task_input_dir = batch_config
-        .project_root
-        .join(".newton")
-        .join("tasks")
-        .join(task_id)
-        .join("input");
-    fs::create_dir_all(&task_input_dir)?;
-    let spec_path = task_input_dir.join("spec.md");
-    if spec_path.exists() {
-        fs::remove_file(&spec_path)?;
-    }
-    fs::copy(plan_file, &spec_path)?;
-
-    let state_dir = batch_config
-        .project_root
-        .join(".newton")
-        .join("tasks")
-        .join(task_id)
-        .join("state");
-    let project_state_dir = batch_config.project_root.join(".newton").join("state");
-
-    if resume {
-        fs::create_dir_all(&state_dir)?;
-        fs::create_dir_all(&project_state_dir)?;
-    } else {
-        if state_dir.exists() {
-            fs::remove_dir_all(&state_dir)?;
-        }
-        if project_state_dir.exists() {
-            fs::remove_dir_all(&project_state_dir)?;
-        }
-        fs::create_dir_all(&state_dir)?;
-        fs::create_dir_all(&project_state_dir)?;
-    }
-
-    let control_file_name = batch_config
-        .control_file
-        .as_deref()
-        .unwrap_or("newton_control.json");
-    let control_file_path = state_dir.join(control_file_name);
-
-    Ok((spec_path, state_dir, control_file_path))
-}
-
-/// Run the pre-run hook if configured
-fn run_pre_run_hook(
-    batch_config: &BatchProjectConfig,
-    context: &BatchTaskContext,
-    plan_file: &Path,
-) -> Result<()> {
-    if let Some(pre_script) = &batch_config.pre_run_script {
-        let pre_env = build_pre_run_env(context);
-        let status = run_batch_hook_script(&batch_config.project_root, pre_script, &pre_env)?;
-        if !status.success() {
-            let code = status.code().unwrap_or(-1);
-            tracing::warn!(
-                "pre_run_script exited {} for {}; skipping run",
-                code,
-                plan_file.display()
-            );
-            write_run_log(
-                &context.state_dir,
-                &format!("pre-run script failed with exit code {}", code),
-            )?;
-            return Err(anyhow!("pre-run script failed with exit code {}", code));
-        }
-    }
-    Ok(())
-}
-
-/// Handle successful run completion
-fn handle_success(
-    context: &BatchTaskContext,
-    plan_file: &Path,
-    completed_dir: &Path,
-    failed_dir: &Path,
-    overrides: Vec<(String, Option<String>)>,
-    once: bool,
-    runner: RunnerKind,
-) -> Result<bool> {
-    let script_env = build_batch_hook_env(context, "success");
-
-    let mut final_destination = completed_dir.to_path_buf();
-    if runner == RunnerKind::Classic {
-        if let Some(success_script) = &context.batch_config.post_success_script {
-            let status = run_batch_hook_script(
-                &context.batch_config.project_root,
-                success_script,
-                &script_env,
-            )?;
-            if !status.success() {
-                tracing::warn!(
-                    "post_success_script exited {} for {}; moving plan to failed",
-                    status.code().unwrap_or(-1),
-                    plan_file.display()
-                );
-                final_destination = failed_dir.to_path_buf();
-            }
-        }
-    }
-
-    let destination = final_destination.join(
-        plan_file
-            .file_name()
-            .ok_or_else(|| anyhow!("Plan file missing name"))?,
-    );
-    if destination.exists() {
-        fs::remove_file(&destination)?;
-    }
-    fs::rename(plan_file, &destination)?;
-    restore_env_vars(overrides);
-
-    Ok(once)
-}
-
-/// Handle failed run
-fn handle_failure(
-    context: &BatchTaskContext,
-    plan_file: &Path,
-    failed_dir: &Path,
-    overrides: Vec<(String, Option<String>)>,
-    once: bool,
-    runner: RunnerKind,
-    error: Error,
-) -> Result<()> {
-    tracing::error!(
-        "Batch processing failed for {}: {}",
-        plan_file.display(),
-        error
-    );
-
-    let script_env = build_batch_hook_env(context, "failure");
-    if runner == RunnerKind::Classic {
-        if let Some(fail_script) = &context.batch_config.post_fail_script {
-            match run_batch_hook_script(
-                &context.batch_config.project_root,
-                fail_script,
-                &script_env,
-            ) {
-                Ok(status) => {
-                    if !status.success() {
-                        tracing::warn!(
-                            "post_fail_script exited {} for {}",
-                            status.code().unwrap_or(-1),
-                            plan_file.display()
-                        );
-                    }
-                }
-                Err(err) => tracing::error!(
-                    "Failed to run post_fail_script for {}: {}",
-                    plan_file.display(),
-                    err
-                ),
-            }
-        }
-    }
-
-    let destination = failed_dir.join(
-        plan_file
-            .file_name()
-            .ok_or_else(|| anyhow!("Plan file missing name"))?,
-    );
-    if destination.exists() {
-        fs::remove_file(&destination)?;
-    }
-    fs::rename(plan_file, &destination)?;
-    restore_env_vars(overrides);
-
-    if once {
-        Err(anyhow!("Batch run failed for {}", plan_file.display()))
-    } else {
-        Ok(())
-    }
-}
-
 pub async fn batch(args: BatchArgs) -> Result<()> {
-    tracing::info!("Starting batch runner for project {}", args.project_id);
+    tracing::info!(
+        "Starting workflow batch runner for project {}",
+        args.project_id
+    );
 
     let workspace_root = validate_batch_workspace(args.workspace.clone())?;
     let batch_config = BatchProjectConfig::load(&workspace_root, &args.project_id)?;
@@ -1349,60 +786,138 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
         }
         let plan_file = plan_file.unwrap();
 
-        let task_id =
-            sanitize_task_id(plan_file.file_name().and_then(|n| n.to_str()).unwrap_or(""));
+        let task_layout = prepare_task_layout(&batch_config, &plan_file)?;
+        let run_result = execute_workflow_for_plan(&batch_config, &task_layout).await;
 
-        let (spec_path, state_dir, control_file_path) =
-            setup_task_dirs_and_state(&batch_config, &task_id, &plan_file, batch_config.resume)?;
+        // Move plan file to completed or failed directory
+        let destination_dir = if run_result.is_ok() {
+            &dirs.completed_dir
+        } else {
+            &dirs.failed_dir
+        };
 
-        let context = prepare_batch_context(
-            &batch_config,
-            &args.project_id,
-            &task_id,
-            &spec_path,
-            &workspace_root,
-            &state_dir,
-            &control_file_path,
+        let destination = destination_dir.join(
+            plan_file
+                .file_name()
+                .ok_or_else(|| anyhow::anyhow!("Plan file missing name"))?,
         );
+        if destination.exists() {
+            fs::remove_file(&destination)?;
+        }
+        fs::rename(&plan_file, &destination)?;
 
-        let overrides = setup_task_environment(&context, &workspace_root);
-        let selection = resolve_batch_runner_selection(&context)?;
-
-        let run_result =
-            execute_batch_task(&context, &args, &workspace_root, &plan_file, &selection).await;
-
-        if run_result.is_ok() {
-            if handle_success(
-                &context,
-                &plan_file,
-                &dirs.completed_dir,
-                &dirs.failed_dir,
-                overrides,
-                args.once,
-                selection.runner,
-            )? {
+        if let Err(error) = run_result {
+            tracing::error!(
+                "Workflow execution failed for {}: {}",
+                plan_file.display(),
+                error
+            );
+            if args.once {
+                return Err(error);
+            }
+        } else {
+            tracing::info!("Workflow execution completed for {}", plan_file.display());
+            if args.once {
                 return Ok(());
             }
-            continue;
         }
 
-        let error = run_result.unwrap_err();
-        handle_failure(
-            &context,
-            &plan_file,
-            &dirs.failed_dir,
-            overrides,
-            args.once,
-            selection.runner,
-            error,
-        )?;
-
-        sleep_if_needed(args.sleep).await;
+        if !args.once {
+            sleep_if_needed(args.sleep).await;
+        }
     }
 }
 
+async fn execute_workflow_for_plan(
+    batch_config: &BatchProjectConfig,
+    task_layout: &TaskLayout,
+) -> Result<()> {
+    fs::create_dir_all(task_layout.state_dir.join("workflows"))?;
+    fs::create_dir_all(task_layout.state_dir.join("artifacts").join("workflows"))?;
+
+    let workspace = batch_config.project_root.clone();
+    let workflow_path = batch_config.workflow_file.clone();
+    let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
+    let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
+    document.triggers = Some(workflow_schema::WorkflowTrigger {
+        trigger_type: workflow_schema::TriggerType::Manual,
+        schema_version: "1".to_string(),
+        payload: json!({
+            "input_file": task_layout.input_file.display().to_string(),
+            "workspace": batch_config.project_root.display().to_string(),
+        }),
+    });
+
+    let overrides = ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+        checkpoint_base_path: Some(task_layout.state_dir.join("workflows")),
+        artifact_base_path: Some(task_layout.state_dir.join("artifacts").join("workflows")),
+        verbose: false,
+    };
+
+    let mut builder = OperatorRegistry::builder();
+    workflow_operators::register_builtins(
+        &mut builder,
+        workspace.clone(),
+        document.workflow.settings.clone(),
+    );
+    let registry = builder.build();
+
+    let previous_state_dir = env::var_os("NEWTON_STATE_DIR");
+    env::set_var("NEWTON_STATE_DIR", &task_layout.state_dir);
+
+    let result = workflow_executor::execute_workflow(
+        document,
+        workflow_path,
+        registry,
+        workspace,
+        overrides,
+    )
+    .await;
+
+    if let Some(previous) = previous_state_dir {
+        env::set_var("NEWTON_STATE_DIR", previous);
+    } else {
+        env::remove_var("NEWTON_STATE_DIR");
+    }
+
+    result
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("Workflow execution failed: {}", e))
+}
+
+#[derive(Debug)]
+struct TaskLayout {
+    state_dir: PathBuf,
+    input_file: PathBuf,
+}
+
+fn prepare_task_layout(batch_config: &BatchProjectConfig, plan_file: &Path) -> Result<TaskLayout> {
+    let task_id = plan_file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("Plan file missing stem: {}", plan_file.display()))?;
+    let task_root = batch_config
+        .project_root
+        .join(".newton")
+        .join("tasks")
+        .join(task_id);
+    let input_dir = task_root.join("input");
+    let state_dir = task_root.join("state");
+    fs::create_dir_all(&input_dir)?;
+    fs::create_dir_all(&state_dir)?;
+    let input_file = input_dir.join("spec.md");
+    fs::copy(plan_file, &input_file)?;
+    Ok(TaskLayout {
+        state_dir,
+        input_file,
+    })
+}
+
 fn validate_batch_workspace(workspace: Option<PathBuf>) -> Result<PathBuf> {
-    let workspace_root = resolve_workspace_root(workspace)?;
+    let workspace_root = workspace.unwrap_or_else(|| std::env::current_dir().unwrap());
     let configs_dir = workspace_root.join(".newton").join("configs");
     if !configs_dir.is_dir() {
         return Err(anyhow!(
@@ -1419,811 +934,21 @@ async fn fetch_next_task(
     sleep_duration: u64,
 ) -> Result<Option<PathBuf>> {
     loop {
-        if let Some(path) = next_plan_file(todo_dir)? {
-            return Ok(Some(path));
+        // Simple implementation to get first plan file from todo directory
+        let mut entries = fs::read_dir(todo_dir)?;
+        if let Some(Ok(entry)) = entries.next() {
+            let path = entry.path();
+            if path.is_file() {
+                return Ok(Some(path));
+            }
         }
+
         if once {
             tracing::info!("Queue empty; exiting after --once");
             return Ok(None);
         }
         sleep_if_needed(sleep_duration).await;
     }
-}
-
-fn prepare_batch_context(
-    batch_config: &BatchProjectConfig,
-    project_id: &str,
-    task_id: &str,
-    spec_path: &Path,
-    workspace_root: &Path,
-    state_dir: &Path,
-    control_file: &Path,
-) -> BatchTaskContext {
-    let branch_name = derive_branch_name(spec_path, task_id);
-    let base_branch = detect_base_branch(&batch_config.project_root);
-
-    BatchTaskContext {
-        batch_config: batch_config.clone(),
-        project_id: project_id.to_string(),
-        task_id: task_id.to_string(),
-        goal_file: spec_path.to_path_buf(),
-        workspace_root: workspace_root.to_path_buf(),
-        state_dir: state_dir.to_path_buf(),
-        control_file: control_file.to_path_buf(),
-        branch_name,
-        base_branch,
-    }
-}
-
-fn setup_task_environment(
-    context: &BatchTaskContext,
-    workspace_root: &Path,
-) -> Vec<(String, Option<String>)> {
-    let coder_cmd = context
-        .batch_config
-        .coder_cmd
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            workspace_root
-                .join(".newton")
-                .join("scripts")
-                .join("coder.sh")
-        });
-
-    let project_root_str = context.batch_config.project_root.display().to_string();
-    let workspace_root_str = context.workspace_root.display().to_string();
-    let state_dir_str = context.state_dir.display().to_string();
-    let coder_cmd_str = coder_cmd.display().to_string();
-    let control_file_str = context.control_file.display().to_string();
-    let goal_file_str = context.goal_file.display().to_string();
-    let evaluator_cmd = context
-        .batch_config
-        .evaluator_cmd
-        .clone()
-        .unwrap_or_default();
-    let advisor_cmd = context.batch_config.advisor_cmd.clone().unwrap_or_default();
-    let executor_cmd = context
-        .batch_config
-        .executor_cmd
-        .clone()
-        .unwrap_or_default();
-
-    let env_pairs = [
-        ("CODING_AGENT", context.batch_config.coding_agent.as_str()),
-        (
-            "CODING_AGENT_MODEL",
-            context.batch_config.coding_model.as_str(),
-        ),
-        (
-            "NEWTON_EXECUTOR_CODING_AGENT",
-            context.batch_config.coding_agent.as_str(),
-        ),
-        (
-            "NEWTON_EXECUTOR_CODING_AGENT_MODEL",
-            context.batch_config.coding_model.as_str(),
-        ),
-        ("NEWTON_PROJECT_ROOT", project_root_str.as_str()),
-        ("NEWTON_PROJECT_ID", context.project_id.as_str()),
-        ("NEWTON_TASK_ID", context.task_id.as_str()),
-        ("NEWTON_WS_ROOT", workspace_root_str.as_str()),
-        ("NEWTON_STATE_DIR", state_dir_str.as_str()),
-        ("NEWTON_CODER_CMD", coder_cmd_str.as_str()),
-        ("NEWTON_EVALUATOR_CMD", evaluator_cmd.as_str()),
-        ("NEWTON_ADVISOR_CMD", advisor_cmd.as_str()),
-        ("NEWTON_EXECUTOR_CMD", executor_cmd.as_str()),
-        ("NEWTON_BRANCH_NAME", context.branch_name.as_str()),
-        ("NEWTON_CONTROL_FILE", control_file_str.as_str()),
-        ("NEWTON_GOAL_FILE", goal_file_str.as_str()),
-    ];
-    apply_env_overrides(&env_pairs)
-}
-
-async fn execute_batch_task(
-    context: &BatchTaskContext,
-    args: &BatchArgs,
-    workspace_root: &Path,
-    plan_file: &Path,
-    selection: &BatchRunnerSelection,
-) -> Result<()> {
-    if selection.runner == RunnerKind::Classic {
-        run_pre_run_hook(&context.batch_config, context, plan_file)?;
-    }
-
-    write_run_log(&context.state_dir, "Starting Newton run")?;
-
-    let ailoop_ctx = initialize_ailoop_context(workspace_root, args, &context.task_id)?;
-
-    let result = if selection.runner == RunnerKind::Classic {
-        let run_args = RunArgs::for_batch_with_tools(
-            context.batch_config.project_root.clone(),
-            Some(context.goal_file.clone()),
-            context.batch_config.evaluator_cmd.clone(),
-            context.batch_config.advisor_cmd.clone(),
-            context.batch_config.executor_cmd.clone(),
-            context.batch_config.max_iterations,
-            context.batch_config.max_time,
-            context.batch_config.verbose,
-            Some(context.control_file.clone()),
-        );
-
-        let newton_config = ConfigLoader::load_from_workspace(&context.batch_config.project_root)?;
-        ConfigValidator::validate(&newton_config)?;
-
-        let (_goal_file, additional_env) =
-            build_run_additional_env(&run_args, &context.batch_config.project_root)?;
-        let exec_config = build_run_exec_config(&run_args, &context.batch_config.project_root);
-        let success_policy = SuccessPolicy::from_path(context.control_file.clone());
-
-        let reporter = Box::new(DefaultErrorReporter);
-        let orchestrator = OptimizationOrchestrator::with_ailoop_context(
-            JsonSerializer,
-            FileUtils,
-            reporter,
-            ailoop_ctx,
-        );
-
-        let result = orchestrator
-            .run_optimization_with_policy(
-                &context.batch_config.project_root,
-                exec_config,
-                &additional_env,
-                Some(&success_policy),
-            )
-            .await;
-
-        match result {
-            Ok(execution) => report_run_result(execution),
-            Err(e) => Err(e.into()),
-        }
-    } else {
-        run_workflow_batch_task(context, selection, workspace_root).await
-    };
-
-    write_run_log(
-        &context.state_dir,
-        &format!(
-            "Newton run finished: {}",
-            if result.is_ok() { "success" } else { "failure" }
-        ),
-    )?;
-
-    result
-}
-
-#[derive(Debug, Clone)]
-struct BatchRunnerSelection {
-    runner: RunnerKind,
-    workflow_file: Option<PathBuf>,
-    user_triggers: Option<Map<String, Value>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SpecNewtonFrontmatter {
-    #[serde(default)]
-    runner: Option<String>,
-    #[serde(default)]
-    workflow_file: Option<String>,
-    #[serde(default)]
-    triggers: Option<Map<String, Value>>,
-}
-
-fn resolve_batch_runner_selection(context: &BatchTaskContext) -> Result<BatchRunnerSelection> {
-    let default_runner = context.batch_config.runner;
-    let default_workflow_file = context.batch_config.workflow_file.clone();
-    let frontmatter = parse_spec_newton_frontmatter(&context.goal_file)?;
-
-    let runner = match frontmatter
-        .as_ref()
-        .and_then(|value| value.runner.as_deref())
-        .map(str::trim)
-    {
-        Some("classic") => RunnerKind::Classic,
-        Some("workflow_graph") => RunnerKind::WorkflowGraph,
-        Some(other) => {
-            return Err(anyhow::anyhow!(
-                "{}",
-                AppError::new(
-                    ErrorCategory::ValidationError,
-                    format!(
-                        "spec.md frontmatter `newton:` block is invalid: invalid runner '{}'",
-                        other
-                    ),
-                )
-                .with_code("WFG-BATCH-001")
-            ))
-        }
-        None => default_runner,
-    };
-
-    let workflow_file = frontmatter
-        .as_ref()
-        .and_then(|value| value.workflow_file.as_ref().map(PathBuf::from))
-        .or(default_workflow_file);
-    let user_triggers = frontmatter.and_then(|value| value.triggers);
-
-    Ok(BatchRunnerSelection {
-        runner,
-        workflow_file,
-        user_triggers,
-    })
-}
-
-fn parse_spec_newton_frontmatter(path: &Path) -> Result<Option<SpecNewtonFrontmatter>> {
-    let content = fs::read_to_string(path)?;
-    if !content.starts_with("---\n") {
-        return Ok(None);
-    }
-    let tail = &content[4..];
-    let end = tail
-        .find("\n---\n")
-        .or_else(|| tail.find("\n---"))
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "{}",
-                AppError::new(
-                    ErrorCategory::ValidationError,
-                    "spec.md frontmatter `newton:` block is invalid: missing closing delimiter",
-                )
-                .with_code("WFG-BATCH-001")
-            )
-        })?;
-    let yaml = &tail[..end];
-    let parsed: Value = serde_yaml::from_str(yaml).map_err(|err| {
-        anyhow::anyhow!(
-            "{}",
-            AppError::new(
-                ErrorCategory::ValidationError,
-                format!("spec.md frontmatter `newton:` block is invalid: {}", err),
-            )
-            .with_code("WFG-BATCH-001")
-        )
-    })?;
-    let Some(newton_value) = parsed.get("newton") else {
-        return Ok(None);
-    };
-    let block: SpecNewtonFrontmatter =
-        serde_json::from_value(newton_value.clone()).map_err(|err| {
-            anyhow::anyhow!(
-                "{}",
-                AppError::new(
-                    ErrorCategory::ValidationError,
-                    format!("spec.md frontmatter `newton:` block is invalid: {}", err),
-                )
-                .with_code("WFG-BATCH-001")
-            )
-        })?;
-    Ok(Some(block))
-}
-
-fn resolve_workflow_file_path(
-    workflow_file: &Path,
-    project_root: &Path,
-    workspace_root: &Path,
-) -> PathBuf {
-    if workflow_file.is_absolute() {
-        return workflow_file.to_path_buf();
-    }
-    if workflow_file.to_string_lossy().starts_with(".newton/") {
-        return workspace_root.join(workflow_file);
-    }
-    project_root.join(workflow_file)
-}
-
-async fn run_workflow_batch_task(
-    context: &BatchTaskContext,
-    selection: &BatchRunnerSelection,
-    workspace_root: &Path,
-) -> Result<()> {
-    let workflow_file = selection.workflow_file.as_ref().ok_or_else(|| {
-        anyhow::anyhow!("runner=workflow_graph requires workflow_file in config or frontmatter")
-    })?;
-    let workflow_path = resolve_workflow_file_path(
-        workflow_file,
-        &context.batch_config.project_root,
-        workspace_root,
-    );
-    let raw_document =
-        workflow_schema::parse_workflow(&workflow_path).map_err(anyhow::Error::from)?;
-    let mut document =
-        workflow_transform::apply_default_pipeline(raw_document).map_err(anyhow::Error::from)?;
-    let lint_results = LintRegistry::new().run(&document);
-    let error_count = lint_results
-        .iter()
-        .filter(|result| result.severity == LintSeverity::Error)
-        .count();
-    if error_count > 0 {
-        return Err(anyhow::anyhow!(
-            "workflow lint detected {} error(s); fix before running",
-            error_count
-        ));
-    }
-
-    let mut payload = Map::new();
-    payload.insert(
-        "project_id".to_string(),
-        Value::String(context.project_id.clone()),
-    );
-    payload.insert(
-        "task_id".to_string(),
-        Value::String(context.task_id.clone()),
-    );
-    payload.insert(
-        "project_root".to_string(),
-        Value::String(context.batch_config.project_root.display().to_string()),
-    );
-    payload.insert(
-        "state_dir".to_string(),
-        Value::String(context.state_dir.display().to_string()),
-    );
-    payload.insert(
-        "spec_path".to_string(),
-        Value::String(context.goal_file.display().to_string()),
-    );
-    payload.insert(
-        "control_file".to_string(),
-        Value::String(context.control_file.display().to_string()),
-    );
-    payload.insert(
-        "workspace_root".to_string(),
-        Value::String(context.workspace_root.display().to_string()),
-    );
-    if let Some(user) = &selection.user_triggers {
-        payload.insert("user".to_string(), Value::Object(user.clone()));
-    }
-    document.triggers = Some(workflow_schema::WorkflowTrigger {
-        trigger_type: workflow_schema::TriggerType::Manual,
-        schema_version: "1".to_string(),
-        payload: Value::Object(payload),
-    });
-
-    document
-        .validate(&ExpressionEngine::default())
-        .map_err(anyhow::Error::from)?;
-
-    let mut builder = OperatorRegistry::builder();
-    workflow_operators::register_builtins(
-        &mut builder,
-        context.batch_config.project_root.clone(),
-        document.workflow.settings.clone(),
-    );
-    let registry = builder.build();
-    let checkpoint_base_path = context.state_dir.join("workflows");
-    let artifact_base_path = context.state_dir.join("artifacts");
-    let overrides = ExecutionOverrides {
-        parallel_limit: None,
-        max_time_seconds: None,
-        checkpoint_base_path: Some(checkpoint_base_path),
-        artifact_base_path: Some(artifact_base_path),
-    };
-    workflow_executor::execute_workflow(
-        document,
-        workflow_path,
-        registry,
-        context.batch_config.project_root.clone(),
-        overrides,
-    )
-    .await
-    .map(|_| ())
-    .map_err(anyhow::Error::from)
-}
-
-fn initialize_ailoop_context(
-    workspace_root: &Path,
-    args: &BatchArgs,
-    task_id: &str,
-) -> Result<Option<Arc<ailoop_integration::AiloopContext>>> {
-    match ailoop_integration::init_context(workspace_root, &CliCommand::Batch(args.clone())) {
-        Ok(ctx) => {
-            if let Some(ref context) = ctx {
-                tracing::info!(
-                    "Ailoop integration enabled for batch task {} on channel: {}",
-                    task_id,
-                    context.channel()
-                );
-            }
-            Ok(ctx.map(Arc::new))
-        }
-        Err(e) => {
-            tracing::warn!("Failed to initialize ailoop integration for batch: {}", e);
-            Ok(None)
-        }
-    }
-}
-
-pub async fn step(args: StepArgs) -> Result<()> {
-    tracing::info!("Executing single step");
-
-    let reporter = Box::new(DefaultErrorReporter);
-    let orchestrator = OptimizationOrchestrator::new(JsonSerializer, FileUtils, reporter);
-
-    let exec_config = crate::core::entities::ExecutionConfiguration {
-        evaluator_cmd: None,
-        advisor_cmd: None,
-        executor_cmd: None,
-        max_iterations: Some(1),
-        max_time_seconds: Some(30),
-        evaluator_timeout_ms: None,
-        advisor_timeout_ms: None,
-        executor_timeout_ms: None,
-        global_timeout_ms: Some(30000),
-        strict_toolchain_mode: false,
-        resource_monitoring: false,
-        verbose: args.verbose,
-    };
-
-    orchestrator
-        .run_optimization(&args.path, exec_config)
-        .await?;
-
-    Ok(())
-}
-
-pub async fn status(args: StatusArgs) -> Result<()> {
-    tracing::info!("Checking status for execution: {}", args.execution_id);
-
-    let execution_dir = args
-        .path
-        .join(".newton")
-        .join("executions")
-        .join(&args.execution_id);
-    let execution_file = execution_dir.join("execution.json");
-
-    if !execution_file.exists() {
-        println!("Execution {} not found", args.execution_id);
-        return Ok(());
-    }
-
-    let content = std::fs::read_to_string(&execution_file)?;
-    let execution: crate::core::entities::OptimizationExecution = serde_json::from_str(&content)?;
-
-    println!("Execution ID: {}", execution.id);
-    println!("Status: {:?}", execution.status);
-    println!("Iterations: {}", execution.total_iterations_completed);
-    println!("Started: {}", execution.started_at);
-    if let Some(completed) = execution.completed_at {
-        println!("Completed: {}", completed);
-    }
-
-    Ok(())
-}
-
-pub async fn report(args: ReportArgs) -> Result<()> {
-    tracing::info!("Generating report for execution: {}", args.execution_id);
-
-    let execution_dir = args
-        .path
-        .join(".newton")
-        .join("executions")
-        .join(&args.execution_id);
-    let execution_file = execution_dir.join("execution.json");
-
-    if !execution_file.exists() {
-        return Err(anyhow!("Execution {} not found", args.execution_id));
-    }
-
-    let content = std::fs::read_to_string(&execution_file)?;
-    let execution: crate::core::entities::OptimizationExecution = serde_json::from_str(&content)?;
-
-    match args.format {
-        crate::cli::args::ReportFormat::Text => {
-            println!("Newton Optimization Report");
-            println!("=========================\n");
-            println!("Execution ID: {}", execution.id);
-            println!("Status: {:?}", execution.status);
-            println!("Iterations: {}", execution.total_iterations_completed);
-            println!("Started: {}", execution.started_at);
-            if let Some(completed) = execution.completed_at {
-                let duration = completed.signed_duration_since(execution.started_at);
-                println!("Duration: {}", duration);
-            }
-            println!(
-                "\nTotal Iterations: {}",
-                execution.total_iterations_completed
-            );
-        }
-        crate::cli::args::ReportFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&execution)?);
-        }
-    }
-
-    Ok(())
-}
-
-pub async fn error(args: ErrorArgs) -> Result<()> {
-    tracing::info!("Analyzing errors for execution: {}", args.execution_id);
-
-    let execution_dir = Path::new(".")
-        .join(".newton")
-        .join("executions")
-        .join(&args.execution_id);
-
-    let error_log = execution_dir.join("error.log");
-
-    if error_log.exists() {
-        let content = std::fs::read_to_string(&error_log)?;
-        if args.verbose {
-            println!("Full error details:\n{}", content);
-        } else {
-            let summary: String = content.lines().take(10).collect::<Vec<_>>().join("\n");
-            println!("Error summary:\n{}", summary);
-            if content.lines().count() > 10 {
-                println!("\n... (truncated, use --verbose for full output)");
-            }
-        }
-    } else {
-        println!("No error log found for execution {}", args.execution_id);
-    }
-
-    Ok(())
-}
-
-fn prepare_goal_file(args: &RunArgs, workspace_path: &Path) -> Result<Option<PathBuf>> {
-    if let Some(ref path) = args.goal_file {
-        Ok(Some(path.clone()))
-    } else if let Some(ref goal_text) = args.goal {
-        let path = workspace_path.join(".newton/state/goal.txt");
-        let parent = path
-            .parent()
-            .ok_or_else(|| anyhow!("goal path has no parent directory"))?;
-        fs::create_dir_all(parent)?;
-        fs::write(&path, goal_text)?;
-        Ok(Some(path))
-    } else {
-        Ok(None)
-    }
-}
-
-fn default_workspace_script(workspace_path: &Path, script_name: &str) -> Option<String> {
-    let script_path = workspace_path.join(".newton/scripts").join(script_name);
-    if script_path.is_file() {
-        Some(script_path.display().to_string())
-    } else {
-        None
-    }
-}
-
-fn resolve_workspace_root(minimum_workspace: Option<PathBuf>) -> Result<PathBuf> {
-    if let Some(workspace) = minimum_workspace {
-        if workspace.join(".newton").is_dir() {
-            return Ok(workspace);
-        }
-        return Err(anyhow!(
-            "Provided workspace {} is missing .newton",
-            workspace.display()
-        ));
-    }
-
-    let current_dir = env::current_dir()?;
-    find_workspace_root(&current_dir)
-}
-
-fn next_plan_file(plan_dir: &Path) -> Result<Option<PathBuf>> {
-    let mut entries: Vec<PathBuf> = fs::read_dir(plan_dir)?
-        .filter_map(|entry| entry.ok().map(|e| e.path()))
-        .filter(|path| path.is_file())
-        .collect();
-
-    entries.sort();
-    Ok(entries.into_iter().next())
-}
-
-fn sanitize_task_id(raw_name: &str) -> String {
-    let filtered: String = raw_name
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
-        .collect();
-    if filtered.is_empty() {
-        format!("task-{}", Utc::now().timestamp_millis())
-    } else {
-        filtered
-    }
-}
-
-fn apply_env_overrides(pairs: &[(&str, &str)]) -> Vec<(String, Option<String>)> {
-    pairs
-        .iter()
-        .map(|(key, value)| {
-            let previous = env::var(key).ok();
-            env::set_var(key, value);
-            (key.to_string(), previous)
-        })
-        .collect()
-}
-
-fn restore_env_vars(overrides: Vec<(String, Option<String>)>) {
-    for (key, previous) in overrides.into_iter().rev() {
-        if let Some(value) = previous {
-            env::set_var(&key, value);
-        } else {
-            env::remove_var(&key);
-        }
-    }
-}
-
-fn build_batch_hook_env(context: &BatchTaskContext, result: &str) -> HashMap<String, String> {
-    let mut env_vars = HashMap::new();
-    env_vars.insert(
-        "CODING_AGENT".to_string(),
-        context.batch_config.coding_agent.clone(),
-    );
-    env_vars.insert(
-        "CODING_AGENT_MODEL".to_string(),
-        context.batch_config.coding_model.clone(),
-    );
-    env_vars.insert(
-        "NEWTON_EXECUTOR_CODING_AGENT".to_string(),
-        context.batch_config.coding_agent.clone(),
-    );
-    env_vars.insert(
-        "NEWTON_EXECUTOR_CODING_AGENT_MODEL".to_string(),
-        context.batch_config.coding_model.clone(),
-    );
-    env_vars.insert(
-        "NEWTON_GOAL_FILE".to_string(),
-        context.goal_file.display().to_string(),
-    );
-    env_vars.insert("NEWTON_PROJECT_ID".to_string(), context.project_id.clone());
-    env_vars.insert("NEWTON_TASK_ID".to_string(), context.task_id.clone());
-    env_vars.insert(
-        "NEWTON_PROJECT_ROOT".to_string(),
-        context.batch_config.project_root.display().to_string(),
-    );
-    env_vars.insert(
-        "NEWTON_WS_ROOT".to_string(),
-        context.workspace_root.display().to_string(),
-    );
-    env_vars.insert(
-        "NEWTON_STATE_DIR".to_string(),
-        context.state_dir.display().to_string(),
-    );
-    env_vars.insert(
-        "NEWTON_CONTROL_FILE".to_string(),
-        context.control_file.display().to_string(),
-    );
-    env_vars.insert("NEWTON_RESULT".to_string(), result.to_string());
-    env_vars.insert(
-        "NEWTON_BASE_BRANCH".to_string(),
-        context.base_branch.clone(),
-    );
-    env_vars.insert(
-        "NEWTON_BRANCH_NAME".to_string(),
-        context.branch_name.clone(),
-    );
-    env_vars
-}
-
-fn run_batch_hook_script(
-    project_root: &Path,
-    script: &str,
-    env_vars: &HashMap<String, String>,
-) -> Result<std::process::ExitStatus> {
-    let status = Command::new("sh")
-        .arg("-c")
-        .arg(script)
-        .current_dir(project_root)
-        .envs(env_vars)
-        .status()
-        .map_err(|e| anyhow!("failed to execute hook script: {}", e))?;
-    Ok(status)
-}
-
-fn build_pre_run_env(context: &BatchTaskContext) -> HashMap<String, String> {
-    let mut env_vars = HashMap::new();
-    env_vars.insert(
-        "CODING_AGENT".to_string(),
-        context.batch_config.coding_agent.clone(),
-    );
-    env_vars.insert(
-        "CODING_AGENT_MODEL".to_string(),
-        context.batch_config.coding_model.clone(),
-    );
-    env_vars.insert(
-        "NEWTON_PROJECT_ROOT".to_string(),
-        context.batch_config.project_root.display().to_string(),
-    );
-    env_vars.insert("NEWTON_PROJECT_ID".to_string(), context.project_id.clone());
-    env_vars.insert("NEWTON_TASK_ID".to_string(), context.task_id.clone());
-    env_vars.insert(
-        "NEWTON_GOAL_FILE".to_string(),
-        context.goal_file.display().to_string(),
-    );
-    env_vars.insert(
-        "NEWTON_WS_ROOT".to_string(),
-        context.workspace_root.display().to_string(),
-    );
-    env_vars.insert(
-        "NEWTON_STATE_DIR".to_string(),
-        context.state_dir.display().to_string(),
-    );
-    env_vars.insert(
-        "NEWTON_CONTROL_FILE".to_string(),
-        context.control_file.display().to_string(),
-    );
-    env_vars.insert(
-        "NEWTON_BRANCH_NAME".to_string(),
-        context.branch_name.clone(),
-    );
-    env_vars.insert(
-        "NEWTON_RESUME".to_string(),
-        if context.batch_config.resume {
-            "1"
-        } else {
-            "0"
-        }
-        .to_string(),
-    );
-    env_vars
-}
-
-fn derive_branch_name(goal_file: &Path, task_id: &str) -> String {
-    let content = match fs::read_to_string(goal_file) {
-        Ok(content) => content,
-        Err(_) => return format!("feature/{}", task_id.replace('_', "-")),
-    };
-
-    let mut lines = content.lines();
-    if lines.next().map(str::trim) != Some("---") {
-        return format!("feature/{}", task_id.replace('_', "-"));
-    }
-
-    for line in lines {
-        let trimmed = line.trim();
-        if trimmed == "---" {
-            break;
-        }
-        if let Some(rest) = trimmed.strip_prefix("branch:") {
-            let branch = rest.trim().trim_matches('"');
-            if !branch.is_empty() {
-                return branch.to_string();
-            }
-        }
-    }
-
-    format!("feature/{}", task_id.replace('_', "-"))
-}
-
-fn detect_base_branch(project_root: &Path) -> String {
-    let default_branch = "main".to_string();
-
-    let output = match Command::new("git")
-        .arg("-C")
-        .arg(project_root)
-        .arg("rev-parse")
-        .arg("--abbrev-ref")
-        .arg("origin/HEAD")
-        .output()
-    {
-        Ok(output) => output,
-        Err(_) => return default_branch,
-    };
-
-    if !output.status.success() {
-        return default_branch;
-    }
-
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if branch.is_empty() {
-        return default_branch;
-    }
-
-    if let Some(stripped) = branch.strip_prefix("origin/") {
-        if !stripped.is_empty() {
-            return stripped.to_string();
-        }
-    }
-
-    branch
-}
-
-fn write_run_log(state_dir: &Path, message: &str) -> Result<()> {
-    let log_path = state_dir.join("newton_run.log");
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)?;
-    writeln!(file, "[{}] {}", Utc::now(), message)?;
-    Ok(())
 }
 
 #[cfg(test)]

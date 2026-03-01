@@ -245,6 +245,7 @@ impl WorkflowTestHarness {
                 max_time_seconds: None,
                 checkpoint_base_path: Some(self.temp_dir.path().join(".newton/state/workflows")),
                 artifact_base_path: Some(self.temp_dir.path().join(".newton/artifacts")),
+                verbose: false,
             },
         )
         .await
@@ -266,9 +267,7 @@ fn execute_workflow_cli(workflow_filename: &str) -> WorkflowCliResult {
     let temp_dir = tempfile::tempdir().unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_newton"))
-        .arg("workflow")
         .arg("run")
-        .arg("--workflow")
         .arg(format!("tests/fixtures/workflows/{}", workflow_filename))
         .arg("--workspace")
         .arg(temp_dir.path())

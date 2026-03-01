@@ -100,7 +100,17 @@ impl Config {
                 let workspace = self
                     .workspace
                     .ok_or_else(|| anyhow!("workspace is required for localdev"))?;
-                Ok(Command::Run(RunArgs::for_batch(workspace, None)))
+                Ok(Command::Run(RunArgs {
+                    workflow: workspace.join("workflow.yaml"),
+                    input_file: None,
+                    workspace: Some(workspace),
+                    arg: Vec::new(),
+                    set: Vec::new(),
+                    trigger_json: None,
+                    parallel_limit: None,
+                    max_time_seconds: None,
+                    verbose: false,
+                }))
             }
             Mode::Batch => {
                 let workspace = self

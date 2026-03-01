@@ -62,33 +62,14 @@ tokio-test = "0.4.5"
 regex = "1.11"
 wiremock = "0.6"
 
-[[test]]
-name = "test_cli_commands"
-path = "tests/unit/test_cli_commands.rs"
-
-[[test]]
-name = "test_orchestrator"
-path = "tests/unit/test_orchestrator.rs"
-
-[[test]]
-name = "test_utils_files"
-path = "tests/unit/test_utils_files.rs"
 
 [[test]]
 name = "test_error_comprehensive"
 path = "tests/unit/test_error_comprehensive.rs"
 
 [[test]]
-name = "test_history_recorder"
-path = "tests/unit/test_history_recorder.rs"
-
-[[test]]
 name = "test_logger"
 path = "tests/unit/test_logger.rs"
-
-[[test]]
-name = "test_tool_executor"
-path = "tests/unit/test_tool_executor.rs"
 
 [[test]]
 name = "test_serialization"
@@ -97,18 +78,6 @@ path = "tests/unit/test_serialization.rs"
 [[test]]
 name = "test_main_functionality"
 path = "tests/unit/test_main_functionality.rs"
-
-[[test]]
-name = "test_tools_execution"
-path = "tests/unit/test_tools_execution.rs"
-
-[[test]]
-name = "test_comprehensive_coverage"
-path = "tests/integration/test_comprehensive_coverage.rs"
-
-[[test]]
-name = "test_cli_commands_snapshots"
-path = "tests/snapshots/test_cli_commands_snapshots.rs"
 
 [[test]]
 name = "test_config_comprehensive"
@@ -173,14 +142,6 @@ path = "tests/workflow_graph/test_agent_operator.rs"
 [[test]]
 name = "test_workflow_scenarios"
 path = "tests/integration/test_workflow_scenarios.rs"
-
-[[test]]
-name = "test_profile_mode"
-path = "tests/run/test_profile_mode.rs"
-
-[[test]]
-name = "test_runner_selection"
-path = "tests/batch/test_runner_selection.rs"
 
 [[test]]
 name = "test_batch_workflow_state_paths"

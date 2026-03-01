@@ -117,6 +117,7 @@ async fn spawn_webhook_server(
         max_time_seconds: None,
         checkpoint_base_path: None,
         artifact_base_path: None,
+        verbose: false,
     };
     let (addr_tx, addr_rx) = oneshot::channel();
     let handle = tokio::spawn(async move {
@@ -177,6 +178,7 @@ async fn manual_trigger_payload_available() -> Result<()> {
         max_time_seconds: Some(60),
         checkpoint_base_path: None,
         artifact_base_path: None,
+        verbose: false,
     };
     let summary = executor::execute_workflow(
         document,

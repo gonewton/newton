@@ -37,12 +37,15 @@ pub fn detect_context(command: &Command) -> ExecutionContext {
     match command {
         Command::Batch(_) => ExecutionContext::Batch,
         Command::Run(_)
-        | Command::Step(_)
-        | Command::Status(_)
-        | Command::Report(_)
-        | Command::Error(_)
-        | Command::Init(_)
-        | Command::Workflow(_) => ExecutionContext::LocalDev,
+        | Command::Validate(_)
+        | Command::Dot(_)
+        | Command::Lint(_)
+        | Command::Explain(_)
+        | Command::Resume(_)
+        | Command::Checkpoints(_)
+        | Command::Artifacts(_)
+        | Command::Webhook(_)
+        | Command::Init(_) => ExecutionContext::LocalDev,
         Command::Monitor(_) => ExecutionContext::Tui,
     }
 }

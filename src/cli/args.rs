@@ -1,146 +1,63 @@
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use std::str::FromStr;
 use uuid::Uuid;
 
 #[derive(Args, Clone)]
 pub struct RunArgs {
-    /// Path containing Newton manifests and artifacts
-    #[arg(value_name = "PATH", default_value = ".")]
-    pub path: PathBuf,
+    /// Path to the workflow YAML file
+    #[arg(value_name = "WORKFLOW")]
+    pub workflow: PathBuf,
 
-    /// Cap the loop after this many iterations (default: 10)
-    #[arg(long, default_value = "10")]
-    pub max_iterations: usize,
+    /// Optional path written into triggers.payload.input_file
+    #[arg(value_name = "INPUT_FILE")]
+    pub input_file: Option<PathBuf>,
 
-    /// Abort the loop after this wall-clock budget in seconds (default: 300)
-    #[arg(long, default_value = "300")]
-    pub max_time: u64,
+    /// Workspace root directory (default: current directory)
+    #[arg(long, value_name = "PATH")]
+    pub workspace: Option<PathBuf>,
 
-    /// Replace the default evaluator tool invocation (strict mode)
-    #[arg(long, value_name = "CMD", help_heading = "Strict Mode Overrides")]
-    pub evaluator_cmd: Option<String>,
+    /// Merge KEY into triggers.payload; VALUE may be @path to read from file, @@ for literal @
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub arg: Vec<KeyValuePair>,
 
-    /// Replace the default advisor tool invocation (strict mode)
-    #[arg(long, value_name = "CMD", help_heading = "Strict Mode Overrides")]
-    pub advisor_cmd: Option<String>,
+    /// Merge KEY into workflow.context at runtime
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub set: Vec<KeyValuePair>,
 
-    /// Replace the default executor tool invocation (strict mode)
-    #[arg(long, value_name = "CMD", help_heading = "Strict Mode Overrides")]
-    pub executor_cmd: Option<String>,
+    /// Load JSON object as base trigger payload before --arg overrides
+    #[arg(long, value_name = "PATH")]
+    pub trigger_json: Option<PathBuf>,
 
-    /// Custom location for captured evaluator status artifacts
-    #[arg(
-        long,
-        default_value = "artifacts/evaluator_status.md",
-        value_name = "FILE",
-        help_heading = "Artifact Paths"
-    )]
-    pub evaluator_status_file: PathBuf,
+    /// Runtime override for bounded task concurrency
+    #[arg(long, value_name = "N")]
+    pub parallel_limit: Option<usize>,
 
-    /// Custom location for advisor recommendation notes
-    #[arg(
-        long,
-        default_value = "artifacts/advisor_recommendations.md",
-        value_name = "FILE",
-        help_heading = "Artifact Paths"
-    )]
-    pub advisor_recommendations_file: PathBuf,
+    /// Runtime wall-clock limit override (seconds)
+    #[arg(long, value_name = "N")]
+    pub max_time_seconds: Option<u64>,
 
-    /// Custom location for executor streaming logs
-    #[arg(
-        long,
-        default_value = "artifacts/executor_log.md",
-        value_name = "FILE",
-        help_heading = "Artifact Paths"
-    )]
-    pub executor_log_file: PathBuf,
-
-    /// Default timeout applied to every tool (seconds)
-    #[arg(long, default_value = "30", help_heading = "Timeout Overrides")]
-    pub tool_timeout_seconds: u64,
-
-    /// Override timeout for evaluator tool only (seconds)
-    #[arg(long, value_name = "SECONDS", help_heading = "Timeout Overrides")]
-    pub evaluator_timeout: Option<u64>,
-
-    /// Override timeout for advisor tool only (seconds)
-    #[arg(long, value_name = "SECONDS", help_heading = "Timeout Overrides")]
-    pub advisor_timeout: Option<u64>,
-
-    /// Override timeout for executor tool only (seconds)
-    #[arg(long, value_name = "SECONDS", help_heading = "Timeout Overrides")]
-    pub executor_timeout: Option<u64>,
-
-    /// Enable verbose output to display tool stdout/stderr
-    #[arg(long, help_heading = "Output Options")]
+    /// Print task stdout/stderr to terminal after each task completes
+    #[arg(long)]
     pub verbose: bool,
-
-    /// Path to custom config file (default: {workspace}/newton.toml)
-    #[arg(long, value_name = "FILE", help_heading = "Configuration")]
-    pub config: Option<PathBuf>,
-
-    /// Goal description (written to goal file, passed as NEWTON_GOAL_FILE)
-    #[arg(long, value_name = "TEXT", help_heading = "Goal Management")]
-    pub goal: Option<String>,
-
-    /// Existing goal file to use instead of writing --goal text (passed as NEWTON_GOAL_FILE)
-    #[arg(long, value_name = "FILE", help_heading = "Goal Management")]
-    pub goal_file: Option<PathBuf>,
-
-    /// Control file path override (default: newton_control.json)
-    #[arg(long, value_name = "FILE", help_heading = "Goal Management")]
-    pub control_file: Option<PathBuf>,
-
-    /// User feedback passed to tools via NEWTON_USER_FEEDBACK
-    #[arg(long, value_name = "TEXT", help_heading = "User Interaction")]
-    pub feedback: Option<String>,
-}
-
-#[derive(Parser, Clone)]
-pub struct WorkflowArgs {
-    #[command(subcommand)]
-    pub command: WorkflowCommand,
-}
-
-#[derive(Subcommand, Clone)]
-pub enum WorkflowCommand {
-    #[command(about = "Execute a workflow graph")]
-    Run(WorkflowRunArgs),
-    #[command(about = "Validate a workflow graph definition")]
-    Validate(WorkflowValidateArgs),
-    #[command(about = "Render workflow graph as DOT")]
-    Dot(WorkflowDotArgs),
-    #[command(about = "Validate workflow lint rules")]
-    Lint(WorkflowLintArgs),
-    #[command(about = "Explain workflow graph settings/transitions")]
-    Explain(WorkflowExplainArgs),
-    #[command(about = "Resume a previously-started workflow execution")]
-    Resume(WorkflowResumeArgs),
-    #[command(about = "Inspect workflow checkpoints")]
-    Checkpoints(WorkflowCheckpointsArgs),
-    #[command(about = "Manage workflow artifacts")]
-    Artifacts(WorkflowArtifactsArgs),
-    #[command(about = "Manage workflow webhook listener")]
-    Webhook(WorkflowWebhookArgs),
 }
 
 #[derive(Args, Clone)]
-pub struct WorkflowWebhookArgs {
+pub struct WebhookArgs {
     #[command(subcommand)]
-    pub command: WorkflowWebhookCommand,
+    pub command: WebhookCommand,
 }
 
 #[derive(Subcommand, Clone)]
-pub enum WorkflowWebhookCommand {
+pub enum WebhookCommand {
     #[command(about = "Serve a webhook listener")]
-    Serve(WorkflowWebhookServeArgs),
+    Serve(WebhookServeArgs),
     #[command(about = "Show webhook configuration status")]
-    Status(WorkflowWebhookStatusArgs),
+    Status(WebhookStatusArgs),
 }
 
 #[derive(Args, Clone)]
-pub struct WorkflowWebhookServeArgs {
+pub struct WebhookServeArgs {
     #[arg(long, value_name = "PATH")]
     pub workflow: PathBuf,
 
@@ -149,38 +66,12 @@ pub struct WorkflowWebhookServeArgs {
 }
 
 #[derive(Args, Clone)]
-pub struct WorkflowWebhookStatusArgs {
+pub struct WebhookStatusArgs {
     #[arg(long, value_name = "PATH")]
     pub workspace: PathBuf,
 
     #[arg(long, value_name = "PATH")]
     pub workflow: Option<PathBuf>,
-}
-
-#[derive(Args, Clone)]
-pub struct WorkflowRunArgs {
-    #[arg(long, value_name = "PATH")]
-    pub workflow: PathBuf,
-
-    #[arg(long, value_name = "PATH")]
-    pub workspace: Option<PathBuf>,
-
-    /// Path to JSON file containing manual trigger payload
-    #[arg(long, value_name = "PATH")]
-    pub trigger_json: Option<PathBuf>,
-
-    /// Trigger payload override in KEY=VALUE form (supports VALUE=@path)
-    #[arg(long, value_name = "KEY=VALUE")]
-    pub arg: Vec<KeyValuePair>,
-
-    #[arg(long, value_name = "KEY=VALUE")]
-    pub set: Vec<KeyValuePair>,
-
-    #[arg(long)]
-    pub parallel_limit: Option<usize>,
-
-    #[arg(long)]
-    pub max_time_seconds: Option<u64>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -191,7 +82,7 @@ pub enum OutputFormat {
 }
 
 #[derive(Args, Clone)]
-pub struct WorkflowLintArgs {
+pub struct LintArgs {
     #[arg(long, value_name = "PATH")]
     pub workflow: PathBuf,
 
@@ -200,7 +91,7 @@ pub struct WorkflowLintArgs {
 }
 
 #[derive(Args, Clone)]
-pub struct WorkflowExplainArgs {
+pub struct ExplainArgs {
     #[arg(long, value_name = "PATH")]
     pub workflow: PathBuf,
 
@@ -223,13 +114,13 @@ pub struct WorkflowExplainArgs {
 }
 
 #[derive(Args, Clone)]
-pub struct WorkflowValidateArgs {
+pub struct ValidateArgs {
     #[arg(long, value_name = "PATH")]
     pub workflow: PathBuf,
 }
 
 #[derive(Args, Clone)]
-pub struct WorkflowDotArgs {
+pub struct DotArgs {
     #[arg(long, value_name = "PATH")]
     pub workflow: PathBuf,
 
@@ -238,7 +129,7 @@ pub struct WorkflowDotArgs {
 }
 
 #[derive(Args, Clone)]
-pub struct WorkflowResumeArgs {
+pub struct ResumeArgs {
     #[arg(long, value_name = "UUID")]
     pub execution_id: Uuid,
 
@@ -250,13 +141,13 @@ pub struct WorkflowResumeArgs {
 }
 
 #[derive(Args, Clone)]
-pub struct WorkflowCheckpointsArgs {
+pub struct CheckpointsArgs {
     #[command(subcommand)]
-    pub command: WorkflowCheckpointCommand,
+    pub command: CheckpointCommand,
 }
 
 #[derive(Subcommand, Clone)]
-pub enum WorkflowCheckpointCommand {
+pub enum CheckpointCommand {
     #[command(about = "List workflow checkpoints")]
     List {
         #[arg(long, value_name = "PATH")]
@@ -276,13 +167,13 @@ pub enum WorkflowCheckpointCommand {
 }
 
 #[derive(Args, Clone)]
-pub struct WorkflowArtifactsArgs {
+pub struct ArtifactsArgs {
     #[command(subcommand)]
-    pub command: WorkflowArtifactCommand,
+    pub command: ArtifactCommand,
 }
 
 #[derive(Subcommand, Clone)]
-pub enum WorkflowArtifactCommand {
+pub enum ArtifactCommand {
     #[command(about = "Clean artifact store files")]
     Clean {
         #[arg(long, value_name = "PATH")]
@@ -321,97 +212,6 @@ impl FromStr for KeyValuePair {
     }
 }
 
-impl RunArgs {
-    /// Produce default arguments used by the batch processor.
-    pub fn for_batch(project_root: PathBuf, goal_file: Option<PathBuf>) -> Self {
-        RunArgs {
-            path: project_root,
-            max_iterations: 10,
-            max_time: 300,
-            evaluator_cmd: None,
-            advisor_cmd: None,
-            executor_cmd: None,
-            evaluator_status_file: PathBuf::from("artifacts/evaluator_status.md"),
-            advisor_recommendations_file: PathBuf::from("artifacts/advisor_recommendations.md"),
-            executor_log_file: PathBuf::from("artifacts/executor_log.md"),
-            tool_timeout_seconds: 30,
-            evaluator_timeout: None,
-            advisor_timeout: None,
-            executor_timeout: None,
-            verbose: false,
-            config: None,
-            goal: None,
-            goal_file,
-            control_file: None,
-            feedback: None,
-        }
-    }
-
-    /// Produce batch arguments when tooling overrides and limits should come from config.
-    #[allow(clippy::too_many_arguments)] // Batch helper mirrors CLI overrides so the argument count reflects user-facing flags.
-    pub fn for_batch_with_tools(
-        project_root: PathBuf,
-        goal_file: Option<PathBuf>,
-        evaluator_cmd: Option<String>,
-        advisor_cmd: Option<String>,
-        executor_cmd: Option<String>,
-        max_iterations: Option<usize>,
-        max_time: Option<u64>,
-        verbose: bool,
-        control_file_path: Option<PathBuf>,
-    ) -> Self {
-        let config = BatchRunConfig {
-            project_root,
-            goal_file,
-            evaluator_cmd,
-            advisor_cmd,
-            executor_cmd,
-            max_iterations,
-            max_time,
-            verbose,
-            control_file_path,
-        };
-        Self::from_batch_config(config)
-    }
-
-    fn from_batch_config(config: BatchRunConfig) -> Self {
-        RunArgs {
-            path: config.project_root,
-            max_iterations: config.max_iterations.unwrap_or(5),
-            max_time: config.max_time.unwrap_or(3600),
-            evaluator_cmd: config.evaluator_cmd,
-            advisor_cmd: config.advisor_cmd,
-            executor_cmd: config.executor_cmd,
-            evaluator_status_file: PathBuf::from("artifacts/evaluator_status.md"),
-            advisor_recommendations_file: PathBuf::from("artifacts/advisor_recommendations.md"),
-            executor_log_file: PathBuf::from("artifacts/executor_log.md"),
-            tool_timeout_seconds: 30,
-            evaluator_timeout: None,
-            advisor_timeout: None,
-            executor_timeout: None,
-            verbose: config.verbose,
-            config: None,
-            goal: None,
-            goal_file: config.goal_file,
-            control_file: config.control_file_path,
-            feedback: None,
-        }
-    }
-}
-
-/// Configuration for batch run arguments
-pub struct BatchRunConfig {
-    pub project_root: PathBuf,
-    pub goal_file: Option<PathBuf>,
-    pub evaluator_cmd: Option<String>,
-    pub advisor_cmd: Option<String>,
-    pub executor_cmd: Option<String>,
-    pub max_iterations: Option<usize>,
-    pub max_time: Option<u64>,
-    pub verbose: bool,
-    pub control_file_path: Option<PathBuf>,
-}
-
 #[derive(Args, Clone)]
 pub struct BatchArgs {
     /// Project identifier that maps to .newton/configs/<project_id>.conf
@@ -431,20 +231,7 @@ pub struct BatchArgs {
     pub sleep: u64,
 }
 
-#[derive(Args)]
-pub struct StepArgs {
-    /// Path to read/write Newton artifacts from
-    #[arg(value_name = "PATH")]
-    pub path: PathBuf,
-
-    /// Associate the single step with an execution ID for auditing
-    #[arg(long, value_name = "EXECUTION")]
-    pub execution_id: Option<String>,
-
-    /// Enable verbose output to display tool stdout/stderr
-    #[arg(long, help_heading = "Output Options")]
-    pub verbose: bool,
-}
+// StepArgs removed - command retired
 
 #[derive(Args)]
 pub struct InitArgs {
@@ -457,39 +244,9 @@ pub struct InitArgs {
     pub template_source: Option<String>,
 }
 
-#[derive(Args)]
-pub struct StatusArgs {
-    /// Identifier of the execution to inspect
-    #[arg(value_name = "EXECUTION")]
-    pub execution_id: String,
+// StatusArgs removed - command retired
 
-    /// Path storing the execution ledger
-    #[arg(long, default_value = ".", value_name = "PATH")]
-    pub path: PathBuf,
-}
-
-#[derive(Args)]
-pub struct ReportArgs {
-    /// Execution whose insights should be summarized
-    #[arg(value_name = "EXECUTION")]
-    pub execution_id: String,
-
-    /// Path storing source artifacts for the report
-    #[arg(long, default_value = ".", value_name = "PATH")]
-    pub path: PathBuf,
-
-    /// Emit either terminal-friendly text or machine-readable JSON
-    #[arg(long, default_value = "text", value_name = "FORMAT")]
-    pub format: ReportFormat,
-}
-
-#[derive(Clone, clap::ValueEnum, Debug)]
-pub enum ReportFormat {
-    /// Human-readable, Markdown-friendly summary
-    Text,
-    /// JSON payload suitable for downstream tooling
-    Json,
-}
+// ReportArgs and ReportFormat removed - commands retired
 
 #[derive(Args, Clone, Debug)]
 pub struct MonitorArgs {
@@ -510,13 +267,4 @@ pub struct MonitorArgs {
     pub ws_url: Option<String>,
 }
 
-#[derive(Args)]
-pub struct ErrorArgs {
-    /// Execution ID whose failures should be analyzed
-    #[arg(value_name = "EXECUTION")]
-    pub execution_id: String,
-
-    /// Include stack traces, raw logs, and contextual artifacts
-    #[arg(long)]
-    pub verbose: bool,
-}
+// ErrorArgs removed - command retired

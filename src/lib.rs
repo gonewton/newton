@@ -4,7 +4,6 @@ pub mod cli;
 pub mod core;
 pub mod logging;
 pub mod monitor;
-pub mod tools;
 pub mod utils;
 
 /// Current crate version string exposed for CLI and tests.

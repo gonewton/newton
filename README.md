@@ -1,8 +1,7 @@
 # Newton
 
-**Newton** is a CLI for iterative optimization and workflow automation. It supports both:
-- The classic evaluator-advisor-executor loop (`newton run`, `newton step`, `newton batch`)
-- A deterministic workflow-graph runner (`newton workflow ...`) with linting, explain output, checkpointing, artifacts, goal gates, terminal tasks, and completion policy controls.
+**Newton** is a workflow-first CLI for deterministic automation and orchestration.
+- A deterministic workflow runner with linting, explain output, checkpointing, artifacts, goal gates, terminal tasks, and completion policy controls.
 
 ## What is Newton?
 
@@ -20,7 +19,7 @@ Instead of just trying the same thing over and over and hoping it gets better, t
 
 Newton includes a production workflow runner with YAML-defined tasks and deterministic execution semantics:
 
-- Workflow commands: `newton workflow run|lint|validate|dot|explain|resume|checkpoints|artifacts|webhook`
+- Workflow commands: `newton run|lint|validate|dot|explain|resume|checkpoints|artifacts|webhook`
 - Safety checks: lint rules, expression precompile validation, shell opt-in, reachability analysis
 - Deterministic completion: goal gates, terminal tasks, explicit completion policy, stable error codes
 - Runtime durability: checkpoint persistence, resume support, artifact routing/cleanup, execution warnings
@@ -84,9 +83,8 @@ Follow the **Setting up a new project** flow below to go from a blank directory 
 2. Run `newton init .` to scaffold the workspace.
 3. Run the loop with an inline goal (no `GOAL.md` needed):
    ```bash
-   newton run . --goal "Add a README.md that describes this project in one paragraph."
+   newton run workflow.yaml input.txt
    ```
-4. Use the execution ID printed by `newton run` with `newton status <execution-id>` to inspect progress.
 
 For a project with a persistent goal file or custom evaluator/advisor/executor scripts, follow **Setting up a new project** below.
 
@@ -96,17 +94,13 @@ For a project with a persistent goal file or custom evaluator/advisor/executor s
 2. Run `newton init .` to scaffold `.newton/`, install the template under `.newton/scripts/`, write `.newton/configs/default.conf`, and prompt the template to add `GOAL.md` if it was missing.
 3. Optionally edit `GOAL.md` after initialization so it reflects your real goal.
 4. Run `newton run` in that directory—`run` uses the `.newton/scripts/` toolchain by default, so no additional paths are required.
-5. Use `newton status`, `newton report`, and `newton error` with the returned execution ID to inspect progress and failures.
 
 For an existing repository, run `newton init .` at the repo root instead of creating a new directory.
 
-To swap in custom evaluators, advisors, or executors, either pass `--evaluator`, `--advisor`, and `--executor` to `newton run` or replace the scripts under `.newton/scripts/` after initialization; see **Advanced Usage → Custom Tool Configuration** for details.
 
 ### Verify your setup
 
 - Before your first run, confirm the CLI is installed by checking `newton --version`.
-- After `newton init .`, list the layout (`ls .newton`) or run `newton step .` once to verify `.newton/scripts/` and `.newton/configs/default.conf` exist.
-- Optionally run `newton step .` to exercise the default template before starting the full loop.
 
 ### CLI Version & Help
 
@@ -139,12 +133,7 @@ If the workspace path is omitted the command runs in the current directory. Afte
 - `--max-iterations N`: Maximum iterations before stopping
 - `--timeout N`: Maximum time in seconds before stopping
 - `--tool-timeout N`: Timeout per tool execution in seconds
-- `--evaluator <command>`: Custom evaluator command
-- `--advisor <command>`: Custom advisor command
-- `--executor <command>`: Custom executor command
 - `--strict-mode`: Enable strict validation mode
-- `--goal <TEXT>`: Inline goal description written to `.newton/state/goal.txt` and exported as `NEWTON_GOAL_FILE` (directories are created automatically when needed)
-- `--goal-file <FILE>`: Use an existing goal file instead of writing from CLI text (`NEWTON_GOAL_FILE` is still populated).
 
 Passing empty evaluator/advisor/executor commands now fails fast with `TOOL-002` (`command must not be empty`). Provide valid tool invocations (or omit the flag) so the orchestrator can launch real scripts.
 
@@ -157,7 +146,6 @@ newton run .
 newton run . --max-iterations 100 --timeout 3600
 
 # Use custom tools
-newton run . --evaluator ./.newton/scripts/my_evaluator.sh
 ```
 
 ### `init [workspace-path]`
@@ -183,14 +171,12 @@ Process queued plan files for a project straight from the CLI. `newton batch` di
 
 Plan files move from `todo` to `completed` only after a successful run, and the same task ID is reused when a plan is re-queued. Batch also sets `CODING_AGENT`, `CODING_AGENT_MODEL`, `NEWTON_EXECUTOR_CODING_AGENT`, and `NEWTON_EXECUTOR_CODING_AGENT_MODEL` based on the `.conf` so the project honors those overrides.
 
-You can add `post_success_script` and `post_fail_script` entries to `.newton/configs/<project_id>.conf`. Each value is run with `sh -c "<value>"` from the project root. `post_success_script` executes only after a successful `newton run` and keeps the plan under `completed/` when it exits `0`; any non-zero exit code flips the plan into the new `.newton/plan/<project_id>/failed/` directory (the target is overwritten when necessary). `post_fail_script` runs when `newton run` fails, its exit code is ignored, and the plan ends up in `failed/` as well. Both scripts receive the batch environment plus `NEWTON_GOAL_FILE`, `NEWTON_PROJECT_ID`, `NEWTON_TASK_ID`, `NEWTON_PROJECT_ROOT`, and `NEWTON_RESULT=success|failure`.
 
 Batch configs now support additional optional keys for parity with `start.sh`/`loop.sh`:
 
 | Key | Description |
 | --- | --- |
 | `evaluator_cmd`, `advisor_cmd`, `executor_cmd` | Override the tool invocations. When omitted, batch derives defaults that match the workspace layout created by `newton init` (`project_root/.newton/scripts/{evaluator,advisor}.sh` and `workspace_root/.newton/scripts/executor.sh`). |
-| `pre_run_script` | Runs once before `newton run` (e.g., `.newton/scripts/pre-run.sh`). |
 | `resume` | `true`/`1` keeps the task and project state directories intact; when false the directories are wiped before the run. |
 | `max_iterations`, `max_time` | Optional limits that mirror the values passed to `newton run`. Without a control file signal, hitting either limit counts as failure. |
 | `verbose` | Passes `--verbose` through to the run so tool stdout/stderr is rendered. |
@@ -308,7 +294,6 @@ Execute a single evaluation-advice-execution iteration.
 
 **Example:**
 ```bash
-newton step .
 ```
 
 ### `status <execution-id>`
@@ -321,7 +306,6 @@ Check current status of an optimization run.
 
 **Example:**
 ```bash
-newton status abc-123 --format json
 ```
 
 **Output:**
@@ -369,7 +353,6 @@ Debug execution errors with detailed information.
 
 **Example:**
 ```bash
-newton error abc-123 --verbose
 ```
 
 **Diagnostic Information:**
@@ -478,9 +461,6 @@ Newton allows you to specify custom commands for each optimization phase:
 
 ```bash
 newton run . \
-  --evaluator "python .newton/scripts/evaluator.py" \
-  --advisor "python .newton/scripts/advisor.py" \
-  --executor "python .newton/scripts/executor.py"
 ```
 
 ### Timeout Configurations
@@ -539,7 +519,6 @@ Monitor execution in real-time:
 
 ```bash
 # Watch execution status
-newton status <execution-id> --format json --verbose
 
 # Generate periodic reports
 newton report <execution-id> --include-stats
@@ -669,9 +648,6 @@ executor_cmd=.newton/scripts/executor.sh
 coder_cmd=.newton/scripts/coder.sh
 
 # Hook scripts
-pre_run_script=.newton/scripts/pre-run.sh
-post_success_script=.newton/scripts/post-success.sh
-post_fail_script=.newton/scripts/post-failure.sh
 
 # Execution control
 resume=true
@@ -686,9 +662,6 @@ control_file=newton_control.json
 - `coding_agent`: AI agent to use, e.g., "claude", "openai" (required)
 - `coding_model`: Specific model identifier (required)
 - `evaluator_cmd`, `advisor_cmd`, `executor_cmd`, `coder_cmd`: Custom tool commands (optional, defaults to `.newton/scripts/*.sh`)
-- `pre_run_script`: Script to run before each task (optional)
-- `post_success_script`: Script to run after successful task completion (optional)
-- `post_fail_script`: Script to run after task failure (optional)
 - `resume`: Whether to resume from previous state - `true`/`1` or `false`/`0` (optional, default: false)
 - `max_iterations`: Maximum optimization iterations per task (optional)
 - `max_time`: Maximum execution time in seconds (optional)
@@ -768,20 +741,16 @@ Add hook script paths to your `.newton/configs/{project_id}.conf`:
 
 ```conf
 # Pre-run hook: executes before newton run starts
-pre_run_script=.newton/scripts/pre-run.sh
 
 # Post-success hook: executes after successful task completion
-post_success_script=.newton/scripts/post-success.sh
 
 # Post-failure hook: executes after task failure
-post_fail_script=.newton/scripts/post-failure.sh
 ```
 
 All hooks run with `sh -c "<script_path>"` from the project root directory.
 
 #### Hook Types
 
-**Pre-run Hook (`pre_run_script`)**
 - Executes once before `newton run` starts
 - Use for: environment setup, dependency installation, test database initialization
 - Environment variables available:
@@ -789,7 +758,6 @@ All hooks run with `sh -c "<script_path>"` from the project root directory.
   - `NEWTON_GOAL_FILE`, `NEWTON_RESUME`
   - All batch environment variables
 
-**Post-success Hook (`post_success_script`)**
 - Executes after successful task completion (control file shows `done: true`)
 - Exit code determines final plan state:
   - `0` - Plan moves to `completed/`
@@ -801,7 +769,6 @@ All hooks run with `sh -c "<script_path>"` from the project root directory.
   - `NEWTON_BRANCH_NAME`, `NEWTON_BASE_BRANCH`
   - `NEWTON_STATE_DIR`, `NEWTON_CONTROL_FILE`
 
-**Post-failure Hook (`post_fail_script`)**
 - Executes after task failure
 - Exit code is ignored (plan always moves to `failed/`)
 - Use for: rollback, error notifications, cleanup, logging

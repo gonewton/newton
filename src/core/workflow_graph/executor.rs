@@ -39,6 +39,7 @@ pub struct ExecutionOverrides {
     pub max_time_seconds: Option<u64>,
     pub checkpoint_base_path: Option<PathBuf>,
     pub artifact_base_path: Option<PathBuf>,
+    pub verbose: bool,
 }
 
 /// Resolved execution configuration used by the runner.
@@ -122,6 +123,7 @@ struct WorkflowRuntime {
     redact_keys: Arc<Vec<String>>,
     last_checkpoint: Instant,
     start_time: Instant,
+    verbose: bool,
 }
 
 impl ExecutionState {
@@ -424,6 +426,12 @@ impl WorkflowRuntime {
             if let Some(patch) = &outcome.context_patch {
                 apply_patch(&mut guard.context, patch);
             }
+
+            // Verbose output: print task stdout/stderr after completion
+            if self.verbose {
+                self.print_task_verbose_output(outcome);
+            }
+
             if outcome.failed && !self.config.continue_on_error {
                 return Err(AppError::new(
                     ErrorCategory::ValidationError,
@@ -552,6 +560,32 @@ impl WorkflowRuntime {
             &self.workflow_execution.execution_id,
             &self.workflow_execution,
         )
+    }
+
+    /// Print task stdout/stderr for verbose mode
+    fn print_task_verbose_output(&self, outcome: &TaskOutcome) {
+        let output = &outcome.record.output;
+
+        // For CommandOperator tasks, stdout/stderr are in the task output
+        if let Value::Object(output_map) = output {
+            if let Some(Value::String(stdout)) = output_map.get("stdout") {
+                if !stdout.trim().is_empty() {
+                    print!("{}", stdout);
+                }
+            }
+            if let Some(Value::String(stderr)) = output_map.get("stderr") {
+                if !stderr.trim().is_empty() {
+                    eprint!("{}", stderr);
+                }
+            }
+            // For AgentOperator tasks, print artifact paths instead
+            if let Some(Value::String(artifact_path)) = output_map.get("stdout_artifact") {
+                println!("stdout artifact: {}", artifact_path);
+            }
+            if let Some(Value::String(artifact_path)) = output_map.get("stderr_artifact") {
+                eprintln!("stderr artifact: {}", artifact_path);
+            }
+        }
     }
 }
 
@@ -737,6 +771,7 @@ fn build_workflow_runtime(
         redact_keys: Arc::new(graph_settings.redaction.redact_keys.clone()),
         last_checkpoint: Instant::now(),
         start_time: Instant::now(),
+        verbose: overrides.verbose,
     })
 }
 
@@ -841,6 +876,7 @@ pub async fn resume_workflow(
         redact_keys: Arc::new(graph_settings.redaction.redact_keys.clone()),
         last_checkpoint: Instant::now(),
         start_time: Instant::now(),
+        verbose: false, // Resume does not support verbose mode
     };
     runtime.run().await
 }
