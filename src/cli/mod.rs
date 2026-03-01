@@ -86,22 +86,22 @@ or manually create .newton/configs/ and add a monitor.conf file."
     Monitor(MonitorArgs),
     #[command(
         about = "Validate a workflow graph definition",
-        after_help = "Example:\n    newton validate --workflow workflow.yaml"
+        after_help = "Example:\n    newton validate workflow.yaml"
     )]
     Validate(ValidateArgs),
     #[command(
         about = "Render workflow graph as DOT",
-        after_help = "Example:\n    newton dot --workflow workflow.yaml --out graph.dot"
+        after_help = "Example:\n    newton dot workflow.yaml --out graph.dot"
     )]
     Dot(DotArgs),
     #[command(
         about = "Validate workflow lint rules",
-        after_help = "Example:\n    newton lint --workflow workflow.yaml --format json"
+        after_help = "Example:\n    newton lint workflow.yaml --format json"
     )]
     Lint(LintArgs),
     #[command(
         about = "Explain workflow graph settings/transitions",
-        after_help = "Example:\n    newton explain --workflow workflow.yaml --format text"
+        after_help = "Example:\n    newton explain workflow.yaml --format text"
     )]
     Explain(ExplainArgs),
     #[command(
@@ -121,7 +121,7 @@ or manually create .newton/configs/ and add a monitor.conf file."
     Artifacts(ArtifactsArgs),
     #[command(
         about = "Manage workflow webhook listener",
-        after_help = "Example:\n    newton webhook serve --workflow workflow.yaml --workspace ./workspace"
+        after_help = "Example:\n    newton webhook serve workflow.yaml --workspace ./workspace"
     )]
     Webhook(WebhookArgs),
 }

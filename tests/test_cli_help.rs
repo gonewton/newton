@@ -90,3 +90,39 @@ fn test_monitor_help_shows_discovery_order() {
     assert!(stdout.contains("CLI overrides"));
     assert!(stdout.contains("monitor.conf"));
 }
+
+#[test]
+fn test_validate_help_documents_positional_and_file_workflow_forms() {
+    let output = Command::new(assert_cmd::cargo::cargo_bin!("newton"))
+        .args(["validate", "--help"])
+        .output()
+        .expect("should run successfully");
+
+    let stdout = std::str::from_utf8(&output.stdout).unwrap();
+    assert!(stdout.contains("newton validate workflow.yaml"));
+    assert!(stdout.contains("[WORKFLOW]"));
+    assert!(stdout.contains("--file <PATH>"));
+}
+
+#[test]
+fn test_run_help_keeps_two_positional_arguments_in_order() {
+    let output = Command::new(assert_cmd::cargo::cargo_bin!("newton"))
+        .args(["run", "--help"])
+        .output()
+        .expect("should run successfully");
+
+    let stdout = std::str::from_utf8(&output.stdout).unwrap();
+    assert!(stdout.contains("[WORKFLOW] [INPUT_FILE]"));
+    assert!(stdout.contains("--file <PATH>"));
+}
+
+#[test]
+fn test_webhook_help_documents_positional_workflow_example() {
+    let output = Command::new(assert_cmd::cargo::cargo_bin!("newton"))
+        .args(["webhook", "--help"])
+        .output()
+        .expect("should run successfully");
+
+    let stdout = std::str::from_utf8(&output.stdout).unwrap();
+    assert!(stdout.contains("newton webhook serve workflow.yaml --workspace ./workspace"));
+}
