@@ -37,7 +37,6 @@ pub fn detect_context(command: &Command) -> ExecutionContext {
     match command {
         Command::Batch(_) => ExecutionContext::Batch,
         Command::Run(_)
-        | Command::Workflow(_)
         | Command::Validate(_)
         | Command::Dot(_)
         | Command::Lint(_)

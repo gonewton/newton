@@ -10,7 +10,7 @@ use crate::logging::layers as layers_mod;
 use crate::logging::layers::{console, file, opentelemetry};
 use crate::{
     cli::{
-        args::{ArtifactCommand, CheckpointCommand, WebhookCommand, WorkflowCommand},
+        args::{ArtifactCommand, CheckpointCommand, WebhookCommand},
         Command,
     },
     core::find_workspace_root,
@@ -172,13 +172,6 @@ pub(crate) fn build_effective_settings(
 fn workspace_root_for_command(command: &Command) -> Result<Option<PathBuf>> {
     let candidate = match command {
         Command::Run(args) => args.workspace.clone(),
-        Command::Workflow(args) => match &args.command {
-            WorkflowCommand::Run(run_args) => run_args
-                .workspace
-                .clone()
-                .or_else(|| run_args.workflow.parent().map(|p| p.to_path_buf()))
-                .or_else(|| env::current_dir().ok()),
-        },
         Command::Init(args) => args.path.clone().or_else(|| env::current_dir().ok()),
         Command::Batch(args) => {
             if let Some(ws) = &args.workspace {

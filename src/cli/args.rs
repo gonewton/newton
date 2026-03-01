@@ -43,73 +43,6 @@ pub struct RunArgs {
 }
 
 #[derive(Args, Clone)]
-pub struct WorkflowArgs {
-    #[command(subcommand)]
-    pub command: WorkflowCommand,
-}
-
-#[derive(Subcommand, Clone)]
-pub enum WorkflowCommand {
-    #[command(about = "Execute a workflow graph definition")]
-    Run(WorkflowRunArgs),
-}
-
-#[derive(Args, Clone)]
-pub struct WorkflowRunArgs {
-    /// Path to the workflow YAML file
-    #[arg(long, value_name = "PATH")]
-    pub workflow: PathBuf,
-
-    /// Optional path written into triggers.payload.input_file
-    #[arg(long, value_name = "PATH")]
-    pub input_file: Option<PathBuf>,
-
-    /// Workspace root directory (default: current directory)
-    #[arg(long, value_name = "PATH")]
-    pub workspace: Option<PathBuf>,
-
-    /// Merge KEY into triggers.payload; VALUE may be @path to read from file, @@ for literal @
-    #[arg(long, value_name = "KEY=VALUE")]
-    pub arg: Vec<KeyValuePair>,
-
-    /// Merge KEY into workflow.context at runtime
-    #[arg(long, value_name = "KEY=VALUE")]
-    pub set: Vec<KeyValuePair>,
-
-    /// Load JSON object as base trigger payload before --arg overrides
-    #[arg(long, value_name = "PATH")]
-    pub trigger_json: Option<PathBuf>,
-
-    /// Runtime override for bounded task concurrency
-    #[arg(long, value_name = "N")]
-    pub parallel_limit: Option<usize>,
-
-    /// Runtime wall-clock limit override (seconds)
-    #[arg(long, value_name = "N")]
-    pub max_time_seconds: Option<u64>,
-
-    /// Print task stdout/stderr to terminal after each task completes
-    #[arg(long)]
-    pub verbose: bool,
-}
-
-impl From<WorkflowRunArgs> for RunArgs {
-    fn from(value: WorkflowRunArgs) -> Self {
-        Self {
-            workflow: value.workflow,
-            input_file: value.input_file,
-            workspace: value.workspace,
-            arg: value.arg,
-            set: value.set,
-            trigger_json: value.trigger_json,
-            parallel_limit: value.parallel_limit,
-            max_time_seconds: value.max_time_seconds,
-            verbose: value.verbose,
-        }
-    }
-}
-
-#[derive(Args, Clone)]
 pub struct WebhookArgs {
     #[command(subcommand)]
     pub command: WebhookCommand,
@@ -140,8 +73,6 @@ pub struct WebhookStatusArgs {
     #[arg(long, value_name = "PATH")]
     pub workflow: Option<PathBuf>,
 }
-
-// WorkflowRunArgs functionality moved to RunArgs
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lowercase")]

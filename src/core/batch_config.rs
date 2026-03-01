@@ -3,20 +3,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BatchRunner {
-    WorkflowGraph,
-    Classic,
-}
-
 /// Batch configuration derived from `.newton/configs/<project>.conf`.
 #[derive(Debug, Clone)]
 pub struct BatchProjectConfig {
     /// Absolute path to the project root that contains `.newton`.
     pub project_root: PathBuf,
-
-    /// Default runner selected by batch config.
-    pub runner: BatchRunner,
 
     /// Required workflow file path for batch execution.
     pub workflow_file: PathBuf,
@@ -32,7 +23,6 @@ impl BatchProjectConfig {
 
         let settings = parse_conf(&conf_path)?;
         let project_root = load_and_validate_project_root(&settings, workspace_root, &conf_path)?;
-        let runner = parse_runner_setting(settings.get("runner"))?;
 
         // Load workflow_file (required)
         let workflow_file_value = settings
@@ -56,21 +46,8 @@ impl BatchProjectConfig {
 
         Ok(BatchProjectConfig {
             project_root,
-            runner,
             workflow_file,
         })
-    }
-}
-
-fn parse_runner_setting(value: Option<&String>) -> Result<BatchRunner> {
-    let normalized = value.map(|v| v.trim().to_ascii_lowercase());
-    match normalized.as_deref() {
-        None | Some("") | Some("workflow_graph") => Ok(BatchRunner::WorkflowGraph),
-        Some("classic") => Ok(BatchRunner::Classic),
-        Some(other) => Err(anyhow::anyhow!(
-            "invalid runner '{}'; expected 'workflow_graph' or 'classic'",
-            other
-        )),
     }
 }
 

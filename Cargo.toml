@@ -144,14 +144,6 @@ name = "test_workflow_scenarios"
 path = "tests/integration/test_workflow_scenarios.rs"
 
 [[test]]
-name = "test_profile_mode"
-path = "tests/run/test_profile_mode.rs"
-
-[[test]]
-name = "test_runner_selection"
-path = "tests/batch/test_runner_selection.rs"
-
-[[test]]
 name = "test_batch_workflow_state_paths"
 path = "tests/batch/test_batch_workflow_state_paths.rs"
 

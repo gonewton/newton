@@ -6,8 +6,7 @@ pub mod init;
 pub use args::{
     ArtifactCommand, ArtifactsArgs, BatchArgs, CheckpointCommand, CheckpointsArgs, DotArgs,
     ExplainArgs, InitArgs, LintArgs, MonitorArgs, ResumeArgs, RunArgs, ValidateArgs, WebhookArgs,
-    WebhookCommand, WebhookServeArgs, WebhookStatusArgs, WorkflowArgs, WorkflowCommand,
-    WorkflowRunArgs,
+    WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
 };
 use clap::{Parser, Subcommand};
 
@@ -40,11 +39,6 @@ pub enum Command {
         after_help = "Example:\n    newton run workflow.yaml input.txt --workspace ./workspace --arg key=value"
     )]
     Run(RunArgs),
-    #[command(
-        about = "Workflow command group (compatibility alias)",
-        after_help = "Example:\n    newton workflow run --workflow workflow.yaml --workspace ./workspace"
-    )]
-    Workflow(WorkflowArgs),
     #[command(
         about = "Initialize a Newton workspace with the default template",
         long_about = "Init creates the .newton workspace layout, installs the Newton template with aikit-sdk, and writes default configs so you can run immediately.",
@@ -135,9 +129,6 @@ or manually create .newton/configs/ and add a monitor.conf file."
 pub async fn run(args: Args) -> crate::Result<()> {
     match args.command {
         Command::Run(run_args) => commands::run(run_args).await,
-        Command::Workflow(workflow_args) => match workflow_args.command {
-            WorkflowCommand::Run(run_args) => commands::run(run_args.into()).await,
-        },
         Command::Init(init_args) => init::run(init_args).await,
         Command::Batch(batch_args) => commands::batch(batch_args).await,
         Command::Monitor(monitor_args) => commands::monitor(monitor_args).await,
