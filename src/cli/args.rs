@@ -6,12 +6,16 @@ use uuid::Uuid;
 #[derive(Args, Clone)]
 pub struct RunArgs {
     /// Path to the workflow YAML file
-    #[arg(value_name = "WORKFLOW")]
-    pub workflow: PathBuf,
+    #[arg(value_name = "WORKFLOW", index = 1)]
+    pub workflow_positional: Option<PathBuf>,
 
     /// Optional path written into triggers.payload.input_file
-    #[arg(value_name = "INPUT_FILE")]
+    #[arg(value_name = "INPUT_FILE", index = 2)]
     pub input_file: Option<PathBuf>,
+
+    /// Path to the workflow YAML file (alternative to positional)
+    #[arg(long, value_name = "PATH")]
+    pub file: Option<PathBuf>,
 
     /// Workspace root directory (default: current directory)
     #[arg(long, value_name = "PATH")]
@@ -42,6 +46,15 @@ pub struct RunArgs {
     pub verbose: bool,
 }
 
+impl RunArgs {
+    /// Resolve workflow path with precedence: --file over positional
+    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
+        self.file
+            .clone()
+            .or_else(|| self.workflow_positional.clone())
+    }
+}
+
 #[derive(Args, Clone)]
 pub struct WebhookArgs {
     #[command(subcommand)]
@@ -58,20 +71,48 @@ pub enum WebhookCommand {
 
 #[derive(Args, Clone)]
 pub struct WebhookServeArgs {
+    /// Path to the workflow YAML file
+    #[arg(value_name = "WORKFLOW")]
+    pub workflow_positional: Option<PathBuf>,
+
+    /// Path to the workflow YAML file (alternative to positional)
     #[arg(long, value_name = "PATH")]
-    pub workflow: PathBuf,
+    pub file: Option<PathBuf>,
 
     #[arg(long, value_name = "PATH")]
     pub workspace: PathBuf,
 }
 
+impl WebhookServeArgs {
+    /// Resolve workflow path with precedence: --file over positional
+    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
+        self.file
+            .clone()
+            .or_else(|| self.workflow_positional.clone())
+    }
+}
+
 #[derive(Args, Clone)]
 pub struct WebhookStatusArgs {
+    /// Path to the workflow YAML file (optional)
+    #[arg(value_name = "WORKFLOW")]
+    pub workflow_positional: Option<PathBuf>,
+
+    /// Path to the workflow YAML file (alternative to positional)
     #[arg(long, value_name = "PATH")]
-    pub workspace: PathBuf,
+    pub file: Option<PathBuf>,
 
     #[arg(long, value_name = "PATH")]
-    pub workflow: Option<PathBuf>,
+    pub workspace: PathBuf,
+}
+
+impl WebhookStatusArgs {
+    /// Resolve workflow path with precedence: --file over positional
+    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
+        self.file
+            .clone()
+            .or_else(|| self.workflow_positional.clone())
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -83,17 +124,36 @@ pub enum OutputFormat {
 
 #[derive(Args, Clone)]
 pub struct LintArgs {
+    /// Path to the workflow YAML file
+    #[arg(value_name = "WORKFLOW")]
+    pub workflow_positional: Option<PathBuf>,
+
+    /// Path to the workflow YAML file (alternative to positional)
     #[arg(long, value_name = "PATH")]
-    pub workflow: PathBuf,
+    pub file: Option<PathBuf>,
 
     #[arg(long, value_enum, default_value = "text")]
     pub format: OutputFormat,
 }
 
+impl LintArgs {
+    /// Resolve workflow path with precedence: --file over positional
+    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
+        self.file
+            .clone()
+            .or_else(|| self.workflow_positional.clone())
+    }
+}
+
 #[derive(Args, Clone)]
 pub struct ExplainArgs {
+    /// Path to the workflow YAML file
+    #[arg(value_name = "WORKFLOW")]
+    pub workflow_positional: Option<PathBuf>,
+
+    /// Path to the workflow YAML file (alternative to positional)
     #[arg(long, value_name = "PATH")]
-    pub workflow: PathBuf,
+    pub file: Option<PathBuf>,
 
     #[arg(long, value_name = "PATH")]
     pub workspace: Option<PathBuf>,
@@ -113,19 +173,56 @@ pub struct ExplainArgs {
     pub trigger_json: Option<PathBuf>,
 }
 
+impl ExplainArgs {
+    /// Resolve workflow path with precedence: --file over positional
+    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
+        self.file
+            .clone()
+            .or_else(|| self.workflow_positional.clone())
+    }
+}
+
 #[derive(Args, Clone)]
 pub struct ValidateArgs {
+    /// Path to the workflow YAML file
+    #[arg(value_name = "WORKFLOW")]
+    pub workflow_positional: Option<PathBuf>,
+
+    /// Path to the workflow YAML file (alternative to positional)
     #[arg(long, value_name = "PATH")]
-    pub workflow: PathBuf,
+    pub file: Option<PathBuf>,
+}
+
+impl ValidateArgs {
+    /// Resolve workflow path with precedence: --file over positional
+    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
+        self.file
+            .clone()
+            .or_else(|| self.workflow_positional.clone())
+    }
 }
 
 #[derive(Args, Clone)]
 pub struct DotArgs {
+    /// Path to the workflow YAML file
+    #[arg(value_name = "WORKFLOW")]
+    pub workflow_positional: Option<PathBuf>,
+
+    /// Path to the workflow YAML file (alternative to positional)
     #[arg(long, value_name = "PATH")]
-    pub workflow: PathBuf,
+    pub file: Option<PathBuf>,
 
     #[arg(long, value_name = "FILE")]
     pub out: Option<PathBuf>,
+}
+
+impl DotArgs {
+    /// Resolve workflow path with precedence: --file over positional
+    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
+        self.file
+            .clone()
+            .or_else(|| self.workflow_positional.clone())
+    }
 }
 
 #[derive(Args, Clone)]

@@ -35,14 +35,16 @@ use std::{
 };
 use tokio::time::sleep;
 
-/// Build additional environment variables for the run, returns (goal_file, env map)
-pub async fn run(args: RunArgs) -> Result<()> {
-    tracing::info!("Starting Newton workflow run");
-
-    let workspace = resolve_workflow_workspace(args.workspace.clone())?;
-    let workflow_path = args.workflow.clone();
+/// Load and validate a workflow document from the given arguments
+fn load_and_validate_workflow(
+    args: &RunArgs,
+) -> Result<(workflow_schema::WorkflowDocument, PathBuf)> {
+    let workflow_path = args
+        .resolved_workflow_path()
+        .ok_or_else(|| anyhow!("missing workflow file; pass WORKFLOW or --file PATH"))?;
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
+
     let lint_results = LintRegistry::new().run(&document);
     if !lint_results.is_empty() {
         print_lint_results_text(&lint_results);
@@ -61,7 +63,15 @@ pub async fn run(args: RunArgs) -> Result<()> {
     apply_context_overrides(&mut document.workflow.context, &args.set);
     document.validate(&ExpressionEngine::default())?;
 
-    // Build trigger payload with input_file and --arg overrides
+    Ok((document, workflow_path))
+}
+
+/// Build comprehensive trigger payload including input file and workspace context
+fn build_comprehensive_trigger_payload(
+    args: &RunArgs,
+    workspace: &std::path::Path,
+) -> Result<Option<Value>> {
+    // Start with base trigger payload from args
     let mut trigger_payload =
         build_trigger_payload(&args.trigger_json, &args.arg)?.unwrap_or_else(|| json!({}));
 
@@ -78,14 +88,20 @@ pub async fn run(args: RunArgs) -> Result<()> {
     // Add workspace to payload
     trigger_payload["workspace"] = json!(workspace.display().to_string());
 
-    if !trigger_payload.as_object().unwrap().is_empty() {
-        document.triggers = Some(workflow_schema::WorkflowTrigger {
-            trigger_type: workflow_schema::TriggerType::Manual,
-            schema_version: "1".to_string(),
-            payload: trigger_payload,
-        });
+    // Only return payload if it contains data
+    if trigger_payload.as_object().unwrap().is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(trigger_payload))
     }
+}
 
+/// Create execution overrides and operator registry for workflow execution
+fn setup_workflow_execution(
+    args: &RunArgs,
+    workspace: &std::path::Path,
+    settings: &workflow_schema::WorkflowSettings,
+) -> (ExecutionOverrides, OperatorRegistry) {
     let overrides = ExecutionOverrides {
         parallel_limit: args.parallel_limit,
         max_time_seconds: args.max_time_seconds,
@@ -95,12 +111,29 @@ pub async fn run(args: RunArgs) -> Result<()> {
     };
 
     let mut builder = OperatorRegistry::builder();
-    workflow_operators::register_builtins(
-        &mut builder,
-        workspace.clone(),
-        document.workflow.settings.clone(),
-    );
+    workflow_operators::register_builtins(&mut builder, workspace.to_path_buf(), settings.clone());
     let registry = builder.build();
+
+    (overrides, registry)
+}
+
+/// Build additional environment variables for the run, returns (goal_file, env map)
+pub async fn run(args: RunArgs) -> Result<()> {
+    tracing::info!("Starting Newton workflow run");
+
+    let workspace = resolve_workflow_workspace(args.workspace.clone())?;
+    let (mut document, workflow_path) = load_and_validate_workflow(&args)?;
+
+    if let Some(trigger_payload) = build_comprehensive_trigger_payload(&args, &workspace)? {
+        document.triggers = Some(workflow_schema::WorkflowTrigger {
+            trigger_type: workflow_schema::TriggerType::Manual,
+            schema_version: "1".to_string(),
+            payload: trigger_payload,
+        });
+    }
+
+    let (overrides, registry) =
+        setup_workflow_execution(&args, &workspace, &document.workflow.settings);
 
     let summary = workflow_executor::execute_workflow(
         document,
@@ -118,8 +151,13 @@ pub async fn run(args: RunArgs) -> Result<()> {
 }
 
 pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
+    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            "missing workflow file; pass WORKFLOW or --file PATH",
+        )
+    })?;
     let workspace = resolve_workflow_workspace(args.workspace)?;
-    let workflow_path = args.workflow.clone();
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
     let lint_results = LintRegistry::new().run(&document);
@@ -182,7 +220,13 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
 }
 
 pub fn validate(args: ValidateArgs) -> StdResult<(), AppError> {
-    let document = workflow_schema::load_workflow(&args.workflow)?;
+    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            "missing workflow file; pass WORKFLOW or --file PATH",
+        )
+    })?;
+    let document = workflow_schema::load_workflow(&workflow_path)?;
     let unreachable = workflow_dot::reachability_warnings(&document);
     for id in &unreachable {
         eprintln!("warning: task '{}' is not reachable from entry_task", id);
@@ -192,7 +236,13 @@ pub fn validate(args: ValidateArgs) -> StdResult<(), AppError> {
 }
 
 pub fn dot(args: DotArgs) -> StdResult<(), AppError> {
-    let document = workflow_schema::load_workflow(&args.workflow)?;
+    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            "missing workflow file; pass WORKFLOW or --file PATH",
+        )
+    })?;
+    let document = workflow_schema::load_workflow(&workflow_path)?;
     let dot = workflow_dot::workflow_to_dot(&document);
     if let Some(path) = args.out {
         fs::write(path, dot).map_err(|err| {
@@ -208,7 +258,13 @@ pub fn dot(args: DotArgs) -> StdResult<(), AppError> {
 }
 
 pub fn lint(args: LintArgs) -> StdResult<(), AppError> {
-    let raw_document = workflow_schema::parse_workflow(&args.workflow)?;
+    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            "missing workflow file; pass WORKFLOW or --file PATH",
+        )
+    })?;
+    let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let document = workflow_transform::apply_default_pipeline(raw_document)?;
     let results = LintRegistry::new().run(&document);
     match args.format {
@@ -235,8 +291,14 @@ pub fn lint(args: LintArgs) -> StdResult<(), AppError> {
 }
 
 pub fn explain(args: ExplainArgs) -> StdResult<(), AppError> {
+    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            "missing workflow file; pass WORKFLOW or --file PATH",
+        )
+    })?;
     let _workspace = resolve_workflow_workspace(args.workspace)?;
-    let raw_document = workflow_schema::parse_workflow(&args.workflow)?;
+    let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let source_tasks = raw_document.workflow.tasks.len();
     let source_macro_invocations = raw_document.workflow.macro_invocation_count();
     let source_macro_names = raw_document.workflow.macro_names_referenced();
@@ -400,8 +462,13 @@ pub async fn webhook(args: WebhookArgs) -> StdResult<(), AppError> {
 }
 
 async fn workflow_webhook_serve(args: WebhookServeArgs) -> StdResult<(), AppError> {
+    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            "missing workflow file; pass WORKFLOW or --file PATH",
+        )
+    })?;
     let workspace = resolve_workflow_workspace(Some(args.workspace))?;
-    let workflow_path = args.workflow.clone();
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let document = workflow_transform::apply_default_pipeline(raw_document)?;
     let lint_results = LintRegistry::new().run(&document);
@@ -450,8 +517,9 @@ async fn workflow_webhook_serve(args: WebhookServeArgs) -> StdResult<(), AppErro
 }
 
 fn workflow_webhook_status(args: WebhookStatusArgs) -> StdResult<(), AppError> {
+    let resolved_workflow = args.resolved_workflow_path();
     let workspace = resolve_workflow_workspace(Some(args.workspace))?;
-    let workflow_path = resolve_workspace_workflow_path(&workspace, args.workflow)?;
+    let workflow_path = resolve_workspace_workflow_path(&workspace, resolved_workflow)?;
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let document = workflow_transform::apply_default_pipeline(raw_document)?;
     let settings = document.workflow.settings.webhook;
@@ -525,7 +593,7 @@ fn resolve_workspace_workflow_path(
     Err(AppError::new(
         ErrorCategory::ValidationError,
         format!(
-            "workflow file not found under {}; pass --workflow to specify",
+            "workflow file not found under {}; pass WORKFLOW or --file PATH to specify",
             workspace.display()
         ),
     ))

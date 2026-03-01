@@ -183,19 +183,16 @@ fn workspace_root_for_command(command: &Command) -> Result<Option<PathBuf>> {
             }
         }
         Command::Validate(args) => args
-            .workflow
-            .parent()
-            .map(|p| p.to_path_buf())
+            .resolved_workflow_path()
+            .and_then(|workflow| workflow.parent().map(|p| p.to_path_buf()))
             .or_else(|| env::current_dir().ok()),
         Command::Dot(args) => args
-            .workflow
-            .parent()
-            .map(|p| p.to_path_buf())
+            .resolved_workflow_path()
+            .and_then(|workflow| workflow.parent().map(|p| p.to_path_buf()))
             .or_else(|| env::current_dir().ok()),
         Command::Lint(args) => args
-            .workflow
-            .parent()
-            .map(|p| p.to_path_buf())
+            .resolved_workflow_path()
+            .and_then(|workflow| workflow.parent().map(|p| p.to_path_buf()))
             .or_else(|| env::current_dir().ok()),
         Command::Explain(args) => args.workspace.clone(),
         Command::Resume(args) => args.workspace.clone(),
@@ -411,8 +408,9 @@ mod tests {
 
     fn make_run_command() -> Command {
         Command::Run(RunArgs {
-            workflow: PathBuf::from("test.yaml"),
+            workflow_positional: Some(PathBuf::from("test.yaml")),
             input_file: None,
+            file: None,
             workspace: Some(PathBuf::from(".")),
             arg: Vec::new(),
             set: Vec::new(),
