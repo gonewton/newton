@@ -123,9 +123,13 @@ fi
 echo -e "${GREEN}Clippy checks passed!${NC}" >&2
 echo "" >&2
 
-# Run tests and capture output
+# Run tests and capture output (allow non-zero so report is always emitted)
 echo -e "${YELLOW}Running tests with cargo-nextest...${NC}" >&2
-if TEST_OUTPUT=$(cargo nextest run --all-features --locked 2>&1); then
+set +e
+TEST_OUTPUT=$(cargo nextest run --all-features --locked 2>&1)
+TEST_EXIT=$?
+set -e
+if [ "$TEST_EXIT" -eq 0 ]; then
     OVERALL_STATUS="PASSED"
     EXIT_CODE=0
     echo -e "${GREEN}Tests completed successfully!${NC}" >&2
