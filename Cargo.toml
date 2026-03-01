@@ -1,6 +1,6 @@
 [package]
 name = "newton"
-version = "0.5.47"
+version = "0.5.48"
 edition = "2021"
 authors = ["Newton Loop Framework"]
 description = "CLI orchestrator for AI-driven optimization workflows."
