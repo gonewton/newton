@@ -86,42 +86,187 @@ or manually create .newton/configs/ and add a monitor.conf file."
     Monitor(MonitorArgs),
     #[command(
         about = "Validate a workflow graph definition",
-        after_help = "Example:\n    newton validate workflow.yaml"
+        long_about = "Validate checks your workflow YAML file for syntax errors, schema compliance, and logical issues before execution.\n\n\
+This command performs comprehensive validation including:\n  \
+  • YAML syntax and structure validation\n  \
+  • Schema compliance checking\n  \
+  • Task dependency validation\n  \
+  • Resource and configuration verification\n\n\
+Use validate before running workflows to catch errors early and ensure your workflow will execute successfully.",
+        after_help = "EXAMPLES:\n  \
+Validate a workflow file:\n    \
+newton validate workflow.yaml\n\n  \
+Validate with alternative syntax:\n    \
+newton validate --file ./workflows/my-workflow.yaml\n\n\
+RETURN CODES:\n  \
+  0: Workflow is valid and ready to run\n  \
+  1: Validation errors found (details printed to stderr)"
     )]
     Validate(ValidateArgs),
     #[command(
-        about = "Render workflow graph as DOT",
-        after_help = "Example:\n    newton dot workflow.yaml --out graph.dot"
+        about = "Generate a visual diagram of the workflow graph",
+        long_about = "Dot creates a Graphviz DOT file from your workflow definition that can be rendered into visual diagrams.\n\n\
+This command analyzes your workflow's task dependencies and generates a directed graph showing:\n  \
+  • Task execution flow and dependencies\n  \
+  • Parallel execution opportunities\n  \
+  • Critical path through the workflow\n  \
+  • Task relationships and data flow\n\n\
+The output DOT file can be rendered to PNG, SVG, or PDF using Graphviz tools like 'dot' or online viewers.",
+        after_help = "EXAMPLES:\n  \
+Generate DOT file to stdout:\n    \
+newton dot workflow.yaml\n\n  \
+Save DOT file for rendering:\n    \
+newton dot workflow.yaml --out graph.dot\n\n  \
+Create PNG diagram (requires Graphviz):\n    \
+newton dot workflow.yaml --out graph.dot && dot -Tpng graph.dot -o workflow.png\n\n\
+VISUALIZATION:\n  \
+Use online Graphviz viewers or install Graphviz locally:\n  \
+  • Online: https://dreampuf.github.io/GraphvizOnline/\n  \
+  • Install: apt install graphviz (Ubuntu) or brew install graphviz (macOS)"
     )]
     Dot(DotArgs),
     #[command(
-        about = "Validate workflow lint rules",
-        after_help = "Example:\n    newton lint workflow.yaml --format json"
+        about = "Check workflow for best practices and potential issues",
+        long_about = "Lint analyzes your workflow definition against Newton's best practices and coding standards to identify potential issues.\n\n\
+This command performs static analysis checking for:\n  \
+  • Performance anti-patterns\n  \
+  • Resource usage optimization opportunities\n  \
+  • Security considerations\n  \
+  • Maintainability issues\n  \
+  • Common workflow design mistakes\n\n\
+Unlike validate (which checks syntax), lint focuses on quality and best practices. All lint warnings are advisory and won't prevent workflow execution.",
+        after_help = "EXAMPLES:\n  \
+Check workflow with human-readable output:\n    \
+newton lint workflow.yaml\n\n  \
+Generate JSON report for CI/CD integration:\n    \
+newton lint workflow.yaml --format json\n\n  \
+Lint with alternative file specification:\n    \
+newton lint --file ./workflows/production.yaml --format json\n\n\
+OUTPUT FORMATS:\n  \
+  • text: Human-readable summary (default)\n  \
+  • json: Machine-readable structured data for tooling integration"
     )]
     Lint(LintArgs),
     #[command(
-        about = "Explain workflow graph settings/transitions",
-        after_help = "Example:\n    newton explain workflow.yaml --format text\n    newton explain workflow.yaml --format prose"
+        about = "Generate human-readable explanations of workflow behavior",
+        long_about = "Explain creates detailed documentation about what your workflow does and how it will execute.\n\n\
+This command analyzes your workflow definition and produces explanations covering:\n  \
+  • Step-by-step execution flow\n  \
+  • Task dependencies and timing\n  \
+  • Configuration settings and their effects\n  \
+  • Resource requirements and constraints\n  \
+  • Expected inputs and outputs\n\n\
+Use this command to understand complex workflows, document your automation, or verify that your workflow behaves as intended.",
+        after_help = "EXAMPLES:\n  \
+Generate structured explanation:\n    \
+newton explain workflow.yaml --format text\n\n  \
+Create natural language description:\n    \
+newton explain workflow.yaml --format prose\n\n  \
+Explain with custom trigger data:\n    \
+newton explain workflow.yaml --arg env=production --format prose\n\n  \
+Generate JSON explanation for documentation tools:\n    \
+newton explain workflow.yaml --format json\n\n\
+OUTPUT FORMATS:\n  \
+  • text: Structured technical breakdown\n  \
+  • prose: Natural language description\n  \
+  • json: Machine-readable analysis for documentation generation"
     )]
     Explain(ExplainArgs),
     #[command(
-        about = "Resume a previously-started workflow execution",
-        after_help = "Example:\n    newton resume --execution-id 12345678-1234-1234-1234-123456789abc"
+        about = "Continue a workflow that was interrupted or stopped",
+        long_about = "Resume restarts a workflow execution from its last saved checkpoint, allowing you to continue from where it left off.\n\n\
+This command is useful when:\n  \
+  • A workflow was interrupted by system shutdown or network issues\n  \
+  • You need to modify execution parameters and continue\n  \
+  • A long-running workflow needs to be restarted after maintenance\n  \
+  • You want to debug a failed workflow by resuming from a specific point\n\n\
+Newton automatically creates checkpoints during execution, so you can safely resume most workflows without losing progress.",
+        after_help = "EXAMPLES:\n  \
+Resume a specific workflow execution:\n    \
+newton resume --execution-id 12345678-1234-1234-1234-123456789abc\n\n  \
+Resume with custom workspace:\n    \
+newton resume --execution-id abcdef01-2345-6789-abcd-ef0123456789 --workspace ./project\n\n  \
+Resume and allow workflow definition changes:\n    \
+newton resume --execution-id 12345678-1234-1234-1234-123456789abc --allow-workflow-change\n\n\
+FINDING EXECUTION IDs:\n  \
+List available executions to resume:\n    \
+newton checkpoints list --workspace ./workspace\n\n\
+SAFETY:\n  \
+By default, resume requires the workflow definition to be unchanged since the checkpoint.\n  \
+Use --allow-workflow-change to override this safety check if you've modified the workflow."
     )]
     Resume(ResumeArgs),
     #[command(
-        about = "Inspect workflow checkpoints",
-        after_help = "Example:\n    newton checkpoints list --workspace ./workspace"
+        about = "Manage and inspect workflow execution checkpoints",
+        long_about = "Checkpoints provides tools to manage the saved states that allow workflow resumption after interruption.\n\n\
+Newton automatically creates checkpoints during workflow execution to preserve progress and enable recovery. This command helps you:\n  \
+  • View available executions that can be resumed\n  \
+  • Clean up old checkpoint data to save disk space\n  \
+  • Inspect checkpoint details for debugging\n  \
+  • Monitor checkpoint storage usage\n\n\
+Checkpoints include execution state, task progress, and all necessary context to safely resume workflows.",
+        after_help = "EXAMPLES:\n  \
+List all available checkpoints:\n    \
+newton checkpoints list --workspace ./workspace\n\n  \
+Get checkpoint details in JSON format:\n    \
+newton checkpoints list --workspace ./workspace --format-json\n\n  \
+Clean old checkpoints (older than 7 days):\n    \
+newton checkpoints clean --workspace ./workspace --older-than 7d\n\n  \
+Clean checkpoints with custom retention:\n    \
+newton checkpoints clean --workspace ./workspace --older-than 30d\n\n\
+CHECKPOINT STORAGE:\n  \
+Checkpoints are stored in .newton/checkpoints/ within your workspace.\n  \
+Large workflows may generate substantial checkpoint data over time."
     )]
     Checkpoints(CheckpointsArgs),
     #[command(
-        about = "Manage workflow artifacts",
-        after_help = "Example:\n    newton artifacts clean --workspace ./workspace --older-than 7d"
+        about = "Manage workflow output files and execution artifacts",
+        long_about = "Artifacts provides tools to manage the files, logs, and output data generated during workflow execution.\n\n\
+Newton stores workflow outputs, logs, and temporary files as artifacts for debugging and analysis. This command helps you:\n  \
+  • Clean up old artifacts to reclaim disk space\n  \
+  • Manage artifact retention policies\n  \
+  • Monitor artifact storage usage\n  \
+  • Archive important execution results\n\n\
+Artifacts include task outputs, execution logs, intermediate files, and any data generated by your workflow tasks.",
+        after_help = "EXAMPLES:\n  \
+Clean artifacts older than 7 days:\n    \
+newton artifacts clean --workspace ./workspace --older-than 7d\n\n  \
+Clean with custom retention period:\n    \
+newton artifacts clean --workspace ./workspace --older-than 30d\n\n  \
+Clean artifacts in specific workspace:\n    \
+newton artifacts clean --workspace /path/to/project --older-than 1w\n\n\
+RETENTION FORMATS:\n  \
+Supported time formats for --older-than:\n  \
+  • Days: 7d, 30d\n  \
+  • Weeks: 1w, 2w\n  \
+  • Hours: 24h, 48h\n\n\
+ARTIFACT STORAGE:\n  \
+Artifacts are stored in .newton/artifacts/ within your workspace.\n  \
+Regular cleanup helps maintain good performance and disk usage."
     )]
     Artifacts(ArtifactsArgs),
     #[command(
-        about = "Manage workflow webhook listener",
-        after_help = "Example:\n    newton webhook serve workflow.yaml --workspace ./workspace"
+        about = "Run webhooks to trigger workflows from external events",
+        long_about = "Webhook provides HTTP endpoints that can trigger workflow executions in response to external events.\n\n\
+This command enables integration with:\n  \
+  • Git hosting services (GitHub, GitLab, Bitbucket)\n  \
+  • CI/CD platforms and build systems\n  \
+  • Monitoring and alerting systems\n  \
+  • Custom applications and services\n\n\
+Webhooks allow you to automate workflow execution based on external triggers, creating reactive automation pipelines.",
+        after_help = "EXAMPLES:\n  \
+Start webhook server for a workflow:\n    \
+newton webhook serve workflow.yaml --workspace ./workspace\n\n  \
+Check webhook configuration status:\n    \
+newton webhook status workflow.yaml --workspace ./workspace\n\n  \
+Serve webhook with alternative file syntax:\n    \
+newton webhook serve --file ./workflows/deploy.yaml --workspace ./project\n\n\
+INTEGRATION:\n  \
+Configure your external services to send POST requests to the webhook URL.\n  \
+The webhook server will parse the incoming payload and trigger the workflow with the event data.\n\n\
+SECURITY:\n  \
+Webhook endpoints include built-in security features like request validation and rate limiting.\n  \
+Configure authentication tokens and HTTPS for production deployments."
     )]
     Webhook(WebhookArgs),
 }

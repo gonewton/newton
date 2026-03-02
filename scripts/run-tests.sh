@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Newton Test Runner Script
-# Runs tests with cargo-nextest, captures results, and emits report to stdout (text or JSON).
+# Runs fmt check, clippy, then tests with cargo-nextest; captures results and emits report to stdout (text or JSON).
 #
 # Usage: ./run-tests.sh [OPTIONS]
 #
@@ -69,7 +69,7 @@ while [[ $# -gt 0 ]]; do
         -h|--help)
             echo "Newton Test Runner Script"
             echo ""
-            echo "Runs tests with cargo-nextest, captures results, and emits report to stdout (text or JSON)."
+            echo "Runs fmt check, clippy, then tests with cargo-nextest; captures results and emits report to stdout (text or JSON)."
             echo ""
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -112,6 +112,23 @@ NEWTON_DIR="$(dirname "$SCRIPT_DIR")"
 
 echo -e "${YELLOW}Running tests in: $NEWTON_DIR${NC}" >&2
 cd "$NEWTON_DIR"
+
+# Disable incremental compilation in CI/sandboxed environments where hard-linking
+# the incremental cache can fail across mount points.
+export CARGO_INCREMENTAL=0
+# Keep Cargo artifacts on a single filesystem to avoid cross-device link errors.
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/newton-target}"
+mkdir -p "$CARGO_TARGET_DIR/tmp"
+export TMPDIR="$CARGO_TARGET_DIR/tmp"
+
+# Run format check (match pre-commit)
+echo -e "${YELLOW}Running cargo fmt --check...${NC}" >&2
+if ! cargo fmt --check 2>&1; then
+    echo -e "${RED}Format check failed. Run 'cargo fmt' to fix.${NC}" >&2
+    exit 1
+fi
+echo -e "${GREEN}Format check passed.${NC}" >&2
+echo "" >&2
 
 # Run clippy linter to check code quality
 echo -e "${YELLOW}Running clippy linter...${NC}" >&2
