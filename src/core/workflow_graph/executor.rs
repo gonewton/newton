@@ -148,6 +148,116 @@ struct TaskOutcome {
 }
 
 impl WorkflowRuntime {
+    /// Check if the workflow has exceeded the maximum allowed time.
+    /// Returns an error if the timeout is exceeded.
+    async fn check_timeout(&mut self) -> Result<(), AppError> {
+        if self.start_time.elapsed().as_secs() >= self.config.max_time_seconds {
+            self.workflow_execution.status = WorkflowExecutionStatus::Failed;
+            self.workflow_execution.completed_at = Some(Utc::now());
+            self.persist_checkpoint_force().await?;
+            return Err(AppError::new(
+                ErrorCategory::TimeoutError,
+                "workflow exceeded max_time_seconds",
+            )
+            .with_code("WFG-TIME-001"));
+        }
+        Ok(())
+    }
+
+    /// Check if we can schedule a task without exceeding iteration limits.
+    /// Returns Ok(true) if the task can be scheduled, Ok(false) if we should stop,
+    /// or an error if limits are exceeded.
+    async fn check_iteration_limits(&mut self, task_id: &str) -> Result<bool, AppError> {
+        if self.total_iterations >= self.config.max_workflow_iterations {
+            self.workflow_execution.status = WorkflowExecutionStatus::Failed;
+            self.workflow_execution.completed_at = Some(Utc::now());
+            self.ready_queue.push_front(task_id.to_string());
+            self.persist_checkpoint_force().await?;
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "workflow exceeded max_workflow_iterations",
+            )
+            .with_code("WFG-ITER-001"));
+        }
+
+        let limit = self
+            .tasks_by_id
+            .get(task_id)
+            .map(|task| task.iteration_limit(self.config.max_task_iterations))
+            .unwrap_or(self.config.max_task_iterations);
+        let entry = self.task_iterations.entry(task_id.to_string()).or_insert(0);
+        if *entry >= limit {
+            self.workflow_execution.status = WorkflowExecutionStatus::Failed;
+            self.workflow_execution.completed_at = Some(Utc::now());
+            self.ready_queue.push_front(task_id.to_string());
+            self.persist_checkpoint_force().await?;
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                format!("task {} reached iteration cap", task_id),
+            )
+            .with_code("WFG-ITER-002"));
+        }
+
+        // Update iteration count
+        self.total_iterations += 1;
+        *entry += 1;
+        Ok(true)
+    }
+
+    /// Prepare tasks for execution in the current tick.
+    /// Returns a list of (task_id, run_sequence) pairs.
+    async fn prepare_tick_tasks(&mut self) -> Result<Vec<(String, u64)>, AppError> {
+        let mut tick_tasks = Vec::new();
+        while tick_tasks.len() < self.config.parallel_limit {
+            if let Some(task_id) = self.ready_queue.pop_front() {
+                self.check_iteration_limits(&task_id).await?;
+                let run_seq = *self.task_iterations.get(&task_id).unwrap() as u64;
+                tick_tasks.push((task_id, run_seq));
+            } else {
+                break;
+            }
+        }
+        Ok(tick_tasks)
+    }
+
+    /// Detect and handle terminal tasks in the current frontier.
+    /// Returns true if a terminal stop was triggered, false otherwise.
+    async fn handle_terminal_tasks(&mut self, frontier: &[TaskOutcome]) -> Result<bool, AppError> {
+        // Detect terminal tasks in this tick before processing.
+        let mut tick_terminal_ids: Vec<String> = Vec::new();
+        if self.graph_settings.completion.stop_on_terminal {
+            for outcome in frontier {
+                if let Some(task) = self.tasks_by_id.get(&outcome.task_id) {
+                    if task.terminal.is_some() {
+                        tick_terminal_ids.push(outcome.task_id.clone());
+                    }
+                }
+            }
+        }
+
+        // Handle terminal stop after processing so all outcomes are recorded.
+        if !tick_terminal_ids.is_empty() {
+            if tick_terminal_ids.len() > 1 {
+                // WFG-TERM-001: multiple terminal tasks in same tick (informational).
+                let affected = tick_terminal_ids[1..].to_vec();
+                let warning = serde_json::json!({
+                    "code": "WFG-TERM-001",
+                    "message": format!(
+                        "multiple terminal tasks completed in the same tick; \
+                         tie-broken by task-id alphabetical order; \
+                         first terminal: {}",
+                        tick_terminal_ids[0]
+                    ),
+                    "affected_tasks": affected
+                });
+                self.workflow_execution.warnings.push(warning);
+            }
+            self.persist_checkpoint_force().await?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     async fn run(mut self) -> Result<ExecutionSummary, AppError> {
         tracing::info!(
             execution_id = %self.workflow_execution.execution_id,
@@ -157,54 +267,9 @@ impl WorkflowRuntime {
         self.save_execution()?;
         let mut terminal_stop_triggered = false;
         while !self.ready_queue.is_empty() {
-            if self.start_time.elapsed().as_secs() >= self.config.max_time_seconds {
-                self.workflow_execution.status = WorkflowExecutionStatus::Failed;
-                self.workflow_execution.completed_at = Some(Utc::now());
-                self.persist_checkpoint_force().await?;
-                return Err(AppError::new(
-                    ErrorCategory::TimeoutError,
-                    "workflow exceeded max_time_seconds",
-                )
-                .with_code("WFG-TIME-001"));
-            }
+            self.check_timeout().await?;
 
-            let mut tick_tasks = Vec::new();
-            while tick_tasks.len() < self.config.parallel_limit {
-                if let Some(task_id) = self.ready_queue.pop_front() {
-                    if self.total_iterations >= self.config.max_workflow_iterations {
-                        self.workflow_execution.status = WorkflowExecutionStatus::Failed;
-                        self.workflow_execution.completed_at = Some(Utc::now());
-                        self.persist_checkpoint_force().await?;
-                        return Err(AppError::new(
-                            ErrorCategory::ValidationError,
-                            "workflow exceeded max_workflow_iterations",
-                        )
-                        .with_code("WFG-ITER-001"));
-                    }
-                    self.total_iterations += 1;
-
-                    let limit = self
-                        .tasks_by_id
-                        .get(&task_id)
-                        .map(|task| task.iteration_limit(self.config.max_task_iterations))
-                        .unwrap_or(self.config.max_task_iterations);
-                    let entry = self.task_iterations.entry(task_id.clone()).or_insert(0);
-                    if *entry >= limit {
-                        self.workflow_execution.status = WorkflowExecutionStatus::Failed;
-                        self.workflow_execution.completed_at = Some(Utc::now());
-                        self.persist_checkpoint_force().await?;
-                        return Err(AppError::new(
-                            ErrorCategory::ValidationError,
-                            format!("task {} reached iteration cap", task_id),
-                        )
-                        .with_code("WFG-ITER-002"));
-                    }
-                    *entry += 1;
-                    tick_tasks.push((task_id, *entry as u64));
-                } else {
-                    break;
-                }
-            }
+            let tick_tasks = self.prepare_tick_tasks().await?;
 
             if tick_tasks.is_empty() {
                 break;
@@ -240,45 +305,17 @@ impl WorkflowRuntime {
             // Sort frontier by task_id alphabetically for deterministic ordering.
             frontier.sort_by(|a, b| a.task_id.cmp(&b.task_id));
 
-            // Detect terminal tasks in this tick before processing.
-            let mut tick_terminal_ids: Vec<String> = Vec::new();
-            if self.graph_settings.completion.stop_on_terminal {
-                for outcome in &frontier {
-                    if let Some(task) = self.tasks_by_id.get(&outcome.task_id) {
-                        if task.terminal.is_some() {
-                            tick_terminal_ids.push(outcome.task_id.clone());
-                        }
-                    }
-                }
-            }
-
             let frontier_len = frontier.len();
-            if let Err(err) = self.process_frontier(frontier).await {
+            if let Err(err) = self.process_frontier(frontier.clone()).await {
                 self.workflow_execution.status = WorkflowExecutionStatus::Failed;
                 self.workflow_execution.completed_at = Some(Utc::now());
                 self.persist_checkpoint_force().await?;
                 return Err(err);
             }
 
-            // Handle terminal stop after processing so all outcomes are recorded.
-            if !tick_terminal_ids.is_empty() {
-                if tick_terminal_ids.len() > 1 {
-                    // WFG-TERM-001: multiple terminal tasks in same tick (informational).
-                    let affected = tick_terminal_ids[1..].to_vec();
-                    let warning = serde_json::json!({
-                        "code": "WFG-TERM-001",
-                        "message": format!(
-                            "multiple terminal tasks completed in the same tick; \
-                             tie-broken by task-id alphabetical order; \
-                             first terminal: {}",
-                            tick_terminal_ids[0]
-                        ),
-                        "affected_tasks": affected
-                    });
-                    self.workflow_execution.warnings.push(warning);
-                }
+            // Handle terminal tasks - check if we should stop
+            if self.handle_terminal_tasks(&frontier).await? {
                 terminal_stop_triggered = true;
-                self.persist_checkpoint_force().await?;
                 break;
             }
 
