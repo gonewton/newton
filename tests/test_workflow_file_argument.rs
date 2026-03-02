@@ -71,6 +71,28 @@ fn commands_accept_positional_workflow_path() {
         explain.resolved_workflow_path(),
         Some(PathBuf::from("flow.yaml"))
     );
+
+    let Command::Explain(explain) =
+        parse_command(&["newton", "explain", "flow.yaml", "--format", "prose"])
+    else {
+        panic!("expected explain command");
+    };
+    assert_eq!(explain.format, OutputFormat::Prose);
+}
+
+#[test]
+fn lint_rejects_prose_format() {
+    let err = commands::lint(LintArgs {
+        workflow_positional: Some(PathBuf::from(
+            "tests/fixtures/workflows/01_minimal_success.yaml",
+        )),
+        file: None,
+        format: OutputFormat::Prose,
+    })
+    .expect_err("expected lint prose format to be rejected");
+    assert!(err
+        .to_string()
+        .contains("prose format is not supported for lint command"));
 }
 
 #[test]

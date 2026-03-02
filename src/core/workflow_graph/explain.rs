@@ -219,3 +219,145 @@ fn apply_context_set_overrides(context: &mut Value, overrides: &[(String, Value)
 fn expr_depends_on_tasks(expr: &str) -> bool {
     expr.contains("tasks.") || expr.contains("tasks[")
 }
+
+/// Format the ExplainOutput as prose for delegation purposes.
+/// This creates a human-readable description that can be used independently
+/// of the workflow YAML or Newton runtime.
+pub fn format_explain_prose(output: &ExplainOutput) -> Result<String, AppError> {
+    let mut prose = String::new();
+
+    // Header and introduction
+    format_prose_header(&mut prose);
+
+    // Content sections
+    format_context_section(&mut prose, &output.context);
+    format_triggers_section(&mut prose, &output.triggers);
+    format_settings_section(&mut prose, &output.settings);
+    format_tasks_section(&mut prose, &output.tasks);
+    format_execution_notes(&mut prose);
+
+    Ok(prose)
+}
+
+fn format_prose_header(prose: &mut String) {
+    prose.push_str("# Workflow Execution Instructions\n\n");
+    prose.push_str("This document contains complete instructions for executing a workflow. ");
+    prose.push_str("All steps, conditions, and parameters are included to enable execution ");
+    prose.push_str("without access to the original workflow file or Newton runtime.\n\n");
+}
+
+fn format_context_section(prose: &mut String, context: &Value) {
+    prose.push_str("## Context\n\n");
+    match serde_json::to_string_pretty(context) {
+        Ok(formatted_context) => {
+            prose.push_str("Initial workflow context:\n");
+            prose.push_str("```json\n");
+            prose.push_str(&formatted_context);
+            prose.push_str("\n```\n\n");
+        }
+        Err(_) => {
+            prose.push_str("Initial workflow context: (unable to format)\n\n");
+        }
+    }
+}
+
+fn format_triggers_section(prose: &mut String, triggers: &Value) {
+    prose.push_str("## Trigger Information\n\n");
+    match serde_json::to_string_pretty(triggers) {
+        Ok(formatted_triggers) => {
+            prose.push_str("Workflow triggers and payload:\n");
+            prose.push_str("```json\n");
+            prose.push_str(&formatted_triggers);
+            prose.push_str("\n```\n\n");
+        }
+        Err(_) => {
+            prose.push_str("Workflow triggers and payload: (unable to format)\n\n");
+        }
+    }
+}
+
+fn format_settings_section(prose: &mut String, settings: &Value) {
+    prose.push_str("## Workflow Settings\n\n");
+    match serde_json::to_string_pretty(settings) {
+        Ok(formatted_settings) => {
+            prose.push_str("Effective workflow settings:\n");
+            prose.push_str("```json\n");
+            prose.push_str(&formatted_settings);
+            prose.push_str("\n```\n\n");
+        }
+        Err(_) => {
+            prose.push_str("Effective workflow settings: (unable to format)\n\n");
+        }
+    }
+}
+
+fn format_tasks_section(prose: &mut String, tasks: &[ExplainTask]) {
+    prose.push_str("## Execution Steps\n\n");
+    prose.push_str("Execute the following tasks according to their transition conditions. ");
+    prose.push_str("Tasks are listed in dependency order, but actual execution depends on the transition logic.\n\n");
+
+    for (index, task) in tasks.iter().enumerate() {
+        format_single_task(prose, task, index + 1);
+    }
+}
+
+fn format_single_task(prose: &mut String, task: &ExplainTask, task_number: usize) {
+    prose.push_str(&format!(
+        "### {}: {} ({})\n\n",
+        task_number, task.id, task.operator
+    ));
+
+    format_task_parameters(prose, &task.params);
+    format_task_transitions(prose, &task.transitions);
+}
+
+fn format_task_parameters(prose: &mut String, params: &Value) {
+    prose.push_str("**Parameters:**\n");
+    match serde_json::to_string_pretty(params) {
+        Ok(formatted_params) => {
+            let formatted_params = format_runtime_placeholders(&formatted_params);
+            prose.push_str("```json\n");
+            prose.push_str(&formatted_params);
+            prose.push_str("\n```\n\n");
+        }
+        Err(_) => {
+            prose.push_str("(unable to format parameters)\n\n");
+        }
+    }
+}
+
+fn format_task_transitions(prose: &mut String, transitions: &[ExplainTransition]) {
+    if !transitions.is_empty() {
+        prose.push_str("**Transitions after completion:**\n");
+        for transition in transitions {
+            prose.push_str(&format!(
+                "- Go to task '{}' with priority {} when: {}\n",
+                transition.target, transition.priority, transition.when
+            ));
+        }
+        prose.push('\n');
+    } else {
+        prose.push_str("**Transitions:** None (terminal task)\n\n");
+    }
+}
+
+fn format_execution_notes(prose: &mut String) {
+    prose.push_str("## Execution Notes\n\n");
+    prose.push_str(
+        "- Parameters marked as \"(runtime)\" will be provided or calculated during execution\n",
+    );
+    prose.push_str("- Transition conditions should be evaluated after each task completes\n");
+    prose
+        .push_str("- Execute transitions in priority order (lower numbers have higher priority)\n");
+    prose.push_str("- If no transition conditions match, the workflow terminates\n");
+    prose.push_str(
+        "- Tasks without transitions are terminal tasks that end the workflow when completed\n",
+    );
+}
+
+fn format_runtime_placeholders(json_str: &str) -> String {
+    json_str.replace(
+        &format!("\"{}\"", RUNTIME_PLACEHOLDER),
+        &format!("\"{}\" (value provided at runtime)", RUNTIME_PLACEHOLDER),
+    )
+}

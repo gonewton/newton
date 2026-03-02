@@ -120,6 +120,7 @@ impl WebhookStatusArgs {
 pub enum OutputFormat {
     Text,
     Json,
+    Prose,
 }
 
 #[derive(Args, Clone)]
