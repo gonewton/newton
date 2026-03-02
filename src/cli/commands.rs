@@ -276,6 +276,12 @@ pub fn lint(args: LintArgs) -> StdResult<(), AppError> {
                 print_lint_results_text(&results);
             }
         }
+        OutputFormat::Prose => {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "prose format is not supported for lint command; use text or json",
+            ));
+        }
     }
     let error_count = results
         .iter()
@@ -324,6 +330,7 @@ pub fn explain(args: ExplainArgs) -> StdResult<(), AppError> {
                 source_macro_names.clone(),
             )),
         )?,
+        OutputFormat::Prose => print_explain_prose(&outcome.output)?,
     }
     for diagnostic in &outcome.diagnostics {
         if let Some(location) = &diagnostic.location {
@@ -690,6 +697,12 @@ fn print_explain_json(output: &explain::ExplainOutput) -> StdResult<(), AppError
         )
     })?;
     println!("{}", serialized);
+    Ok(())
+}
+
+fn print_explain_prose(output: &explain::ExplainOutput) -> StdResult<(), AppError> {
+    let prose = explain::format_explain_prose(output)?;
+    println!("{}", prose);
     Ok(())
 }
 

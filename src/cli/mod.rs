@@ -101,7 +101,7 @@ or manually create .newton/configs/ and add a monitor.conf file."
     Lint(LintArgs),
     #[command(
         about = "Explain workflow graph settings/transitions",
-        after_help = "Example:\n    newton explain workflow.yaml --format text"
+        after_help = "Example:\n    newton explain workflow.yaml --format text\n    newton explain workflow.yaml --format prose"
     )]
     Explain(ExplainArgs),
     #[command(
