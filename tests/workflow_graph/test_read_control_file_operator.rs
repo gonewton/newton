@@ -1,6 +1,8 @@
+use newton::core::workflow_graph::executor::GraphHandle;
 use newton::core::workflow_graph::operator::{ExecutionContext, Operator, StateView};
 use newton::core::workflow_graph::operators::read_control_file::ReadControlFileOperator;
 use serde_json::json;
+use std::collections::HashMap;
 use tempfile::tempdir;
 
 fn execution_context(workspace: std::path::PathBuf) -> ExecutionContext {
@@ -10,6 +12,7 @@ fn execution_context(workspace: std::path::PathBuf) -> ExecutionContext {
         task_id: "read".to_string(),
         iteration: 1,
         state_view: StateView::new(json!({}), json!({}), json!({})),
+        graph: GraphHandle::new(HashMap::new()),
     }
 }
 
@@ -23,6 +26,7 @@ fn execution_context_with_triggers(
         task_id: "read".to_string(),
         iteration: 1,
         state_view: StateView::new(json!({}), json!({}), triggers),
+        graph: GraphHandle::new(HashMap::new()),
     }
 }
 

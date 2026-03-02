@@ -810,9 +810,11 @@ fn build_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::workflow_graph::executor::GraphHandle;
     use crate::core::workflow_graph::operator::StateView;
     use crate::core::workflow_graph::schema::WorkflowSettings;
     use serde_json::json;
+    use std::collections::HashMap;
     use tempfile::TempDir;
 
     fn make_ctx(workspace: &TempDir) -> ExecutionContext {
@@ -822,6 +824,7 @@ mod tests {
             task_id: "agent".to_string(),
             iteration: 1,
             state_view: StateView::new(json!({}), json!({}), json!({})),
+            graph: GraphHandle::new(HashMap::new()), // Empty graph for test
         }
     }
 

@@ -532,6 +532,13 @@ impl Condition {
     }
 }
 
+/// Parameters for the barrier operator that waits for multiple tasks to complete.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BarrierParams {
+    #[serde(default)]
+    pub expected: Vec<String>,
+}
+
 impl WorkflowDocument {
     /// Parse a workflow document from a YAML file without semantic validation.
     pub fn parse_from_file(path: &Path) -> Result<Self, AppError> {

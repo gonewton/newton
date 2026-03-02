@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod assert_completed;
+pub mod barrier;
 pub mod command;
 pub mod engine;
 pub mod human_approval;
@@ -56,6 +57,7 @@ pub fn register_builtins_with_deps(
         .register(noop::NoOpOperator::new())
         .register(command_operator)
         .register(assert_completed::AssertCompletedOperator::new())
+        .register(barrier::BarrierOperator::new())
         .register(set_context::SetContextOperator::new())
         .register(read_control_file::ReadControlFileOperator::new())
         .register(agent_operator)
