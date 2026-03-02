@@ -63,9 +63,9 @@ pub struct WebhookArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum WebhookCommand {
-    #[command(about = "Serve a webhook listener")]
+    #[command(about = "Start an HTTP server to receive webhook events and trigger workflows")]
     Serve(WebhookServeArgs),
-    #[command(about = "Show webhook configuration status")]
+    #[command(about = "Display webhook endpoint configuration and server status")]
     Status(WebhookStatusArgs),
 }
 
@@ -246,7 +246,7 @@ pub struct CheckpointsArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum CheckpointCommand {
-    #[command(about = "List workflow checkpoints")]
+    #[command(about = "Display available workflow executions and their checkpoint details")]
     List {
         #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
@@ -254,7 +254,7 @@ pub enum CheckpointCommand {
         #[arg(long)]
         format_json: bool,
     },
-    #[command(about = "Clean historical checkpoints")]
+    #[command(about = "Remove old checkpoint files to free up disk space")]
     Clean {
         #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
@@ -272,7 +272,7 @@ pub struct ArtifactsArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum ArtifactCommand {
-    #[command(about = "Clean artifact store files")]
+    #[command(about = "Remove old workflow output files and execution artifacts")]
     Clean {
         #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
