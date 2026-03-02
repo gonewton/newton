@@ -5,32 +5,31 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::core::workflow_graph::artifacts::ArtifactStore;
 use crate::core::workflow_graph::checkpoint;
-use crate::core::workflow_graph::expression::{EvaluationContext, ExpressionEngine};
-use crate::core::workflow_graph::operator::{
-    ExecutionContext as OperatorContext, OperatorRegistry, StateView,
-};
+use crate::core::workflow_graph::context;
+use crate::core::workflow_graph::expression::ExpressionEngine;
+use crate::core::workflow_graph::operator::{OperatorRegistry, StateView};
 use crate::core::workflow_graph::schema::{
-    self, GoalGateFailureBehavior, TerminalKind, WorkflowDocument, WorkflowTask,
+    self, BarrierParams, GoalGateFailureBehavior, TerminalKind, WorkflowDocument, WorkflowTask,
 };
 use crate::core::workflow_graph::state::{
-    canonicalize_workflow_path, compute_sha256_hex, redact_value, summarize_error, AppErrorSummary,
-    GraphSettings, WorkflowCheckpoint, WorkflowExecution, WorkflowExecutionStatus,
-    WorkflowTaskRunRecord, WorkflowTaskRunSummary, WorkflowTaskStatus,
-    WORKFLOW_EXECUTION_FORMAT_VERSION,
+    canonicalize_workflow_path, compute_sha256_hex, redact_value, AppErrorSummary, GraphSettings,
+    TaskRunRecord, WorkflowCheckpoint, WorkflowExecution, WorkflowExecutionStatus,
+    WorkflowTaskRunRecord, WorkflowTaskRunSummary, WORKFLOW_EXECUTION_FORMAT_VERSION,
 };
+use crate::core::workflow_graph::task_execution;
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
-use rand::{rngs::StdRng, Rng, SeedableRng};
-use serde_json::{Map, Number, Value};
+use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::convert::TryFrom;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
-use tokio::time::{sleep, timeout};
 use tracing;
 use uuid::Uuid;
+
+// Re-export TaskStatus for backward compatibility with existing tests
+pub use crate::core::workflow_graph::state::TaskStatus;
 
 /// Optional overrides supplied by CLI flags.
 #[derive(Clone, Debug)]
@@ -60,56 +59,165 @@ pub struct ExecutionSummary {
     pub completed_tasks: BTreeMap<String, TaskRunRecord>,
 }
 
-/// Record describing the last completed run of a task.
-#[derive(Clone, Debug, Serialize)]
-pub struct TaskRunRecord {
-    pub status: TaskStatus,
-    pub output: Value,
-    pub error_code: Option<String>,
-    pub duration_ms: u64,
-    pub run_seq: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TaskStatus {
-    Success,
-    Failed,
-    Skipped,
-}
-
-impl TaskStatus {
-    fn as_str(&self) -> &'static str {
-        match self {
-            TaskStatus::Success => "success",
-            TaskStatus::Failed => "failed",
-            TaskStatus::Skipped => "skipped",
-        }
-    }
-}
-
-impl From<WorkflowTaskStatus> for TaskStatus {
-    fn from(status: WorkflowTaskStatus) -> Self {
-        match status {
-            WorkflowTaskStatus::Success => TaskStatus::Success,
-            WorkflowTaskStatus::Failed => TaskStatus::Failed,
-            WorkflowTaskStatus::Skipped => TaskStatus::Skipped,
-        }
-    }
-}
-
-struct ExecutionState {
+pub struct ExecutionState {
     context: Value,
     completed: HashMap<String, TaskRunRecord>,
     checkpoint_records: HashMap<String, WorkflowTaskRunRecord>,
     triggers: Value,
 }
 
+/// Handle providing controlled access to the runtime workflow graph.
+#[derive(Clone)]
+pub struct GraphHandle(Arc<RwLock<HashMap<String, WorkflowTask>>>);
+
+impl GraphHandle {
+    pub fn new(tasks: HashMap<String, WorkflowTask>) -> Self {
+        GraphHandle(Arc::new(RwLock::new(tasks)))
+    }
+
+    /// Add a single task to the runtime graph.
+    pub fn add_task(
+        &self,
+        task: WorkflowTask,
+        _enqueue: bool,
+        if_absent: bool,
+    ) -> Result<(), AppError> {
+        let mut graph = self.0.write().unwrap();
+
+        if let Some(existing_task) = graph.get(&task.id) {
+            if !if_absent {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    format!("Task '{}' already exists in runtime graph", task.id),
+                )
+                .with_code("WFG-DYN-001"));
+            }
+            // If if_absent is true and task exists with identical definition, it's a no-op
+            if existing_task.operator != task.operator || existing_task.params != task.params {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    format!(
+                        "Task '{}' already exists with different definition",
+                        task.id
+                    ),
+                )
+                .with_code("WFG-DYN-001"));
+            }
+            return Ok(()); // No-op for identical task
+        }
+
+        // Validate required fields
+        if task.id.trim().is_empty() {
+            return Err(
+                AppError::new(ErrorCategory::ValidationError, "Task ID cannot be empty")
+                    .with_code("WFG-DYN-002"),
+            );
+        }
+        if task.operator.trim().is_empty() {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "Task operator cannot be empty",
+            )
+            .with_code("WFG-DYN-002"));
+        }
+
+        graph.insert(task.id.clone(), task);
+        Ok(())
+    }
+
+    /// Add multiple tasks to the runtime graph.
+    pub fn add_tasks(
+        &self,
+        tasks: Vec<WorkflowTask>,
+        _enqueue: bool,
+        if_absent: bool,
+        barrier_task_id: Option<&str>,
+    ) -> Result<(), AppError> {
+        let mut task_ids = Vec::new();
+
+        // Add all tasks first
+        for task in tasks {
+            self.add_task(task.clone(), false, if_absent)?; // Don't enqueue individual tasks
+            task_ids.push(task.id);
+        }
+
+        // If barrier task is specified, register the added tasks with it
+        if let Some(barrier_id) = barrier_task_id {
+            self.register_barrier(barrier_id, &task_ids)?;
+        }
+
+        Ok(())
+    }
+
+    /// Register task IDs with a barrier operator.
+    pub fn register_barrier(
+        &self,
+        barrier_task_id: &str,
+        expected_ids: &[String],
+    ) -> Result<(), AppError> {
+        let mut graph = self.0.write().unwrap();
+
+        let barrier_task = graph.get_mut(barrier_task_id).ok_or_else(|| {
+            AppError::new(
+                ErrorCategory::ValidationError,
+                format!(
+                    "Barrier task '{}' not found in runtime graph",
+                    barrier_task_id
+                ),
+            )
+            .with_code("WFG-DYN-004")
+        })?;
+
+        if barrier_task.operator != "barrier" {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                format!("Task '{}' is not a barrier operator", barrier_task_id),
+            )
+            .with_code("WFG-DYN-004"));
+        }
+
+        // Parse current barrier params
+        let mut barrier_params: BarrierParams = serde_json::from_value(barrier_task.params.clone())
+            .unwrap_or_else(|_| BarrierParams { expected: vec![] });
+
+        // Add new expected IDs
+        barrier_params.expected.extend_from_slice(expected_ids);
+
+        // Update the task params
+        barrier_task.params = serde_json::to_value(&barrier_params).map_err(|err| {
+            AppError::new(
+                ErrorCategory::SerializationError,
+                format!("Failed to serialize barrier params: {}", err),
+            )
+        })?;
+
+        Ok(())
+    }
+
+    /// Get a task from the runtime graph (read-only access).
+    pub fn get_task(&self, task_id: &str) -> Option<WorkflowTask> {
+        let graph = self.0.read().unwrap();
+        graph.get(task_id).cloned()
+    }
+
+    /// Get all tasks from the runtime graph (read-only access).
+    pub fn get_all_tasks(&self) -> Vec<WorkflowTask> {
+        let graph = self.0.read().unwrap();
+        graph.values().cloned().collect()
+    }
+
+    /// Check if a task exists in the runtime graph.
+    pub fn contains_task(&self, task_id: &str) -> bool {
+        let graph = self.0.read().unwrap();
+        graph.contains_key(task_id)
+    }
+}
+
 struct WorkflowRuntime {
     workspace_root: PathBuf,
     checkpoint_root: PathBuf,
     registry: OperatorRegistry,
-    tasks_by_id: Arc<HashMap<String, WorkflowTask>>,
+    runtime_graph: GraphHandle,
     engine: Arc<ExpressionEngine>,
     graph_settings: GraphSettings,
     config: ExecutionConfig,
@@ -130,21 +238,21 @@ impl ExecutionState {
     fn snapshot(&self) -> StateView {
         StateView::new(
             self.context.clone(),
-            build_tasks_value(&self.completed),
+            context::build_tasks_value(&self.completed),
             self.triggers.clone(),
         )
     }
 }
 
 #[derive(Clone)]
-struct TaskOutcome {
-    task_id: String,
-    record: TaskRunRecord,
-    context_patch: Option<Value>,
-    failed: bool,
-    started_at: DateTime<Utc>,
-    completed_at: DateTime<Utc>,
-    error_summary: Option<AppErrorSummary>,
+pub struct TaskOutcome {
+    pub task_id: String,
+    pub record: TaskRunRecord,
+    pub context_patch: Option<Value>,
+    pub failed: bool,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: DateTime<Utc>,
+    pub error_summary: Option<AppErrorSummary>,
 }
 
 impl WorkflowRuntime {
@@ -181,8 +289,8 @@ impl WorkflowRuntime {
         }
 
         let limit = self
-            .tasks_by_id
-            .get(task_id)
+            .runtime_graph
+            .get_task(task_id)
             .map(|task| task.iteration_limit(self.config.max_task_iterations))
             .unwrap_or(self.config.max_task_iterations);
         let entry = self.task_iterations.entry(task_id.to_string()).or_insert(0);
@@ -227,7 +335,7 @@ impl WorkflowRuntime {
         let mut tick_terminal_ids: Vec<String> = Vec::new();
         if self.graph_settings.completion.stop_on_terminal {
             for outcome in frontier {
-                if let Some(task) = self.tasks_by_id.get(&outcome.task_id) {
+                if let Some(task) = self.runtime_graph.get_task(&outcome.task_id) {
                     if task.terminal.is_some() {
                         tick_terminal_ids.push(outcome.task_id.clone());
                     }
@@ -279,13 +387,13 @@ impl WorkflowRuntime {
             let tick_tasks_owned = tick_tasks.clone();
             let mut futures = Vec::new();
             for (task_id, run_seq) in tick_tasks_owned {
-                let task = self.tasks_by_id.get(&task_id).unwrap().clone();
+                let task = self.runtime_graph.get_task(&task_id).unwrap();
                 let registry = self.registry.clone();
                 let engine = Arc::clone(&self.engine);
                 let workspace = self.workspace_root.clone();
                 let snapshot = snapshot.clone();
                 let execution_id = self.workflow_execution.execution_id.to_string();
-                futures.push(run_task(
+                futures.push(task_execution::run_task(
                     task,
                     registry,
                     engine,
@@ -294,6 +402,7 @@ impl WorkflowRuntime {
                     execution_id,
                     run_seq,
                     Arc::clone(&self.redact_keys),
+                    self.runtime_graph.clone(),
                 ));
             }
 
@@ -371,8 +480,12 @@ impl WorkflowRuntime {
         let completion = &self.graph_settings.completion;
 
         // Collect all goal gate tasks.
-        let goal_gate_tasks: Vec<&WorkflowTask> =
-            self.tasks_by_id.values().filter(|t| t.goal_gate).collect();
+        let goal_gate_tasks: Vec<WorkflowTask> = self
+            .runtime_graph
+            .get_all_tasks()
+            .into_iter()
+            .filter(|t| t.goal_gate)
+            .collect();
 
         // Rules 2a and 2b: evaluate goal gates.
         if !goal_gate_tasks.is_empty() {
@@ -381,7 +494,8 @@ impl WorkflowRuntime {
             for gate in &goal_gate_tasks {
                 if let Some(record) = state.completed.get(&gate.id) {
                     // Gate was reached — check if it passed.
-                    let passed = record.status == TaskStatus::Success;
+                    let passed =
+                        record.status == crate::core::workflow_graph::state::TaskStatus::Success;
                     if !passed
                         && completion.goal_gate_failure_behavior == GoalGateFailureBehavior::Fail
                     {
@@ -421,7 +535,7 @@ impl WorkflowRuntime {
             && state
                 .completed
                 .values()
-                .any(|r| r.status == TaskStatus::Failed)
+                .any(|r| r.status == crate::core::workflow_graph::state::TaskStatus::Failed)
         {
             let err = AppError::new(
                 ErrorCategory::ValidationError,
@@ -434,7 +548,7 @@ impl WorkflowRuntime {
         // Rule 4: any completed terminal:failure task causes failure.
         let mut terminal_failure_task: Option<&str> = None;
         for task_id in state.completed.keys() {
-            if let Some(task) = self.tasks_by_id.get(task_id) {
+            if let Some(task) = self.runtime_graph.get_task(task_id) {
                 if task.terminal == Some(TerminalKind::Failure) {
                     terminal_failure_task = Some(task_id.as_str());
                     break;
@@ -461,7 +575,7 @@ impl WorkflowRuntime {
                 .completed
                 .insert(outcome.task_id.clone(), outcome.record.clone());
             if let Some(patch) = &outcome.context_patch {
-                apply_patch(&mut guard.context, patch);
+                context::apply_patch(&mut guard.context, patch);
             }
 
             // Verbose output: print task stdout/stderr after completion
@@ -476,10 +590,10 @@ impl WorkflowRuntime {
                 )
                 .with_code("WFG-EXEC-001"));
             }
-            let record = build_workflow_task_run_record(
+            let record = task_execution::build_workflow_task_run_record(
                 outcome,
-                self.tasks_by_id
-                    .get(&outcome.task_id)
+                self.runtime_graph
+                    .get_task(&outcome.task_id)
                     .and_then(|task| task.goal_gate_group.clone()),
                 &mut self.artifact_store,
                 &self.graph_settings,
@@ -497,7 +611,7 @@ impl WorkflowRuntime {
 
         let mut seen = HashSet::new();
         for outcome in frontier {
-            if let Some(task) = self.tasks_by_id.get(&outcome.task_id) {
+            if let Some(task) = self.runtime_graph.get_task(&outcome.task_id) {
                 let mut transitions = task.transitions.clone();
                 transitions.sort_by_key(|t| t.priority);
 
@@ -510,7 +624,21 @@ impl WorkflowRuntime {
                 let has_conditional = transitions.iter().any(|t| t.when.is_some());
                 if has_conditional {
                     for transition in transitions {
-                        if evaluate_transition(&transition, self.engine.as_ref(), &snapshot)? {
+                        if context::evaluate_transition(
+                            &transition,
+                            self.engine.as_ref(),
+                            &snapshot,
+                        )? {
+                            // WFG-DYN-003: Validate that transition target exists in runtime graph
+                            if !self.runtime_graph.contains_task(&transition.to) {
+                                return Err(AppError::new(
+                                    ErrorCategory::ValidationError,
+                                    format!(
+                                        "Task '{}' transition references non-existent task '{}' in runtime graph",
+                                        task.id, transition.to
+                                    ),
+                                ).with_code("WFG-DYN-003"));
+                            }
                             if seen.insert(transition.to.clone()) {
                                 self.ready_queue.push_back(transition.to.clone());
                             }
@@ -519,15 +647,32 @@ impl WorkflowRuntime {
                     }
                 } else {
                     for transition in transitions {
-                        if evaluate_transition(&transition, self.engine.as_ref(), &snapshot)?
-                            && seen.insert(transition.to.clone())
-                        {
-                            self.ready_queue.push_back(transition.to.clone());
+                        if context::evaluate_transition(
+                            &transition,
+                            self.engine.as_ref(),
+                            &snapshot,
+                        )? {
+                            // WFG-DYN-003: Validate that transition target exists in runtime graph
+                            if !self.runtime_graph.contains_task(&transition.to) {
+                                return Err(AppError::new(
+                                    ErrorCategory::ValidationError,
+                                    format!(
+                                        "Task '{}' transition references non-existent task '{}' in runtime graph",
+                                        task.id, transition.to
+                                    ),
+                                ).with_code("WFG-DYN-003"));
+                            }
+                            if seen.insert(transition.to.clone()) {
+                                self.ready_queue.push_back(transition.to.clone());
+                            }
                         }
                     }
                 }
             }
         }
+
+        // Evaluate barrier tasks: check if they can be enqueued
+        self.evaluate_barrier_tasks().await?;
 
         Ok(())
     }
@@ -562,7 +707,8 @@ impl WorkflowRuntime {
         let ready_queue = self.ready_queue.iter().cloned().collect::<Vec<_>>();
         let checkpoint_records = guard.checkpoint_records.clone();
         drop(guard);
-        let checkpoint = WorkflowCheckpoint::new(
+        let runtime_tasks = self.runtime_graph.get_all_tasks();
+        let checkpoint = WorkflowCheckpoint::new_v2(
             self.workflow_execution.execution_id,
             self.workflow_execution.workflow_hash.clone(),
             redacted_context,
@@ -571,6 +717,7 @@ impl WorkflowRuntime {
             self.task_iterations.clone(),
             self.total_iterations,
             checkpoint_records,
+            runtime_tasks,
         );
         checkpoint::save_checkpoint_at(
             &self.checkpoint_root,
@@ -597,6 +744,58 @@ impl WorkflowRuntime {
             &self.workflow_execution.execution_id,
             &self.workflow_execution,
         )
+    }
+
+    /// Evaluate barrier tasks and enqueue those that are ready.
+    async fn evaluate_barrier_tasks(&mut self) -> Result<(), AppError> {
+        // Get the current state
+        let guard = self.state.read().await;
+        let completed_tasks = &guard.completed;
+
+        // Get all barrier tasks from the runtime graph
+        let all_tasks = self.runtime_graph.get_all_tasks();
+        let barrier_tasks: Vec<WorkflowTask> = all_tasks
+            .into_iter()
+            .filter(|task| task.operator == "barrier")
+            .collect();
+
+        for barrier_task in barrier_tasks {
+            // Skip if this barrier is already completed or already in the ready queue
+            if completed_tasks.contains_key(&barrier_task.id)
+                || self.ready_queue.contains(&barrier_task.id)
+            {
+                continue;
+            }
+
+            // Parse barrier parameters
+            let barrier_params: BarrierParams =
+                match serde_json::from_value(barrier_task.params.clone()) {
+                    Ok(params) => params,
+                    Err(_) => {
+                        // Skip invalid barrier params
+                        continue;
+                    }
+                };
+
+            // Check if all expected tasks are completed
+            let all_expected_completed = barrier_params
+                .expected
+                .iter()
+                .all(|task_id| completed_tasks.contains_key(task_id));
+
+            if all_expected_completed && !barrier_params.expected.is_empty() {
+                // All expected tasks are completed, enqueue the barrier
+                self.ready_queue.push_back(barrier_task.id.clone());
+
+                tracing::info!(
+                    barrier_task_id = %barrier_task.id,
+                    expected_count = barrier_params.expected.len(),
+                    "barrier task ready: all expected tasks completed"
+                );
+            }
+        }
+
+        Ok(())
     }
 
     /// Print task stdout/stderr for verbose mode
@@ -708,7 +907,7 @@ fn build_workflow_runtime(
     let workflow_hash = compute_sha256_hex(&workflow_bytes);
 
     let engine = Arc::new(ExpressionEngine::default());
-    let eval_ctx = resolve_initial_evaluation_context(
+    let eval_ctx = context::resolve_initial_evaluation_context(
         &document.workflow.context,
         engine.as_ref(),
         &trigger_payload,
@@ -720,7 +919,7 @@ fn build_workflow_runtime(
             schema::TaskOrMacro::Task(task) => {
                 let mut included = true;
                 if let Some(ref guard) = task.include_if {
-                    included = evaluate_condition(guard, engine.as_ref(), &eval_ctx)?;
+                    included = context::evaluate_condition(guard, engine.as_ref(), &eval_ctx)?;
                 }
                 if included {
                     let mut task_clone = task.clone();
@@ -729,7 +928,8 @@ fn build_workflow_runtime(
                         .iter()
                         .filter(|t| {
                             if let Some(ref g) = t.include_if {
-                                evaluate_condition(g, engine.as_ref(), &eval_ctx).unwrap_or(true)
+                                context::evaluate_condition(g, engine.as_ref(), &eval_ctx)
+                                    .unwrap_or(true)
                             } else {
                                 true
                             }
@@ -751,7 +951,7 @@ fn build_workflow_runtime(
             }
         }
     }
-    let tasks_by_id = Arc::new(tasks_map);
+    let runtime_graph = GraphHandle::new(tasks_map);
 
     let config = ExecutionConfig {
         parallel_limit: graph_settings.parallel_limit,
@@ -794,7 +994,7 @@ fn build_workflow_runtime(
         workspace_root: workspace_root.clone(),
         checkpoint_root,
         registry,
-        tasks_by_id,
+        runtime_graph,
         engine,
         graph_settings: graph_settings.clone(),
         config,
@@ -858,24 +1058,56 @@ pub async fn resume_workflow(
         max_workflow_iterations: graph_settings.max_workflow_iterations,
     };
 
-    let tasks_by_id = Arc::new(
-        document
-            .workflow
-            .tasks
-            .into_iter()
-            .map(|task| match task {
-                schema::TaskOrMacro::Task(task) => Ok((task.id.clone(), task)),
-                schema::TaskOrMacro::Macro(invocation) => Err(AppError::new(
-                    ErrorCategory::ValidationError,
-                    format!(
-                        "unexpanded macro invocation '{}' reached executor",
-                        invocation.macro_name
-                    ),
-                )
-                .with_code("WFG-MACRO-002")),
-            })
-            .collect::<Result<HashMap<_, _>, _>>()?,
-    );
+    let runtime_graph = if checkpoint_data.version >= 2 {
+        if let Some(runtime_tasks) = checkpoint_data.runtime_tasks {
+            // Version 2+: Build runtime graph from checkpoint's runtime_tasks
+            let tasks_map: HashMap<String, WorkflowTask> = runtime_tasks
+                .into_iter()
+                .map(|task| (task.id.clone(), task))
+                .collect();
+            GraphHandle::new(tasks_map)
+        } else {
+            // Version 2+ but no runtime_tasks (fallback to document)
+            GraphHandle::new(
+                document
+                    .workflow
+                    .tasks
+                    .into_iter()
+                    .map(|task| match task {
+                        schema::TaskOrMacro::Task(task) => Ok((task.id.clone(), task)),
+                        schema::TaskOrMacro::Macro(invocation) => Err(AppError::new(
+                            ErrorCategory::ValidationError,
+                            format!(
+                                "unexpanded macro invocation '{}' reached executor",
+                                invocation.macro_name
+                            ),
+                        )
+                        .with_code("WFG-MACRO-002")),
+                    })
+                    .collect::<Result<HashMap<_, _>, _>>()?,
+            )
+        }
+    } else {
+        // Version 1: Build runtime graph from document (current behavior)
+        GraphHandle::new(
+            document
+                .workflow
+                .tasks
+                .into_iter()
+                .map(|task| match task {
+                    schema::TaskOrMacro::Task(task) => Ok((task.id.clone(), task)),
+                    schema::TaskOrMacro::Macro(invocation) => Err(AppError::new(
+                        ErrorCategory::ValidationError,
+                        format!(
+                            "unexpanded macro invocation '{}' reached executor",
+                            invocation.macro_name
+                        ),
+                    )
+                    .with_code("WFG-MACRO-002")),
+                })
+                .collect::<Result<HashMap<_, _>, _>>()?,
+        )
+    };
 
     let engine = Arc::new(ExpressionEngine::default());
     let completed_records = hydrate_completed_records(&checkpoint_data.completed, &workspace_root)?;
@@ -899,7 +1131,7 @@ pub async fn resume_workflow(
             .join("state")
             .join("workflows"),
         registry,
-        tasks_by_id,
+        runtime_graph,
         engine,
         graph_settings: graph_settings.clone(),
         config,
@@ -942,180 +1174,6 @@ fn validate_required_triggers(required: &[String], payload: &Value) -> Result<()
     Ok(())
 }
 
-fn resolve_initial_context(
-    context: &Value,
-    engine: &ExpressionEngine,
-    triggers: &Value,
-) -> Result<Value, AppError> {
-    let eval = EvaluationContext::new(context.clone(), Value::Object(Map::new()), triggers.clone());
-    resolve_value(context, engine, &eval)
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn run_task(
-    task: WorkflowTask,
-    registry: OperatorRegistry,
-    engine: Arc<ExpressionEngine>,
-    workspace_root: PathBuf,
-    snapshot: StateView,
-    execution_id: String,
-    run_seq: u64,
-    redact_keys: Arc<Vec<String>>,
-) -> Result<TaskOutcome, AppError> {
-    let operator = registry.get(&task.operator).ok_or_else(|| {
-        AppError::new(
-            ErrorCategory::ValidationError,
-            format!("operator '{}' is not registered", task.operator),
-        )
-        .with_code("WFG-OP-001")
-    })?;
-
-    let eval_ctx = snapshot.evaluation_context();
-    let resolved_params = resolve_value(&task.params, engine.as_ref(), &eval_ctx)?;
-    operator.validate_params(&resolved_params)?;
-
-    let mut attempts = 0usize;
-    let max_attempts = task.retry.as_ref().map(|r| r.max_attempts).unwrap_or(1);
-    let mut backoff_ms = task.retry.as_ref().map(|r| r.backoff_ms).unwrap_or(0);
-    let multiplier = task
-        .retry
-        .as_ref()
-        .and_then(|r| r.backoff_multiplier)
-        .unwrap_or(1.0);
-    let jitter_ms = task.retry.as_ref().and_then(|r| r.jitter_ms).unwrap_or(0);
-    let mut rng = StdRng::from_entropy();
-
-    loop {
-        attempts += 1;
-        tracing::info!(
-            task_id = %task.id,
-            task_name = task.name.as_deref().unwrap_or("-"),
-            operator = %task.operator,
-            attempt = attempts,
-            max_attempts = max_attempts,
-            timeout_ms = task.timeout_ms.map(|t| t.to_string()).as_deref().unwrap_or("-"),
-            "task starting"
-        );
-        let ctx = OperatorContext {
-            workspace_path: workspace_root.clone(),
-            execution_id: execution_id.clone(),
-            task_id: task.id.clone(),
-            iteration: run_seq,
-            state_view: snapshot.clone(),
-        };
-        let params = resolved_params.clone();
-        let started_at = Utc::now();
-        let execution = operator.execute(params, ctx);
-        let execution_result = if let Some(timeout_ms) = task.timeout_ms {
-            match timeout(Duration::from_millis(timeout_ms), execution).await {
-                Ok(res) => res,
-                Err(_) => Err(AppError::new(
-                    ErrorCategory::TimeoutError,
-                    format!("task {} timed out", task.id),
-                )
-                .with_code("WFG-TIME-002")),
-            }
-        } else {
-            execution.await
-        };
-        let completed_at = Utc::now();
-        let duration_ms = completed_at
-            .signed_duration_since(started_at)
-            .num_milliseconds() as u64;
-
-        match execution_result {
-            Ok(output) => {
-                tracing::info!(
-                    task_id = %task.id,
-                    duration_ms = duration_ms,
-                    "task completed"
-                );
-                let patch = extract_context_patch(&output);
-                return Ok(TaskOutcome {
-                    task_id: task.id.clone(),
-                    record: TaskRunRecord {
-                        status: TaskStatus::Success,
-                        output,
-                        error_code: None,
-                        duration_ms,
-                        run_seq,
-                    },
-                    context_patch: patch,
-                    failed: false,
-                    started_at,
-                    completed_at,
-                    error_summary: None,
-                });
-            }
-            Err(err) => {
-                if attempts >= max_attempts {
-                    tracing::warn!(
-                        task_id = %task.id,
-                        error_code = %err.code,
-                        error = %err.message,
-                        "task failed"
-                    );
-                    return Ok(TaskOutcome {
-                        task_id: task.id.clone(),
-                        record: TaskRunRecord {
-                            status: TaskStatus::Failed,
-                            output: Value::String(err.message.clone()),
-                            error_code: Some(err.code.clone()),
-                            duration_ms,
-                            run_seq,
-                        },
-                        context_patch: None,
-                        failed: true,
-                        started_at,
-                        completed_at,
-                        error_summary: Some(summarize_error(&err, redact_keys.as_ref())),
-                    });
-                }
-                let sleep_ms = backoff_ms.saturating_add(if jitter_ms > 0 {
-                    rng.gen_range(0..=jitter_ms)
-                } else {
-                    0
-                });
-                if sleep_ms > 0 {
-                    sleep(Duration::from_millis(sleep_ms)).await;
-                }
-                backoff_ms = ((backoff_ms as f32) * multiplier).max(1.0) as u64;
-                continue;
-            }
-        }
-    }
-}
-
-fn build_workflow_task_run_record(
-    outcome: &TaskOutcome,
-    goal_gate_group: Option<String>,
-    artifact_store: &mut ArtifactStore,
-    graph_settings: &GraphSettings,
-    execution_id: &Uuid,
-) -> Result<WorkflowTaskRunRecord, AppError> {
-    let run_seq = usize::try_from(outcome.record.run_seq).map_err(|_| {
-        AppError::new(
-            ErrorCategory::ValidationError,
-            "task run_seq value overflowed usize",
-        )
-        .with_code("WFG-EXEC-004")
-    })?;
-    let mut persisted_output = outcome.record.output.clone();
-    redact_value(&mut persisted_output, &graph_settings.redaction.redact_keys);
-    let output_ref =
-        artifact_store.route_output(execution_id, &outcome.task_id, run_seq, persisted_output)?;
-    Ok(WorkflowTaskRunRecord {
-        task_id: outcome.task_id.clone(),
-        run_seq,
-        started_at: outcome.started_at,
-        completed_at: outcome.completed_at,
-        status: WorkflowTaskStatus::from_execution(outcome.record.status.clone()),
-        goal_gate_group,
-        output_ref,
-        error: outcome.error_summary.clone(),
-    })
-}
-
 fn hydrate_completed_records(
     records: &HashMap<String, WorkflowTaskRunRecord>,
     workspace_root: &Path,
@@ -1130,7 +1188,7 @@ fn hydrate_completed_records(
         map.insert(
             task_id.clone(),
             TaskRunRecord {
-                status: TaskStatus::from(record.status),
+                status: record.status,
                 output,
                 error_code: record.error.as_ref().map(|err| err.code.clone()),
                 duration_ms,
@@ -1139,147 +1197,4 @@ fn hydrate_completed_records(
         );
     }
     Ok(map)
-}
-
-fn resolve_value(
-    value: &Value,
-    engine: &ExpressionEngine,
-    ctx: &EvaluationContext,
-) -> Result<Value, AppError> {
-    match value {
-        Value::Object(map) => {
-            if map.len() == 1 && map.contains_key("$expr") {
-                if let Some(Value::String(expr)) = map.get("$expr") {
-                    return engine.evaluate(expr, ctx);
-                }
-            }
-            let mut resolved = Map::new();
-            for (key, child) in map {
-                resolved.insert(key.clone(), resolve_value(child, engine, ctx)?);
-            }
-            Ok(Value::Object(resolved))
-        }
-        Value::Array(items) => {
-            let mut collection = Vec::new();
-            for item in items {
-                collection.push(resolve_value(item, engine, ctx)?);
-            }
-            Ok(Value::Array(collection))
-        }
-        other => Ok(other.clone()),
-    }
-}
-
-fn evaluate_transition(
-    transition: &crate::core::workflow_graph::schema::Transition,
-    engine: &ExpressionEngine,
-    snapshot: &StateView,
-) -> Result<bool, AppError> {
-    let ctx = snapshot.evaluation_context();
-
-    // Check include_if (compile-time/init-time condition, but we evaluate here if not already filtered)
-    if let Some(ref guard) = transition.include_if {
-        if !evaluate_condition(guard, engine, &ctx)? {
-            return Ok(false);
-        }
-    }
-
-    match &transition.when {
-        None => Ok(true),
-        Some(cond) => evaluate_condition(cond, engine, &ctx),
-    }
-}
-
-fn evaluate_condition(
-    condition: &crate::core::workflow_graph::schema::Condition,
-    engine: &ExpressionEngine,
-    ctx: &EvaluationContext,
-) -> Result<bool, AppError> {
-    match condition {
-        crate::core::workflow_graph::schema::Condition::Bool(flag) => Ok(*flag),
-        crate::core::workflow_graph::schema::Condition::Expr { expr } => {
-            let result = engine.evaluate(expr, ctx)?;
-            if let Value::Bool(flag) = result {
-                Ok(flag)
-            } else {
-                Err(AppError::new(
-                    ErrorCategory::ValidationError,
-                    format!(
-                        "expression in condition evaluated to a non-boolean value at runtime: {:?}",
-                        result
-                    ),
-                )
-                .with_code("WFG-EXPR-BOOL-001"))
-            }
-        }
-    }
-}
-
-fn resolve_initial_evaluation_context(
-    context: &Value,
-    engine: &ExpressionEngine,
-    triggers: &Value,
-) -> Result<EvaluationContext, AppError> {
-    let resolved_context = resolve_initial_context(context, engine, triggers)?;
-    Ok(EvaluationContext::new(
-        resolved_context,
-        Value::Object(Map::new()),
-        triggers.clone(),
-    ))
-}
-
-fn apply_patch(target: &mut Value, patch: &Value) {
-    match (target, patch) {
-        (Value::Object(target_map), Value::Object(patch_map)) => {
-            for (key, value) in patch_map {
-                match target_map.get_mut(key) {
-                    Some(existing) => apply_patch(existing, value),
-                    None => {
-                        target_map.insert(key.clone(), value.clone());
-                    }
-                }
-            }
-        }
-        (target_value, patch_value) => {
-            *target_value = patch_value.clone();
-        }
-    }
-}
-
-fn build_tasks_value(completed: &HashMap<String, TaskRunRecord>) -> Value {
-    let mut map = Map::new();
-    for (task_id, record) in completed {
-        let mut entry = Map::new();
-        entry.insert(
-            "status".to_string(),
-            Value::String(record.status.as_str().to_string()),
-        );
-        entry.insert("output".to_string(), record.output.clone());
-        entry.insert(
-            "error_code".to_string(),
-            record
-                .error_code
-                .clone()
-                .map(Value::String)
-                .unwrap_or(Value::Null),
-        );
-        entry.insert(
-            "duration_ms".to_string(),
-            Value::Number(Number::from(record.duration_ms)),
-        );
-        entry.insert(
-            "run_seq".to_string(),
-            Value::Number(Number::from(record.run_seq)),
-        );
-        map.insert(task_id.clone(), Value::Object(entry));
-    }
-    Value::Object(map)
-}
-
-fn extract_context_patch(output: &Value) -> Option<Value> {
-    if let Value::Object(map) = output {
-        map.get("patch").cloned()
-    } else {
-        None
-    }
 }

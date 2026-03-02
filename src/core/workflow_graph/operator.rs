@@ -1,6 +1,7 @@
 #![allow(clippy::result_large_err)] // Operator trait and registry return AppError directly for structured diagnostics without boxing.
 
 use crate::core::error::AppError;
+use crate::core::workflow_graph::executor::GraphHandle;
 use crate::core::workflow_graph::expression::EvaluationContext;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -42,6 +43,7 @@ pub struct ExecutionContext {
     pub task_id: String,
     pub iteration: u64,
     pub state_view: StateView,
+    pub graph: GraphHandle,
 }
 
 /// Trait implemented by workflow graph operators.

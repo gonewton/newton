@@ -2,7 +2,7 @@
 
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
-use crate::core::workflow_graph::schema::WorkflowSettings;
+use crate::core::workflow_graph::schema::{WorkflowSettings, WorkflowTask};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -69,6 +69,19 @@ pub enum WorkflowTaskStatus {
     Success,
     Failed,
     Skipped,
+}
+
+/// Runtime task execution status (alias for WorkflowTaskStatus).
+pub type TaskStatus = WorkflowTaskStatus;
+
+/// Record describing the last completed run of a task.
+#[derive(Clone, Debug, Serialize)]
+pub struct TaskRunRecord {
+    pub status: TaskStatus,
+    pub output: Value,
+    pub error_code: Option<String>,
+    pub duration_ms: u64,
+    pub run_seq: u64,
 }
 
 /// Lightweight per-task summary appended to `execution.json`.
@@ -156,6 +169,9 @@ pub struct WorkflowCheckpoint {
     pub task_iterations: HashMap<String, usize>,
     pub total_iterations: usize,
     pub completed: HashMap<String, WorkflowTaskRunRecord>,
+    #[serde(default)]
+    pub version: u32,
+    pub runtime_tasks: Option<Vec<WorkflowTask>>,
 }
 
 impl WorkflowCheckpoint {
@@ -181,20 +197,36 @@ impl WorkflowCheckpoint {
             task_iterations,
             total_iterations,
             completed,
+            version: 1,          // defaults to 1 for backward compatibility
+            runtime_tasks: None, // not provided in the existing new method
         }
     }
-}
 
-impl WorkflowTaskStatus {
-    pub fn from_execution(status: crate::core::workflow_graph::executor::TaskStatus) -> Self {
-        match status {
-            crate::core::workflow_graph::executor::TaskStatus::Success => {
-                WorkflowTaskStatus::Success
-            }
-            crate::core::workflow_graph::executor::TaskStatus::Failed => WorkflowTaskStatus::Failed,
-            crate::core::workflow_graph::executor::TaskStatus::Skipped => {
-                WorkflowTaskStatus::Skipped
-            }
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_v2(
+        execution_id: Uuid,
+        workflow_hash: String,
+        context: Value,
+        trigger_payload: Value,
+        ready_queue: Vec<String>,
+        task_iterations: HashMap<String, usize>,
+        total_iterations: usize,
+        completed: HashMap<String, WorkflowTaskRunRecord>,
+        runtime_tasks: Vec<WorkflowTask>,
+    ) -> Self {
+        WorkflowCheckpoint {
+            format_version: WORKFLOW_CHECKPOINT_FORMAT_VERSION.to_string(),
+            execution_id,
+            workflow_hash,
+            created_at: Utc::now(),
+            ready_queue,
+            context,
+            trigger_payload,
+            task_iterations,
+            total_iterations,
+            completed,
+            version: 2,
+            runtime_tasks: Some(runtime_tasks),
         }
     }
 }

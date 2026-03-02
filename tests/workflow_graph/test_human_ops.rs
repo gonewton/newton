@@ -4,12 +4,14 @@ use chrono::Utc;
 use newton::core::error::AppError;
 use newton::core::types::ErrorCategory;
 use newton::core::workflow_graph::{
+    executor::GraphHandle,
     human::{ApprovalDefault, ApprovalResult, DecisionResult, Interviewer},
     operator::{ExecutionContext, Operator, StateView},
     operators::{human_approval::HumanApprovalOperator, human_decision::HumanDecisionOperator},
     schema::HumanSettings,
 };
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -84,6 +86,7 @@ fn build_execution_context(workspace: &TempDir, execution_id: String) -> Executi
         task_id: "approval".to_string(),
         iteration: 1,
         state_view: StateView::new(empty.clone(), empty.clone(), empty),
+        graph: GraphHandle::new(HashMap::new()),
     }
 }
 

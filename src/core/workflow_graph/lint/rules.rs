@@ -1,6 +1,8 @@
 use super::{LintResult, LintSeverity, WorkflowLintRule};
 use crate::core::workflow_graph::expression::{EvaluationContext, ExpressionEngine};
-use crate::core::workflow_graph::schema::{Condition, WorkflowDocument, WorkflowTask};
+use crate::core::workflow_graph::schema::{
+    BarrierParams, Condition, WorkflowDocument, WorkflowTask,
+};
 use petgraph::algo::{has_path_connecting, tarjan_scc};
 use petgraph::graph::{DiGraph, NodeIndex};
 use regex::Regex;
@@ -27,6 +29,8 @@ pub fn built_in_rules() -> Vec<Box<dyn WorkflowLintRule>> {
         Box::new(AgentUnboundedLoopRule),
         Box::new(AgentCommandNoEngineCommandRule),
         Box::new(AgentNamedDriverNoPromptRule),
+        Box::new(StaticTaskIdContainsColonRule),
+        Box::new(BarrierExpectedNonExistentTaskRule),
     ]
 }
 
@@ -853,5 +857,100 @@ impl WorkflowLintRule for AgentNamedDriverNoPromptRule {
             }
         }
         out
+    }
+}
+
+struct StaticTaskIdContainsColonRule;
+
+impl WorkflowLintRule for StaticTaskIdContainsColonRule {
+    fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
+        let mut out = Vec::new();
+        for task in workflow.workflow.tasks() {
+            if task.id.contains(':') {
+                out.push(LintResult::new(
+                    "WFG-LINT-120",
+                    LintSeverity::Error,
+                    format!(
+                        "Static task ID '{}' contains colon which is reserved for dynamic namespacing",
+                        task.id
+                    ),
+                    Some(task.id.clone()),
+                    Some("Remove colon from task ID or use a different character".to_string()),
+                ));
+            }
+        }
+        out
+    }
+}
+
+struct BarrierExpectedNonExistentTaskRule;
+
+impl WorkflowLintRule for BarrierExpectedNonExistentTaskRule {
+    fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
+        let mut out = Vec::new();
+
+        // Get all task IDs in the workflow
+        let task_ids: HashSet<String> = workflow
+            .workflow
+            .tasks()
+            .map(|task| task.id.clone())
+            .collect();
+
+        // Check barrier tasks
+        for task in workflow.workflow.tasks() {
+            self.validate_barrier_task(task, &task_ids, &mut out);
+        }
+        out
+    }
+}
+
+impl BarrierExpectedNonExistentTaskRule {
+    fn validate_barrier_task(
+        &self,
+        task: &crate::core::workflow_graph::schema::WorkflowTask,
+        task_ids: &HashSet<String>,
+        results: &mut Vec<LintResult>,
+    ) {
+        // Skip non-barrier tasks
+        if task.operator != "barrier" {
+            return;
+        }
+
+        // Parse barrier parameters, skip if parsing fails
+        let barrier_params = match serde_json::from_value::<BarrierParams>(task.params.clone()) {
+            Ok(params) => params,
+            Err(_) => return,
+        };
+
+        // Check each expected task ID
+        for expected_id in &barrier_params.expected {
+            self.check_expected_task_exists(task, expected_id, task_ids, results);
+        }
+    }
+
+    fn check_expected_task_exists(
+        &self,
+        barrier_task: &crate::core::workflow_graph::schema::WorkflowTask,
+        expected_id: &str,
+        task_ids: &HashSet<String>,
+        results: &mut Vec<LintResult>,
+    ) {
+        if task_ids.contains(expected_id) {
+            return; // Task exists, no error
+        }
+
+        results.push(LintResult::new(
+            "WFG-LINT-121",
+            LintSeverity::Error,
+            format!(
+                "Barrier task '{}' references non-existent task '{}' in expected list",
+                barrier_task.id, expected_id
+            ),
+            Some(barrier_task.id.clone()),
+            Some(format!(
+                "Remove '{}' from expected list or add the missing task",
+                expected_id
+            )),
+        ));
     }
 }
