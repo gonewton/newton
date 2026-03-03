@@ -531,6 +531,8 @@ fn check_timeout_before_execution(params: &ExecParams<'_>) -> Result<(), AppErro
     Ok(())
 }
 
+const CMD_LOG_ARG_MAX_LEN: usize = 200;
+
 /// Spawn the engine process and set up stderr capture.
 async fn spawn_engine_process(
     params: &ExecParams<'_>,
@@ -543,6 +545,24 @@ async fn spawn_engine_process(
     AppError,
 > {
     use tokio::io::{AsyncReadExt, BufReader};
+
+    let cmd_display: Vec<String> = params
+        .invocation
+        .command
+        .iter()
+        .map(|a| {
+            if a.len() > CMD_LOG_ARG_MAX_LEN {
+                format!("{}... ({} chars)", &a[..CMD_LOG_ARG_MAX_LEN], a.len())
+            } else {
+                a.clone()
+            }
+        })
+        .collect();
+    tracing::debug!(
+        cmd = ?cmd_display,
+        cwd = ?params.paths.working_dir,
+        "AgentOperator executing engine"
+    );
 
     let mut cmd_builder = build_command(
         params.invocation,
