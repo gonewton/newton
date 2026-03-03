@@ -1058,9 +1058,9 @@ pub async fn resume_workflow(
         max_workflow_iterations: graph_settings.max_workflow_iterations,
     };
 
-    let runtime_graph = if checkpoint_data.version >= 2 {
+    let runtime_graph = if checkpoint_data.version >= 2 && !allow_workflow_change {
         if let Some(runtime_tasks) = checkpoint_data.runtime_tasks {
-            // Version 2+: Build runtime graph from checkpoint's runtime_tasks
+            // Version 2+: Build runtime graph from checkpoint's runtime_tasks (unchanged workflow)
             let tasks_map: HashMap<String, WorkflowTask> = runtime_tasks
                 .into_iter()
                 .map(|task| (task.id.clone(), task))
@@ -1088,7 +1088,7 @@ pub async fn resume_workflow(
             )
         }
     } else {
-        // Version 1: Build runtime graph from document (current behavior)
+        // Version 1, or allow_workflow_change: use current workflow document (e.g. updated max_iterations)
         GraphHandle::new(
             document
                 .workflow
