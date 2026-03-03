@@ -78,9 +78,20 @@ pub fn default_registry() -> HashMap<String, Box<dyn EngineDriver>> {
 
 /// Extract text content from a stream-json line.
 /// Returns the original line if parsing fails or the line is not a content type.
+/// Supports Claude stream-json and opencode run --format json (type "text" => part.text).
 pub fn extract_text_from_stream_json(line: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    // Try various content field paths used by Claude stream-json
+    // OpenCode run --format json: type "text" with part.text
+    if v.get("type").and_then(|t| t.as_str()) == Some("text") {
+        if let Some(text) = v
+            .get("part")
+            .and_then(|p| p.get("text"))
+            .and_then(|t| t.as_str())
+        {
+            return Some(text.to_string());
+        }
+    }
+    // Claude stream-json: content or result.result
     if let Some(content) = v.get("content").and_then(|c| c.as_str()) {
         return Some(content.to_string());
     }
@@ -92,6 +103,5 @@ pub fn extract_text_from_stream_json(line: &str) -> Option<String> {
             return Some(result_str.to_string());
         }
     }
-    // Not a content-bearing line; skip
     None
 }

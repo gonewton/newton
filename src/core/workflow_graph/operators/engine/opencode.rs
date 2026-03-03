@@ -29,17 +29,21 @@ impl EngineDriver for OpencodeDriver {
             .with_code("WFG-AGENT-006")
         })?;
 
-        let mut cmd = vec!["opencode".to_string(), "run".to_string()];
-        cmd.push("--model".to_string());
-        cmd.push(model.to_string());
+        let mut cmd = vec![
+            "opencode".to_string(),
+            "run".to_string(),
+            "--format".to_string(),
+            "json".to_string(),
+            "--model".to_string(),
+            model.to_string(),
+        ];
 
         match config.prompt_source {
             Some(super::PromptSource::File(p)) => {
-                cmd.push("--prompt-file".to_string());
+                cmd.push("--file".to_string());
                 cmd.push(p.clone());
             }
             Some(super::PromptSource::Inline(s)) => {
-                cmd.push("--prompt".to_string());
                 cmd.push(s.clone());
             }
             None => {
@@ -60,7 +64,7 @@ impl EngineDriver for OpencodeDriver {
                     project_root.display().to_string(),
                 ),
             ],
-            output_format: OutputFormat::PlainText,
+            output_format: OutputFormat::StreamJson,
         })
     }
 }
