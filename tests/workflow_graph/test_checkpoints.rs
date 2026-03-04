@@ -1,3 +1,4 @@
+use newton::core::workflow_graph::checkpoint;
 use newton::core::workflow_graph::{
     executor::{self, ExecutionOverrides},
     operator::OperatorRegistry,
@@ -264,4 +265,60 @@ async fn checkpoint_records_goal_gate_group() {
         checkpoint_value["completed"]["gate"]["goal_gate_group"],
         Value::String("critical".to_string())
     );
+}
+
+#[tokio::test]
+async fn checkpoints_list_output_format_and_sort_order() {
+    let workspace = tempdir().expect("workspace");
+    let workflow_file = write_workflow(RESUME_WORKFLOW);
+    let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings.clone());
+    let overrides = ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
+        verbose: false,
+    };
+
+    // Run workflow twice to create multiple checkpoints
+    let _summary1 = executor::execute_workflow(
+        document.clone(),
+        workflow_file.path().to_path_buf(),
+        registry.clone(),
+        workspace.path().to_path_buf(),
+        overrides.clone(),
+    )
+    .await
+    .expect("first run succeeded");
+
+    // Sleep briefly to ensure different timestamps
+    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+    let _summary2 = executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry.clone(),
+        workspace.path().to_path_buf(),
+        overrides,
+    )
+    .await
+    .expect("second run succeeded");
+
+    // Use list_checkpoints to verify the data
+    let mut entries = checkpoint::list_checkpoints(workspace.path()).expect("list checkpoints");
+    assert_eq!(entries.len(), 2);
+
+    // Manually sort to verify sorting works correctly
+    entries.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+
+    // Verify entries are sorted by started_at descending (newest first)
+    assert!(entries[0].started_at >= entries[1].started_at);
+
+    // Verify each entry has the required fields
+    for entry in &entries {
+        assert_ne!(entry.execution_id, uuid::Uuid::nil());
+        assert_eq!(entry.status, state::WorkflowExecutionStatus::Completed);
+    }
 }

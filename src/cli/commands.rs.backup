@@ -382,59 +382,12 @@ pub fn checkpoints(args: CheckpointsArgs) -> StdResult<(), AppError> {
     }
 }
 
-/// Format duration showing at most two significant time units
-fn format_duration_short(duration: Duration) -> String {
-    let mut remaining = duration.as_secs();
-    let mut parts = Vec::new();
-
-    if remaining == 0 {
-        return "0s".to_string();
-    }
-
-    const SECONDS_PER_DAY: u64 = 86400;
-    const SECONDS_PER_HOUR: u64 = 3600;
-    const SECONDS_PER_MINUTE: u64 = 60;
-
-    if remaining >= SECONDS_PER_DAY {
-        let days = remaining / SECONDS_PER_DAY;
-        parts.push(format!("{}d", days));
-        remaining %= SECONDS_PER_DAY;
-    }
-
-    if remaining >= SECONDS_PER_HOUR && parts.len() < 2 {
-        let hours = remaining / SECONDS_PER_HOUR;
-        parts.push(format!("{}h", hours));
-        remaining %= SECONDS_PER_HOUR;
-    }
-
-    if remaining >= SECONDS_PER_MINUTE && parts.len() < 2 {
-        let minutes = remaining / SECONDS_PER_MINUTE;
-        parts.push(format!("{}m", minutes));
-        remaining %= SECONDS_PER_MINUTE;
-    }
-
-    if parts.is_empty() && parts.len() < 2 {
-        parts.push(format!("{}s", remaining));
-    }
-
-    parts.join(" ")
-}
-
-/// Format datetime for compact human-readable display
-fn format_datetime_short(dt: &chrono::DateTime<chrono::Utc>) -> String {
-    dt.format("%Y-%m-%d %H:%M").to_string()
-}
-
 fn workflow_checkpoints_list(
     workspace: Option<PathBuf>,
     format_json: bool,
 ) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(workspace)?;
-    let mut entries = checkpoint::list_checkpoints(&workspace)?;
-
-    // Sort by started_at descending (newest first)
-    entries.sort_by(|a, b| b.started_at.cmp(&a.started_at));
-
+    let entries = checkpoint::list_checkpoints(&workspace)?;
     if format_json {
         let items: Vec<Value> = entries
             .iter()
@@ -457,21 +410,17 @@ fn workflow_checkpoints_list(
         println!("{}", serialized);
         return Ok(());
     }
-
-    // Table output with compact formatting
     println!(
-        "{:<36} {:<10} {:<16} {:<14} {:>7}",
+        "{:<36} {:<10} {:<24} {:<12} {:>7}",
         "EXECUTION ID", "STATUS", "STARTED AT", "CHECKPOINT AGE", "SIZE"
     );
-    println!("{}", "-".repeat(93));
-
     for summary in entries {
         println!(
-            "{:<36} {:<10} {:<16} {:<14} {:>7}",
+            "{:<36} {:<10} {:<24} {:<12} {:>7}",
             summary.execution_id,
             summary.status.as_str(),
-            format_datetime_short(&summary.started_at),
-            format!("{} ago", format_duration_short(summary.checkpoint_age)),
+            summary.started_at.to_rfc3339(),
+            format!("{} ago", format_duration(summary.checkpoint_age)),
             format_bytes(summary.checkpoint_size),
         );
     }
@@ -1234,74 +1183,5 @@ mod tests {
             "unexpected error: {}",
             err
         );
-    }
-}
-
-#[cfg(test)]
-mod duration_formatting_tests {
-    use super::*;
-
-    #[test]
-    fn format_duration_short_zero() {
-        let duration = Duration::from_secs(0);
-        assert_eq!(format_duration_short(duration), "0s");
-    }
-
-    #[test]
-    fn format_duration_short_seconds() {
-        let duration = Duration::from_secs(30);
-        assert_eq!(format_duration_short(duration), "30s");
-    }
-
-    #[test]
-    fn format_duration_short_minutes() {
-        let duration = Duration::from_secs(150);
-        assert_eq!(format_duration_short(duration), "2m");
-    }
-
-    #[test]
-    fn format_duration_short_hours() {
-        let duration = Duration::from_secs(7200);
-        assert_eq!(format_duration_short(duration), "2h");
-    }
-
-    #[test]
-    fn format_duration_short_days() {
-        let duration = Duration::from_secs(172800);
-        assert_eq!(format_duration_short(duration), "2d");
-    }
-
-    #[test]
-    fn format_duration_short_hours_minutes() {
-        let duration = Duration::from_secs(8100);
-        assert_eq!(format_duration_short(duration), "2h 15m");
-    }
-
-    #[test]
-    fn format_duration_short_days_hours() {
-        let duration = Duration::from_secs(205200);
-        assert_eq!(format_duration_short(duration), "2d 9h");
-    }
-
-    #[test]
-    fn format_duration_short_large_duration() {
-        let duration = Duration::from_secs(90061);
-        assert_eq!(format_duration_short(duration), "1d 1h");
-    }
-
-    #[test]
-    fn format_datetime_short_format() {
-        use chrono::TimeZone;
-        let dt = chrono::Utc
-            .with_ymd_and_hms(2026, 3, 4, 16, 27, 43)
-            .unwrap();
-        let formatted = format_datetime_short(&dt);
-        assert_eq!(formatted, "2026-03-04 16:27");
-    }
-
-    #[test]
-    fn format_duration_short_two_units_max() {
-        let duration = Duration::from_secs(93784);
-        assert_eq!(format_duration_short(duration), "1d 2h");
     }
 }
