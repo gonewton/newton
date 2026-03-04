@@ -22,6 +22,7 @@ pub async fn run(args: MonitorArgs) -> Result<()> {
     let workspace_root = find_workspace_root(&current_dir)?;
 
     let overrides = MonitorOverrides {
+        workflow_service_url: None,
         http_url: args.http_url,
         ws_url: args.ws_url,
     };
@@ -40,6 +41,21 @@ pub async fn run(args: MonitorArgs) -> Result<()> {
     let poll_handle = tokio::spawn(polling_loop(client.clone(), event_tx.clone()));
     let command_handle = tokio::spawn(command_loop(client.clone(), command_rx, event_tx.clone()));
 
+    let backend_handle = if args.backend {
+        Some(tokio::spawn(async move {
+            if let Err(err) = crate::cli::commands::serve(crate::cli::args::ServeArgs {
+                host: "127.0.0.1".to_string(),
+                port: 8080,
+            })
+            .await
+            {
+                tracing::error!("Backend server error: {:?}", err);
+            }
+        }))
+    } else {
+        None
+    };
+
     tokio::task::spawn_blocking(move || {
         ui::run_tui(endpoints, workspace_root, event_rx, command_tx)
     })
@@ -48,6 +64,9 @@ pub async fn run(args: MonitorArgs) -> Result<()> {
     ws_handle.abort();
     poll_handle.abort();
     command_handle.abort();
+    if let Some(handle) = backend_handle {
+        handle.abort();
+    }
 
     Ok(())
 }

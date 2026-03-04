@@ -1,28 +1,25 @@
 #![allow(clippy::result_large_err)] // CLI command handlers return AppError directly to preserve diagnostic context without boxing.
 
+use crate::cli::args::{
+    ArtifactCommand, ArtifactsArgs, BatchArgs, CheckpointCommand, CheckpointsArgs, DotArgs,
+    ExplainArgs, KeyValuePair, LintArgs, MonitorArgs, OutputFormat, ResumeArgs, RunArgs, ServeArgs,
+    ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
+};
+use crate::core::batch_config::BatchProjectConfig;
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
-use crate::{
-    cli::args::{
-        ArtifactCommand, ArtifactsArgs, BatchArgs, CheckpointCommand, CheckpointsArgs, DotArgs,
-        ExplainArgs, KeyValuePair, LintArgs, MonitorArgs, OutputFormat, ResumeArgs, RunArgs,
-        ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
-    },
-    core::{
-        batch_config::BatchProjectConfig,
-        workflow_graph::{
-            artifacts, checkpoint, dot as workflow_dot,
-            executor::{self as workflow_executor, ExecutionOverrides},
-            explain,
-            expression::ExpressionEngine,
-            lint::{LintRegistry, LintResult, LintSeverity},
-            operator::OperatorRegistry,
-            operators as workflow_operators, schema as workflow_schema,
-            transform as workflow_transform, webhook,
-        },
-    },
-    monitor, Result,
+use crate::core::workflow_graph::operator::OperatorRegistry;
+use crate::core::workflow_graph::{
+    artifacts, checkpoint, dot as workflow_dot,
+    executor::{self as workflow_executor, ExecutionOverrides},
+    explain,
+    expression::ExpressionEngine,
+    lint::{LintRegistry, LintResult, LintSeverity},
+    operators as workflow_operators, schema as workflow_schema, transform as workflow_transform,
+    webhook,
 };
+use crate::monitor;
+use crate::Result;
 use anyhow::anyhow;
 use humantime::{format_duration, parse_duration};
 use serde::Serialize;
@@ -800,6 +797,66 @@ fn load_trigger_payload(path: &Path) -> StdResult<Value, AppError> {
         ));
     }
     Ok(value)
+}
+
+/// Launch the Newton HTTP API server
+pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
+    use crate::api::{self, state::AppState};
+    use crate::core::workflow_graph::operators;
+    use std::net::SocketAddr;
+    use tokio::net::TcpListener;
+    use tracing::info;
+
+    info!("Starting Newton API server on {}: {}", args.host, args.port);
+
+    let mut builder = OperatorRegistry::builder();
+    operators::register_builtins(
+        &mut builder,
+        std::path::PathBuf::from("."),
+        Default::default(),
+    );
+    let registry = builder.build();
+
+    let operator_names = registry.operator_names();
+    let operator_descriptors: Vec<newton_types::OperatorDescriptor> = operator_names
+        .iter()
+        .map(|name: &String| newton_types::OperatorDescriptor {
+            operator_type: name.clone(),
+            description: format!("{} operator", name),
+            params_schema: serde_json::json!({}),
+        })
+        .collect();
+
+    let state = AppState::new(operator_descriptors);
+    let app = api::create_router(state);
+
+    let addr = format!("{}:{}", args.host, args.port);
+    let socket_addr: SocketAddr = addr.parse().map_err(|err| {
+        AppError::new(
+            crate::core::types::ErrorCategory::ValidationError,
+            format!("invalid bind address: {}", err),
+        )
+    })?;
+
+    let listener = TcpListener::bind(&socket_addr).await.map_err(|err| {
+        AppError::new(
+            crate::core::types::ErrorCategory::IoError,
+            format!("failed to bind to {}: {}", addr, err),
+        )
+    })?;
+
+    info!("Newton API server listening on {}", socket_addr);
+
+    axum::serve(listener, app.into_make_service())
+        .await
+        .map_err(|err| {
+            AppError::new(
+                crate::core::types::ErrorCategory::IoError,
+                format!("server error: {}", err),
+            )
+        })?;
+
+    Ok(())
 }
 
 /// Launch the interactive Newton monitor TUI that watches ailoop channels.

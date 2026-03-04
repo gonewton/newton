@@ -1,4 +1,5 @@
 use crate::monitor::message::MonitorMessage;
+use newton_types::BroadcastEvent;
 use uuid::Uuid;
 
 /// Commands emitted by the UI that require HTTP requests.
@@ -45,6 +46,61 @@ pub enum MonitorEvent {
     ConnectionStatus(ConnectionStatus),
     /// Message received from a channel or from backfill/polling.
     Message(MonitorMessage),
+    /// Workflow event received from the backend API server.
+    Workflow(WorkflowEvent),
+}
+
+/// Workflow-specific events from the backend API.
+#[derive(Debug, Clone)]
+pub enum WorkflowEvent {
+    /// Workflow instance was updated.
+    InstanceUpdated { instance_id: String },
+    /// Node state changed.
+    NodeStateChanged {
+        instance_id: String,
+        node_id: String,
+    },
+    /// Log message received.
+    LogMessage {
+        instance_id: String,
+        node_id: String,
+        message: String,
+    },
+    /// HIL event occurred.
+    HilEvent { instance_id: String, event_id: Uuid },
+}
+
+impl From<BroadcastEvent> for WorkflowEvent {
+    fn from(event: BroadcastEvent) -> Self {
+        match event {
+            BroadcastEvent::WorkflowInstanceUpdated { instance_id } => {
+                WorkflowEvent::InstanceUpdated { instance_id }
+            }
+            BroadcastEvent::NodeStateChanged {
+                instance_id,
+                node_id,
+            } => WorkflowEvent::NodeStateChanged {
+                instance_id,
+                node_id,
+            },
+            BroadcastEvent::LogMessage {
+                instance_id,
+                node_id,
+                message,
+            } => WorkflowEvent::LogMessage {
+                instance_id,
+                node_id,
+                message,
+            },
+            BroadcastEvent::HilEvent {
+                instance_id,
+                event_id,
+            } => WorkflowEvent::HilEvent {
+                instance_id,
+                event_id,
+            },
+        }
+    }
 }
 
 /// Current connection health for display in the UI.

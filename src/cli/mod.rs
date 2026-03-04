@@ -5,8 +5,8 @@ pub mod init;
 
 pub use args::{
     ArtifactCommand, ArtifactsArgs, BatchArgs, CheckpointCommand, CheckpointsArgs, DotArgs,
-    ExplainArgs, InitArgs, LintArgs, MonitorArgs, ResumeArgs, RunArgs, ValidateArgs, WebhookArgs,
-    WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
+    ExplainArgs, InitArgs, LintArgs, MonitorArgs, ResumeArgs, RunArgs, ServeArgs, ValidateArgs,
+    WebhookArgs, WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
 };
 use clap::{Parser, Subcommand};
 
@@ -51,6 +51,45 @@ pub enum Command {
         after_help = "Example:\n    newton batch project-alpha --workspace ./workspace"
     )]
     Batch(BatchArgs),
+    #[command(
+        about = "Start the Newton HTTP API server",
+        long_about = "Serve starts the HTTP/WebSocket API server that provides real-time access to workflow execution state.
+
+The API server exposes endpoints for:
+    • Workflow instance management and queries
+    • HIL (Human-in-the-Loop) event handling
+    • Real-time streaming via WebSocket and SSE
+    • Operator metadata and schema information
+
+Use this command to run Newton as a backend service for web UIs, monitoring dashboards, or external integrations.
+
+CORS is enabled for local development by default.",
+        after_help = "EXAMPLES:
+  Start API server on default port:
+    newton serve
+
+  Start on custom host and port:
+    newton serve --host 0.0.0.0 --port 9000
+
+  Run in background:
+    newton serve --host 0.0.0.0 --port 8080 &
+
+API ENDPOINTS:
+    GET  /health              Health check endpoint
+    GET  /api/workflows       List all workflow instances
+    GET  /api/workflows/:id   Get workflow instance by ID
+    PUT  /api/workflows/:id   Update workflow definition
+    GET  /api/operators       List registered operators
+    GET  /api/hil/workflows/:id            List HIL events for workflow
+    POST /api/hil/workflows/:id/:eventId/action  Submit HIL action
+    WS   /api/stream/workflow/:id/ws        WebSocket stream for workflow
+    WS   /api/stream/logs/:id/:node_id/ws   WebSocket stream for node logs
+    SSE  /api/stream/workflow/:id/sse      SSE stream for workflow events
+
+LEGACY ENDPOINTS:
+    GET  /api/channels        List workflow channels (legacy compatibility)"
+    )]
+    Serve(ServeArgs),
     #[command(
         about = "Monitor live ailoop channels via a terminal UI",
         long_about = "Monitor listens to every project/branch channel from the workspace using a WebSocket/HTTP mix and lets you answer questions or approve authorizations in a queue.\n\n\
@@ -276,6 +315,9 @@ pub async fn run(args: Args) -> crate::Result<()> {
         Command::Run(run_args) => commands::run(run_args).await,
         Command::Init(init_args) => init::run(init_args).await,
         Command::Batch(batch_args) => commands::batch(batch_args).await,
+        Command::Serve(serve_args) => commands::serve(serve_args)
+            .await
+            .map_err(anyhow::Error::from),
         Command::Monitor(monitor_args) => commands::monitor(monitor_args).await,
         Command::Validate(validate_args) => {
             commands::validate(validate_args).map_err(anyhow::Error::from)

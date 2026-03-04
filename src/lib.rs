@@ -1,5 +1,6 @@
 //! Newton CLI crate re-exports for orchestrating AI-driven optimization loops and exposing the shared API surface.
 pub mod ailoop_integration;
+pub mod api;
 pub mod cli;
 pub mod core;
 pub mod logging;
