@@ -95,6 +95,7 @@ impl Config {
             Mode::Monitor => Ok(Command::Monitor(MonitorArgs {
                 http_url: None,
                 ws_url: None,
+                backend: false,
             })),
             Mode::LocalDev => {
                 let workspace = self

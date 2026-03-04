@@ -17,6 +17,7 @@ fn endpoint_resolution_http_override_ws_from_config() {
     .unwrap();
 
     let overrides = MonitorOverrides {
+        workflow_service_url: None,
         http_url: Some("http://override.example.com:9081".to_string()),
         ws_url: None,
     };
@@ -44,6 +45,7 @@ fn endpoint_resolution_ws_override_http_from_config() {
     .unwrap();
 
     let overrides = MonitorOverrides {
+        workflow_service_url: None,
         http_url: None,
         ws_url: Some("ws://override.example.com:9080".to_string()),
     };
@@ -67,6 +69,7 @@ fn endpoint_resolution_missing_http_yields_specific_error() {
     .unwrap();
 
     let overrides = MonitorOverrides {
+        workflow_service_url: None,
         http_url: None,
         ws_url: None,
     };
@@ -100,6 +103,7 @@ fn endpoint_resolution_missing_ws_yields_specific_error() {
     .unwrap();
 
     let overrides = MonitorOverrides {
+        workflow_service_url: None,
         http_url: None,
         ws_url: None,
     };
@@ -129,6 +133,7 @@ fn endpoint_resolution_missing_both_yields_specific_error() {
     fs::write(&monitor_conf, "# Empty config\n").unwrap();
 
     let overrides = MonitorOverrides {
+        workflow_service_url: None,
         http_url: None,
         ws_url: None,
     };
@@ -158,6 +163,7 @@ fn url_parse_failure_identifies_http_endpoint() {
     .unwrap();
 
     let overrides = MonitorOverrides {
+        workflow_service_url: None,
         http_url: None,
         ws_url: None,
     };
@@ -187,6 +193,7 @@ fn url_parse_failure_identifies_ws_endpoint() {
     .unwrap();
 
     let overrides = MonitorOverrides {
+        workflow_service_url: None,
         http_url: None,
         ws_url: None,
     };
@@ -226,6 +233,7 @@ fn discovery_order_monitor_conf_takes_precedence() {
     .unwrap();
 
     let overrides = MonitorOverrides {
+        workflow_service_url: None,
         http_url: None,
         ws_url: None,
     };
@@ -260,6 +268,7 @@ fn discovery_order_alphabetical_fallback() {
     .unwrap();
 
     let overrides = MonitorOverrides {
+        workflow_service_url: None,
         http_url: None,
         ws_url: None,
     };
@@ -276,6 +285,7 @@ fn missing_configs_dir_provides_actionable_error() {
     // Don't create .newton/configs directory
 
     let overrides = MonitorOverrides {
+        workflow_service_url: None,
         http_url: None,
         ws_url: None,
     };
@@ -301,6 +311,7 @@ fn cli_overrides_work_without_config_dir() {
     // Don't create .newton/configs directory - CLI overrides should still work
 
     let overrides = MonitorOverrides {
+        workflow_service_url: None,
         http_url: Some("http://override.example.com:8081".to_string()),
         ws_url: Some("ws://override.example.com:8080".to_string()),
     };

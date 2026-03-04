@@ -363,6 +363,22 @@ pub struct MonitorArgs {
     /// the first alphabetically-sorted .conf file that defines both endpoints.
     #[arg(long, value_name = "URL")]
     pub ws_url: Option<String>,
+
+    /// Also start the HTTP API backend server
+    #[arg(long)]
+    pub backend: bool,
 }
 
+#[derive(Args, Clone, Debug)]
+pub struct ServeArgs {
+    /// Host address to bind the server to (default: 127.0.0.1)
+    #[arg(long, default_value = "127.0.0.1")]
+    pub host: String,
+
+    /// Port to listen on (default: 8080)
+    #[arg(long, default_value = "8080")]
+    pub port: u16,
+}
+
+// ErrorArgs removed - command retired
 // ErrorArgs removed - command retired

@@ -12,6 +12,8 @@ pub enum ExecutionContext {
     Batch,
     /// Remote agent execution that runs on a different host.
     RemoteAgent,
+    /// API server such as `newton serve`.
+    Server,
 }
 
 impl ExecutionContext {
@@ -19,7 +21,10 @@ impl ExecutionContext {
     pub fn disables_console(self) -> bool {
         matches!(
             self,
-            ExecutionContext::Tui | ExecutionContext::Batch | ExecutionContext::RemoteAgent
+            ExecutionContext::Tui
+                | ExecutionContext::Batch
+                | ExecutionContext::RemoteAgent
+                | ExecutionContext::Server
         )
     }
 }
@@ -47,6 +52,7 @@ pub fn detect_context(command: &Command) -> ExecutionContext {
         | Command::Webhook(_)
         | Command::Init(_) => ExecutionContext::LocalDev,
         Command::Monitor(_) => ExecutionContext::Tui,
+        Command::Serve(_) => ExecutionContext::Server,
     }
 }
 

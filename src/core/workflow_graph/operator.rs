@@ -117,4 +117,12 @@ impl OperatorRegistry {
     pub fn get(&self, name: &str) -> Option<Arc<dyn Operator>> {
         self.inner.get(name).cloned()
     }
+
+    pub fn list_operators(&self) -> Vec<Arc<dyn Operator>> {
+        self.inner.values().cloned().collect()
+    }
+
+    pub fn operator_names(&self) -> Vec<String> {
+        self.inner.keys().cloned().collect()
+    }
 }

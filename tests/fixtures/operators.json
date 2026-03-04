@@ -1,0 +1,146 @@
+[
+  {
+    "operator_type": "noop",
+    "description": "No-operation operator that does nothing and always succeeds",
+    "params_schema": {}
+  },
+  {
+    "operator_type": "command",
+    "description": "Execute shell commands and capture output",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Shell command to execute"
+        },
+        "capture_output": {
+          "type": "boolean",
+          "description": "Capture stdout and stderr",
+          "default": true
+        }
+      },
+      "required": ["command"]
+    }
+  },
+  {
+    "operator_type": "assert_completed",
+    "description": "Assert that a workflow task has completed successfully",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "description": "Task ID to check"
+        }
+      },
+      "required": ["task_id"]
+    }
+  },
+  {
+    "operator_type": "barrier",
+    "description": "Wait for all upstream tasks to complete before proceeding",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "timeout_seconds": {
+          "type": "number",
+          "description": "Maximum time to wait in seconds",
+          "default": 300
+        }
+      }
+    }
+  },
+  {
+    "operator_type": "set_context",
+    "description": "Set key-value pairs in the workflow context",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "values": {
+          "type": "object",
+          "description": "Key-value pairs to set in context"
+        }
+      },
+      "required": ["values"]
+    }
+  },
+  {
+    "operator_type": "read_control_file",
+    "description": "Read and parse control file for workflow directives",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to control file"
+        }
+      },
+      "required": ["path"]
+    }
+  },
+  {
+    "operator_type": "agent",
+    "description": "AI agent operator that uses external AI engines",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "engine": {
+          "type": "string",
+          "description": "AI engine to use (e.g., claude_code)",
+          "default": "claude_code"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Prompt to send to the AI engine"
+        }
+      },
+      "required": ["prompt"]
+    }
+  },
+  {
+    "operator_type": "human_approval",
+    "description": "Request human approval before proceeding",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "Question to ask the human"
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "description": "Time to wait for response in seconds",
+          "default": 300
+        }
+      },
+      "required": ["question"]
+    }
+  },
+  {
+    "operator_type": "human_decision",
+    "description": "Request a decision from a human with multiple options",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "Question to ask the human"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Available choices for the human"
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "description": "Time to wait for response in seconds",
+          "default": 300
+        }
+      },
+      "required": ["question", "choices"]
+    }
+  }
+]

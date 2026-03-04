@@ -14,6 +14,8 @@ pub struct MonitorEndpoints {
     pub ws_url: Url,
     /// Underlying workspace root that provided the configuration.
     pub workspace_root: PathBuf,
+    /// Optional HTTP URL for the Newton workflow service (backend API).
+    pub workflow_service_url: Option<Url>,
 }
 
 /// Optional overrides passed through `newton monitor`.
@@ -23,6 +25,8 @@ pub struct MonitorOverrides {
     pub http_url: Option<String>,
     /// Explicit WebSocket URL to use instead of the config file.
     pub ws_url: Option<String>,
+    /// Optional workflow service URL for the Newton backend API.
+    pub workflow_service_url: Option<String>,
 }
 
 /// Load the HTTP/WS URLs using the workspace `.newton/configs/` layout.
@@ -59,7 +63,7 @@ fn validate_configs_dir(workspace_root: &Path) -> Result<PathBuf> {
              Expected location: {}\n\n\
              To fix:\n  \
              - Run 'newton init' in your workspace root, or\n  \
-             - Manually create the directory and add a monitor.conf file, or\n  \
+             - Manually create a directory and add a monitor.conf file, or\n  \
              - Provide both --http-url and --ws-url on the command line",
             configs_dir.display()
         ));
@@ -136,6 +140,7 @@ fn finalize_endpoints(
 struct ConfigPair {
     http_url: Option<String>,
     ws_url: Option<String>,
+    workflow_service_url: Option<String>,
 }
 
 impl ConfigPair {
@@ -143,6 +148,7 @@ impl ConfigPair {
         ConfigPair {
             http_url: overrides.http_url,
             ws_url: overrides.ws_url,
+            workflow_service_url: overrides.workflow_service_url,
         }
     }
 
@@ -152,6 +158,9 @@ impl ConfigPair {
         }
         if self.ws_url.is_none() {
             self.ws_url = other.ws_url;
+        }
+        if self.workflow_service_url.is_none() {
+            self.workflow_service_url = other.workflow_service_url;
         }
     }
 
@@ -193,10 +202,16 @@ impl ConfigPair {
                 .ok_or_else(|| anyhow!("missing WebSocket endpoint"))?,
         )
         .map_err(|e| anyhow!("Invalid WebSocket URL: {}", e))?;
+
+        let workflow_service_url = self
+            .workflow_service_url
+            .and_then(|url| Url::parse(&url).ok());
+
         Ok(MonitorEndpoints {
             http_url,
             ws_url,
             workspace_root,
+            workflow_service_url,
         })
     }
 }
@@ -220,11 +235,23 @@ fn parse_config_entry(path: &Path) -> Result<Option<ConfigPair>> {
             Some(trimmed.to_string())
         }
     });
+    let workflow_service_url = settings.get("workflow_service_url").and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
 
-    // Return None only if both are missing; partial configs are valid
+    // Return None only if both core endpoints are missing; partial configs are valid
     if http_url.is_none() && ws_url.is_none() {
         return Ok(None);
     }
 
-    Ok(Some(ConfigPair { http_url, ws_url }))
+    Ok(Some(ConfigPair {
+        http_url,
+        ws_url,
+        workflow_service_url,
+    }))
 }

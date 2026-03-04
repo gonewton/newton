@@ -211,6 +211,7 @@ fn workspace_root_for_command(command: &Command) -> Result<Option<PathBuf>> {
             let cwd = env::current_dir()?;
             Some(find_workspace_root(&cwd)?)
         }
+        Command::Serve(_) => None,
     };
 
     if let Some(mut path) = candidate {
@@ -441,6 +442,7 @@ mod tests {
         Command::Monitor(MonitorArgs {
             http_url: None,
             ws_url: None,
+            backend: false,
         })
     }
 

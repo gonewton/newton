@@ -70,6 +70,11 @@ impl MonitorState {
             MonitorEvent::Message(message) => {
                 self.last_seen_message(message);
             }
+            MonitorEvent::Workflow(workflow_event) => {
+                // Workflow events can be handled here in the future
+                // For now, we just log them
+                tracing::debug!("Received workflow event: {:?}", workflow_event);
+            }
         }
     }
 

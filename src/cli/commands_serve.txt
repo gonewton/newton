@@ -1,0 +1,124 @@
+use crate::core::error::AppError;
+use crate::core::types::ErrorCategory;
+use newton_types::OperatorDescriptor;
+use crate::api;
+use std::result::Result as StdResult;
+
+pub async fn serve(args: crate::cli::ServeArgs) -> StdResult<(), AppError> {
+    tracing::info!("Starting Newton API server on {}", args.bind);
+    
+    let operators = vec![
+        OperatorDescriptor {
+            operator_type: "agent".to_string(),
+            description: "Run AI agent operations with configurable engines".to_string(),
+            params_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "engine": {"type": "string", "default": "claude_code"},
+                    "prompt": {"type": "string"},
+                    "max_iterations": {"type": "number", "default": 10}
+                }
+            }),
+        },
+        OperatorDescriptor {
+            operator_type: "command".to_string(),
+            description: "Execute shell commands".to_string(),
+            params_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string"},
+                    "working_dir": {"type": "string"},
+                    "timeout_seconds": {"type": "number"}
+                }
+            }),
+        },
+        OperatorDescriptor {
+            operator_type: "human_approval".to_string(),
+            description: "Request human approval for workflow continuation".to_string(),
+            params_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "timeout_seconds": {"type": "number", "default": 300}
+                }
+            }),
+        },
+        OperatorDescriptor {
+            operator_type: "human_decision".to_string(),
+            description: "Request human decision from multiple choices".to_string(),
+            params_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "choices": {"type": "array", "items": {"type": "string"}},
+                    "timeout_seconds": {"type": "number", "default": 300}
+                }
+            }),
+        },
+        OperatorDescriptor {
+            operator_type: "barrier".to_string(),
+            description: "Wait for specified tasks to complete".to_string(),
+            params_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "expected": {"type": "array", "items": {"type": "string"}}
+                }
+            }),
+        },
+        OperatorDescriptor {
+            operator_type: "noop".to_string(),
+            description: "No-operation placeholder task".to_string(),
+            params_schema: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+        },
+        OperatorDescriptor {
+            operator_type: "set_context".to_string(),
+            description: "Set values in workflow context".to_string(),
+            params_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "values": {"type": "object"}
+                }
+            }),
+        },
+        OperatorDescriptor {
+            operator_type: "assert_completed".to_string(),
+            description: "Assert that specified tasks have completed".to_string(),
+            params_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "task_ids": {"type": "array", "items": {"type": "string"}}
+                }
+            }),
+        },
+    ];
+    
+    let state = api::state::AppState::new(operators);
+    let app = api::create_router(state);
+    
+    let listener = tokio::net::TcpListener::bind(&args.bind).await.map_err(|err| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            format!("Failed to bind to {}: {}", args.bind, err),
+        )
+    })?;
+    
+    let addr = listener.local_addr().map_err(|err| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            format!("Failed to get listener address: {}", err),
+        )
+    })?;
+    
+    println!("Newton API server listening on {}", addr);
+    println!("Health check: http://{}/health", addr);
+    println!("API endpoints: http://{}/api", addr);
+    
+    loop {
+        if let Err(err) = axum::serve(&listener, &app).await {
+            tracing::error!("Server error: {}", err);
+        }
+    }
+}

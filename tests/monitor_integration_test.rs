@@ -20,6 +20,7 @@ fn build_endpoints(server: &MockServer) -> MonitorEndpoints {
         http_url,
         ws_url,
         workspace_root: PathBuf::from("."),
+        workflow_service_url: None,
     }
 }
 
