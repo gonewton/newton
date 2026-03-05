@@ -1049,7 +1049,12 @@ pub async fn resume_workflow(
         .with_code("WFG-CKPT-001"));
     }
 
-    let graph_settings = execution.settings_effective.clone();
+    let mut graph_settings = execution.settings_effective.clone();
+    if allow_workflow_change {
+        graph_settings.max_workflow_iterations = document.workflow.settings.max_workflow_iterations;
+        graph_settings.max_task_iterations = document.workflow.settings.max_task_iterations;
+    }
+
     let config = ExecutionConfig {
         parallel_limit: graph_settings.parallel_limit,
         max_time_seconds: graph_settings.max_time_seconds,
