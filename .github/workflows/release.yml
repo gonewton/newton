@@ -124,6 +124,10 @@ jobs:
       contents: write
 
     steps:
+      - name: Wait for release assets to be indexed
+        run: sleep 15
+        # GitHub Releases API can return the release before assets are listed; avoid empty-hash in Scoop manifest
+
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@v1
