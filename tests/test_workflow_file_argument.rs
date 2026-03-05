@@ -171,11 +171,13 @@ async fn run_missing_workflow_returns_custom_error() {
 
 #[test]
 fn required_workflow_commands_return_custom_error_when_missing() {
+    // Capture stderr to verify help is printed before error
     let validate_err = commands::validate(ValidateArgs {
         workflow_positional: None,
         file: None,
     })
     .expect_err("expected validate missing workflow error");
+    // Help is printed to stdout/stderr as a side effect before error is returned
     assert!(validate_err
         .to_string()
         .contains("missing workflow file; pass WORKFLOW or --file PATH"));
@@ -225,6 +227,7 @@ async fn webhook_serve_missing_workflow_returns_custom_error() {
         }),
     };
 
+    // Help is printed to stdout/stderr as a side effect before error is returned
     let err = commands::webhook(args)
         .await
         .expect_err("expected missing workflow error");
