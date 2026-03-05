@@ -21,6 +21,7 @@ use crate::core::workflow_graph::{
 use crate::monitor;
 use crate::Result;
 use anyhow::anyhow;
+use clap::CommandFactory;
 use humantime::{format_duration, parse_duration};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -32,13 +33,30 @@ use std::{
 };
 use tokio::time::sleep;
 
+/// Print help for a specific command by name
+/// For nested commands (e.g., "webhook serve"), displays the parent help
+fn print_help_for_command(command_name: &str) {
+    let mut cmd = crate::cli::Args::command();
+
+    // Get the first part of the command name (parent command)
+    let parts: Vec<&str> = command_name.split_whitespace().collect();
+    let main_command = parts.first().unwrap_or(&command_name);
+
+    // Find and print help for the main command
+    // For nested commands, this will show the parent help which includes subcommand list
+    if let Some(subcommand) = cmd.find_subcommand_mut(main_command) {
+        let _ = subcommand.print_long_help();
+    }
+}
+
 /// Load and validate a workflow document from the given arguments
 fn load_and_validate_workflow(
     args: &RunArgs,
 ) -> Result<(workflow_schema::WorkflowDocument, PathBuf)> {
-    let workflow_path = args
-        .resolved_workflow_path()
-        .ok_or_else(|| anyhow!("missing workflow file; pass WORKFLOW or --file PATH"))?;
+    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
+        print_help_for_command("run");
+        anyhow!("missing workflow file; pass WORKFLOW or --file PATH")
+    })?;
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
 
@@ -149,6 +167,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
 pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
     let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
+        print_help_for_command("run");
         AppError::new(
             ErrorCategory::ValidationError,
             "missing workflow file; pass WORKFLOW or --file PATH",
@@ -218,6 +237,7 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
 
 pub fn validate(args: ValidateArgs) -> StdResult<(), AppError> {
     let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
+        print_help_for_command("validate");
         AppError::new(
             ErrorCategory::ValidationError,
             "missing workflow file; pass WORKFLOW or --file PATH",
@@ -234,6 +254,7 @@ pub fn validate(args: ValidateArgs) -> StdResult<(), AppError> {
 
 pub fn dot(args: DotArgs) -> StdResult<(), AppError> {
     let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
+        print_help_for_command("dot");
         AppError::new(
             ErrorCategory::ValidationError,
             "missing workflow file; pass WORKFLOW or --file PATH",
@@ -256,6 +277,7 @@ pub fn dot(args: DotArgs) -> StdResult<(), AppError> {
 
 pub fn lint(args: LintArgs) -> StdResult<(), AppError> {
     let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
+        print_help_for_command("lint");
         AppError::new(
             ErrorCategory::ValidationError,
             "missing workflow file; pass WORKFLOW or --file PATH",
@@ -295,6 +317,7 @@ pub fn lint(args: LintArgs) -> StdResult<(), AppError> {
 
 pub fn explain(args: ExplainArgs) -> StdResult<(), AppError> {
     let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
+        print_help_for_command("explain");
         AppError::new(
             ErrorCategory::ValidationError,
             "missing workflow file; pass WORKFLOW or --file PATH",
@@ -518,6 +541,7 @@ pub async fn webhook(args: WebhookArgs) -> StdResult<(), AppError> {
 
 async fn workflow_webhook_serve(args: WebhookServeArgs) -> StdResult<(), AppError> {
     let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
+        print_help_for_command("webhook");
         AppError::new(
             ErrorCategory::ValidationError,
             "missing workflow file; pass WORKFLOW or --file PATH",
