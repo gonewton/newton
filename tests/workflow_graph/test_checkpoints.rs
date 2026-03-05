@@ -322,3 +322,386 @@ async fn checkpoints_list_output_format_and_sort_order() {
         assert_eq!(entry.status, state::WorkflowExecutionStatus::Completed);
     }
 }
+
+#[tokio::test]
+async fn resume_with_allow_workflow_change_updates_iteration_limits() {
+    let workspace = tempdir().expect("workspace");
+    let workflow_with_low_limits = r#"
+version: 2.0
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: first
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 2
+    max_workflow_iterations: 3
+  tasks:
+    - id: first
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: second
+          when:
+            $expr: "true"
+    - id: second
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: done
+          when:
+            $expr: "true"
+    - id: done
+      operator: NoOpOperator
+      params: {}
+"#;
+    let workflow_file = write_workflow(workflow_with_low_limits);
+    let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings.clone());
+    let overrides = ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
+        verbose: false,
+    };
+
+    let summary = executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry.clone(),
+        workspace.path().to_path_buf(),
+        overrides,
+    )
+    .await
+    .expect("first run succeeded");
+
+    let state_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(summary.execution_id.to_string());
+    let execution_path = state_dir.join("execution.json");
+    let checkpoint_path = state_dir.join("checkpoint.json");
+
+    let mut execution_value = read_json(&execution_path);
+    if let Some(array) = execution_value
+        .get_mut("task_runs")
+        .and_then(Value::as_array_mut)
+    {
+        let filtered: Vec<Value> = array
+            .iter()
+            .filter(|entry| entry["task_id"] == "first")
+            .cloned()
+            .collect();
+        *array = filtered;
+    }
+    execution_value["status"] = Value::String("Running".to_string());
+    execution_value["completed_at"] = Value::Null;
+    write_json(&execution_path, &execution_value);
+
+    let mut checkpoint_value = read_json(&checkpoint_path);
+    if let Some(map) = checkpoint_value.as_object_mut() {
+        map.insert("ready_queue".to_string(), json!(["second"]));
+        map.insert("task_iterations".to_string(), json!({"first": 1}));
+        map.insert("total_iterations".to_string(), json!(1));
+        if let Some(completed) = map.get_mut("completed").and_then(Value::as_object_mut) {
+            completed.retain(|key, _| key == "first");
+        }
+    }
+    write_json(&checkpoint_path, &checkpoint_value);
+
+    let workflow_with_higher_limits = r#"
+version: 2.0
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: first
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 20
+    max_workflow_iterations: 50
+  tasks:
+    - id: first
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: second
+          when:
+            $expr: "true"
+    - id: second
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: done
+          when:
+            $expr: "true"
+    - id: done
+      operator: NoOpOperator
+      params: {}
+"#;
+    fs::write(workflow_file.path(), workflow_with_higher_limits).expect("update workflow");
+
+    let resume_registry = build_registry(workspace.path().to_path_buf(), settings);
+    let resume_summary = executor::resume_workflow(
+        resume_registry,
+        workspace.path().to_path_buf(),
+        summary.execution_id,
+        true,
+    )
+    .await
+    .expect("resume with allow_workflow_change succeeded");
+
+    assert!(resume_summary.total_iterations >= 3);
+    let execution_value = read_json(&execution_path);
+    let task_runs = execution_value["task_runs"]
+        .as_array()
+        .expect("task runs present");
+    let ids: HashSet<_> = task_runs
+        .iter()
+        .map(|entry| entry["task_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 3);
+    assert!(ids.contains("first"));
+    assert!(ids.contains("second"));
+    assert!(ids.contains("done"));
+}
+
+#[tokio::test]
+async fn resume_without_allow_workflow_change_preserves_checkpoint_limits() {
+    let workspace = tempdir().expect("workspace");
+    let workflow_with_low_limits = r#"
+version: 2.0
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: first
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+  tasks:
+    - id: first
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: second
+          when:
+            $expr: "true"
+    - id: second
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: done
+          when:
+            $expr: "true"
+    - id: done
+      operator: NoOpOperator
+      params: {}
+"#;
+    let workflow_file = write_workflow(workflow_with_low_limits);
+    let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings.clone());
+    let overrides = ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
+        verbose: false,
+    };
+
+    let summary = executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry.clone(),
+        workspace.path().to_path_buf(),
+        overrides,
+    )
+    .await
+    .expect("first run succeeded");
+
+    let state_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(summary.execution_id.to_string());
+    let execution_path = state_dir.join("execution.json");
+    let checkpoint_path = state_dir.join("checkpoint.json");
+
+    let mut execution_value = read_json(&execution_path);
+    if let Some(array) = execution_value
+        .get_mut("task_runs")
+        .and_then(Value::as_array_mut)
+    {
+        let filtered: Vec<Value> = array
+            .iter()
+            .filter(|entry| entry["task_id"] == "first")
+            .cloned()
+            .collect();
+        *array = filtered;
+    }
+    execution_value["status"] = Value::String("Running".to_string());
+    execution_value["completed_at"] = Value::Null;
+    write_json(&execution_path, &execution_value);
+
+    let mut checkpoint_value = read_json(&checkpoint_path);
+    if let Some(map) = checkpoint_value.as_object_mut() {
+        map.insert("ready_queue".to_string(), json!(["second"]));
+        map.insert("task_iterations".to_string(), json!({"first": 1}));
+        map.insert("total_iterations".to_string(), json!(1));
+        if let Some(completed) = map.get_mut("completed").and_then(Value::as_object_mut) {
+            completed.retain(|key, _| key == "first");
+        }
+    }
+    write_json(&checkpoint_path, &checkpoint_value);
+
+    let resume_registry = build_registry(workspace.path().to_path_buf(), settings);
+    let resume_summary = executor::resume_workflow(
+        resume_registry,
+        workspace.path().to_path_buf(),
+        summary.execution_id,
+        false,
+    )
+    .await
+    .expect("resume without allow_workflow_change succeeded");
+
+    assert!(resume_summary.total_iterations >= 3);
+}
+
+#[tokio::test]
+async fn resume_with_allow_workflow_change_preserves_other_settings() {
+    let workspace = tempdir().expect("workspace");
+    let workflow_original = r#"
+version: 2.0
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: first
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+  tasks:
+    - id: first
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: done
+          when:
+            $expr: "true"
+    - id: done
+      operator: NoOpOperator
+      params: {}
+"#;
+    let workflow_file = write_workflow(workflow_original);
+    let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings.clone());
+    let overrides = ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
+        verbose: false,
+    };
+
+    let summary = executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry.clone(),
+        workspace.path().to_path_buf(),
+        overrides,
+    )
+    .await
+    .expect("first run succeeded");
+
+    let state_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(summary.execution_id.to_string());
+    let execution_path = state_dir.join("execution.json");
+    let checkpoint_path = state_dir.join("checkpoint.json");
+
+    let mut execution_value = read_json(&execution_path);
+    if let Some(array) = execution_value
+        .get_mut("task_runs")
+        .and_then(Value::as_array_mut)
+    {
+        let filtered: Vec<Value> = array
+            .iter()
+            .filter(|entry| entry["task_id"] == "first")
+            .cloned()
+            .collect();
+        *array = filtered;
+    }
+    execution_value["status"] = Value::String("Running".to_string());
+    execution_value["completed_at"] = Value::Null;
+    write_json(&execution_path, &execution_value);
+
+    let mut checkpoint_value = read_json(&checkpoint_path);
+    if let Some(map) = checkpoint_value.as_object_mut() {
+        map.insert("ready_queue".to_string(), json!(["done"]));
+        map.insert("task_iterations".to_string(), json!({"first": 1}));
+        map.insert("total_iterations".to_string(), json!(1));
+        if let Some(completed) = map.get_mut("completed").and_then(Value::as_object_mut) {
+            completed.retain(|key, _| key == "first");
+        }
+    }
+    write_json(&checkpoint_path, &checkpoint_value);
+
+    let workflow_with_changed_non_iteration_settings = r#"
+version: 2.0
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: first
+    max_time_seconds: 999
+    parallel_limit: 999
+    continue_on_error: true
+    max_task_iterations: 20
+    max_workflow_iterations: 50
+  tasks:
+    - id: first
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: done
+          when:
+            $expr: "true"
+    - id: done
+      operator: NoOpOperator
+      params: {}
+"#;
+    fs::write(
+        workflow_file.path(),
+        workflow_with_changed_non_iteration_settings,
+    )
+    .expect("update workflow");
+
+    let resume_registry = build_registry(workspace.path().to_path_buf(), settings);
+    let resume_summary = executor::resume_workflow(
+        resume_registry,
+        workspace.path().to_path_buf(),
+        summary.execution_id,
+        true,
+    )
+    .await
+    .expect("resume succeeded");
+
+    assert!(resume_summary.total_iterations >= 2);
+}

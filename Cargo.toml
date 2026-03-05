@@ -162,3 +162,7 @@ path = "tests/bin/logging_integration_helper.rs"
 [[test]]
 name = "test_api_integration"
 path = "tests/integration/test_api.rs"
+
+[[test]]
+name = "test_workflow_resume_settings"
+path = "tests/workflow_graph/test_resume_settings.rs"
