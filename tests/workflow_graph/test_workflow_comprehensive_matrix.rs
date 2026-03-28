@@ -473,6 +473,7 @@ fn command_deps(plans: HashMap<String, VecDeque<MockCommandStep>>) -> BuiltinOpe
         interviewer: None,
         command_runner: Some(Arc::new(MockCommandRunner::new(plans))),
         engine_registry: None,
+        gh_runner: None,
     }
 }
 
@@ -732,6 +733,7 @@ async fn scenario_human_approval_and_decision_path() -> Result<(), String> {
         interviewer: Some(Arc::new(FakeInterviewer::approve_and_choose("ship"))),
         command_runner: None,
         engine_registry: None,
+        gh_runner: None,
     };
     let summary = run_yaml_scenario(
         NAME,
@@ -799,6 +801,7 @@ async fn scenario_command_execution_error_fails_workflow() -> Result<(), String>
         interviewer: None,
         command_runner: Some(Arc::new(MockCommandRunner::new(plans))),
         engine_registry: None,
+        gh_runner: None,
     };
     let err = execute_yaml(
         workspace.path(),
