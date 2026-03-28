@@ -247,6 +247,7 @@ impl WorkflowTestHarness {
                 checkpoint_base_path: Some(self.temp_dir.path().join(".newton/state/workflows")),
                 artifact_base_path: Some(self.temp_dir.path().join(".newton/artifacts")),
                 verbose: false,
+                server_notifier: None,
             },
         )
         .await

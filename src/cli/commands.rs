@@ -15,8 +15,9 @@ use crate::core::workflow_graph::{
     explain,
     expression::ExpressionEngine,
     lint::{LintRegistry, LintResult, LintSeverity},
-    operators as workflow_operators, schema as workflow_schema, transform as workflow_transform,
-    webhook,
+    operators as workflow_operators, schema as workflow_schema,
+    server_notifier::ServerNotifier,
+    transform as workflow_transform, webhook,
 };
 use crate::monitor;
 use crate::Result;
@@ -117,12 +118,18 @@ fn setup_workflow_execution(
     workspace: &std::path::Path,
     settings: &workflow_schema::WorkflowSettings,
 ) -> (ExecutionOverrides, OperatorRegistry) {
+    let server_notifier = args
+        .server
+        .as_ref()
+        .map(|url| std::sync::Arc::new(ServerNotifier::new(url.clone())));
+
     let overrides = ExecutionOverrides {
         parallel_limit: args.parallel_limit,
         max_time_seconds: args.max_time_seconds,
         checkpoint_base_path: None,
         artifact_base_path: None,
         verbose: args.verbose,
+        server_notifier,
     };
 
     let mut builder = OperatorRegistry::builder();
@@ -204,12 +211,18 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
         });
     }
 
+    let server_notifier = args
+        .server
+        .as_ref()
+        .map(|url| std::sync::Arc::new(ServerNotifier::new(url.clone())));
+
     let overrides = ExecutionOverrides {
         parallel_limit: args.parallel_limit,
         max_time_seconds: args.max_time_seconds,
         checkpoint_base_path: None,
         artifact_base_path: None,
         verbose: false,
+        server_notifier,
     };
 
     let mut builder = OperatorRegistry::builder();
@@ -582,6 +595,7 @@ async fn workflow_webhook_serve(args: WebhookServeArgs) -> StdResult<(), AppErro
         checkpoint_base_path: None,
         artifact_base_path: None,
         verbose: false,
+        server_notifier: None,
     };
 
     webhook::serve_webhook(
@@ -1067,6 +1081,7 @@ async fn execute_workflow_for_plan(
         checkpoint_base_path: Some(task_layout.state_dir.join("workflows")),
         artifact_base_path: Some(task_layout.state_dir.join("artifacts").join("workflows")),
         verbose: false,
+        server_notifier: None,
     };
 
     let mut builder = OperatorRegistry::builder();

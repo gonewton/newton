@@ -193,6 +193,7 @@ async fn execute_yaml(
             checkpoint_base_path: None,
             artifact_base_path: None,
             verbose: false,
+            server_notifier: None,
         },
     )
     .await

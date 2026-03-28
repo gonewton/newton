@@ -112,6 +112,7 @@ impl Config {
                     parallel_limit: None,
                     max_time_seconds: None,
                     verbose: false,
+                    server: None,
                 }))
             }
             Mode::Batch => {

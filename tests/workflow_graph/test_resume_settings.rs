@@ -45,6 +45,7 @@ fn default_overrides() -> ExecutionOverrides {
         checkpoint_base_path: None,
         artifact_base_path: None,
         verbose: false,
+        server_notifier: None,
     }
 }
 

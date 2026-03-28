@@ -12,6 +12,7 @@ pub mod lint;
 pub mod operator;
 pub mod operators;
 pub mod schema;
+pub mod server_notifier;
 pub mod state;
 pub mod task_execution;
 pub mod transform;
