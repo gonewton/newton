@@ -705,3 +705,90 @@ workflow:
 
     assert!(resume_summary.total_iterations >= 2);
 }
+
+#[tokio::test]
+async fn hard_abort_task_is_requeued_in_checkpoint() {
+    // When a task hard-aborts (operator not registered), it must be re-queued in
+    // the checkpoint so that a corrected workflow can resume from that task.
+    let workspace = tempdir().expect("workspace");
+    let workflow_with_bad_operator = r#"
+version: 2.0
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: fail_task
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+  tasks:
+    - id: fail_task
+      operator: NonExistentOperator
+      params: {}
+"#;
+    let workflow_file = write_workflow(workflow_with_bad_operator);
+    let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings.clone());
+    let overrides = ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
+        verbose: false,
+    };
+
+    let result = executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry.clone(),
+        workspace.path().to_path_buf(),
+        overrides,
+    )
+    .await;
+
+    // Execution must fail with a hard operator-resolution error.
+    let err = result.expect_err("hard abort must fail");
+    assert_eq!(err.code, "WFG-OP-001");
+
+    // Locate the execution directory.
+    let state_root = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows");
+    let entries: Vec<_> = fs::read_dir(&state_root)
+        .expect("state dir exists")
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(entries.len(), 1, "exactly one execution directory");
+    let exec_dir = entries[0].path();
+    let checkpoint_path = exec_dir.join("checkpoint.json");
+
+    let checkpoint_value = read_json(&checkpoint_path);
+
+    // The aborted task must be back in ready_queue.
+    let ready_queue = checkpoint_value["ready_queue"]
+        .as_array()
+        .expect("ready_queue is array");
+    assert_eq!(ready_queue.len(), 1, "aborted task must be re-queued");
+    assert_eq!(
+        ready_queue[0].as_str().unwrap(),
+        "fail_task",
+        "fail_task must be in ready_queue after hard abort"
+    );
+
+    // No tasks completed.
+    let completed = checkpoint_value["completed"]
+        .as_object()
+        .expect("completed is object");
+    assert_eq!(completed.len(), 0, "no tasks should be in completed");
+
+    // total_iterations was incremented before the abort.
+    let total_iterations = checkpoint_value["total_iterations"]
+        .as_u64()
+        .expect("total_iterations is number");
+    assert_eq!(total_iterations, 1, "total_iterations should be 1");
+}

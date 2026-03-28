@@ -5,6 +5,10 @@
 
 set -e
 
+# Match CI: same incremental/Rustc denial as typical GitHub Actions Rust jobs (see ci.yml).
+export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
+export RUSTFLAGS="${RUSTFLAGS:--D warnings}"
+
 echo "🔍 Running pre-commit checks..."
 echo "==============================="
 
@@ -19,7 +23,7 @@ echo "✅ Repository structure verified"
 # Check code formatting
 echo ""
 echo "📝 Checking code formatting..."
-if cargo fmt --check; then
+if cargo fmt --all -- --check; then
     echo "✅ Code formatting is correct"
 else
     echo "❌ Code formatting issues found. Run 'cargo fmt' to fix."

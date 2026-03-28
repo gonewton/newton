@@ -403,3 +403,186 @@ workflow:
     assert_eq!(settings_effective["max_task_iterations"], json!(5));
     assert_eq!(settings_effective["max_workflow_iterations"], json!(10));
 }
+
+#[tokio::test]
+async fn resume_inconsistent_checkpoint_returns_wfg_resume_002() {
+    // When a checkpoint has empty ready_queue but total_iterations > completed.len()
+    // (old-format aborted checkpoint), resume must return WFG-RESUME-002.
+    let workspace = tempdir().expect("workspace");
+
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: task1
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+  tasks:
+    - id: task1
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: task2
+    - id: task2
+      operator: NoOpOperator
+      params: {}
+"#;
+
+    let workflow_file = write_workflow(workflow);
+    let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings.clone());
+
+    let summary = executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry.clone(),
+        workspace.path().to_path_buf(),
+        default_overrides(),
+    )
+    .await
+    .expect("initial execution succeeded");
+
+    let state_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(summary.execution_id.to_string());
+    let execution_path = state_dir.join("execution.json");
+    let checkpoint_path = state_dir.join("checkpoint.json");
+
+    // Simulate an old-format checkpoint: ready_queue is empty but
+    // total_iterations (2) exceeds completed.len() (1), as if a task
+    // hard-aborted without being re-queued.
+    let mut execution_value = read_json(&execution_path);
+    execution_value["status"] = json!("Running");
+    execution_value["completed_at"] = json!(null);
+    write_json(&execution_path, &execution_value);
+
+    let mut checkpoint_value = read_json(&checkpoint_path);
+    if let Some(map) = checkpoint_value.as_object_mut() {
+        map.insert("ready_queue".to_string(), json!([]));
+        map.insert(
+            "task_iterations".to_string(),
+            json!({"task1": 1, "task2": 1}),
+        );
+        map.insert("total_iterations".to_string(), json!(2));
+        // Only task1 completed — task2 aborted without being re-queued (old format).
+        if let Some(completed) = map.get_mut("completed").and_then(Value::as_object_mut) {
+            completed.retain(|key, _| key == "task1");
+        }
+    }
+    write_json(&checkpoint_path, &checkpoint_value);
+
+    let resume_registry = build_registry(workspace.path().to_path_buf(), settings.clone());
+    let err = executor::resume_workflow(
+        resume_registry,
+        workspace.path().to_path_buf(),
+        summary.execution_id,
+        false,
+    )
+    .await
+    .expect_err("resume of inconsistent checkpoint must fail");
+
+    assert_eq!(err.code, "WFG-RESUME-002");
+    assert!(
+        err.message.contains("2 tasks ran"),
+        "error message should contain task count: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains("1 completed"),
+        "error message should contain completed count: {}",
+        err.message
+    );
+}
+
+#[tokio::test]
+async fn resume_inconsistent_checkpoint_with_allow_workflow_change_also_returns_wfg_resume_002() {
+    // The WFG-RESUME-002 guard fires regardless of allow_workflow_change.
+    let workspace = tempdir().expect("workspace");
+
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: task1
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+  tasks:
+    - id: task1
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: task2
+    - id: task2
+      operator: NoOpOperator
+      params: {}
+"#;
+
+    let workflow_file = write_workflow(workflow);
+    let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings.clone());
+
+    let summary = executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry.clone(),
+        workspace.path().to_path_buf(),
+        default_overrides(),
+    )
+    .await
+    .expect("initial execution succeeded");
+
+    let state_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(summary.execution_id.to_string());
+    let execution_path = state_dir.join("execution.json");
+    let checkpoint_path = state_dir.join("checkpoint.json");
+
+    let mut execution_value = read_json(&execution_path);
+    execution_value["status"] = json!("Running");
+    execution_value["completed_at"] = json!(null);
+    write_json(&execution_path, &execution_value);
+
+    let mut checkpoint_value = read_json(&checkpoint_path);
+    if let Some(map) = checkpoint_value.as_object_mut() {
+        map.insert("ready_queue".to_string(), json!([]));
+        map.insert(
+            "task_iterations".to_string(),
+            json!({"task1": 1, "task2": 1}),
+        );
+        map.insert("total_iterations".to_string(), json!(2));
+        if let Some(completed) = map.get_mut("completed").and_then(Value::as_object_mut) {
+            completed.retain(|key, _| key == "task1");
+        }
+    }
+    write_json(&checkpoint_path, &checkpoint_value);
+
+    let resume_registry = build_registry(workspace.path().to_path_buf(), settings);
+    let err = executor::resume_workflow(
+        resume_registry,
+        workspace.path().to_path_buf(),
+        summary.execution_id,
+        true, // allow_workflow_change=true — guard still fires
+    )
+    .await
+    .expect_err("resume of inconsistent checkpoint must fail even with allow_workflow_change");
+
+    assert_eq!(err.code, "WFG-RESUME-002");
+}
