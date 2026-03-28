@@ -116,6 +116,8 @@ cd "$NEWTON_DIR"
 # Disable incremental compilation in CI/sandboxed environments where hard-linking
 # the incremental cache can fail across mount points.
 export CARGO_INCREMENTAL=0
+# Match ci.yml / pre-commit: deny rustc warnings during clippy and tests.
+export RUSTFLAGS="${RUSTFLAGS:--D warnings}"
 # Keep Cargo artifacts on a single filesystem to avoid cross-device link errors.
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/newton-target}"
 mkdir -p "$CARGO_TARGET_DIR/tmp"
