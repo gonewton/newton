@@ -28,10 +28,10 @@ async fn read_line_blocking() -> Result<String, AppError> {
     spawn_blocking(|| {
         let mut buffer = String::new();
         io::stdin().read_line(&mut buffer).map_err(|err| {
-            AppError::new(
+            Box::new(AppError::new(
                 ErrorCategory::IoError,
                 format!("failed to read stdin: {}", err),
-            )
+            ))
         })?;
         Ok(buffer)
     })
@@ -42,6 +42,7 @@ async fn read_line_blocking() -> Result<String, AppError> {
             format!("console input task cancelled: {}", err),
         )
     })?
+    .map_err(|e: Box<AppError>| *e)
 }
 
 async fn read_input_with_timeout(
