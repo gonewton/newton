@@ -83,6 +83,7 @@ async fn execute_yaml_with_gh_runner(
             checkpoint_base_path: None,
             artifact_base_path: None,
             verbose: false,
+            server_notifier: None,
         },
     )
     .await

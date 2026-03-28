@@ -80,6 +80,7 @@ fn default_overrides() -> ExecutionOverrides {
         checkpoint_base_path: None,
         artifact_base_path: None,
         verbose: false,
+        server_notifier: None,
     }
 }
 
@@ -525,6 +526,7 @@ async fn e8_terminal_success_stops_executor_queued_tasks_not_run() {
         checkpoint_base_path: None,
         artifact_base_path: None,
         verbose: false,
+        server_notifier: None,
     };
     let registry = build_registry(workspace.clone(), document.workflow.settings.clone());
 

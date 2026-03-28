@@ -11,6 +11,7 @@ use crate::core::workflow_graph::operator::{OperatorRegistry, StateView};
 use crate::core::workflow_graph::schema::{
     self, BarrierParams, GoalGateFailureBehavior, TerminalKind, WorkflowDocument, WorkflowTask,
 };
+use crate::core::workflow_graph::server_notifier::ServerNotifier;
 use crate::core::workflow_graph::state::{
     canonicalize_workflow_path, compute_sha256_hex, redact_value, AppErrorSummary, GraphSettings,
     TaskRunRecord, WorkflowCheckpoint, WorkflowExecution, WorkflowExecutionStatus,
@@ -19,6 +20,7 @@ use crate::core::workflow_graph::state::{
 use crate::core::workflow_graph::task_execution;
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
+use newton_types::{NodeState, NodeStatus, WorkflowInstance, WorkflowStatus};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
@@ -39,6 +41,8 @@ pub struct ExecutionOverrides {
     pub checkpoint_base_path: Option<PathBuf>,
     pub artifact_base_path: Option<PathBuf>,
     pub verbose: bool,
+    /// Optional server notifier for registering with a newton serve instance.
+    pub server_notifier: Option<Arc<ServerNotifier>>,
 }
 
 /// Resolved execution configuration used by the runner.
@@ -234,6 +238,8 @@ struct WorkflowRuntime {
     verbose: bool,
     /// Task IDs popped in the current tick, tracked for re-queue on hard batch failure.
     current_tick_tasks: Vec<String>,
+    /// Optional server notifier for pushing lifecycle events to a newton serve instance.
+    server_notifier: Option<Arc<ServerNotifier>>,
 }
 
 impl ExecutionState {
@@ -377,6 +383,20 @@ impl WorkflowRuntime {
             "workflow starting"
         );
         self.save_execution()?;
+
+        // Notify server that workflow has started.
+        if let Some(notifier) = &self.server_notifier {
+            let instance = WorkflowInstance {
+                instance_id: self.workflow_execution.execution_id.to_string(),
+                workflow_id: self.workflow_execution.workflow_file.clone(),
+                status: WorkflowStatus::Running,
+                nodes: vec![],
+                started_at: self.workflow_execution.started_at,
+                ended_at: None,
+            };
+            notifier.notify_workflow_started(instance);
+        }
+
         let mut terminal_stop_triggered = false;
         while !self.ready_queue.is_empty() {
             self.check_timeout().await?;
@@ -385,6 +405,21 @@ impl WorkflowRuntime {
 
             if tick_tasks.is_empty() {
                 break;
+            }
+
+            // Notify server of task starts.
+            if let Some(notifier) = &self.server_notifier {
+                let instance_id = self.workflow_execution.execution_id.to_string();
+                let now = Utc::now();
+                for (task_id, _) in &tick_tasks {
+                    let node = NodeState {
+                        node_id: task_id.clone(),
+                        status: NodeStatus::Running,
+                        started_at: Some(now),
+                        ended_at: None,
+                    };
+                    notifier.notify_node_updated(instance_id.clone(), node);
+                }
             }
 
             let snapshot = { self.state.read().await.snapshot() };
@@ -427,6 +462,15 @@ impl WorkflowRuntime {
                     self.workflow_execution.status = WorkflowExecutionStatus::Failed;
                     self.workflow_execution.completed_at = Some(Utc::now());
                     self.persist_checkpoint_force().await?;
+                    if let Some(notifier) = &self.server_notifier {
+                        notifier.notify_workflow_completed(
+                            self.workflow_execution.execution_id.to_string(),
+                            WorkflowStatus::Failed,
+                            self.workflow_execution
+                                .completed_at
+                                .unwrap_or_else(Utc::now),
+                        );
+                    }
                     return Err(err);
                 }
             };
@@ -439,7 +483,35 @@ impl WorkflowRuntime {
                 self.workflow_execution.status = WorkflowExecutionStatus::Failed;
                 self.workflow_execution.completed_at = Some(Utc::now());
                 self.persist_checkpoint_force().await?;
+                if let Some(notifier) = &self.server_notifier {
+                    notifier.notify_workflow_completed(
+                        self.workflow_execution.execution_id.to_string(),
+                        WorkflowStatus::Failed,
+                        self.workflow_execution
+                            .completed_at
+                            .unwrap_or_else(Utc::now),
+                    );
+                }
                 return Err(err);
+            }
+
+            // Notify server of task completions.
+            if let Some(notifier) = &self.server_notifier {
+                let instance_id = self.workflow_execution.execution_id.to_string();
+                for outcome in &frontier {
+                    let node_status = if outcome.failed {
+                        NodeStatus::Failed
+                    } else {
+                        NodeStatus::Succeeded
+                    };
+                    let node = NodeState {
+                        node_id: outcome.task_id.clone(),
+                        status: node_status,
+                        started_at: Some(outcome.started_at),
+                        ended_at: Some(outcome.completed_at),
+                    };
+                    notifier.notify_node_updated(instance_id.clone(), node);
+                }
             }
 
             // Handle terminal tasks - check if we should stop
@@ -461,6 +533,15 @@ impl WorkflowRuntime {
         self.workflow_execution.completed_at = Some(Utc::now());
         if let Some(err) = maybe_err {
             self.persist_checkpoint_force().await?;
+            if let Some(notifier) = &self.server_notifier {
+                notifier.notify_workflow_completed(
+                    self.workflow_execution.execution_id.to_string(),
+                    WorkflowStatus::Failed,
+                    self.workflow_execution
+                        .completed_at
+                        .unwrap_or_else(Utc::now),
+                );
+            }
             return Err(err);
         }
         if self.graph_settings.checkpoint.checkpoint_enabled {
@@ -480,6 +561,21 @@ impl WorkflowRuntime {
             redact_value(
                 &mut record.output,
                 &self.graph_settings.redaction.redact_keys,
+            );
+        }
+
+        // Notify server of workflow completion.
+        if let Some(notifier) = &self.server_notifier {
+            let status = match self.workflow_execution.status {
+                WorkflowExecutionStatus::Completed => WorkflowStatus::Succeeded,
+                _ => WorkflowStatus::Failed,
+            };
+            notifier.notify_workflow_completed(
+                self.workflow_execution.execution_id.to_string(),
+                status,
+                self.workflow_execution
+                    .completed_at
+                    .unwrap_or_else(Utc::now),
             );
         }
 
@@ -1030,6 +1126,7 @@ fn build_workflow_runtime(
         start_time: Instant::now(),
         verbose: overrides.verbose,
         current_tick_tasks: Vec::new(),
+        server_notifier: overrides.server_notifier.clone(),
     })
 }
 
@@ -1193,6 +1290,7 @@ pub async fn resume_workflow(
         start_time: Instant::now(),
         verbose: false, // Resume does not support verbose mode
         current_tick_tasks: Vec::new(),
+        server_notifier: None, // Resume does not support server notification
     };
     runtime.run().await
 }

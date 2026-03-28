@@ -161,6 +161,7 @@ async fn transitions_deduplicate_targets_per_tick() {
         checkpoint_base_path: None,
         artifact_base_path: None,
         verbose: false,
+        server_notifier: None,
     };
 
     let summary = executor::execute_workflow(
@@ -192,6 +193,7 @@ async fn loop_exhausts_iteration_limit() {
         checkpoint_base_path: None,
         artifact_base_path: None,
         verbose: false,
+        server_notifier: None,
     };
 
     let result = executor::execute_workflow(
@@ -219,6 +221,7 @@ async fn higher_priority_transition_wins() {
         checkpoint_base_path: None,
         artifact_base_path: None,
         verbose: false,
+        server_notifier: None,
     };
 
     let summary = executor::execute_workflow(
@@ -248,6 +251,7 @@ async fn workflow_exhausts_global_iteration_limit() {
         checkpoint_base_path: None,
         artifact_base_path: None,
         verbose: false,
+        server_notifier: None,
     };
 
     let result = executor::execute_workflow(

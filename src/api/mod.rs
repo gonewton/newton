@@ -11,11 +11,13 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Json, Response, Sse},
-    routing::{get, post, put},
+    routing::{get, patch, post, put},
     Router,
 };
+use chrono::{DateTime, Utc};
 use newton_types::{
-    ApiError, BroadcastEvent, HilAction, HilEvent, HilStatus, WorkflowDefinition, WorkflowInstance,
+    ApiError, BroadcastEvent, HilAction, HilEvent, HilStatus, NodeState, NodeStatus,
+    WorkflowInstance, WorkflowStatus,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -33,8 +35,10 @@ pub fn create_router(state: AppState, ui_dir: Option<PathBuf>) -> Router {
     let mut router = Router::new()
         .route("/health", get(health_check))
         .route("/api/workflows", get(list_workflows))
+        .route("/api/workflows", post(create_workflow))
         .route("/api/workflows/{id}", get(get_workflow))
         .route("/api/workflows/{id}", put(update_workflow))
+        .route("/api/workflows/{id}/nodes/{node_id}", patch(update_node))
         .route("/api/hil/workflows/{id}", get(list_hil_events))
         .route(
             "/api/hil/workflows/{id}/{event_id}/action",
@@ -75,12 +79,49 @@ async fn health_check() -> impl IntoResponse {
     }))
 }
 
-async fn list_workflows(State(state): State<Arc<AppState>>) -> Json<Vec<WorkflowInstance>> {
-    let instances: Vec<WorkflowInstance> = state
+#[derive(Debug, Deserialize)]
+struct WorkflowQuery {
+    status: Option<WorkflowStatus>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodeUpdate {
+    status: NodeStatus,
+    started_at: Option<DateTime<Utc>>,
+    ended_at: Option<DateTime<Utc>>,
+}
+
+/// Flexible update body: supports both legacy WorkflowDefinition format
+/// and new status/ended_at update format.
+#[derive(Debug, Deserialize)]
+struct WorkflowUpdateBody {
+    workflow_id: Option<String>,
+    #[allow(dead_code)]
+    definition: Option<serde_json::Value>,
+    status: Option<WorkflowStatus>,
+    ended_at: Option<DateTime<Utc>>,
+}
+
+async fn list_workflows(
+    Query(query): Query<WorkflowQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Json<Vec<WorkflowInstance>> {
+    let mut instances: Vec<WorkflowInstance> = state
         .instances
         .iter()
         .map(|entry| entry.value().clone())
         .collect();
+
+    if let Some(ref status) = query.status {
+        instances.retain(|i| &i.status == status);
+    }
+
+    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.unwrap_or(usize::MAX);
+    instances = instances.into_iter().skip(offset).take(limit).collect();
+
     Json(instances)
 }
 
@@ -116,29 +157,70 @@ async fn get_workflow(Path(id): Path<String>, State(state): State<Arc<AppState>>
     }
 }
 
+async fn create_workflow(
+    State(state): State<Arc<AppState>>,
+    Json(instance): Json<WorkflowInstance>,
+) -> Response {
+    if Uuid::parse_str(&instance.instance_id).is_err() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                code: "API-WORKFLOW-001".to_string(),
+                category: "ValidationError".to_string(),
+                message: "Invalid workflow instance ID format".to_string(),
+                details: None,
+            }),
+        )
+            .into_response();
+    }
+
+    if state.instances.contains_key(&instance.instance_id) {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiError {
+                code: "API-WORKFLOW-003".to_string(),
+                category: "ValidationError".to_string(),
+                message: "Workflow instance already exists".to_string(),
+                details: None,
+            }),
+        )
+            .into_response();
+    }
+
+    state
+        .instances
+        .insert(instance.instance_id.clone(), instance.clone());
+    (StatusCode::CREATED, Json(instance)).into_response()
+}
+
 async fn update_workflow(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
-    Json(definition): Json<WorkflowDefinition>,
+    Json(body): Json<WorkflowUpdateBody>,
 ) -> Response {
-    match Uuid::parse_str(&id) {
-        Ok(_) => {}
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ApiError {
-                    code: "API-WORKFLOW-001".to_string(),
-                    category: "ValidationError".to_string(),
-                    message: "Invalid workflow instance ID format".to_string(),
-                    details: None,
-                }),
-            )
-                .into_response()
-        }
+    if Uuid::parse_str(&id).is_err() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                code: "API-WORKFLOW-001".to_string(),
+                category: "ValidationError".to_string(),
+                message: "Invalid workflow instance ID format".to_string(),
+                details: None,
+            }),
+        )
+            .into_response();
     }
 
     if let Some(mut instance) = state.instances.get_mut(&id) {
-        instance.workflow_id = definition.workflow_id;
+        if let Some(workflow_id) = body.workflow_id {
+            instance.workflow_id = workflow_id;
+        }
+        if let Some(status) = body.status {
+            instance.status = status;
+        }
+        if let Some(ended_at) = body.ended_at {
+            instance.ended_at = Some(ended_at);
+        }
         (StatusCode::OK, Json(instance.clone())).into_response()
     } else {
         (
@@ -151,6 +233,68 @@ async fn update_workflow(
             }),
         )
             .into_response()
+    }
+}
+
+async fn update_node(
+    Path((id, node_id)): Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+    Json(node_update): Json<NodeUpdate>,
+) -> Response {
+    if Uuid::parse_str(&id).is_err() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                code: "API-WORKFLOW-001".to_string(),
+                category: "ValidationError".to_string(),
+                message: "Invalid workflow instance ID format".to_string(),
+                details: None,
+            }),
+        )
+            .into_response();
+    }
+
+    if node_id.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError {
+                code: "API-NODE-001".to_string(),
+                category: "ValidationError".to_string(),
+                message: "Invalid node ID format".to_string(),
+                details: None,
+            }),
+        )
+            .into_response();
+    }
+
+    match state.instances.get_mut(&id) {
+        Some(mut instance) => {
+            if let Some(node) = instance.nodes.iter_mut().find(|n| n.node_id == node_id) {
+                node.status = node_update.status;
+                if node_update.started_at.is_some() {
+                    node.started_at = node_update.started_at;
+                }
+                node.ended_at = node_update.ended_at;
+            } else {
+                instance.nodes.push(NodeState {
+                    node_id: node_id.clone(),
+                    status: node_update.status,
+                    started_at: node_update.started_at,
+                    ended_at: node_update.ended_at,
+                });
+            }
+            (StatusCode::OK, Json(instance.clone())).into_response()
+        }
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(ApiError {
+                code: "API-WORKFLOW-002".to_string(),
+                category: "ValidationError".to_string(),
+                message: "Workflow instance not found".to_string(),
+                details: None,
+            }),
+        )
+            .into_response(),
     }
 }
 

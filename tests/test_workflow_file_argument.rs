@@ -159,6 +159,7 @@ async fn run_missing_workflow_returns_custom_error() {
         parallel_limit: None,
         max_time_seconds: None,
         verbose: false,
+        server: None,
     };
 
     let err = commands::run(args)

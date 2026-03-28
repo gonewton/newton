@@ -44,6 +44,10 @@ pub struct RunArgs {
     /// Print task stdout/stderr to terminal after each task completes
     #[arg(long)]
     pub verbose: bool,
+
+    /// Newton server URL to register this run (optional)
+    #[arg(long, value_name = "URL")]
+    pub server: Option<String>,
 }
 
 impl RunArgs {
