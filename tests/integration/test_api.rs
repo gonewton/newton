@@ -14,7 +14,7 @@ use uuid::Uuid;
 #[tokio::test]
 async fn test_health_endpoint() {
     let state = create_test_state();
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let request = Request::builder()
         .uri("/health")
@@ -37,7 +37,7 @@ async fn test_health_endpoint() {
 #[tokio::test]
 async fn test_list_workflows_empty() {
     let state = create_test_state();
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let request = Request::builder()
         .uri("/api/workflows")
@@ -72,7 +72,7 @@ async fn test_list_workflows_with_instances() {
 
     state.instances.insert(instance_id.clone(), instance);
 
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let request = Request::builder()
         .uri("/api/workflows")
@@ -96,7 +96,7 @@ async fn test_list_workflows_with_instances() {
 #[tokio::test]
 async fn test_get_workflow_not_found() {
     let state = create_test_state();
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let instance_id = Uuid::new_v4();
     let request = Request::builder()
@@ -121,7 +121,7 @@ async fn test_get_workflow_not_found() {
 #[tokio::test]
 async fn test_get_workflow_invalid_id() {
     let state = create_test_state();
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let request = Request::builder()
         .uri("/api/workflows/invalid-uuid")
@@ -162,7 +162,7 @@ async fn test_get_workflow_success() {
 
     state.instances.insert(instance_id.clone(), instance);
 
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let request = Request::builder()
         .uri(format!("/api/workflows/{}", instance_id))
@@ -200,7 +200,7 @@ async fn test_update_workflow_success() {
 
     state.instances.insert(instance_id.clone(), instance);
 
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let update = WorkflowDefinition {
         workflow_id: "new-workflow".to_string(),
@@ -229,7 +229,7 @@ async fn test_update_workflow_success() {
 #[tokio::test]
 async fn test_list_operators() {
     let state = create_test_state();
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let request = Request::builder()
         .uri("/api/operators")
@@ -252,7 +252,7 @@ async fn test_list_operators() {
 #[tokio::test]
 async fn test_list_hil_events_empty() {
     let state = create_test_state();
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let instance_id = Uuid::new_v4();
     let request = Request::builder()
@@ -295,7 +295,7 @@ async fn test_list_hil_events_with_events() {
 
     state.hil_events.insert(event_id, event);
 
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let request = Request::builder()
         .uri(format!("/api/hil/workflows/{}", instance_id))
@@ -339,7 +339,7 @@ async fn test_submit_hil_action_success() {
 
     state.hil_events.insert(event_id, event);
 
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let action = HilAction {
         answer: Some("Option A".to_string()),
@@ -364,7 +364,7 @@ async fn test_submit_hil_action_success() {
 #[tokio::test]
 async fn test_submit_hil_action_not_found() {
     let state = create_test_state();
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let instance_id = Uuid::new_v4().to_string();
     let event_id = Uuid::new_v4();
@@ -412,7 +412,7 @@ async fn test_submit_hil_action_already_resolved() {
 
     state.hil_events.insert(event_id, event);
 
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let action = HilAction {
         answer: Some("Option A".to_string()),
@@ -457,7 +457,7 @@ async fn test_submit_hil_action_invalid_response_type() {
 
     state.hil_events.insert(event_id, event);
 
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let action = HilAction {
         answer: Some("Option A".to_string()),
@@ -502,7 +502,7 @@ async fn test_submit_hil_action_missing_answer() {
 
     state.hil_events.insert(event_id, event);
 
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let action = HilAction {
         answer: None,
@@ -527,7 +527,7 @@ async fn test_submit_hil_action_missing_answer() {
 #[tokio::test]
 async fn test_workflow_stream_invalid_uuid() {
     let state = create_test_state();
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let request = Request::builder()
         .uri("/api/stream/workflow/invalid-uuid/ws")
@@ -557,7 +557,7 @@ async fn test_legacy_list_channels() {
 
     state.instances.insert(instance_id.clone(), instance);
 
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
 
     let request = Request::builder()
         .uri("/channels")
@@ -595,7 +595,7 @@ async fn test_legacy_api_list_channels() {
         },
     );
 
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
     let request = Request::builder()
         .uri("/api/channels")
         .body(Body::empty())
@@ -636,7 +636,7 @@ async fn test_legacy_api_list_channel_messages() {
         },
     );
 
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
     let request = Request::builder()
         .uri("/api/channels/workflow-a/messages?limit=10")
         .body(Body::empty())
@@ -679,7 +679,7 @@ async fn test_legacy_api_submit_message_response() {
         },
     );
 
-    let app = newton::api::create_router(state);
+    let app = newton::api::create_router(state, None);
     let action = HilAction {
         answer: Some("yes".to_string()),
         response_type: "text".to_string(),
@@ -706,7 +706,7 @@ async fn test_legacy_api_submit_message_response() {
 #[tokio::test]
 async fn test_event_broadcasting() {
     let state = create_test_state();
-    let _ = newton::api::create_router(state.clone());
+    let _ = newton::api::create_router(state.clone(), None);
 
     let instance_id = Uuid::new_v4().to_string();
 
