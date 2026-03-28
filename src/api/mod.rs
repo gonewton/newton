@@ -16,8 +16,8 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use newton_types::{
-    ApiError, BroadcastEvent, HilAction, HilEvent, HilStatus, NodeState, NodeStatus,
-    WorkflowInstance, WorkflowStatus,
+    ApiError, BroadcastEvent, HilAction, HilEvent, HilStatus, NodeStatus, WorkflowInstance,
+    WorkflowStatus,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -275,15 +275,19 @@ async fn update_node(
                     node.started_at = node_update.started_at;
                 }
                 node.ended_at = node_update.ended_at;
+                (StatusCode::OK, Json(instance.clone())).into_response()
             } else {
-                instance.nodes.push(NodeState {
-                    node_id: node_id.clone(),
-                    status: node_update.status,
-                    started_at: node_update.started_at,
-                    ended_at: node_update.ended_at,
-                });
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(ApiError {
+                        code: "API-NODE-002".to_string(),
+                        category: "ValidationError".to_string(),
+                        message: "Node not found in workflow instance".to_string(),
+                        details: None,
+                    }),
+                )
+                    .into_response()
             }
-            (StatusCode::OK, Json(instance.clone())).into_response()
         }
         None => (
             StatusCode::NOT_FOUND,

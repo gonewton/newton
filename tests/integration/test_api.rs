@@ -833,9 +833,14 @@ async fn test_update_node_success() {
     let instance_id = Uuid::new_v4().to_string();
     let instance = WorkflowInstance {
         instance_id: instance_id.clone(),
-        workflow_id: "test-workflow".to_string(),
         status: WorkflowStatus::Running,
-        nodes: vec![],
+        workflow_id: "test-workflow".to_string(),
+        nodes: vec![NodeState {
+            node_id: "task-1".to_string(),
+            status: NodeStatus::Running,
+            started_at: Some(chrono::Utc::now()),
+            ended_at: None,
+        }],
         started_at: chrono::Utc::now(),
         ended_at: None,
     };
@@ -1048,4 +1053,57 @@ fn create_test_state() -> AppState {
     ];
 
     AppState::new(operators)
+}
+
+#[tokio::test]
+async fn test_update_node_not_found_returns_404() {
+    let state = create_test_state();
+
+    let instance_id = Uuid::new_v4().to_string();
+    let instance = WorkflowInstance {
+        instance_id: instance_id.clone(),
+        workflow_id: "test-workflow".to_string(),
+        status: WorkflowStatus::Running,
+        nodes: vec![NodeState {
+            node_id: "existing-task".to_string(),
+            status: NodeStatus::Running,
+            started_at: Some(chrono::Utc::now()),
+            ended_at: None,
+        }],
+        started_at: chrono::Utc::now(),
+        ended_at: None,
+    };
+
+    state.instances.insert(instance_id.clone(), instance);
+
+    let app = newton::api::create_router(state, None);
+
+    let node_update = json!({
+        "status": "succeeded",
+        "started_at": chrono::Utc::now(),
+        "ended_at": chrono::Utc::now()
+    });
+
+    let request = Request::builder()
+        .method(Method::PATCH)
+        .uri(format!(
+            "/api/workflows/{}/nodes/non-existent-task",
+            instance_id
+        ))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&node_update).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let error: ApiError = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(error.code, "API-NODE-002");
+    assert_eq!(error.category, "ValidationError");
+    assert_eq!(error.message, "Node not found in workflow instance");
 }
