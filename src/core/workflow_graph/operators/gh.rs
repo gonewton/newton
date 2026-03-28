@@ -478,6 +478,13 @@ impl GhOperator {
     async fn execute_pr_view(&self, map: &Map<String, Value>) -> Result<Value, AppError> {
         let pr = get_pr_identifier(map)?;
 
+        let pr_number = pr.parse::<u64>().map_err(|_| {
+            AppError::new(
+                ErrorCategory::ValidationError,
+                format!("pr must be a valid number, got: {}", pr),
+            )
+        })?;
+
         let output = self
             .runner
             .run(&["pr", "view", &pr, "--json", "state"])
@@ -500,9 +507,6 @@ impl GhOperator {
         })?;
 
         let normalized_state = state.to_uppercase();
-        let pr_number =
-            extract_pr_number(&format!("https://github.com/placeholder/repo/pull/{}", pr))
-                .unwrap_or(0);
 
         Ok(json!({
             "state": normalized_state,

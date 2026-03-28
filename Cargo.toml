@@ -166,3 +166,7 @@ path = "tests/integration/test_api.rs"
 [[test]]
 name = "test_workflow_resume_settings"
 path = "tests/workflow_graph/test_resume_settings.rs"
+
+[[test]]
+name = "test_gh_operator"
+path = "tests/workflow_graph/test_gh_operator.rs"
