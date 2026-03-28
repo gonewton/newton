@@ -1,0 +1,26 @@
+version: "2.0"
+mode: workflow_graph
+metadata:
+  name: "GhOperator Test Workflow"
+workflow:
+  context: {}
+  settings:
+    entry_task: resolve_board
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 100
+  tasks:
+    - id: resolve_board
+      operator: GhOperator
+      params:
+        operation: project_resolve_board
+        owner: testorg
+        project_number: 1
+      transitions:
+        - to: done
+    - id: done
+      operator: NoOpOperator
+      terminal: success
+      params: {}

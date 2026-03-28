@@ -223,6 +223,7 @@ impl WorkflowTestHarness {
             command_runner: Some(Arc::new(self.cmd_runner.clone())),
             interviewer: Some(Arc::new(self.interviewer.clone())),
             engine_registry: None,
+            gh_runner: None,
         };
 
         let settings = document.workflow.settings.clone();
@@ -750,6 +751,7 @@ async fn test_scenario_17_checkpoint_resume() {
                 command_runner: Some(Arc::new(cmd_runner.clone())),
                 interviewer: Some(Arc::new(harness.interviewer.clone())),
                 engine_registry: None,
+                gh_runner: None,
             },
         );
         builder.build()

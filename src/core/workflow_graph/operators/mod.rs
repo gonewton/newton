@@ -3,6 +3,7 @@ pub mod assert_completed;
 pub mod barrier;
 pub mod command;
 pub mod engine;
+pub mod gh;
 pub mod human_approval;
 pub mod human_decision;
 pub mod noop;
@@ -23,6 +24,8 @@ pub struct BuiltinOperatorDeps {
     pub command_runner: Option<Arc<dyn command::CommandRunner>>,
     /// Engine driver registry for AgentOperator. Defaults to engine::default_registry() when None.
     pub engine_registry: Option<HashMap<String, Box<dyn EngineDriver>>>,
+    /// GhRunner for GhOperator. Defaults to real gh CLI subprocess when None.
+    pub gh_runner: Option<Arc<dyn gh::GhRunner>>,
 }
 
 /// Register built-in operators into the supplied builder.
@@ -53,6 +56,10 @@ pub fn register_builtins_with_deps(
         .engine_registry
         .unwrap_or_else(engine::default_registry);
     let agent_operator = agent::AgentOperator::new(workspace, settings, engine_registry);
+    let gh_operator = match deps.gh_runner {
+        Some(runner) => gh::GhOperator::with_runner(runner),
+        None => gh::GhOperator::new(),
+    };
     builder
         .register(noop::NoOpOperator::new())
         .register(command_operator)
@@ -61,6 +68,7 @@ pub fn register_builtins_with_deps(
         .register(set_context::SetContextOperator::new())
         .register(read_control_file::ReadControlFileOperator::new())
         .register(agent_operator)
+        .register(gh_operator)
         .register(human_approval::HumanApprovalOperator::new(
             interviewer.clone(),
             human_settings.clone(),
