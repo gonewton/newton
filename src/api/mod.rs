@@ -21,14 +21,16 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::convert::Infallible;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
+use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
-pub fn create_router(state: AppState) -> Router {
+pub fn create_router(state: AppState, ui_dir: Option<PathBuf>) -> Router {
     let arc_state = Arc::new(state);
 
-    Router::new()
+    let mut router = Router::new()
         .route("/health", get(health_check))
         .route("/api/workflows", get(list_workflows))
         .route("/api/workflows/{id}", get(get_workflow))
@@ -53,7 +55,17 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/stream/workflow/{id}/sse", get(workflow_sse))
         .route("/channels", get(legacy_list_channels))
         .with_state(arc_state)
-        .layer(CorsLayer::permissive())
+        .layer(CorsLayer::permissive());
+
+    if let Some(ref dir) = ui_dir {
+        if dir.exists() {
+            router = router.fallback_service(
+                ServeDir::new(dir).not_found_service(ServeFile::new(dir.join("index.html"))),
+            );
+        }
+    }
+
+    router
 }
 
 async fn health_check() -> impl IntoResponse {

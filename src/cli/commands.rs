@@ -903,7 +903,7 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         .collect();
 
     let state = AppState::new(operator_descriptors);
-    let app = api::create_router(state);
+    let app = api::create_router(state, args.ui_dir.clone());
 
     let addr = format!("{}:{}", args.host, args.port);
     let socket_addr: SocketAddr = addr.parse().map_err(|err| {

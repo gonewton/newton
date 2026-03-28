@@ -378,6 +378,10 @@ pub struct ServeArgs {
     /// Port to listen on (default: 8080)
     #[arg(long, default_value = "8080")]
     pub port: u16,
+
+    /// Path to the built Newton UI dist directory (optional)
+    #[arg(long, value_name = "PATH")]
+    pub ui_dir: Option<PathBuf>,
 }
 
 // ErrorArgs removed - command retired
