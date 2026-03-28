@@ -125,6 +125,26 @@ fn validate_project_resolve_board(map: &Map<String, Value>) -> Result<(), AppErr
             ));
         }
     }
+    if let Some(arr) = map.get("required_option_names").and_then(Value::as_array) {
+        if arr.is_empty() {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "required_option_names must be a non-empty array when set",
+            ));
+        }
+        for v in arr {
+            if v.as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .is_none()
+            {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    "required_option_names must contain only non-empty strings",
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -147,11 +167,11 @@ fn validate_project_item_set_status(map: &Map<String, Value>) -> Result<(), AppE
         ));
     }
     let status = map.get("status").and_then(Value::as_str).unwrap_or("");
-    if !["Ready", "In progress", "In review", "Done"].contains(&status) {
+    if !["Ready", "In progress", "In review", "Done", "Backlog"].contains(&status) {
         return Err(AppError::new(
             ErrorCategory::ValidationError,
             format!(
-                "status must be one of: Ready, In progress, In review, Done; got: {}",
+                "status must be one of: Ready, In progress, In review, Done, Backlog; got: {}",
                 status
             ),
         ));
@@ -306,7 +326,29 @@ impl GhOperator {
             .with_code("WFG-GH-001")
         })?;
 
-        let required_options = ["Ready", "In progress", "In review", "Done"];
+        let default_required = vec![
+            "Ready".to_string(),
+            "In progress".to_string(),
+            "In review".to_string(),
+            "Done".to_string(),
+        ];
+        let required_names: Vec<String> = if let Some(arr) = map.get("required_option_names") {
+            arr.as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            default_required.clone()
+        };
+        let required_names = if required_names.is_empty() {
+            default_required
+        } else {
+            required_names
+        };
+
         let mut found_options: Vec<String> = Vec::new();
         let mut options_map: HashMap<String, String> = HashMap::new();
 
@@ -317,8 +359,8 @@ impl GhOperator {
             }
         }
 
-        for required in &required_options {
-            if !options_map.contains_key(*required) {
+        for required in &required_names {
+            if !options_map.contains_key(required) {
                 return Err(AppError::new(
                     ErrorCategory::ToolExecutionError,
                     format!(
@@ -330,15 +372,35 @@ impl GhOperator {
             }
         }
 
-        Ok(json!({
-            "project_id": project_id,
-            "field_id": field_id,
-            "options": options_map,
-            "ready_id": options_map["Ready"],
-            "in_progress_id": options_map["In progress"],
-            "in_review_id": options_map["In review"],
-            "done_id": options_map["Done"]
-        }))
+        let mut out = serde_json::Map::new();
+        out.insert("project_id".to_string(), json!(project_id));
+        out.insert("field_id".to_string(), json!(field_id));
+        out.insert(
+            "options".to_string(),
+            Value::Object(
+                options_map
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+                    .collect(),
+            ),
+        );
+        if let Some(id) = options_map.get("Ready") {
+            out.insert("ready_id".to_string(), json!(id));
+        }
+        if let Some(id) = options_map.get("In progress") {
+            out.insert("in_progress_id".to_string(), json!(id));
+        }
+        if let Some(id) = options_map.get("In review") {
+            out.insert("in_review_id".to_string(), json!(id));
+        }
+        if let Some(id) = options_map.get("Done") {
+            out.insert("done_id".to_string(), json!(id));
+        }
+        if let Some(id) = options_map.get("Backlog") {
+            out.insert("backlog_id".to_string(), json!(id));
+        }
+
+        Ok(Value::Object(out))
     }
 
     async fn execute_project_item_set_status(
@@ -527,6 +589,7 @@ fn resolve_option_id(board: &Map<String, Value>, status: &str) -> Result<String,
         "In progress" => "in_progress_id",
         "In review" => "in_review_id",
         "Done" => "done_id",
+        "Backlog" => "backlog_id",
         _ => {
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
@@ -678,6 +741,14 @@ mod tests {
         assert!(GhOperator::new()
             .validate_params(&params_invalid_status)
             .is_err());
+
+        let params_backlog = json!({
+            "operation": "project_item_set_status",
+            "item_id": "ITEM_123",
+            "board": {"project_id": "P_123", "field_id": "F_123", "backlog_id": "OPT_b"},
+            "status": "Backlog"
+        });
+        assert!(GhOperator::new().validate_params(&params_backlog).is_ok());
     }
 
     #[test]

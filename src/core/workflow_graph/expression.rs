@@ -37,6 +37,17 @@ impl Default for ExpressionEngine {
         engine.register_fn("contains", |s1: String, s2: String| -> bool {
             s1.contains(&s2)
         });
+        engine.register_fn("file_stem", |path: String| -> String {
+            std::path::Path::new(&path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(std::string::ToString::to_string)
+                .unwrap_or_else(|| "spec".to_string())
+        });
+        // Reads process env at eval time (same as `newton run`). Empty if unset.
+        engine.register_fn("env", |name: String| -> String {
+            std::env::var(&name).unwrap_or_default()
+        });
         engine.on_print(|_| {});
         engine.on_debug(|_, _, _| {});
         ExpressionEngine { engine }

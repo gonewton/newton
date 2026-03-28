@@ -489,3 +489,131 @@ workflow:
     assert_eq!(output["state"], "MERGED");
     assert_eq!(output["pr_number"], 99);
 }
+
+#[tokio::test]
+async fn test_gh_operator_project_resolve_board_backlog_only() {
+    let workspace = tempdir().expect("workspace");
+    let runner = Arc::new(MockGhRunner::new());
+
+    let project_view_json = json!({
+        "id": "PVT_planner",
+        "title": "Planner Project"
+    });
+
+    let field_list_json = json!({
+        "fields": [
+            {
+                "id": "FLD_status",
+                "name": "Status",
+                "dataType": "SINGLE_SELECT",
+                "options": [
+                    {"id": "OPT_backlog", "name": "Backlog"}
+                ]
+            }
+        ]
+    });
+
+    runner.add_response(
+        vec![
+            "project", "view", "1", "--owner", "testorg", "--format", "json",
+        ],
+        GhOutput {
+            stdout: project_view_json.to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+    );
+
+    runner.add_response(
+        vec![
+            "project",
+            "field-list",
+            "1",
+            "--owner",
+            "testorg",
+            "--format",
+            "json",
+        ],
+        GhOutput {
+            stdout: field_list_json.to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+    );
+
+    runner.add_response(
+        vec![
+            "project",
+            "item-edit",
+            "--project-id",
+            "PVT_planner",
+            "--id",
+            "ITEM_1",
+            "--field-id",
+            "FLD_status",
+            "--single-select-option-id",
+            "OPT_backlog",
+        ],
+        GhOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+    );
+
+    let yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: resolve_board
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 100
+  tasks:
+    - id: resolve_board
+      operator: GhOperator
+      params:
+        operation: project_resolve_board
+        owner: testorg
+        project_number: 1
+        required_option_names:
+          - Backlog
+      transitions:
+        - to: set_backlog
+    - id: set_backlog
+      operator: GhOperator
+      params:
+        operation: project_item_set_status
+        item_id: "ITEM_1"
+        board: { $expr: 'tasks.resolve_board.output' }
+        status: "Backlog"
+        on_error: fail
+      transitions:
+        - to: done
+    - id: done
+      operator: NoOpOperator
+      terminal: success
+      params: {}
+"#;
+
+    let summary = execute_yaml_with_gh_runner(workspace.path(), yaml, runner)
+        .await
+        .expect("workflow should complete");
+
+    let resolve = summary
+        .completed_tasks
+        .get("resolve_board")
+        .expect("resolve_board");
+    assert_eq!(resolve.output["backlog_id"], "OPT_backlog");
+    assert_eq!(resolve.output["project_id"], "PVT_planner");
+
+    let set = summary
+        .completed_tasks
+        .get("set_backlog")
+        .expect("set_backlog");
+    assert_eq!(set.output["updated"], true);
+}
