@@ -232,6 +232,8 @@ struct WorkflowRuntime {
     last_checkpoint: Instant,
     start_time: Instant,
     verbose: bool,
+    /// Task IDs popped in the current tick, tracked for re-queue on hard batch failure.
+    current_tick_tasks: Vec<String>,
 }
 
 impl ExecutionState {
@@ -316,11 +318,13 @@ impl WorkflowRuntime {
     /// Returns a list of (task_id, run_sequence) pairs.
     async fn prepare_tick_tasks(&mut self) -> Result<Vec<(String, u64)>, AppError> {
         let mut tick_tasks = Vec::new();
+        self.current_tick_tasks.clear();
         while tick_tasks.len() < self.config.parallel_limit {
             if let Some(task_id) = self.ready_queue.pop_front() {
                 self.check_iteration_limits(&task_id).await?;
                 let run_seq = *self.task_iterations.get(&task_id).unwrap() as u64;
-                tick_tasks.push((task_id, run_seq));
+                tick_tasks.push((task_id.clone(), run_seq));
+                self.current_tick_tasks.push(task_id);
             } else {
                 break;
             }
@@ -406,10 +410,26 @@ impl WorkflowRuntime {
                 ));
             }
 
-            let mut frontier: Vec<TaskOutcome> = join_all(futures)
-                .await
-                .into_iter()
-                .collect::<Result<Vec<_>, _>>()?;
+            let frontier_result: Result<Vec<TaskOutcome>, AppError> =
+                join_all(futures).await.into_iter().collect();
+
+            let mut frontier = match frontier_result {
+                Ok(outcomes) => {
+                    self.current_tick_tasks.clear();
+                    outcomes
+                }
+                Err(err) => {
+                    // Hard task error: re-queue aborted tasks in reverse order to
+                    // preserve original execution priority.
+                    for task_id in self.current_tick_tasks.drain(..).rev() {
+                        self.ready_queue.push_front(task_id);
+                    }
+                    self.workflow_execution.status = WorkflowExecutionStatus::Failed;
+                    self.workflow_execution.completed_at = Some(Utc::now());
+                    self.persist_checkpoint_force().await?;
+                    return Err(err);
+                }
+            };
 
             // Sort frontier by task_id alphabetically for deterministic ordering.
             frontier.sort_by(|a, b| a.task_id.cmp(&b.task_id));
@@ -1009,6 +1029,7 @@ fn build_workflow_runtime(
         last_checkpoint: Instant::now(),
         start_time: Instant::now(),
         verbose: overrides.verbose,
+        current_tick_tasks: Vec::new(),
     })
 }
 
@@ -1047,6 +1068,26 @@ pub async fn resume_workflow(
             "workflow hash does not match checkpoint",
         )
         .with_code("WFG-CKPT-001"));
+    }
+
+    // GUARD: Detect old-format checkpoint where a hard task abort left the queue empty
+    // but total_iterations exceeds completed task count — indicates an aborted task
+    // was never re-queued (pre-fix checkpoint). Resuming would silently succeed with
+    // no work done, so we fail fast with a clear error.
+    if checkpoint_data.ready_queue.is_empty()
+        && checkpoint_data.total_iterations > checkpoint_data.completed.len()
+    {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "workflow cannot be resumed: {} tasks ran but only {} completed; \
+                 the last task aborted without a transition. \
+                 Re-run with a fresh execution or inspect the workflow.",
+                checkpoint_data.total_iterations,
+                checkpoint_data.completed.len()
+            ),
+        )
+        .with_code("WFG-RESUME-002"));
     }
 
     let mut graph_settings = execution.settings_effective.clone();
@@ -1151,6 +1192,7 @@ pub async fn resume_workflow(
         last_checkpoint: Instant::now(),
         start_time: Instant::now(),
         verbose: false, // Resume does not support verbose mode
+        current_tick_tasks: Vec::new(),
     };
     runtime.run().await
 }

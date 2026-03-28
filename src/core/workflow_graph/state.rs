@@ -167,6 +167,12 @@ pub struct WorkflowCheckpoint {
     #[serde(default = "default_trigger_payload_value")]
     pub trigger_payload: Value,
     pub task_iterations: HashMap<String, usize>,
+    /// Total number of task iteration slots consumed across all ticks.
+    ///
+    /// **Invariant**: when `ready_queue` is empty, `total_iterations` MUST equal
+    /// `completed.len()`.  New engine versions maintain this via re-queuing of
+    /// hard-aborted tasks; the resume guard (`WFG-RESUME-002`) validates it for
+    /// older checkpoint files.
     pub total_iterations: usize,
     pub completed: HashMap<String, WorkflowTaskRunRecord>,
     #[serde(default)]
