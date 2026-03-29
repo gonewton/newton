@@ -43,8 +43,6 @@ pub struct ExecutionOverrides {
     pub verbose: bool,
     /// Optional server notifier for registering with a newton serve instance.
     pub server_notifier: Option<Arc<ServerNotifier>>,
-    /// Whether to pre-seed workflow nodes with Pending status on start. Defaults to true.
-    pub pre_seed_nodes: bool,
 }
 
 /// Resolved execution configuration used by the runner.
@@ -1008,13 +1006,7 @@ fn build_workflow_runtime(
     workspace_root: PathBuf,
     overrides: ExecutionOverrides,
 ) -> Result<WorkflowRuntime, AppError> {
-    let workflow_definition_json = serde_json::to_value(&document).map_err(|e| {
-        AppError::new(
-            ErrorCategory::ValidationError,
-            format!("Failed to serialize workflow definition: {}", e),
-        )
-        .with_code("API-WORKFLOW-004")
-    })?;
+    let workflow_definition_json = serde_json::to_value(&document).ok();
     let trigger_payload = extract_trigger_payload(&document);
     let mut graph_settings = document.workflow.settings;
     if let Some(parallel) = overrides.parallel_limit {
@@ -1161,7 +1153,7 @@ fn build_workflow_runtime(
         verbose: overrides.verbose,
         current_tick_tasks: Vec::new(),
         server_notifier: overrides.server_notifier.clone(),
-        workflow_definition_json: Some(workflow_definition_json),
+        workflow_definition_json,
     })
 }
 

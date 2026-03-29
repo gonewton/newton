@@ -130,6 +130,7 @@ fn setup_workflow_execution(
         artifact_base_path: None,
         verbose: args.verbose,
         server_notifier,
+        pre_seed_nodes: true,
     };
 
     let mut builder = OperatorRegistry::builder();
@@ -223,6 +224,7 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
         artifact_base_path: None,
         verbose: false,
         server_notifier,
+        pre_seed_nodes: true,
     };
 
     let mut builder = OperatorRegistry::builder();
@@ -596,6 +598,7 @@ async fn workflow_webhook_serve(args: WebhookServeArgs) -> StdResult<(), AppErro
         artifact_base_path: None,
         verbose: false,
         server_notifier: None,
+        pre_seed_nodes: true,
     };
 
     webhook::serve_webhook(
@@ -1082,6 +1085,7 @@ async fn execute_workflow_for_plan(
         artifact_base_path: Some(task_layout.state_dir.join("artifacts").join("workflows")),
         verbose: false,
         server_notifier: None,
+        pre_seed_nodes: true,
     };
 
     let mut builder = OperatorRegistry::builder();

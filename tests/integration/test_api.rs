@@ -1126,3 +1126,79 @@ async fn test_update_node_upsert_creates_missing_node() {
     assert_eq!(new_node.status, NodeStatus::Succeeded);
     assert_eq!(new_node.operator_type.as_deref(), Some("CommandOperator"));
 }
+
+#[tokio::test]
+async fn test_workflow_definition_exposure() {
+    let state = create_test_state();
+
+    let instance_id = Uuid::new_v4().to_string();
+    let definition = json!({
+        "version": "2.0",
+        "mode": "workflow_graph",
+        "workflow": {
+            "settings": {
+                "entry_task": "resolve_board_ids",
+                "max_time_seconds": 3600,
+                "parallel_limit": 4
+            },
+            "tasks": [
+                {
+                    "id": "resolve_board_ids",
+                    "operator": "GhOperator",
+                    "params": {},
+                    "transitions": [
+                        {"to": "enrich_spec"}
+                    ]
+                },
+                {
+                    "id": "enrich_spec",
+                    "operator": "AgentOperator",
+                    "params": {"model": "claude-3"},
+                    "transitions": []
+                }
+            ]
+        }
+    });
+
+    let instance = WorkflowInstance {
+        instance_id: instance_id.clone(),
+        workflow_id: "test-workflow".to_string(),
+        status: WorkflowStatus::Running,
+        nodes: vec![],
+        started_at: chrono::Utc::now(),
+        ended_at: None,
+        definition: Some(definition.clone()),
+    };
+
+    state.instances.insert(instance_id.clone(), instance);
+
+    let app = newton::api::create_router(state, None);
+
+    let request = Request::builder()
+        .uri(format!("/api/workflows/{}", instance_id))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let workflow: WorkflowInstance = serde_json::from_slice(&body).unwrap();
+
+    assert!(workflow.definition.is_some());
+    let def = workflow.definition.unwrap();
+    assert_eq!(def["version"], "2.0");
+    assert_eq!(
+        def["workflow"]["settings"]["entry_task"],
+        "resolve_board_ids"
+    );
+    let tasks = def["workflow"]["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(tasks[0]["id"], "resolve_board_ids");
+    assert_eq!(tasks[0]["operator"], "GhOperator");
+    assert_eq!(tasks[1]["id"], "enrich_spec");
+    assert_eq!(tasks[1]["operator"], "AgentOperator");
+}

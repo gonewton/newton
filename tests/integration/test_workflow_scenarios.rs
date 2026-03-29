@@ -248,6 +248,7 @@ impl WorkflowTestHarness {
                 artifact_base_path: Some(self.temp_dir.path().join(".newton/artifacts")),
                 verbose: false,
                 server_notifier: None,
+                pre_seed_nodes: true,
             },
         )
         .await

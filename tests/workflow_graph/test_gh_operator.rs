@@ -84,6 +84,7 @@ async fn execute_yaml_with_gh_runner(
             artifact_base_path: None,
             verbose: false,
             server_notifier: None,
+            pre_seed_nodes: true,
         },
     )
     .await
