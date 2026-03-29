@@ -1,0 +1,25 @@
+{
+  "version": "2.0",
+  "mode": "workflow_graph",
+  "workflow": {
+    "settings": {
+      "entry_task": "step_a"
+    },
+    "tasks": [
+      {
+        "id": "step_a",
+        "operator": "CommandOperator",
+        "params": {},
+        "transitions": [
+          { "to": "step_b" }
+        ]
+      },
+      {
+        "id": "step_b",
+        "operator": "CommandOperator",
+        "params": {},
+        "transitions": []
+      }
+    ]
+  }
+}

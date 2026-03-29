@@ -46,6 +46,7 @@ fn default_overrides() -> ExecutionOverrides {
         artifact_base_path: None,
         verbose: false,
         server_notifier: None,
+        pre_seed_nodes: true,
     }
 }
 

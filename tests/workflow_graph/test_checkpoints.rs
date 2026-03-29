@@ -104,6 +104,7 @@ async fn resume_skips_completed_tasks() {
         artifact_base_path: None,
         verbose: false,
         server_notifier: None,
+        pre_seed_nodes: true,
     };
 
     let summary = executor::execute_workflow(
@@ -201,6 +202,7 @@ async fn resume_hash_mismatch_blocks_resume() {
         artifact_base_path: None,
         verbose: false,
         server_notifier: None,
+        pre_seed_nodes: true,
     };
 
     let summary = executor::execute_workflow(
@@ -243,6 +245,7 @@ async fn checkpoint_records_goal_gate_group() {
         artifact_base_path: None,
         verbose: false,
         server_notifier: None,
+        pre_seed_nodes: true,
     };
 
     let summary = executor::execute_workflow(
@@ -284,6 +287,7 @@ async fn checkpoints_list_output_format_and_sort_order() {
         artifact_base_path: None,
         verbose: false,
         server_notifier: None,
+        pre_seed_nodes: true,
     };
 
     // Run workflow twice to create multiple checkpoints
@@ -372,6 +376,7 @@ workflow:
         artifact_base_path: None,
         verbose: false,
         server_notifier: None,
+        pre_seed_nodes: true,
     };
 
     let summary = executor::execute_workflow(
@@ -523,6 +528,7 @@ workflow:
         artifact_base_path: None,
         verbose: false,
         server_notifier: None,
+        pre_seed_nodes: true,
     };
 
     let summary = executor::execute_workflow(
@@ -622,6 +628,7 @@ workflow:
         artifact_base_path: None,
         verbose: false,
         server_notifier: None,
+        pre_seed_nodes: true,
     };
 
     let summary = executor::execute_workflow(
@@ -746,6 +753,7 @@ workflow:
         artifact_base_path: None,
         verbose: false,
         server_notifier: None,
+        pre_seed_nodes: true,
     };
 
     let result = executor::execute_workflow(

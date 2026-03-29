@@ -81,6 +81,7 @@ impl ServerNotifier {
                         "status": node.status,
                         "started_at": node.started_at,
                         "ended_at": node.ended_at,
+                        "operator_type": node.operator_type,
                     });
                     if let Err(e) = client.patch(&url).json(&update).send().await {
                         tracing::warn!(

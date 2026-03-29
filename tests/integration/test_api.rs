@@ -68,6 +68,7 @@ async fn test_list_workflows_with_instances() {
         nodes: vec![],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -155,9 +156,11 @@ async fn test_get_workflow_success() {
             status: NodeStatus::Succeeded,
             started_at: Some(chrono::Utc::now()),
             ended_at: Some(chrono::Utc::now()),
+            operator_type: None,
         }],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -196,6 +199,7 @@ async fn test_update_workflow_success() {
         nodes: vec![],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -553,6 +557,7 @@ async fn test_legacy_list_channels() {
         nodes: vec![],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -592,6 +597,7 @@ async fn test_legacy_api_list_channels() {
             nodes: vec![],
             started_at: chrono::Utc::now(),
             ended_at: None,
+            definition: None,
         },
     );
 
@@ -732,6 +738,7 @@ async fn test_create_workflow_success() {
         nodes: vec![],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     let request = Request::builder()
@@ -766,6 +773,7 @@ async fn test_create_workflow_duplicate_returns_409() {
         nodes: vec![],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state
@@ -840,9 +848,11 @@ async fn test_update_node_success() {
             status: NodeStatus::Running,
             started_at: Some(chrono::Utc::now()),
             ended_at: None,
+            operator_type: None,
         }],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -923,6 +933,7 @@ async fn test_list_workflows_filter_by_status() {
             nodes: vec![],
             started_at: chrono::Utc::now(),
             ended_at: None,
+            definition: None,
         },
     );
     state.instances.insert(
@@ -934,6 +945,7 @@ async fn test_list_workflows_filter_by_status() {
             nodes: vec![],
             started_at: chrono::Utc::now(),
             ended_at: Some(chrono::Utc::now()),
+            definition: None,
         },
     );
 
@@ -972,6 +984,7 @@ async fn test_list_workflows_pagination() {
                 nodes: vec![],
                 started_at: chrono::Utc::now(),
                 ended_at: None,
+                definition: None,
             },
         );
     }
@@ -1007,6 +1020,7 @@ async fn test_update_workflow_status() {
         nodes: vec![],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -1056,7 +1070,7 @@ fn create_test_state() -> AppState {
 }
 
 #[tokio::test]
-async fn test_update_node_not_found_returns_404() {
+async fn test_update_node_upsert_creates_missing_node() {
     let state = create_test_state();
 
     let instance_id = Uuid::new_v4().to_string();
@@ -1069,9 +1083,11 @@ async fn test_update_node_not_found_returns_404() {
             status: NodeStatus::Running,
             started_at: Some(chrono::Utc::now()),
             ended_at: None,
+            operator_type: None,
         }],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -1081,13 +1097,142 @@ async fn test_update_node_not_found_returns_404() {
     let node_update = json!({
         "status": "succeeded",
         "started_at": chrono::Utc::now(),
-        "ended_at": chrono::Utc::now()
+        "ended_at": chrono::Utc::now(),
+        "operator_type": "CommandOperator"
+    });
+
+    let request = Request::builder()
+        .method(Method::PATCH)
+        .uri(format!("/api/workflows/{}/nodes/new-task", instance_id))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&node_update).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let updated: WorkflowInstance = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(updated.nodes.len(), 2);
+    let new_node = updated
+        .nodes
+        .iter()
+        .find(|n| n.node_id == "new-task")
+        .unwrap();
+    assert_eq!(new_node.status, NodeStatus::Succeeded);
+    assert_eq!(new_node.operator_type.as_deref(), Some("CommandOperator"));
+}
+
+#[tokio::test]
+async fn test_workflow_definition_exposure() {
+    let state = create_test_state();
+
+    let instance_id = Uuid::new_v4().to_string();
+    let definition = json!({
+        "version": "2.0",
+        "mode": "workflow_graph",
+        "workflow": {
+            "settings": {
+                "entry_task": "resolve_board_ids",
+                "max_time_seconds": 3600,
+                "parallel_limit": 4
+            },
+            "tasks": [
+                {
+                    "id": "resolve_board_ids",
+                    "operator": "GhOperator",
+                    "params": {},
+                    "transitions": [
+                        {"to": "enrich_spec"}
+                    ]
+                },
+                {
+                    "id": "enrich_spec",
+                    "operator": "AgentOperator",
+                    "params": {"model": "claude-3"},
+                    "transitions": []
+                }
+            ]
+        }
+    });
+
+    let instance = WorkflowInstance {
+        instance_id: instance_id.clone(),
+        workflow_id: "test-workflow".to_string(),
+        status: WorkflowStatus::Running,
+        nodes: vec![],
+        started_at: chrono::Utc::now(),
+        ended_at: None,
+        definition: Some(definition.clone()),
+    };
+
+    state.instances.insert(instance_id.clone(), instance);
+
+    let app = newton::api::create_router(state, None);
+
+    let request = Request::builder()
+        .uri(format!("/api/workflows/{}", instance_id))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let workflow: WorkflowInstance = serde_json::from_slice(&body).unwrap();
+
+    assert!(workflow.definition.is_some());
+    let def = workflow.definition.unwrap();
+    assert_eq!(def["version"], "2.0");
+    assert_eq!(
+        def["workflow"]["settings"]["entry_task"],
+        "resolve_board_ids"
+    );
+    let tasks = def["workflow"]["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(tasks[0]["id"], "resolve_board_ids");
+    assert_eq!(tasks[0]["operator"], "GhOperator");
+    assert_eq!(tasks[1]["id"], "enrich_spec");
+    assert_eq!(tasks[1]["operator"], "AgentOperator");
+}
+
+#[tokio::test]
+async fn test_node_upsert_broadcasts_event() {
+    let state = create_test_state();
+
+    let instance_id = Uuid::new_v4().to_string();
+    let instance = WorkflowInstance {
+        instance_id: instance_id.clone(),
+        workflow_id: "test-workflow".to_string(),
+        status: WorkflowStatus::Running,
+        nodes: vec![],
+        started_at: chrono::Utc::now(),
+        ended_at: None,
+        definition: None,
+    };
+
+    state.instances.insert(instance_id.clone(), instance);
+
+    let mut rx = state.events_tx.subscribe();
+
+    let app = newton::api::create_router(state, None);
+
+    let node_update = json!({
+        "status": "running",
+        "started_at": chrono::Utc::now(),
     });
 
     let request = Request::builder()
         .method(Method::PATCH)
         .uri(format!(
-            "/api/workflows/{}/nodes/non-existent-task",
+            "/api/workflows/{}/nodes/new-broadcast-task",
             instance_id
         ))
         .header(header::CONTENT_TYPE, "application/json")
@@ -1096,14 +1241,17 @@ async fn test_update_node_not_found_returns_404() {
 
     let response = app.oneshot(request).await.unwrap();
 
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response.status(), StatusCode::OK);
 
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let error: ApiError = serde_json::from_slice(&body).unwrap();
-
-    assert_eq!(error.code, "API-NODE-002");
-    assert_eq!(error.category, "ValidationError");
-    assert_eq!(error.message, "Node not found in workflow instance");
+    let event = rx.try_recv().unwrap();
+    match event {
+        BroadcastEvent::NodeStateChanged {
+            instance_id: recv_id,
+            node_id,
+        } => {
+            assert_eq!(recv_id, instance_id);
+            assert_eq!(node_id, "new-broadcast-task");
+        }
+        _ => panic!("Expected NodeStateChanged event, got {:?}", event),
+    }
 }
