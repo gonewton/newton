@@ -244,6 +244,8 @@ struct WorkflowRuntime {
     server_notifier: Option<Arc<ServerNotifier>>,
     /// Serialized workflow definition JSON for API exposure.
     workflow_definition_json: Option<serde_json::Value>,
+    /// Whether to pre-seed workflow nodes with Pending status on start.
+    pre_seed_nodes: bool,
 }
 
 impl ExecutionState {
@@ -390,18 +392,21 @@ impl WorkflowRuntime {
 
         // Notify server that workflow has started.
         if let Some(notifier) = &self.server_notifier {
-            let pre_seeded_nodes: Vec<NodeState> = self
-                .runtime_graph
-                .get_all_tasks()
-                .into_iter()
-                .map(|task| NodeState {
-                    node_id: task.id.clone(),
-                    status: NodeStatus::Pending,
-                    started_at: None,
-                    ended_at: None,
-                    operator_type: Some(task.operator.clone()),
-                })
-                .collect();
+            let pre_seeded_nodes: Vec<NodeState> = if self.pre_seed_nodes {
+                self.runtime_graph
+                    .get_all_tasks()
+                    .into_iter()
+                    .map(|task| NodeState {
+                        node_id: task.id.clone(),
+                        status: NodeStatus::Pending,
+                        started_at: None,
+                        ended_at: None,
+                        operator_type: Some(task.operator.clone()),
+                    })
+                    .collect()
+            } else {
+                vec![]
+            };
             let instance = WorkflowInstance {
                 instance_id: self.workflow_execution.execution_id.to_string(),
                 workflow_id: self.workflow_execution.workflow_file.clone(),
@@ -1162,6 +1167,7 @@ fn build_workflow_runtime(
         current_tick_tasks: Vec::new(),
         server_notifier: overrides.server_notifier.clone(),
         workflow_definition_json: Some(workflow_definition_json),
+        pre_seed_nodes: overrides.pre_seed_nodes,
     })
 }
 
@@ -1327,6 +1333,7 @@ pub async fn resume_workflow(
         current_tick_tasks: Vec::new(),
         server_notifier: None, // Resume does not support server notification
         workflow_definition_json: None,
+        pre_seed_nodes: false,
     };
     runtime.run().await
 }

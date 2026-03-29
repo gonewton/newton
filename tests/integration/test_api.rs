@@ -1202,3 +1202,56 @@ async fn test_workflow_definition_exposure() {
     assert_eq!(tasks[1]["id"], "enrich_spec");
     assert_eq!(tasks[1]["operator"], "AgentOperator");
 }
+
+#[tokio::test]
+async fn test_node_upsert_broadcasts_event() {
+    let state = create_test_state();
+
+    let instance_id = Uuid::new_v4().to_string();
+    let instance = WorkflowInstance {
+        instance_id: instance_id.clone(),
+        workflow_id: "test-workflow".to_string(),
+        status: WorkflowStatus::Running,
+        nodes: vec![],
+        started_at: chrono::Utc::now(),
+        ended_at: None,
+        definition: None,
+    };
+
+    state.instances.insert(instance_id.clone(), instance);
+
+    let mut rx = state.events_tx.subscribe();
+
+    let app = newton::api::create_router(state, None);
+
+    let node_update = json!({
+        "status": "running",
+        "started_at": chrono::Utc::now(),
+    });
+
+    let request = Request::builder()
+        .method(Method::PATCH)
+        .uri(format!(
+            "/api/workflows/{}/nodes/new-broadcast-task",
+            instance_id
+        ))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&node_update).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let event = rx.try_recv().unwrap();
+    match event {
+        BroadcastEvent::NodeStateChanged {
+            instance_id: recv_id,
+            node_id,
+        } => {
+            assert_eq!(recv_id, instance_id);
+            assert_eq!(node_id, "new-broadcast-task");
+        }
+        _ => panic!("Expected NodeStateChanged event, got {:?}", event),
+    }
+}
