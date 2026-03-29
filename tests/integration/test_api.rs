@@ -68,6 +68,7 @@ async fn test_list_workflows_with_instances() {
         nodes: vec![],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -155,9 +156,11 @@ async fn test_get_workflow_success() {
             status: NodeStatus::Succeeded,
             started_at: Some(chrono::Utc::now()),
             ended_at: Some(chrono::Utc::now()),
+            operator_type: None,
         }],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -196,6 +199,7 @@ async fn test_update_workflow_success() {
         nodes: vec![],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -553,6 +557,7 @@ async fn test_legacy_list_channels() {
         nodes: vec![],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -592,6 +597,7 @@ async fn test_legacy_api_list_channels() {
             nodes: vec![],
             started_at: chrono::Utc::now(),
             ended_at: None,
+            definition: None,
         },
     );
 
@@ -732,6 +738,7 @@ async fn test_create_workflow_success() {
         nodes: vec![],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     let request = Request::builder()
@@ -766,6 +773,7 @@ async fn test_create_workflow_duplicate_returns_409() {
         nodes: vec![],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state
@@ -840,9 +848,11 @@ async fn test_update_node_success() {
             status: NodeStatus::Running,
             started_at: Some(chrono::Utc::now()),
             ended_at: None,
+            operator_type: None,
         }],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -923,6 +933,7 @@ async fn test_list_workflows_filter_by_status() {
             nodes: vec![],
             started_at: chrono::Utc::now(),
             ended_at: None,
+            definition: None,
         },
     );
     state.instances.insert(
@@ -934,6 +945,7 @@ async fn test_list_workflows_filter_by_status() {
             nodes: vec![],
             started_at: chrono::Utc::now(),
             ended_at: Some(chrono::Utc::now()),
+            definition: None,
         },
     );
 
@@ -972,6 +984,7 @@ async fn test_list_workflows_pagination() {
                 nodes: vec![],
                 started_at: chrono::Utc::now(),
                 ended_at: None,
+                definition: None,
             },
         );
     }
@@ -1007,6 +1020,7 @@ async fn test_update_workflow_status() {
         nodes: vec![],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -1056,7 +1070,7 @@ fn create_test_state() -> AppState {
 }
 
 #[tokio::test]
-async fn test_update_node_not_found_returns_404() {
+async fn test_update_node_upsert_creates_missing_node() {
     let state = create_test_state();
 
     let instance_id = Uuid::new_v4().to_string();
@@ -1069,9 +1083,11 @@ async fn test_update_node_not_found_returns_404() {
             status: NodeStatus::Running,
             started_at: Some(chrono::Utc::now()),
             ended_at: None,
+            operator_type: None,
         }],
         started_at: chrono::Utc::now(),
         ended_at: None,
+        definition: None,
     };
 
     state.instances.insert(instance_id.clone(), instance);
@@ -1081,29 +1097,32 @@ async fn test_update_node_not_found_returns_404() {
     let node_update = json!({
         "status": "succeeded",
         "started_at": chrono::Utc::now(),
-        "ended_at": chrono::Utc::now()
+        "ended_at": chrono::Utc::now(),
+        "operator_type": "CommandOperator"
     });
 
     let request = Request::builder()
         .method(Method::PATCH)
-        .uri(format!(
-            "/api/workflows/{}/nodes/non-existent-task",
-            instance_id
-        ))
+        .uri(format!("/api/workflows/{}/nodes/new-task", instance_id))
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(serde_json::to_vec(&node_update).unwrap()))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
 
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let error: ApiError = serde_json::from_slice(&body).unwrap();
+    let updated: WorkflowInstance = serde_json::from_slice(&body).unwrap();
 
-    assert_eq!(error.code, "API-NODE-002");
-    assert_eq!(error.category, "ValidationError");
-    assert_eq!(error.message, "Node not found in workflow instance");
+    assert_eq!(updated.nodes.len(), 2);
+    let new_node = updated
+        .nodes
+        .iter()
+        .find(|n| n.node_id == "new-task")
+        .unwrap();
+    assert_eq!(new_node.status, NodeStatus::Succeeded);
+    assert_eq!(new_node.operator_type.as_deref(), Some("CommandOperator"));
 }

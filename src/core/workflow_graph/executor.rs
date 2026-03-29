@@ -240,6 +240,8 @@ struct WorkflowRuntime {
     current_tick_tasks: Vec<String>,
     /// Optional server notifier for pushing lifecycle events to a newton serve instance.
     server_notifier: Option<Arc<ServerNotifier>>,
+    /// Serialized workflow definition JSON for API exposure.
+    workflow_definition_json: Option<serde_json::Value>,
 }
 
 impl ExecutionState {
@@ -386,13 +388,26 @@ impl WorkflowRuntime {
 
         // Notify server that workflow has started.
         if let Some(notifier) = &self.server_notifier {
+            let pre_seeded_nodes: Vec<NodeState> = self
+                .runtime_graph
+                .get_all_tasks()
+                .into_iter()
+                .map(|task| NodeState {
+                    node_id: task.id.clone(),
+                    status: NodeStatus::Pending,
+                    started_at: None,
+                    ended_at: None,
+                    operator_type: Some(task.operator.clone()),
+                })
+                .collect();
             let instance = WorkflowInstance {
                 instance_id: self.workflow_execution.execution_id.to_string(),
                 workflow_id: self.workflow_execution.workflow_file.clone(),
                 status: WorkflowStatus::Running,
-                nodes: vec![],
+                nodes: pre_seeded_nodes,
                 started_at: self.workflow_execution.started_at,
                 ended_at: None,
+                definition: self.workflow_definition_json.clone(),
             };
             notifier.notify_workflow_started(instance);
         }
@@ -412,11 +427,16 @@ impl WorkflowRuntime {
                 let instance_id = self.workflow_execution.execution_id.to_string();
                 let now = Utc::now();
                 for (task_id, _) in &tick_tasks {
+                    let operator_type = self
+                        .runtime_graph
+                        .get_task(task_id)
+                        .map(|t| t.operator.clone());
                     let node = NodeState {
                         node_id: task_id.clone(),
                         status: NodeStatus::Running,
                         started_at: Some(now),
                         ended_at: None,
+                        operator_type,
                     };
                     notifier.notify_node_updated(instance_id.clone(), node);
                 }
@@ -504,11 +524,16 @@ impl WorkflowRuntime {
                     } else {
                         NodeStatus::Succeeded
                     };
+                    let operator_type = self
+                        .runtime_graph
+                        .get_task(&outcome.task_id)
+                        .map(|t| t.operator.clone());
                     let node = NodeState {
                         node_id: outcome.task_id.clone(),
                         status: node_status,
                         started_at: Some(outcome.started_at),
                         ended_at: Some(outcome.completed_at),
+                        operator_type,
                     };
                     notifier.notify_node_updated(instance_id.clone(), node);
                 }
@@ -981,6 +1006,7 @@ fn build_workflow_runtime(
     workspace_root: PathBuf,
     overrides: ExecutionOverrides,
 ) -> Result<WorkflowRuntime, AppError> {
+    let workflow_definition_json = serde_json::to_value(&document).ok();
     let trigger_payload = extract_trigger_payload(&document);
     let mut graph_settings = document.workflow.settings;
     if let Some(parallel) = overrides.parallel_limit {
@@ -1127,6 +1153,7 @@ fn build_workflow_runtime(
         verbose: overrides.verbose,
         current_tick_tasks: Vec::new(),
         server_notifier: overrides.server_notifier.clone(),
+        workflow_definition_json,
     })
 }
 
@@ -1291,6 +1318,7 @@ pub async fn resume_workflow(
         verbose: false, // Resume does not support verbose mode
         current_tick_tasks: Vec::new(),
         server_notifier: None, // Resume does not support server notification
+        workflow_definition_json: None,
     };
     runtime.run().await
 }
