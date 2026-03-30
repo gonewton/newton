@@ -81,6 +81,7 @@ fn default_overrides() -> ExecutionOverrides {
         artifact_base_path: None,
         verbose: false,
         server_notifier: None,
+        pre_seed_nodes: true,
     }
 }
 
@@ -527,6 +528,7 @@ async fn e8_terminal_success_stops_executor_queued_tasks_not_run() {
         artifact_base_path: None,
         verbose: false,
         server_notifier: None,
+        pre_seed_nodes: true,
     };
     let registry = build_registry(workspace.clone(), document.workflow.settings.clone());
 

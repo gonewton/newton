@@ -91,6 +91,7 @@ struct NodeUpdate {
     status: NodeStatus,
     started_at: Option<DateTime<Utc>>,
     ended_at: Option<DateTime<Utc>>,
+    operator_type: Option<String>,
 }
 
 /// Flexible update body: supports both legacy WorkflowDefinition format
@@ -275,19 +276,26 @@ async fn update_node(
                     node.started_at = node_update.started_at;
                 }
                 node.ended_at = node_update.ended_at;
-                (StatusCode::OK, Json(instance.clone())).into_response()
+                if node_update.operator_type.is_some() {
+                    node.operator_type = node_update.operator_type;
+                }
             } else {
-                (
-                    StatusCode::NOT_FOUND,
-                    Json(ApiError {
-                        code: "API-NODE-002".to_string(),
-                        category: "ValidationError".to_string(),
-                        message: "Node not found in workflow instance".to_string(),
-                        details: None,
-                    }),
-                )
-                    .into_response()
+                let new_node = newton_types::NodeState {
+                    node_id: node_id.clone(),
+                    status: node_update.status,
+                    started_at: node_update.started_at,
+                    ended_at: node_update.ended_at,
+                    operator_type: node_update.operator_type,
+                };
+                instance.nodes.push(new_node);
             }
+
+            let _ = state.events_tx.send(BroadcastEvent::NodeStateChanged {
+                instance_id: id.clone(),
+                node_id: node_id.clone(),
+            });
+
+            (StatusCode::OK, Json(instance.clone())).into_response()
         }
         None => (
             StatusCode::NOT_FOUND,
