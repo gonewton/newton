@@ -111,11 +111,13 @@ fn all_main_commands_have_examples() {
         &["checkpoints"],
         &["artifacts"],
         &["webhook"],
+        &["monitor"],
+        &["dot"],
     ];
     for command in commands {
         let stdout = help_output(command);
         assert!(
-            stdout.contains("EXAMPLES") || stdout.contains("Example"),
+            stdout.contains("EXAMPLES:"),
             "{:?} --help should contain an examples section",
             command
         );
