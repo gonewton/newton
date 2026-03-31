@@ -123,29 +123,33 @@ This repository includes a Repomix pack (`repomix-output.xml`) for contributors 
 
 ## Commands Reference
 
-### `run [workspace-path]`
+### `run <workflow.yaml>`
 
-Start optimization loop for a workspace.
-
-If the workspace path is omitted the command runs in the current directory. After `newton init .` the `.newton/scripts` toolchain is installed automatically, so you can rely on the default `evaluator.sh`, `advisor.sh`, and `executor.sh` without passing strict-mode overrides.
+Execute a workflow graph defined in YAML.
 
 **Options:**
-- `--max-iterations N`: Maximum iterations before stopping
-- `--timeout N`: Maximum time in seconds before stopping
-- `--tool-timeout N`: Timeout per tool execution in seconds
-- `--strict-mode`: Enable strict validation mode
-
-Passing empty evaluator/advisor/executor commands now fails fast with `TOOL-002` (`command must not be empty`). Provide valid tool invocations (or omit the flag) so the orchestrator can launch real scripts.
+- `--workspace <PATH>`: Workspace root directory (default: current directory)
+- `--arg KEY=VALUE`: Merge key into triggers.payload (repeatable)
+- `--set KEY=VALUE`: Merge key into workflow context at runtime (repeatable)
+- `--max-time-seconds N`: Wall-clock time limit override in seconds
+- `--parallel-limit N`: Runtime override for bounded task concurrency
+- `--verbose`: Print task stdout/stderr to terminal after each task completes
+- `--file <PATH>`: Path to workflow YAML file (alternative to positional argument)
+- `--trigger-json <PATH>`: Load JSON object as base trigger payload before --arg overrides
 
 **Examples:**
 ```bash
 # Run with default settings
-newton run .
+newton run workflow.yaml
 
-# Run with custom timeouts
-newton run . --max-iterations 100 --timeout 3600
+# With workspace and trigger data
+newton run workflow.yaml --workspace ./output --arg key=value
 
-# Use custom tools
+# Multiple arguments
+newton run workflow.yaml --arg env=prod --arg version=1.2.3
+
+# With time limit
+newton run workflow.yaml --max-time-seconds 3600
 ```
 
 ### `init [workspace-path]`
@@ -284,84 +288,6 @@ OpenTelemetry exports only activate when either `logging.opentelemetry.endpoint`
 - If `newton monitor` shows garbled output when you run `RUST_LOG=debug`, confirm no console sink is configured (`console_output` defaults to `none` in the TUI context) and inspect `<workspace>/.newton/logs/newton.log` for the emitted events.
 - To temporarily force console logging for debugging, set `logging.console_output = "stderr"` or add `logging.console_output = "stdout"` and rely on the file sink for production runs.
 - Setting `NEWTON_REMOTE_AGENT=1` switches the context to `RemoteAgent`, which guarantees file logging remains active even when the console is disabled, making it ideal for remote workers or batch troubleshooting.
-### `step <workspace-path>`
-
-Execute a single evaluation-advice-execution iteration.
-
-**Options:**
-- `--tool-timeout N`: Timeout per tool execution in seconds
-- `--strict-mode`: Enable strict validation mode
-
-**Example:**
-```bash
-```
-
-### `status <execution-id>`
-
-Check current status of an optimization run.
-
-**Options:**
-- `--format <format>`: Output format (text, json)
-- `--verbose`: Show detailed execution information
-
-**Example:**
-```bash
-```
-
-**Output:**
-- Current iteration count
-- Last evaluation score
-- Overall progress toward goals
-- Execution status (running, completed, failed)
-- Time elapsed
-
-### `report <execution-id>`
-
-Generate a comprehensive execution report.
-
-**Options:**
-- `--format <format>`: Output format (text, json)
-- `--include-stats`: Include performance statistics
-
-**Examples:**
-```bash
-# Generate text report
-newton report abc-123
-
-# Generate JSON report for programmatic access
-newton report abc-123 --format json
-
-# Generate report with statistics
-newton report abc-123 --include-stats
-```
-
-**Report Contents:**
-- Overall execution summary
-- Iteration-by-iteration progress
-- Tool execution logs
-- Final evaluation metrics
-- Performance statistics
-- Error messages (if any)
-
-### `error <execution-id>`
-
-Debug execution errors with detailed information.
-
-**Options:**
-- `--verbose`: Show detailed stack traces and logs
-- `--show-artifacts`: Include generated artifacts in output
-
-**Example:**
-```bash
-```
-
-**Diagnostic Information:**
-- Error type and location
-- Tool execution failures
-- Workspace validation errors
-- Generated artifacts
-- Execution logs
-- Recovery recommendations
 
 ### `monitor`
 
@@ -455,73 +381,19 @@ newton init . --template basic --interactive
 
 ## Advanced Usage
 
-### Custom Tool Configuration
+### Time and Concurrency Limits
 
-Newton allows you to specify custom commands for each optimization phase:
-
-```bash
-newton run . \
-```
-
-### Timeout Configurations
-
-Configure timeouts at different levels:
+Configure execution limits for workflows:
 
 ```bash
-# Overall timeout (30 minutes)
-newton run . --timeout 1800
+# Set a wall-clock time limit (30 minutes)
+newton run workflow.yaml --max-time-seconds 1800
 
-# Per-tool timeout (5 minutes)
-newton run . --tool-timeout 300
+# Limit concurrent task execution
+newton run workflow.yaml --parallel-limit 4
 
-# Combined approach
-newton run . --timeout 3600 --tool-timeout 300
-```
-
-### Iteration and Time Limits
-
-```bash
-# Run at most 50 iterations
-newton run . --max-iterations 50
-
-# Stop after 10 minutes
-newton run . --timeout 600
-
-# Stop when either condition is met
-newton run . --max-iterations 50 --timeout 600
-```
-
-### Strict Mode
-
-Enable strict validation mode for critical operations:
-
-```bash
-newton run . --strict-mode
-```
-
-Strict mode requires:
-- All tools to exit with code 0
-- Workspace validation to pass
-- Evaluation score to be positive
-- No unexpected errors during execution
-
-### Resource Limits and Monitoring
-
-```bash
-newton run . \
-  --max-iterations 100 \
-  --timeout 3600 \
-  --tool-timeout 300 \
-  --memory-limit 4G
-```
-
-Monitor execution in real-time:
-
-```bash
-# Watch execution status
-
-# Generate periodic reports
-newton report <execution-id> --include-stats
+# Combined: time limit and concurrency
+newton run workflow.yaml --max-time-seconds 3600 --parallel-limit 2
 ```
 
 ### Git Integration
@@ -868,13 +740,11 @@ Tools can access Newton's environment variables:
 
 ### Resource Limits
 
-Configure resource limits to control optimization runs:
+Configure execution limits for workflow runs:
 
 ```bash
---max-iterations N    Maximum iterations (default: 100)
---timeout N           Maximum time in seconds (default: 3600)
---tool-timeout N      Timeout per tool in seconds (default: 60)
---memory-limit N      Maximum memory per tool (e.g., 4G)
+--max-time-seconds N    Wall-clock time limit in seconds
+--parallel-limit N      Maximum number of tasks to run concurrently
 ```
 
 ## Output and Artifacts

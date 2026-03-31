@@ -36,19 +36,19 @@ pub enum Command {
     #[command(
         about = "Execute a workflow graph",
         long_about = "Run executes a workflow graph defined in YAML, with optional trigger payload from input file or arguments.",
-        after_help = "Example:\n    newton run workflow.yaml input.txt --workspace ./workspace --arg key=value"
+        after_help = "EXAMPLES:\n  Basic workflow execution:\n    newton run workflow.yaml\n\n  With workspace and trigger data:\n    newton run workflow.yaml --workspace ./output --arg key=value\n\n  Multiple arguments:\n    newton run workflow.yaml --arg env=prod --arg version=1.2.3\n\n  With input file and verbose output:\n    newton run workflow.yaml input.txt --workspace ./workspace --verbose"
     )]
     Run(RunArgs),
     #[command(
         about = "Initialize a Newton workspace with the default template",
         long_about = "Init creates the .newton workspace layout, installs the Newton template with aikit-sdk, and writes default configs so you can run immediately.",
-        after_help = "Example:\n    newton init ./workspace"
+        after_help = "EXAMPLES:\n  Initialize current directory:\n    newton init .\n\n  Initialize a specific directory:\n    newton init ./workspace\n\n  Initialize with custom template source:\n    newton init . --template-source gonewton/newton-templates"
     )]
     Init(InitArgs),
     #[command(
         about = "Process queued work items for a project",
         long_about = "Batch reads plan files from .newton/plan/<project_id> and drives headless workflow orchestration.",
-        after_help = "Example:\n    newton batch project-alpha --workspace ./workspace"
+        after_help = "EXAMPLES:\n  Process queued plans for a project:\n    newton batch project-alpha\n\n  With workspace override:\n    newton batch project-alpha --workspace ./workspace\n\n  Process one plan and exit:\n    newton batch project-alpha --once\n\n  Custom poll interval:\n    newton batch project-alpha --sleep 30"
     )]
     Batch(BatchArgs),
     #[command(
