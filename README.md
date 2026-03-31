@@ -123,29 +123,33 @@ This repository includes a Repomix pack (`repomix-output.xml`) for contributors 
 
 ## Commands Reference
 
-### `run [workspace-path]`
+### `run <workflow.yaml>`
 
-Start optimization loop for a workspace.
-
-If the workspace path is omitted the command runs in the current directory. After `newton init .` the `.newton/scripts` toolchain is installed automatically, so you can rely on the default `evaluator.sh`, `advisor.sh`, and `executor.sh` without passing strict-mode overrides.
+Execute a workflow graph defined in YAML.
 
 **Options:**
-- `--max-iterations N`: Maximum iterations before stopping
-- `--timeout N`: Maximum time in seconds before stopping
-- `--tool-timeout N`: Timeout per tool execution in seconds
-- `--strict-mode`: Enable strict validation mode
-
-Passing empty evaluator/advisor/executor commands now fails fast with `TOOL-002` (`command must not be empty`). Provide valid tool invocations (or omit the flag) so the orchestrator can launch real scripts.
+- `--workspace <PATH>`: Workspace root directory (default: current directory)
+- `--arg KEY=VALUE`: Merge key into triggers.payload (repeatable)
+- `--set KEY=VALUE`: Merge key into workflow context at runtime (repeatable)
+- `--max-time-seconds N`: Wall-clock time limit override in seconds
+- `--parallel-limit N`: Runtime override for bounded task concurrency
+- `--verbose`: Print task stdout/stderr to terminal after each task completes
+- `--file <PATH>`: Path to workflow YAML file (alternative to positional argument)
+- `--trigger-json <PATH>`: Load JSON object as base trigger payload before --arg overrides
 
 **Examples:**
 ```bash
 # Run with default settings
-newton run .
+newton run workflow.yaml
 
-# Run with custom timeouts
-newton run . --max-iterations 100 --timeout 3600
+# With workspace and trigger data
+newton run workflow.yaml --workspace ./output --arg key=value
 
-# Use custom tools
+# Multiple arguments
+newton run workflow.yaml --arg env=prod --arg version=1.2.3
+
+# With time limit
+newton run workflow.yaml --max-time-seconds 3600
 ```
 
 ### `init [workspace-path]`
@@ -455,73 +459,19 @@ newton init . --template basic --interactive
 
 ## Advanced Usage
 
-### Custom Tool Configuration
+### Time and Concurrency Limits
 
-Newton allows you to specify custom commands for each optimization phase:
-
-```bash
-newton run . \
-```
-
-### Timeout Configurations
-
-Configure timeouts at different levels:
+Configure execution limits for workflows:
 
 ```bash
-# Overall timeout (30 minutes)
-newton run . --timeout 1800
+# Set a wall-clock time limit (30 minutes)
+newton run workflow.yaml --max-time-seconds 1800
 
-# Per-tool timeout (5 minutes)
-newton run . --tool-timeout 300
+# Limit concurrent task execution
+newton run workflow.yaml --parallel-limit 4
 
-# Combined approach
-newton run . --timeout 3600 --tool-timeout 300
-```
-
-### Iteration and Time Limits
-
-```bash
-# Run at most 50 iterations
-newton run . --max-iterations 50
-
-# Stop after 10 minutes
-newton run . --timeout 600
-
-# Stop when either condition is met
-newton run . --max-iterations 50 --timeout 600
-```
-
-### Strict Mode
-
-Enable strict validation mode for critical operations:
-
-```bash
-newton run . --strict-mode
-```
-
-Strict mode requires:
-- All tools to exit with code 0
-- Workspace validation to pass
-- Evaluation score to be positive
-- No unexpected errors during execution
-
-### Resource Limits and Monitoring
-
-```bash
-newton run . \
-  --max-iterations 100 \
-  --timeout 3600 \
-  --tool-timeout 300 \
-  --memory-limit 4G
-```
-
-Monitor execution in real-time:
-
-```bash
-# Watch execution status
-
-# Generate periodic reports
-newton report <execution-id> --include-stats
+# Combined: time limit and concurrency
+newton run workflow.yaml --max-time-seconds 3600 --parallel-limit 2
 ```
 
 ### Git Integration
