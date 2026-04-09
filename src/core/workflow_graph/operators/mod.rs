@@ -12,9 +12,8 @@ pub mod set_context;
 
 use crate::core::workflow_graph::human::{ConsoleInterviewer, Interviewer};
 use crate::core::workflow_graph::operator::OperatorRegistryBuilder;
-use crate::core::workflow_graph::operators::engine::EngineDriver;
+use crate::core::workflow_graph::operators::engine::AikitEngineManager;
 use crate::core::workflow_graph::state::GraphSettings;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -22,8 +21,6 @@ use std::sync::Arc;
 pub struct BuiltinOperatorDeps {
     pub interviewer: Option<Arc<dyn Interviewer>>,
     pub command_runner: Option<Arc<dyn command::CommandRunner>>,
-    /// Engine driver registry for AgentOperator. Defaults to engine::default_registry() when None.
-    pub engine_registry: Option<HashMap<String, Box<dyn EngineDriver>>>,
     /// GhRunner for GhOperator. Defaults to real gh CLI subprocess when None.
     pub gh_runner: Option<Arc<dyn gh::GhRunner>>,
 }
@@ -52,10 +49,9 @@ pub fn register_builtins_with_deps(
         Some(runner) => command::CommandOperator::with_runner(workspace.clone(), runner),
         None => command::CommandOperator::new(workspace.clone()),
     };
-    let engine_registry = deps
-        .engine_registry
-        .unwrap_or_else(engine::default_registry);
-    let agent_operator = agent::AgentOperator::new(workspace, settings, engine_registry);
+    let engine_manager = AikitEngineManager::new(workspace.clone())
+        .expect("AikitEngineManager::new should not fail");
+    let agent_operator = agent::AgentOperator::new(workspace, settings, engine_manager);
     let gh_operator = match deps.gh_runner {
         Some(runner) => gh::GhOperator::with_runner(runner),
         None => gh::GhOperator::new(),

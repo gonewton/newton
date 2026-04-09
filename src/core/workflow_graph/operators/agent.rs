@@ -4,9 +4,10 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::core::workflow_graph::expression::{EvaluationContext, ExpressionEngine};
 use crate::core::workflow_graph::operator::{ExecutionContext, Operator};
+use crate::core::workflow_graph::operators::engine::passthrough::PassthroughDriver;
 use crate::core::workflow_graph::operators::engine::{
-    default_registry, extract_text_from_stream_json, DriverConfig, EngineDriver, EngineInvocation,
-    OutputFormat, PromptSource,
+    extract_text_from_event, extract_text_from_stream_json, AikitEngineManager, AikitEventRecord,
+    DriverConfig, EngineDriver, EngineInvocation, OutputFormat, PromptSource,
 };
 use crate::core::workflow_graph::state::GraphSettings;
 use async_trait::async_trait;
@@ -25,24 +26,35 @@ const OUTPUT_CAPTURE_LIMIT_BYTES: usize = 1_048_576;
 pub struct AgentOperator {
     workspace_root: PathBuf,
     settings: GraphSettings,
-    engine_registry: HashMap<String, Box<dyn EngineDriver>>,
+    engine_manager: AikitEngineManager,
 }
 
 impl AgentOperator {
     pub fn new(
         workspace_root: PathBuf,
         settings: GraphSettings,
-        engine_registry: HashMap<String, Box<dyn EngineDriver>>,
+        engine_manager: AikitEngineManager,
     ) -> Self {
         Self {
             workspace_root,
             settings,
-            engine_registry,
+            engine_manager,
         }
     }
 
+    /// Construct AgentOperator using aikit-sdk for AI engine delegation.
+    pub fn with_aikit_sdk(
+        workspace_root: PathBuf,
+        settings: GraphSettings,
+    ) -> Result<Self, AppError> {
+        let engine_manager = AikitEngineManager::new(workspace_root.clone())?;
+        Ok(Self::new(workspace_root, settings, engine_manager))
+    }
+
+    /// Convenience constructor; delegates to with_aikit_sdk.
     pub fn with_default_registry(workspace_root: PathBuf, settings: GraphSettings) -> Self {
-        Self::new(workspace_root, settings, default_registry())
+        Self::with_aikit_sdk(workspace_root, settings)
+            .expect("AikitEngineManager::new should not fail")
     }
 }
 
@@ -281,22 +293,11 @@ impl Operator for AgentOperator {
             .ok_or_else(|| {
                 AppError::new(
                     ErrorCategory::ValidationError,
-                    "no engine resolved: set params.engine, settings.default_engine, or workspace coding_agent",
+                    "no engine resolved: set params.engine or settings.default_engine",
                 )
                 .with_code("WFG-AGENT-001")
             })?
             .to_string();
-
-        let driver = self.engine_registry.get(&engine_name).ok_or_else(|| {
-            AppError::new(
-                ErrorCategory::ValidationError,
-                format!(
-                    "unknown engine '{}': not found in driver registry",
-                    engine_name
-                ),
-            )
-            .with_code("WFG-AGENT-001")
-        })?;
 
         // Resolve model
         let model = config
@@ -310,19 +311,6 @@ impl Operator for AgentOperator {
             })
             .map(|s| s.to_string());
 
-        // Check model requirement
-        if driver.requires_model() && model.is_none() {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                format!(
-                    "engine '{}' requires a model but none was resolved; \
-                     set params.model or settings.model_stylesheet.model",
-                    engine_name
-                ),
-            )
-            .with_code("WFG-AGENT-006"));
-        }
-
         // Validate and compile signal patterns
         let compiled_signals = validate_and_compile_signals(&config.signals)?;
 
@@ -331,45 +319,6 @@ impl Operator for AgentOperator {
 
         // Interpolate env values
         let interpolated_env = interpolate_env(&config.env, &eval_ctx)?;
-
-        // Build resolved config for driver
-        let resolved_engine_command = if engine_name == "command" {
-            match &config.engine_command {
-                None => {
-                    return Err(AppError::new(
-                        ErrorCategory::ValidationError,
-                        "engine: command requires engine_command in params",
-                    )
-                    .with_code("WFG-AGENT-007"));
-                }
-                Some(cmds) => {
-                    let engine = ExpressionEngine::default();
-                    let mut result = Vec::new();
-                    for entry in cmds {
-                        let interpolated = engine.interpolate_string(entry, &eval_ctx)?;
-                        result.push(interpolated);
-                    }
-                    if result.is_empty() {
-                        return Err(AppError::new(
-                            ErrorCategory::ValidationError,
-                            "engine_command evaluates to empty list",
-                        )
-                        .with_code("WFG-AGENT-007"));
-                    }
-                    Some(result)
-                }
-            }
-        } else {
-            config.engine_command.clone()
-        };
-
-        let driver_config = DriverConfig {
-            model: model.as_deref(),
-            prompt_source: config.prompt_source.as_ref(),
-            engine_command: resolved_engine_command.as_ref(),
-        };
-
-        let invocation = driver.build_invocation(&driver_config, &self.workspace_root)?;
 
         // Set up artifact paths
         let artifact_base = if self.settings.artifact_storage.base_path.is_absolute() {
@@ -407,47 +356,104 @@ impl Operator for AgentOperator {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| stderr_abs_path.to_string_lossy().to_string());
 
-        // Resolve timeout
-        let timeout_duration = config
-            .timeout_seconds
-            .map(Duration::from_secs)
-            .unwrap_or_else(|| Duration::from_secs(self.settings.max_time_seconds));
+        let (signal, signal_data, exit_code, final_iteration) = if engine_name == "command" {
+            // Command engine: use PassthroughDriver and subprocess execution
+            let resolved_engine_command = match &config.engine_command {
+                None => {
+                    return Err(AppError::new(
+                        ErrorCategory::ValidationError,
+                        "engine: command requires engine_command in params",
+                    )
+                    .with_code("WFG-AGENT-007"));
+                }
+                Some(cmds) => {
+                    let expr_engine = ExpressionEngine::default();
+                    let mut result = Vec::new();
+                    for entry in cmds {
+                        let interpolated = expr_engine.interpolate_string(entry, &eval_ctx)?;
+                        result.push(interpolated);
+                    }
+                    if result.is_empty() {
+                        return Err(AppError::new(
+                            ErrorCategory::ValidationError,
+                            "engine_command evaluates to empty list",
+                        )
+                        .with_code("WFG-AGENT-007"));
+                    }
+                    result
+                }
+            };
 
-        // Resolve working directory
-        let working_dir = config
-            .working_dir
-            .as_deref()
-            .map(|d| self.workspace_root.join(d))
-            .unwrap_or_else(|| self.workspace_root.clone());
+            let driver = PassthroughDriver;
+            let driver_config = DriverConfig {
+                model: model.as_deref(),
+                prompt_source: config.prompt_source.as_ref(),
+                engine_command: Some(&resolved_engine_command),
+            };
+            let invocation = driver.build_invocation(&driver_config, &self.workspace_root)?;
 
-        // Resolve effective streaming setting
-        let stream_to_terminal = config
-            .stream_stdout
-            .unwrap_or(self.settings.stream_agent_stdout);
+            // Resolve timeout
+            let timeout_duration = config
+                .timeout_seconds
+                .map(Duration::from_secs)
+                .unwrap_or_else(|| Duration::from_secs(self.settings.max_time_seconds));
 
-        let exec_paths = ExecPaths {
-            working_dir: &working_dir,
-            stdout_path: &stdout_abs_path,
-            stderr_path: &stderr_abs_path,
-        };
+            // Resolve working directory
+            let working_dir = config
+                .working_dir
+                .as_deref()
+                .map(|d| self.workspace_root.join(d))
+                .unwrap_or_else(|| self.workspace_root.clone());
 
-        // Execute
-        let start = Instant::now();
-        let exec_params = ExecParams {
-            invocation: &invocation,
-            compiled_signals: &compiled_signals,
-            paths: &exec_paths,
-            extra_env: &interpolated_env,
-            timeout: timeout_duration,
-            start,
-            stream_to_terminal,
-        };
+            let stream_to_terminal = config
+                .stream_stdout
+                .unwrap_or(self.settings.stream_agent_stdout);
 
-        let (signal, signal_data, exit_code, final_iteration) = if config.loop_mode {
-            execute_loop(&config, &exec_params).await?
+            let exec_paths = ExecPaths {
+                working_dir: &working_dir,
+                stdout_path: &stdout_abs_path,
+                stderr_path: &stderr_abs_path,
+            };
+
+            let start = Instant::now();
+            let exec_params = ExecParams {
+                invocation: &invocation,
+                compiled_signals: &compiled_signals,
+                paths: &exec_paths,
+                extra_env: &interpolated_env,
+                timeout: timeout_duration,
+                start,
+                stream_to_terminal,
+            };
+
+            if config.loop_mode {
+                execute_loop(&config, &exec_params).await?
+            } else {
+                let result = execute_single(&exec_params).await?;
+                (result.signal, result.signal_data, result.exit_code, 1u32)
+            }
         } else {
-            let result = execute_single(&exec_params).await?;
-            (result.signal, result.signal_data, result.exit_code, 1u32)
+            // AI engine: delegate to aikit-sdk via AikitEngineManager
+            let prompt = resolve_prompt(&config, &self.engine_manager.workspace_root)?;
+
+            // Resolve timeout
+            let timeout_duration = config
+                .timeout_seconds
+                .map(Duration::from_secs)
+                .unwrap_or_else(|| Duration::from_secs(self.settings.max_time_seconds));
+
+            execute_sdk_engine(
+                &self.engine_manager,
+                &engine_name,
+                &prompt,
+                model.as_deref(),
+                &config,
+                &compiled_signals,
+                &stdout_abs_path,
+                &stderr_abs_path,
+                timeout_duration,
+            )
+            .await?
         };
 
         // Determine stderr artifact
@@ -503,6 +509,164 @@ impl Operator for AgentOperator {
 
         Ok(Value::Object(output_map))
     }
+}
+
+/// Resolve the prompt string from config.
+fn resolve_prompt(
+    config: &AgentOperatorConfig,
+    workspace_root: &std::path::Path,
+) -> Result<String, AppError> {
+    match &config.prompt_source {
+        Some(PromptSource::Inline(s)) => Ok(s.clone()),
+        Some(PromptSource::File(f)) => {
+            let path = workspace_root.join(f);
+            std::fs::read_to_string(&path).map_err(|e| {
+                AppError::new(
+                    ErrorCategory::IoError,
+                    format!("failed to read prompt_file '{}': {}", path.display(), e),
+                )
+            })
+        }
+        None => Ok(String::new()),
+    }
+}
+
+/// Execute an AI engine via aikit-sdk, handling loop mode and signal matching.
+#[allow(clippy::too_many_arguments)]
+async fn execute_sdk_engine(
+    manager: &AikitEngineManager,
+    engine_name: &str,
+    prompt: &str,
+    model: Option<&str>,
+    config: &AgentOperatorConfig,
+    compiled_signals: &IndexMap<String, Regex>,
+    stdout_path: &std::path::Path,
+    stderr_path: &std::path::Path,
+    timeout: Duration,
+) -> Result<(Option<String>, HashMap<String, String>, i32, u32), AppError> {
+    use std::io::Write;
+
+    let max_iters = if config.loop_mode {
+        config.max_iterations.unwrap_or(u32::MAX)
+    } else {
+        1
+    };
+
+    let mut iteration: u32 = 0;
+    let mut last_signal: Option<String> = None;
+    let mut last_signal_data: HashMap<String, String> = HashMap::new();
+    let last_exit_code: i32 = 0;
+    let start = Instant::now();
+
+    loop {
+        iteration += 1;
+        if iteration > max_iters {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                format!("agent exceeded max_iterations ({}) in loop mode", max_iters),
+            )
+            .with_code("WFG-AGENT-003"));
+        }
+
+        // Check timeout
+        if start.elapsed() >= timeout {
+            return Err(AppError::new(
+                ErrorCategory::TimeoutError,
+                "agent operator timeout exceeded during SDK execution",
+            )
+            .with_code("WFG-AGENT-005"));
+        }
+
+        // Execute via SDK with remaining timeout
+        let remaining = timeout.saturating_sub(start.elapsed());
+        let events = tokio::time::timeout(
+            remaining,
+            manager.execute_engine_events(engine_name, prompt, model),
+        )
+        .await
+        .map_err(|_| {
+            AppError::new(
+                ErrorCategory::TimeoutError,
+                "agent operator timeout exceeded during SDK execution",
+            )
+            .with_code("WFG-AGENT-005")
+        })??;
+
+        // Write stdout events to artifact file
+        let mut stdout_file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(stdout_path)
+            .map_err(|e| {
+                AppError::new(
+                    ErrorCategory::IoError,
+                    format!("failed to open stdout artifact: {}", e),
+                )
+            })?;
+
+        let mut stdout_bytes: usize = 0;
+        let mut signal_found: Option<String> = None;
+        let mut signal_data_found: HashMap<String, String> = HashMap::new();
+
+        for event in &events {
+            // Write event text to stdout artifact
+            if let Some(text) = extract_text_from_event(event) {
+                if stdout_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
+                    let _ = stdout_file.write_all(text.as_bytes());
+                    let _ = stdout_file.write_all(b"\n");
+                    stdout_bytes += text.len() + 1;
+                }
+
+                // Signal matching (only stdout/stderr raw lines and JSON lines participate)
+                if signal_found.is_none() {
+                    if let Some((sig_name, sig_data)) = match_signals(&text, compiled_signals) {
+                        signal_found = Some(sig_name);
+                        signal_data_found = sig_data;
+                    }
+                }
+            }
+        }
+
+        // Write stderr events to stderr artifact
+        let stderr_events: Vec<&AikitEventRecord> =
+            events.iter().filter(|e| e.stream == "stderr").collect();
+        if !stderr_events.is_empty() {
+            let mut stderr_file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(stderr_path)
+                .map_err(|e| {
+                    AppError::new(
+                        ErrorCategory::IoError,
+                        format!("failed to open stderr artifact: {}", e),
+                    )
+                })?;
+            let mut stderr_bytes: usize = 0;
+            for event in &stderr_events {
+                let text = match &event.payload {
+                    serde_json::Value::String(s) => s.clone(),
+                    v => v.to_string(),
+                };
+                if stderr_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
+                    let _ = stderr_file.write_all(text.as_bytes());
+                    let _ = stderr_file.write_all(b"\n");
+                    stderr_bytes += text.len() + 1;
+                }
+            }
+        }
+
+        if let Some(sig) = signal_found {
+            last_signal = Some(sig);
+            last_signal_data = signal_data_found;
+            break;
+        }
+
+        if !config.loop_mode {
+            break;
+        }
+    }
+
+    Ok((last_signal, last_signal_data, last_exit_code, iteration))
 }
 
 /// Interpolate template expressions in env values.
@@ -949,20 +1113,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_engine_requires_model_missing_returns_agent_006() {
+    async fn execute_non_runnable_ai_engine_returns_sdk_002() {
+        // After SDK delegation, engines that are not runnable (not in aikit-sdk runnable list)
+        // return AgentNotRunnable → WFG-SDK-002.
+        // "copilot" is a known agent key but NOT in the runnable list.
         let tmp = TempDir::new().unwrap();
         let settings = WorkflowSettings {
-            default_engine: Some("opencode".to_string()),
+            default_engine: Some("copilot".to_string()),
             ..WorkflowSettings::default()
         };
         let op = AgentOperator::with_default_registry(tmp.path().to_path_buf(), settings);
         let ctx = make_ctx(&tmp);
         let params = json!({
             "prompt": "test prompt"
-            // no model, opencode requires model
         });
         let err = op.execute(params, ctx).await.unwrap_err();
-        assert_eq!(err.code, "WFG-AGENT-006");
+        // SDK delegation: AgentNotRunnable → WFG-SDK-002
+        assert_eq!(err.code, "WFG-SDK-002");
     }
 
     #[tokio::test]

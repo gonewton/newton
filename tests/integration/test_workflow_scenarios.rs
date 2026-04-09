@@ -222,7 +222,6 @@ impl WorkflowTestHarness {
         let deps = BuiltinOperatorDeps {
             command_runner: Some(Arc::new(self.cmd_runner.clone())),
             interviewer: Some(Arc::new(self.interviewer.clone())),
-            engine_registry: None,
             gh_runner: None,
         };
 
@@ -752,7 +751,6 @@ async fn test_scenario_17_checkpoint_resume() {
             BuiltinOperatorDeps {
                 command_runner: Some(Arc::new(cmd_runner.clone())),
                 interviewer: Some(Arc::new(harness.interviewer.clone())),
-                engine_registry: None,
                 gh_runner: None,
             },
         );

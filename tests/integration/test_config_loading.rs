@@ -190,7 +190,7 @@ fn test_config_loading_without_file() {
     assert!(config.executor.auto_commit);
 
     // Verify defaults are used for unset values
-    assert_eq!(config.executor.coding_agent, "opencode");
+    assert_eq!(config.executor.coding_agent, "");
     assert_eq!(
         config.executor.coding_agent_model,
         "zai-coding-plan/glm-4.7"
@@ -286,7 +286,7 @@ name = "minimal-test"
 
     assert_debug_snapshot!(config);
     assert_eq!(config.project.name, "minimal-test");
-    assert_eq!(config.executor.coding_agent, "opencode"); // Should use default
+    assert_eq!(config.executor.coding_agent, ""); // Should use default (empty)
     assert_eq!(config.evaluator.score_threshold, 95.0); // Should use default
 
     // Test config with only some sections
@@ -305,7 +305,7 @@ file = "custom/context.md"
     let config = ConfigLoader::load_from_workspace(workspace_path).unwrap();
 
     assert_eq!(config.project.name, "partial-test");
-    assert_eq!(config.executor.coding_agent, "opencode"); // Default
+    assert_eq!(config.executor.coding_agent, ""); // Default (empty)
     assert!(config.executor.auto_commit); // From file
     assert_eq!(
         config.context.file,

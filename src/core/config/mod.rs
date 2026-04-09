@@ -96,7 +96,7 @@ pub struct PromiseConfig {
 
 // Default functions
 fn default_coding_agent() -> String {
-    "opencode".to_string()
+    String::new()
 }
 
 fn default_coding_agent_model() -> String {
@@ -131,7 +131,7 @@ impl Default for ProjectConfig {
 impl Default for ExecutorConfig {
     fn default() -> Self {
         ExecutorConfig {
-            coding_agent: default_coding_agent(),
+            coding_agent: String::new(),
             coding_agent_model: default_coding_agent_model(),
             auto_commit: false,
         }
@@ -175,7 +175,7 @@ mod tests {
         assert_debug_snapshot!(config);
 
         assert_eq!(config.project.name, "newton-project");
-        assert_eq!(config.executor.coding_agent, "opencode");
+        assert_eq!(config.executor.coding_agent, "");
         assert_eq!(
             config.executor.coding_agent_model,
             "zai-coding-plan/glm-4.7"
@@ -202,7 +202,7 @@ name = "my-project"
 
         let config: NewtonConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.project.name, "my-project");
-        assert_eq!(config.executor.coding_agent, "opencode"); // Should use default
+        assert_eq!(config.executor.coding_agent, ""); // Should use default (empty)
     }
 
     #[test]
@@ -259,7 +259,7 @@ auto_commit = true
 
         let config: NewtonConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.project.name, "minimal-project");
-        assert_eq!(config.executor.coding_agent, "opencode"); // Default value
+        assert_eq!(config.executor.coding_agent, ""); // Default value (empty)
         assert_eq!(
             config.executor.coding_agent_model,
             "zai-coding-plan/glm-4.7"

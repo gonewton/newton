@@ -52,7 +52,6 @@ fn build_registry_with_gh_runner(
     let deps = BuiltinOperatorDeps {
         interviewer: None,
         command_runner: None,
-        engine_registry: None,
         gh_runner: Some(runner),
     };
     operators::register_builtins_with_deps(&mut builder, workspace, Default::default(), deps);

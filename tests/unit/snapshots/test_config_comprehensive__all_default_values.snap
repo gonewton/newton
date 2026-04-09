@@ -8,7 +8,7 @@ NewtonConfig {
         template: None,
     },
     executor: ExecutorConfig {
-        coding_agent: "opencode",
+        coding_agent: "",
         coding_agent_model: "zai-coding-plan/glm-4.7",
         auto_commit: false,
     },
