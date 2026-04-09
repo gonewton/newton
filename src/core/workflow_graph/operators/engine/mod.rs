@@ -71,12 +71,63 @@ pub fn default_registry() -> HashMap<String, Box<dyn EngineDriver>> {
     m
 }
 
-/// A record representing a single SDK event from an AI engine execution.
+/// Token usage metrics emitted by AI engine execution.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: Option<u64>,
+    pub cache_read_tokens: Option<u64>,
+    pub cache_creation_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
+    /// Engine key that produced this usage (codex|claude|gemini|opencode|agent).
+    pub source: String,
+}
+
+/// Typed event payload from AI engine output — mirrors the aikit-sdk AgentEventPayload contract.
+///
+/// Processing rules:
+/// - `RawLine`: use raw string as-is for signal matching
+/// - `JsonLine`: extract text via ordered field lookup (.content → .result.result → .result → .part.text)
+/// - `RawBytes`: MUST NOT participate in signal matching
+/// - `TokenUsageLine`: MUST NOT participate in signal matching; used for token usage accounting
+#[derive(Debug, Clone)]
+pub enum AgentEventPayload {
+    /// Structured JSON output line from the engine.
+    JsonLine(serde_json::Value),
+    /// Plain text output line from the engine.
+    RawLine(String),
+    /// Binary output (excluded from signal matching).
+    RawBytes(Vec<u8>),
+    /// Provider token usage metrics (excluded from signal matching).
+    TokenUsageLine(TokenUsage),
+}
+
+/// A record representing a single typed event from an AI engine execution.
 #[derive(Debug, Clone)]
 pub struct AikitEventRecord {
     pub seq: u64,
-    pub stream: String, // "stdout" | "stderr"
-    pub payload: serde_json::Value,
+    /// "stdout" or "stderr"
+    pub stream: String,
+    pub payload: AgentEventPayload,
+}
+
+impl AikitEventRecord {
+    /// Serialize this record to a JSON value for NDJSON artifact writing.
+    pub fn to_json_value(&self) -> serde_json::Value {
+        use serde_json::json;
+        let payload_json = match &self.payload {
+            AgentEventPayload::JsonLine(v) => json!({"type": "JsonLine", "data": v}),
+            AgentEventPayload::RawLine(s) => json!({"type": "RawLine", "data": s}),
+            AgentEventPayload::RawBytes(b) => json!({"type": "RawBytes", "length": b.len()}),
+            AgentEventPayload::TokenUsageLine(u) => json!({"type": "TokenUsageLine", "data": u}),
+        };
+        json!({
+            "seq": self.seq,
+            "stream": self.stream,
+            "payload": payload_json,
+        })
+    }
 }
 
 /// Manages AI engine execution by delegating to aikit-sdk.
@@ -89,7 +140,10 @@ impl AikitEngineManager {
         Ok(Self { workspace_root })
     }
 
-    /// Execute an AI engine via aikit-sdk and return collected events.
+    /// Execute an AI engine via aikit-sdk and return collected typed events.
+    ///
+    /// Delegates to `aikit_sdk::run_agent` and classifies output lines into
+    /// `AgentEventPayload` variants (`JsonLine`, `RawLine`, `TokenUsageLine`).
     pub async fn execute_engine_events(
         &self,
         engine_name: &str,
@@ -129,13 +183,14 @@ impl AikitEngineManager {
         })?
         .map_err(map_run_error)?;
 
-        // Convert RunResult output to event records
-        let events = convert_run_result_to_events(result);
+        // Classify RunResult output into typed AgentEventPayload events
+        let events = classify_run_result_to_events(result, engine_name);
         Ok(events)
     }
 }
 
 /// Map aikit_sdk::RunError to Newton AppError with appropriate WFG-SDK codes.
+/// Exhaustively covers all RunError variants.
 pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
     match err {
         aikit_sdk::RunError::AgentNotRunnable(key) => AppError::new(
@@ -164,20 +219,94 @@ pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
     }
 }
 
-/// Convert a RunResult (collected stdout/stderr) into AikitEventRecord list.
-fn convert_run_result_to_events(result: aikit_sdk::RunResult) -> Vec<AikitEventRecord> {
+/// Attempt to detect token usage metadata in a JSON value.
+///
+/// Recognizes common patterns from AI providers:
+/// - Claude: `{"input_tokens": N, "output_tokens": N, ...}`
+/// - OpenAI/Codex: `{"usage": {"prompt_tokens": N, "completion_tokens": N, "total_tokens": N}}`
+/// - Generic nested: `{"usage": {"input_tokens": N, "output_tokens": N}}`
+fn detect_token_usage(json: &serde_json::Value, engine_name: &str) -> Option<TokenUsage> {
+    // Pattern 1: top-level input_tokens + output_tokens
+    if let (Some(input), Some(output)) = (
+        json.get("input_tokens").and_then(|v| v.as_u64()),
+        json.get("output_tokens").and_then(|v| v.as_u64()),
+    ) {
+        return Some(TokenUsage {
+            input_tokens: input,
+            output_tokens: output,
+            total_tokens: json.get("total_tokens").and_then(|v| v.as_u64()),
+            cache_read_tokens: json.get("cache_read_tokens").and_then(|v| v.as_u64()),
+            cache_creation_tokens: json.get("cache_creation_tokens").and_then(|v| v.as_u64()),
+            reasoning_tokens: json.get("reasoning_tokens").and_then(|v| v.as_u64()),
+            source: engine_name.to_string(),
+        });
+    }
+
+    if let Some(usage) = json.get("usage") {
+        // Pattern 2: {"usage": {"input_tokens": N, "output_tokens": N}}
+        if let (Some(input), Some(output)) = (
+            usage.get("input_tokens").and_then(|v| v.as_u64()),
+            usage.get("output_tokens").and_then(|v| v.as_u64()),
+        ) {
+            return Some(TokenUsage {
+                input_tokens: input,
+                output_tokens: output,
+                total_tokens: usage.get("total_tokens").and_then(|v| v.as_u64()),
+                cache_read_tokens: usage.get("cache_read_tokens").and_then(|v| v.as_u64()),
+                cache_creation_tokens: usage.get("cache_creation_tokens").and_then(|v| v.as_u64()),
+                reasoning_tokens: usage.get("reasoning_tokens").and_then(|v| v.as_u64()),
+                source: engine_name.to_string(),
+            });
+        }
+
+        // Pattern 3: OpenAI/Codex {"usage": {"prompt_tokens": N, "completion_tokens": N}}
+        if let (Some(input), Some(output)) = (
+            usage.get("prompt_tokens").and_then(|v| v.as_u64()),
+            usage.get("completion_tokens").and_then(|v| v.as_u64()),
+        ) {
+            let total = usage.get("total_tokens").and_then(|v| v.as_u64());
+            return Some(TokenUsage {
+                input_tokens: input,
+                output_tokens: output,
+                total_tokens: total,
+                cache_read_tokens: None,
+                cache_creation_tokens: None,
+                reasoning_tokens: usage.get("reasoning_tokens").and_then(|v| v.as_u64()),
+                source: engine_name.to_string(),
+            });
+        }
+    }
+
+    None
+}
+
+/// Classify a single text line into an `AgentEventPayload`.
+fn classify_line(line: &str, engine_name: &str) -> AgentEventPayload {
+    if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(line) {
+        // Check if this JSON event represents token usage
+        if let Some(usage) = detect_token_usage(&json_val, engine_name) {
+            AgentEventPayload::TokenUsageLine(usage)
+        } else {
+            AgentEventPayload::JsonLine(json_val)
+        }
+    } else {
+        AgentEventPayload::RawLine(line.to_string())
+    }
+}
+
+/// Classify `RunResult` stdout/stderr into typed `AgentEventPayload` events.
+fn classify_run_result_to_events(
+    result: aikit_sdk::RunResult,
+    engine_name: &str,
+) -> Vec<AikitEventRecord> {
     let mut events = Vec::new();
     let mut seq: u64 = 0;
 
-    // Process stdout lines as events
+    // Classify stdout lines as typed events
     if !result.stdout.is_empty() {
         let stdout_str = String::from_utf8_lossy(&result.stdout);
         for line in stdout_str.lines() {
-            let payload = if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(line) {
-                json_val
-            } else {
-                serde_json::Value::String(line.to_string())
-            };
+            let payload = classify_line(line, engine_name);
             events.push(AikitEventRecord {
                 seq,
                 stream: "stdout".to_string(),
@@ -187,15 +316,11 @@ fn convert_run_result_to_events(result: aikit_sdk::RunResult) -> Vec<AikitEventR
         }
     }
 
-    // Process stderr lines as events
+    // Classify stderr lines as typed events
     if !result.stderr.is_empty() {
         let stderr_str = String::from_utf8_lossy(&result.stderr);
         for line in stderr_str.lines() {
-            let payload = if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(line) {
-                json_val
-            } else {
-                serde_json::Value::String(line.to_string())
-            };
+            let payload = classify_line(line, engine_name);
             events.push(AikitEventRecord {
                 seq,
                 stream: "stderr".to_string(),
@@ -208,18 +333,25 @@ fn convert_run_result_to_events(result: aikit_sdk::RunResult) -> Vec<AikitEventR
     events
 }
 
-/// Extract text for signal matching from an AikitEventRecord payload.
-/// Follows deterministic field extraction order:
-/// For JSON payloads: .content → .result.result → .result → .part.text
-/// For raw string payloads: use value as-is
+/// Extract text for signal matching from an `AikitEventRecord`.
+///
+/// Follows the deterministic rule order from spec section 4:
+/// 1. `RawLine` → use raw string as-is
+/// 2. `JsonLine` → ordered field extraction: `.content` → `.result.result` → `.result` → `.part.text`
+/// 3. `RawBytes` → None (MUST NOT participate in signal matching)
+/// 4. `TokenUsageLine` → None (MUST NOT participate in signal matching)
 pub fn extract_text_from_event(record: &AikitEventRecord) -> Option<String> {
     match &record.payload {
-        serde_json::Value::String(s) => Some(s.clone()),
-        json_val => extract_text_from_json(json_val),
+        AgentEventPayload::RawLine(s) => Some(s.clone()),
+        AgentEventPayload::JsonLine(json) => extract_text_from_json(json),
+        AgentEventPayload::RawBytes(_) => None,
+        AgentEventPayload::TokenUsageLine(_) => None,
     }
 }
 
 /// Extract candidate text from a JSON payload using ordered field lookup.
+///
+/// Order: `.content` (string) → `.result.result` (string) → `.result` (string) → `.part.text` (string)
 pub fn extract_text_from_json(json: &serde_json::Value) -> Option<String> {
     // .content (string)
     if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
@@ -250,7 +382,7 @@ pub fn extract_text_from_json(json: &serde_json::Value) -> Option<String> {
 
 /// Extract text content from a stream-json line.
 /// Returns the original line if parsing fails or the line is not a content type.
-/// Used by the command (passthrough) engine.
+/// Used by the command (passthrough) engine only.
 pub fn extract_text_from_stream_json(line: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(line).ok()?;
     // OpenCode run --format json: type "text" with part.text

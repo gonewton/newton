@@ -6,8 +6,9 @@ use crate::core::workflow_graph::expression::{EvaluationContext, ExpressionEngin
 use crate::core::workflow_graph::operator::{ExecutionContext, Operator};
 use crate::core::workflow_graph::operators::engine::passthrough::PassthroughDriver;
 use crate::core::workflow_graph::operators::engine::{
-    extract_text_from_event, extract_text_from_stream_json, AikitEngineManager, AikitEventRecord,
-    DriverConfig, EngineDriver, EngineInvocation, OutputFormat, PromptSource,
+    extract_text_from_event, extract_text_from_stream_json, AgentEventPayload, AikitEngineManager,
+    AikitEventRecord, DriverConfig, EngineDriver, EngineInvocation, OutputFormat, PromptSource,
+    TokenUsage,
 };
 use crate::core::workflow_graph::state::GraphSettings;
 use async_trait::async_trait;
@@ -356,6 +357,10 @@ impl Operator for AgentOperator {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| stderr_abs_path.to_string_lossy().to_string());
 
+        // token_usage and events_artifact are only set for AI engine (SDK) paths
+        let mut sdk_token_usage: Option<TokenUsage> = None;
+        let mut sdk_events_artifact: Option<String> = None;
+
         let (signal, signal_data, exit_code, final_iteration) = if engine_name == "command" {
             // Command engine: use PassthroughDriver and subprocess execution
             let resolved_engine_command = match &config.engine_command {
@@ -442,7 +447,10 @@ impl Operator for AgentOperator {
                 .map(Duration::from_secs)
                 .unwrap_or_else(|| Duration::from_secs(self.settings.max_time_seconds));
 
-            execute_sdk_engine(
+            // Path for the NDJSON events artifact
+            let events_ndjson_abs_path = task_artifact_dir.join("events.ndjson");
+
+            let sdk_result = execute_sdk_engine(
                 &self.engine_manager,
                 &engine_name,
                 &prompt,
@@ -451,9 +459,21 @@ impl Operator for AgentOperator {
                 &compiled_signals,
                 &stdout_abs_path,
                 &stderr_abs_path,
+                &events_ndjson_abs_path,
+                &self.workspace_root,
                 timeout_duration,
             )
-            .await?
+            .await?;
+
+            sdk_token_usage = sdk_result.token_usage;
+            sdk_events_artifact = sdk_result.events_artifact_path;
+
+            (
+                sdk_result.signal,
+                sdk_result.signal_data,
+                sdk_result.exit_code,
+                sdk_result.iteration,
+            )
         };
 
         // Determine stderr artifact
@@ -507,6 +527,27 @@ impl Operator for AgentOperator {
             );
         }
 
+        // AI engine SDK outputs: token_usage and events_artifact
+        if let Some(usage) = sdk_token_usage {
+            let usage_obj = serde_json::json!({
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "total_tokens": usage.total_tokens,
+                "cache_read_tokens": usage.cache_read_tokens,
+                "cache_creation_tokens": usage.cache_creation_tokens,
+                "reasoning_tokens": usage.reasoning_tokens,
+                "source": usage.source,
+            });
+            output_map.insert("token_usage".to_string(), usage_obj);
+        } else if engine_name != "command" {
+            // For AI engines with no token usage events, set to null
+            output_map.insert("token_usage".to_string(), Value::Null);
+        }
+
+        if let Some(events_path) = sdk_events_artifact {
+            output_map.insert("events_artifact".to_string(), Value::String(events_path));
+        }
+
         Ok(Value::Object(output_map))
     }
 }
@@ -531,7 +572,18 @@ fn resolve_prompt(
     }
 }
 
+/// Result of SDK engine execution (signal, signal_data, exit_code, iteration, token_usage, events_artifact_rel_path).
+struct SdkExecResult {
+    signal: Option<String>,
+    signal_data: HashMap<String, String>,
+    exit_code: i32,
+    iteration: u32,
+    token_usage: Option<TokenUsage>,
+    events_artifact_path: Option<String>,
+}
+
 /// Execute an AI engine via aikit-sdk, handling loop mode and signal matching.
+/// Writes a NDJSON events artifact and accumulates token usage from TokenUsageLine events.
 #[allow(clippy::too_many_arguments)]
 async fn execute_sdk_engine(
     manager: &AikitEngineManager,
@@ -542,8 +594,10 @@ async fn execute_sdk_engine(
     compiled_signals: &IndexMap<String, Regex>,
     stdout_path: &std::path::Path,
     stderr_path: &std::path::Path,
+    events_ndjson_path: &std::path::Path,
+    workspace_root: &std::path::Path,
     timeout: Duration,
-) -> Result<(Option<String>, HashMap<String, String>, i32, u32), AppError> {
+) -> Result<SdkExecResult, AppError> {
     use std::io::Write;
 
     let max_iters = if config.loop_mode {
@@ -557,6 +611,28 @@ async fn execute_sdk_engine(
     let mut last_signal_data: HashMap<String, String> = HashMap::new();
     let last_exit_code: i32 = 0;
     let start = Instant::now();
+
+    // Accumulated token usage across all iterations
+    let mut accumulated_input_tokens: u64 = 0;
+    let mut accumulated_output_tokens: u64 = 0;
+    let mut accumulated_cache_read: Option<u64> = None;
+    let mut accumulated_cache_creation: Option<u64> = None;
+    let mut accumulated_reasoning: Option<u64> = None;
+    let mut has_token_usage = false;
+    let mut token_source = engine_name.to_string();
+
+    // NDJSON events artifact writer (opened once, appended across iterations)
+    let mut events_ndjson_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(events_ndjson_path)
+        .map_err(|e| {
+            AppError::new(
+                ErrorCategory::IoError,
+                format!("failed to open events NDJSON artifact: {}", e),
+            )
+            .with_code("WFG-SDK-003")
+        })?;
 
     loop {
         iteration += 1;
@@ -609,25 +685,57 @@ async fn execute_sdk_engine(
         let mut signal_data_found: HashMap<String, String> = HashMap::new();
 
         for event in &events {
-            // Write event text to stdout artifact
-            if let Some(text) = extract_text_from_event(event) {
-                if stdout_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
-                    let _ = stdout_file.write_all(text.as_bytes());
-                    let _ = stdout_file.write_all(b"\n");
-                    stdout_bytes += text.len() + 1;
-                }
+            // Write every event to NDJSON artifact (all variants)
+            let event_json = event.to_json_value().to_string();
+            let _ = events_ndjson_file.write_all(event_json.as_bytes());
+            let _ = events_ndjson_file.write_all(b"\n");
 
-                // Signal matching (only stdout/stderr raw lines and JSON lines participate)
-                if signal_found.is_none() {
-                    if let Some((sig_name, sig_data)) = match_signals(&text, compiled_signals) {
-                        signal_found = Some(sig_name);
-                        signal_data_found = sig_data;
+            match &event.payload {
+                AgentEventPayload::TokenUsageLine(usage) => {
+                    // Accumulate token usage; TokenUsageLine MUST NOT participate in signal matching
+                    accumulated_input_tokens += usage.input_tokens;
+                    accumulated_output_tokens += usage.output_tokens;
+                    if let Some(v) = usage.cache_read_tokens {
+                        *accumulated_cache_read.get_or_insert(0) += v;
+                    }
+                    if let Some(v) = usage.cache_creation_tokens {
+                        *accumulated_cache_creation.get_or_insert(0) += v;
+                    }
+                    if let Some(v) = usage.reasoning_tokens {
+                        *accumulated_reasoning.get_or_insert(0) += v;
+                    }
+                    token_source = usage.source.clone();
+                    has_token_usage = true;
+                }
+                AgentEventPayload::RawBytes(_) => {
+                    // RawBytes MUST NOT participate in signal matching; no stdout artifact write
+                }
+                _ => {
+                    // RawLine and JsonLine: write to stdout artifact and attempt signal matching
+                    if let Some(text) = extract_text_from_event(event) {
+                        if event.stream == "stdout"
+                            && stdout_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES
+                        {
+                            let _ = stdout_file.write_all(text.as_bytes());
+                            let _ = stdout_file.write_all(b"\n");
+                            stdout_bytes += text.len() + 1;
+                        }
+
+                        // Both stdout and stderr events participate in signal matching
+                        if signal_found.is_none() {
+                            if let Some((sig_name, sig_data)) =
+                                match_signals(&text, compiled_signals)
+                            {
+                                signal_found = Some(sig_name);
+                                signal_data_found = sig_data;
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // Write stderr events to stderr artifact
+        // Write stderr events (non-token, non-binary) to stderr artifact
         let stderr_events: Vec<&AikitEventRecord> =
             events.iter().filter(|e| e.stream == "stderr").collect();
         if !stderr_events.is_empty() {
@@ -643,14 +751,24 @@ async fn execute_sdk_engine(
                 })?;
             let mut stderr_bytes: usize = 0;
             for event in &stderr_events {
-                let text = match &event.payload {
-                    serde_json::Value::String(s) => s.clone(),
-                    v => v.to_string(),
-                };
-                if stderr_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
-                    let _ = stderr_file.write_all(text.as_bytes());
-                    let _ = stderr_file.write_all(b"\n");
-                    stderr_bytes += text.len() + 1;
+                // Only write RawLine/JsonLine to stderr artifact; skip RawBytes and TokenUsageLine
+                match &event.payload {
+                    AgentEventPayload::RawLine(s) => {
+                        if stderr_bytes + s.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
+                            let _ = stderr_file.write_all(s.as_bytes());
+                            let _ = stderr_file.write_all(b"\n");
+                            stderr_bytes += s.len() + 1;
+                        }
+                    }
+                    AgentEventPayload::JsonLine(v) => {
+                        let text = v.to_string();
+                        if stderr_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
+                            let _ = stderr_file.write_all(text.as_bytes());
+                            let _ = stderr_file.write_all(b"\n");
+                            stderr_bytes += text.len() + 1;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -666,7 +784,35 @@ async fn execute_sdk_engine(
         }
     }
 
-    Ok((last_signal, last_signal_data, last_exit_code, iteration))
+    // Build token_usage output if any TokenUsageLine events were seen
+    let token_usage = if has_token_usage {
+        Some(TokenUsage {
+            input_tokens: accumulated_input_tokens,
+            output_tokens: accumulated_output_tokens,
+            total_tokens: Some(accumulated_input_tokens + accumulated_output_tokens),
+            cache_read_tokens: accumulated_cache_read,
+            cache_creation_tokens: accumulated_cache_creation,
+            reasoning_tokens: accumulated_reasoning,
+            source: token_source,
+        })
+    } else {
+        None
+    };
+
+    // Compute relative path to events artifact
+    let events_artifact_path = events_ndjson_path
+        .strip_prefix(workspace_root)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| events_ndjson_path.to_string_lossy().to_string());
+
+    Ok(SdkExecResult {
+        signal: last_signal,
+        signal_data: last_signal_data,
+        exit_code: last_exit_code,
+        iteration,
+        token_usage,
+        events_artifact_path: Some(events_artifact_path),
+    })
 }
 
 /// Interpolate template expressions in env values.
