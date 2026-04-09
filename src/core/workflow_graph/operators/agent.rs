@@ -6,9 +6,8 @@ use crate::core::workflow_graph::expression::{EvaluationContext, ExpressionEngin
 use crate::core::workflow_graph::operator::{ExecutionContext, Operator};
 use crate::core::workflow_graph::operators::engine::passthrough::PassthroughDriver;
 use crate::core::workflow_graph::operators::engine::{
-    extract_text_from_event, extract_text_from_stream_json, AgentEventPayload, AikitEngineManager,
-    AikitEventRecord, DriverConfig, EngineDriver, EngineInvocation, OutputFormat, PromptSource,
-    TokenUsage,
+    extract_text_from_event, extract_text_from_stream_json, AikitEngineManager, AikitEventRecord,
+    DriverConfig, EngineDriver, EngineInvocation, OutputFormat, PromptSource,
 };
 use crate::core::workflow_graph::state::GraphSettings;
 use async_trait::async_trait;
@@ -357,8 +356,8 @@ impl Operator for AgentOperator {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| stderr_abs_path.to_string_lossy().to_string());
 
-        // token_usage and events_artifact are only set for AI engine (SDK) paths
-        let mut sdk_token_usage: Option<TokenUsage> = None;
+        // events_artifact is only set for AI engine (SDK) paths
+        // token_usage is not available until aikit-sdk provides run_agent_events (requires v0.1.75+)
         let mut sdk_events_artifact: Option<String> = None;
 
         let (signal, signal_data, exit_code, final_iteration) = if engine_name == "command" {
@@ -465,7 +464,6 @@ impl Operator for AgentOperator {
             )
             .await?;
 
-            sdk_token_usage = sdk_result.token_usage;
             sdk_events_artifact = sdk_result.events_artifact_path;
 
             (
@@ -527,20 +525,9 @@ impl Operator for AgentOperator {
             );
         }
 
-        // AI engine SDK outputs: token_usage and events_artifact
-        if let Some(usage) = sdk_token_usage {
-            let usage_obj = serde_json::json!({
-                "input_tokens": usage.input_tokens,
-                "output_tokens": usage.output_tokens,
-                "total_tokens": usage.total_tokens,
-                "cache_read_tokens": usage.cache_read_tokens,
-                "cache_creation_tokens": usage.cache_creation_tokens,
-                "reasoning_tokens": usage.reasoning_tokens,
-                "source": usage.source,
-            });
-            output_map.insert("token_usage".to_string(), usage_obj);
-        } else if engine_name != "command" {
-            // For AI engines with no token usage events, set to null
+        // AI engine SDK outputs: token_usage (null until aikit-sdk v0.1.75+ run_agent_events) and events_artifact
+        if engine_name != "command" {
+            // token_usage will be populated from SDK TokenUsageLine events once run_agent_events is available
             output_map.insert("token_usage".to_string(), Value::Null);
         }
 
@@ -572,13 +559,12 @@ fn resolve_prompt(
     }
 }
 
-/// Result of SDK engine execution (signal, signal_data, exit_code, iteration, token_usage, events_artifact_rel_path).
+/// Result of SDK engine execution (signal, signal_data, exit_code, iteration, events_artifact_rel_path).
 struct SdkExecResult {
     signal: Option<String>,
     signal_data: HashMap<String, String>,
     exit_code: i32,
     iteration: u32,
-    token_usage: Option<TokenUsage>,
     events_artifact_path: Option<String>,
 }
 
@@ -611,15 +597,6 @@ async fn execute_sdk_engine(
     let mut last_signal_data: HashMap<String, String> = HashMap::new();
     let last_exit_code: i32 = 0;
     let start = Instant::now();
-
-    // Accumulated token usage across all iterations
-    let mut accumulated_input_tokens: u64 = 0;
-    let mut accumulated_output_tokens: u64 = 0;
-    let mut accumulated_cache_read: Option<u64> = None;
-    let mut accumulated_cache_creation: Option<u64> = None;
-    let mut accumulated_reasoning: Option<u64> = None;
-    let mut has_token_usage = false;
-    let mut token_source = engine_name.to_string();
 
     // NDJSON events artifact writer (opened once, appended across iterations)
     let mut events_ndjson_file = std::fs::OpenOptions::new()
@@ -685,57 +662,48 @@ async fn execute_sdk_engine(
         let mut signal_data_found: HashMap<String, String> = HashMap::new();
 
         for event in &events {
-            // Write every event to NDJSON artifact (all variants)
+            // Write every event to NDJSON artifact
             let event_json = event.to_json_value().to_string();
-            let _ = events_ndjson_file.write_all(event_json.as_bytes());
-            let _ = events_ndjson_file.write_all(b"\n");
+            events_ndjson_file
+                .write_all(event_json.as_bytes())
+                .and_then(|_| events_ndjson_file.write_all(b"\n"))
+                .map_err(|e| {
+                    AppError::new(
+                        ErrorCategory::IoError,
+                        format!("failed to write event to NDJSON artifact: {}", e),
+                    )
+                    .with_code("WFG-SDK-003")
+                })?;
 
-            match &event.payload {
-                AgentEventPayload::TokenUsageLine(usage) => {
-                    // Accumulate token usage; TokenUsageLine MUST NOT participate in signal matching
-                    accumulated_input_tokens += usage.input_tokens;
-                    accumulated_output_tokens += usage.output_tokens;
-                    if let Some(v) = usage.cache_read_tokens {
-                        *accumulated_cache_read.get_or_insert(0) += v;
-                    }
-                    if let Some(v) = usage.cache_creation_tokens {
-                        *accumulated_cache_creation.get_or_insert(0) += v;
-                    }
-                    if let Some(v) = usage.reasoning_tokens {
-                        *accumulated_reasoning.get_or_insert(0) += v;
-                    }
-                    token_source = usage.source.clone();
-                    has_token_usage = true;
-                }
-                AgentEventPayload::RawBytes(_) => {
-                    // RawBytes MUST NOT participate in signal matching; no stdout artifact write
-                }
-                _ => {
-                    // RawLine and JsonLine: write to stdout artifact and attempt signal matching
-                    if let Some(text) = extract_text_from_event(event) {
-                        if event.stream == "stdout"
-                            && stdout_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES
-                        {
-                            let _ = stdout_file.write_all(text.as_bytes());
-                            let _ = stdout_file.write_all(b"\n");
-                            stdout_bytes += text.len() + 1;
-                        }
+            // Determine event type from payload's "type" field
+            let payload_type = event.payload.get("type").and_then(|t| t.as_str());
 
-                        // Both stdout and stderr events participate in signal matching
-                        if signal_found.is_none() {
-                            if let Some((sig_name, sig_data)) =
-                                match_signals(&text, compiled_signals)
-                            {
-                                signal_found = Some(sig_name);
-                                signal_data_found = sig_data;
-                            }
-                        }
+            // TokenUsageLine and RawBytes MUST NOT participate in signal matching or stdout artifact
+            if matches!(payload_type, Some("TokenUsageLine") | Some("RawBytes")) {
+                continue;
+            }
+
+            // RawLine and JsonLine: write to stdout artifact and attempt signal matching
+            if let Some(text) = extract_text_from_event(event) {
+                if event.stream == "stdout"
+                    && stdout_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES
+                {
+                    let _ = stdout_file.write_all(text.as_bytes());
+                    let _ = stdout_file.write_all(b"\n");
+                    stdout_bytes += text.len() + 1;
+                }
+
+                // Both stdout and stderr events participate in signal matching
+                if signal_found.is_none() {
+                    if let Some((sig_name, sig_data)) = match_signals(&text, compiled_signals) {
+                        signal_found = Some(sig_name);
+                        signal_data_found = sig_data;
                     }
                 }
             }
         }
 
-        // Write stderr events (non-token, non-binary) to stderr artifact
+        // Write stderr events (non-binary, non-token) to stderr artifact
         let stderr_events: Vec<&AikitEventRecord> =
             events.iter().filter(|e| e.stream == "stderr").collect();
         if !stderr_events.is_empty() {
@@ -751,21 +719,26 @@ async fn execute_sdk_engine(
                 })?;
             let mut stderr_bytes: usize = 0;
             for event in &stderr_events {
-                // Only write RawLine/JsonLine to stderr artifact; skip RawBytes and TokenUsageLine
-                match &event.payload {
-                    AgentEventPayload::RawLine(s) => {
-                        if stderr_bytes + s.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
-                            let _ = stderr_file.write_all(s.as_bytes());
-                            let _ = stderr_file.write_all(b"\n");
-                            stderr_bytes += s.len() + 1;
+                let payload_type = event.payload.get("type").and_then(|t| t.as_str());
+                // Only write RawLine/JsonLine to stderr artifact
+                match payload_type {
+                    Some("RawLine") => {
+                        if let Some(s) = event.payload.get("data").and_then(|d| d.as_str()) {
+                            if stderr_bytes + s.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
+                                let _ = stderr_file.write_all(s.as_bytes());
+                                let _ = stderr_file.write_all(b"\n");
+                                stderr_bytes += s.len() + 1;
+                            }
                         }
                     }
-                    AgentEventPayload::JsonLine(v) => {
-                        let text = v.to_string();
-                        if stderr_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
-                            let _ = stderr_file.write_all(text.as_bytes());
-                            let _ = stderr_file.write_all(b"\n");
-                            stderr_bytes += text.len() + 1;
+                    Some("JsonLine") => {
+                        if let Some(v) = event.payload.get("data") {
+                            let text = v.to_string();
+                            if stderr_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
+                                let _ = stderr_file.write_all(text.as_bytes());
+                                let _ = stderr_file.write_all(b"\n");
+                                stderr_bytes += text.len() + 1;
+                            }
                         }
                     }
                     _ => {}
@@ -784,21 +757,6 @@ async fn execute_sdk_engine(
         }
     }
 
-    // Build token_usage output if any TokenUsageLine events were seen
-    let token_usage = if has_token_usage {
-        Some(TokenUsage {
-            input_tokens: accumulated_input_tokens,
-            output_tokens: accumulated_output_tokens,
-            total_tokens: Some(accumulated_input_tokens + accumulated_output_tokens),
-            cache_read_tokens: accumulated_cache_read,
-            cache_creation_tokens: accumulated_cache_creation,
-            reasoning_tokens: accumulated_reasoning,
-            source: token_source,
-        })
-    } else {
-        None
-    };
-
     // Compute relative path to events artifact
     let events_artifact_path = events_ndjson_path
         .strip_prefix(workspace_root)
@@ -810,7 +768,6 @@ async fn execute_sdk_engine(
         signal_data: last_signal_data,
         exit_code: last_exit_code,
         iteration,
-        token_usage,
         events_artifact_path: Some(events_artifact_path),
     })
 }

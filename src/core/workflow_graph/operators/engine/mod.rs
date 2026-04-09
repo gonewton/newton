@@ -71,66 +71,44 @@ pub fn default_registry() -> HashMap<String, Box<dyn EngineDriver>> {
     m
 }
 
-/// Token usage metrics emitted by AI engine execution.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TokenUsage {
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub total_tokens: Option<u64>,
-    pub cache_read_tokens: Option<u64>,
-    pub cache_creation_tokens: Option<u64>,
-    pub reasoning_tokens: Option<u64>,
-    /// Engine key that produced this usage (codex|claude|gemini|opencode|agent).
-    pub source: String,
-}
-
-/// Typed event payload from AI engine output — mirrors the aikit-sdk AgentEventPayload contract.
-///
-/// Processing rules:
-/// - `RawLine`: use raw string as-is for signal matching
-/// - `JsonLine`: extract text via ordered field lookup (.content → .result.result → .result → .part.text)
-/// - `RawBytes`: MUST NOT participate in signal matching
-/// - `TokenUsageLine`: MUST NOT participate in signal matching; used for token usage accounting
-#[derive(Debug, Clone)]
-pub enum AgentEventPayload {
-    /// Structured JSON output line from the engine.
-    JsonLine(serde_json::Value),
-    /// Plain text output line from the engine.
-    RawLine(String),
-    /// Binary output (excluded from signal matching).
-    RawBytes(Vec<u8>),
-    /// Provider token usage metrics (excluded from signal matching).
-    TokenUsageLine(TokenUsage),
-}
-
 /// A record representing a single typed event from an AI engine execution.
+///
+/// The `payload` field stores a raw JSON value following the SDK's AgentEventPayload naming:
+/// - `{"type": "JsonLine", "data": {...}}` — structured JSON output line
+/// - `{"type": "RawLine", "data": "..."}` — plain text output line
+/// - `{"type": "RawBytes", "length": N}` — binary output (excluded from signal matching)
+/// - `{"type": "TokenUsageLine", "data": {...}}` — provider token usage metrics (excluded from signal matching)
+///
+/// This layout matches the `aikit-sdk` AgentEventPayload contract and is ready for direct
+/// consumption once the SDK provides `run_agent_events` (requires aikit-sdk v0.1.75+).
 #[derive(Debug, Clone)]
 pub struct AikitEventRecord {
     pub seq: u64,
     /// "stdout" or "stderr"
     pub stream: String,
-    pub payload: AgentEventPayload,
+    /// Raw AgentEventPayload JSON — use SDK naming for type field.
+    pub payload: serde_json::Value,
 }
 
 impl AikitEventRecord {
     /// Serialize this record to a JSON value for NDJSON artifact writing.
     pub fn to_json_value(&self) -> serde_json::Value {
         use serde_json::json;
-        let payload_json = match &self.payload {
-            AgentEventPayload::JsonLine(v) => json!({"type": "JsonLine", "data": v}),
-            AgentEventPayload::RawLine(s) => json!({"type": "RawLine", "data": s}),
-            AgentEventPayload::RawBytes(b) => json!({"type": "RawBytes", "length": b.len()}),
-            AgentEventPayload::TokenUsageLine(u) => json!({"type": "TokenUsageLine", "data": u}),
-        };
         json!({
             "seq": self.seq,
             "stream": self.stream,
-            "payload": payload_json,
+            "payload": self.payload,
         })
     }
 }
 
 /// Manages AI engine execution by delegating to aikit-sdk.
+///
+/// Currently wraps `aikit_sdk::run_agent` (available in aikit-sdk v0.1.49).
+/// Full delegation to `aikit_sdk::run_agent_events` with typed `AgentEventPayload`
+/// requires aikit-sdk v0.1.75+. Once that version is available, replace the
+/// `run_agent` call in `execute_engine_events` with `run_agent_events` and
+/// remove the manual stdout/stderr conversion below.
 pub struct AikitEngineManager {
     pub workspace_root: PathBuf,
 }
@@ -140,10 +118,14 @@ impl AikitEngineManager {
         Ok(Self { workspace_root })
     }
 
-    /// Execute an AI engine via aikit-sdk and return collected typed events.
+    /// Execute an AI engine via aikit-sdk and return collected event records.
     ///
-    /// Delegates to `aikit_sdk::run_agent` and classifies output lines into
-    /// `AgentEventPayload` variants (`JsonLine`, `RawLine`, `TokenUsageLine`).
+    /// Delegates to `aikit_sdk::run_agent`. Each stdout/stderr line is converted
+    /// to an `AikitEventRecord` with a `serde_json::Value` payload using the SDK's
+    /// AgentEventPayload naming convention (`JsonLine` / `RawLine`).
+    ///
+    /// NOTE: Full event-stream delegation via `run_agent_events` requires aikit-sdk
+    /// v0.1.75+. Until then, `run_agent` is used as the available SDK entry point.
     pub async fn execute_engine_events(
         &self,
         engine_name: &str,
@@ -183,14 +165,14 @@ impl AikitEngineManager {
         })?
         .map_err(map_run_error)?;
 
-        // Classify RunResult output into typed AgentEventPayload events
-        let events = classify_run_result_to_events(result, engine_name);
+        // Convert run_agent output to AikitEventRecord using SDK AgentEventPayload naming.
+        // Each line becomes a serde_json::Value payload; no Newton-owned typed enum.
+        let events = run_result_to_event_records(result, engine_name);
         Ok(events)
     }
 }
 
 /// Map aikit_sdk::RunError to Newton AppError with appropriate WFG-SDK codes.
-/// Exhaustively covers all RunError variants.
 pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
     match err {
         aikit_sdk::RunError::AgentNotRunnable(key) => AppError::new(
@@ -219,111 +201,39 @@ pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
     }
 }
 
-/// Attempt to detect token usage metadata in a JSON value.
+/// Convert `RunResult` stdout/stderr into `AikitEventRecord` values using SDK naming.
 ///
-/// Recognizes common patterns from AI providers:
-/// - Claude: `{"input_tokens": N, "output_tokens": N, ...}`
-/// - OpenAI/Codex: `{"usage": {"prompt_tokens": N, "completion_tokens": N, "total_tokens": N}}`
-/// - Generic nested: `{"usage": {"input_tokens": N, "output_tokens": N}}`
-fn detect_token_usage(json: &serde_json::Value, engine_name: &str) -> Option<TokenUsage> {
-    // Pattern 1: top-level input_tokens + output_tokens
-    if let (Some(input), Some(output)) = (
-        json.get("input_tokens").and_then(|v| v.as_u64()),
-        json.get("output_tokens").and_then(|v| v.as_u64()),
-    ) {
-        return Some(TokenUsage {
-            input_tokens: input,
-            output_tokens: output,
-            total_tokens: json.get("total_tokens").and_then(|v| v.as_u64()),
-            cache_read_tokens: json.get("cache_read_tokens").and_then(|v| v.as_u64()),
-            cache_creation_tokens: json.get("cache_creation_tokens").and_then(|v| v.as_u64()),
-            reasoning_tokens: json.get("reasoning_tokens").and_then(|v| v.as_u64()),
-            source: engine_name.to_string(),
-        });
-    }
-
-    if let Some(usage) = json.get("usage") {
-        // Pattern 2: {"usage": {"input_tokens": N, "output_tokens": N}}
-        if let (Some(input), Some(output)) = (
-            usage.get("input_tokens").and_then(|v| v.as_u64()),
-            usage.get("output_tokens").and_then(|v| v.as_u64()),
-        ) {
-            return Some(TokenUsage {
-                input_tokens: input,
-                output_tokens: output,
-                total_tokens: usage.get("total_tokens").and_then(|v| v.as_u64()),
-                cache_read_tokens: usage.get("cache_read_tokens").and_then(|v| v.as_u64()),
-                cache_creation_tokens: usage.get("cache_creation_tokens").and_then(|v| v.as_u64()),
-                reasoning_tokens: usage.get("reasoning_tokens").and_then(|v| v.as_u64()),
-                source: engine_name.to_string(),
-            });
-        }
-
-        // Pattern 3: OpenAI/Codex {"usage": {"prompt_tokens": N, "completion_tokens": N}}
-        if let (Some(input), Some(output)) = (
-            usage.get("prompt_tokens").and_then(|v| v.as_u64()),
-            usage.get("completion_tokens").and_then(|v| v.as_u64()),
-        ) {
-            let total = usage.get("total_tokens").and_then(|v| v.as_u64());
-            return Some(TokenUsage {
-                input_tokens: input,
-                output_tokens: output,
-                total_tokens: total,
-                cache_read_tokens: None,
-                cache_creation_tokens: None,
-                reasoning_tokens: usage.get("reasoning_tokens").and_then(|v| v.as_u64()),
-                source: engine_name.to_string(),
-            });
-        }
-    }
-
-    None
-}
-
-/// Classify a single text line into an `AgentEventPayload`.
-fn classify_line(line: &str, engine_name: &str) -> AgentEventPayload {
-    if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(line) {
-        // Check if this JSON event represents token usage
-        if let Some(usage) = detect_token_usage(&json_val, engine_name) {
-            AgentEventPayload::TokenUsageLine(usage)
-        } else {
-            AgentEventPayload::JsonLine(json_val)
-        }
-    } else {
-        AgentEventPayload::RawLine(line.to_string())
-    }
-}
-
-/// Classify `RunResult` stdout/stderr into typed `AgentEventPayload` events.
-fn classify_run_result_to_events(
+/// Each line is converted to a `serde_json::Value` payload:
+/// - Lines that parse as JSON → `{"type": "JsonLine", "data": <json>}`
+/// - Plain text lines → `{"type": "RawLine", "data": "<line>"}`
+///
+/// This produces the event record format that `run_agent_events` would emit directly
+/// once aikit-sdk v0.1.75+ is available.
+fn run_result_to_event_records(
     result: aikit_sdk::RunResult,
-    engine_name: &str,
+    _engine_name: &str,
 ) -> Vec<AikitEventRecord> {
+    use serde_json::json;
     let mut events = Vec::new();
     let mut seq: u64 = 0;
 
-    // Classify stdout lines as typed events
-    if !result.stdout.is_empty() {
-        let stdout_str = String::from_utf8_lossy(&result.stdout);
-        for line in stdout_str.lines() {
-            let payload = classify_line(line, engine_name);
-            events.push(AikitEventRecord {
-                seq,
-                stream: "stdout".to_string(),
-                payload,
-            });
-            seq += 1;
+    for (raw_bytes, stream_label) in [
+        (result.stdout.as_slice(), "stdout"),
+        (result.stderr.as_slice(), "stderr"),
+    ] {
+        if raw_bytes.is_empty() {
+            continue;
         }
-    }
-
-    // Classify stderr lines as typed events
-    if !result.stderr.is_empty() {
-        let stderr_str = String::from_utf8_lossy(&result.stderr);
-        for line in stderr_str.lines() {
-            let payload = classify_line(line, engine_name);
+        let text = String::from_utf8_lossy(raw_bytes);
+        for line in text.lines() {
+            let payload = if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(line) {
+                json!({"type": "JsonLine", "data": json_val})
+            } else {
+                json!({"type": "RawLine", "data": line})
+            };
             events.push(AikitEventRecord {
                 seq,
-                stream: "stderr".to_string(),
+                stream: stream_label.to_string(),
                 payload,
             });
             seq += 1;
@@ -341,11 +251,19 @@ fn classify_run_result_to_events(
 /// 3. `RawBytes` → None (MUST NOT participate in signal matching)
 /// 4. `TokenUsageLine` → None (MUST NOT participate in signal matching)
 pub fn extract_text_from_event(record: &AikitEventRecord) -> Option<String> {
-    match &record.payload {
-        AgentEventPayload::RawLine(s) => Some(s.clone()),
-        AgentEventPayload::JsonLine(json) => extract_text_from_json(json),
-        AgentEventPayload::RawBytes(_) => None,
-        AgentEventPayload::TokenUsageLine(_) => None,
+    let payload_type = record.payload.get("type").and_then(|t| t.as_str())?;
+    match payload_type {
+        "RawLine" => record
+            .payload
+            .get("data")
+            .and_then(|d| d.as_str())
+            .map(str::to_string),
+        "JsonLine" => {
+            let data = record.payload.get("data")?;
+            extract_text_from_json(data)
+        }
+        // RawBytes and TokenUsageLine MUST NOT participate in signal matching
+        _ => None,
     }
 }
 
