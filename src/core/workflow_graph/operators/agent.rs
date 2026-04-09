@@ -6,8 +6,9 @@ use crate::core::workflow_graph::expression::{EvaluationContext, ExpressionEngin
 use crate::core::workflow_graph::operator::{ExecutionContext, Operator};
 use crate::core::workflow_graph::operators::engine::passthrough::PassthroughDriver;
 use crate::core::workflow_graph::operators::engine::{
-    extract_text_from_event, extract_text_from_stream_json, AikitEngineManager, AikitEventRecord,
-    DriverConfig, EngineDriver, EngineInvocation, OutputFormat, PromptSource,
+    extract_text_from_event, extract_text_from_stream_json, AgentEventPayload, AikitEngineManager,
+    AikitEventRecord, DriverConfig, EngineDriver, EngineInvocation, OutputFormat, PromptSource,
+    TokenUsageLine,
 };
 use crate::core::workflow_graph::state::GraphSettings;
 use async_trait::async_trait;
@@ -356,9 +357,10 @@ impl Operator for AgentOperator {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| stderr_abs_path.to_string_lossy().to_string());
 
-        // events_artifact is only set for AI engine (SDK) paths
-        // token_usage is not available until aikit-sdk provides run_agent_events (requires v0.1.75+)
+        // events_artifact and token_usage are only set for AI engine (SDK) paths
         let mut sdk_events_artifact: Option<String> = None;
+        // token_usage is accumulated from AgentEventPayload::TokenUsageLine events during SDK execution.
+        let mut sdk_events_token_usage: Option<TokenUsageLine> = None;
 
         let (signal, signal_data, exit_code, final_iteration) = if engine_name == "command" {
             // Command engine: use PassthroughDriver and subprocess execution
@@ -465,6 +467,7 @@ impl Operator for AgentOperator {
             .await?;
 
             sdk_events_artifact = sdk_result.events_artifact_path;
+            sdk_events_token_usage = sdk_result.token_usage;
 
             (
                 sdk_result.signal,
@@ -525,10 +528,16 @@ impl Operator for AgentOperator {
             );
         }
 
-        // AI engine SDK outputs: token_usage (null until aikit-sdk v0.1.75+ run_agent_events) and events_artifact
+        // AI engine SDK outputs: token_usage from AgentEventPayload::TokenUsageLine events,
+        // and events_artifact NDJSON path.
         if engine_name != "command" {
-            // token_usage will be populated from SDK TokenUsageLine events once run_agent_events is available
-            output_map.insert("token_usage".to_string(), Value::Null);
+            // Serialize token usage accumulated from TokenUsageLine events during execution.
+            // Value is null when the engine emitted no token usage events.
+            let token_usage_value = sdk_events_token_usage
+                .as_ref()
+                .and_then(|t| serde_json::to_value(t).ok())
+                .unwrap_or(Value::Null);
+            output_map.insert("token_usage".to_string(), token_usage_value);
         }
 
         if let Some(events_path) = sdk_events_artifact {
@@ -559,13 +568,16 @@ fn resolve_prompt(
     }
 }
 
-/// Result of SDK engine execution (signal, signal_data, exit_code, iteration, events_artifact_rel_path).
+/// Result of SDK engine execution (signal, signal_data, exit_code, iteration, events_artifact_rel_path, token_usage).
 struct SdkExecResult {
     signal: Option<String>,
     signal_data: HashMap<String, String>,
     exit_code: i32,
     iteration: u32,
     events_artifact_path: Option<String>,
+    /// Aggregated token usage from `AgentEventPayload::TokenUsageLine` events.
+    /// `None` if no token usage was emitted by the engine during execution.
+    token_usage: Option<TokenUsageLine>,
 }
 
 /// Execute an AI engine via aikit-sdk, handling loop mode and signal matching.
@@ -597,6 +609,8 @@ async fn execute_sdk_engine(
     let mut last_signal_data: HashMap<String, String> = HashMap::new();
     let last_exit_code: i32 = 0;
     let start = Instant::now();
+    // Accumulated token usage from AgentEventPayload::TokenUsageLine events across all iterations.
+    let mut accumulated_token_usage: Option<TokenUsageLine> = None;
 
     // NDJSON events artifact writer (opened once, appended across iterations)
     let mut events_ndjson_file = std::fs::OpenOptions::new()
@@ -675,15 +689,21 @@ async fn execute_sdk_engine(
                     .with_code("WFG-SDK-003")
                 })?;
 
-            // Determine event type from payload's "type" field
-            let payload_type = event.payload.get("type").and_then(|t| t.as_str());
-
-            // TokenUsageLine and RawBytes MUST NOT participate in signal matching or stdout artifact
-            if matches!(payload_type, Some("TokenUsageLine") | Some("RawBytes")) {
-                continue;
+            // Use typed AgentEventPayload matching per spec section 4 "Tick and Lifecycle Visibility Rules"
+            match &event.payload {
+                // TokenUsageLine: accumulate token usage; MUST NOT participate in signal matching
+                AgentEventPayload::TokenUsageLine(token_usage) => {
+                    accumulated_token_usage = Some(token_usage.clone());
+                    continue;
+                }
+                // RawBytes: MUST NOT participate in signal matching or stdout artifact
+                AgentEventPayload::RawBytes(_) => {
+                    continue;
+                }
+                // RawLine and JsonLine: write to stdout artifact and attempt signal matching
+                AgentEventPayload::RawLine(_) | AgentEventPayload::JsonLine(_) => {}
             }
 
-            // RawLine and JsonLine: write to stdout artifact and attempt signal matching
             if let Some(text) = extract_text_from_event(event) {
                 if event.stream == "stdout"
                     && stdout_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES
@@ -703,7 +723,7 @@ async fn execute_sdk_engine(
             }
         }
 
-        // Write stderr events (non-binary, non-token) to stderr artifact
+        // Write stderr events to stderr artifact — use typed enum matching
         let stderr_events: Vec<&AikitEventRecord> =
             events.iter().filter(|e| e.stream == "stderr").collect();
         if !stderr_events.is_empty() {
@@ -719,29 +739,24 @@ async fn execute_sdk_engine(
                 })?;
             let mut stderr_bytes: usize = 0;
             for event in &stderr_events {
-                let payload_type = event.payload.get("type").and_then(|t| t.as_str());
-                // Only write RawLine/JsonLine to stderr artifact
-                match payload_type {
-                    Some("RawLine") => {
-                        if let Some(s) = event.payload.get("data").and_then(|d| d.as_str()) {
-                            if stderr_bytes + s.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
-                                let _ = stderr_file.write_all(s.as_bytes());
-                                let _ = stderr_file.write_all(b"\n");
-                                stderr_bytes += s.len() + 1;
-                            }
+                // Only write RawLine/JsonLine to stderr artifact; skip TokenUsageLine and RawBytes
+                match &event.payload {
+                    AgentEventPayload::RawLine(s) => {
+                        if stderr_bytes + s.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
+                            let _ = stderr_file.write_all(s.as_bytes());
+                            let _ = stderr_file.write_all(b"\n");
+                            stderr_bytes += s.len() + 1;
                         }
                     }
-                    Some("JsonLine") => {
-                        if let Some(v) = event.payload.get("data") {
-                            let text = v.to_string();
-                            if stderr_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
-                                let _ = stderr_file.write_all(text.as_bytes());
-                                let _ = stderr_file.write_all(b"\n");
-                                stderr_bytes += text.len() + 1;
-                            }
+                    AgentEventPayload::JsonLine(v) => {
+                        let text = v.to_string();
+                        if stderr_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
+                            let _ = stderr_file.write_all(text.as_bytes());
+                            let _ = stderr_file.write_all(b"\n");
+                            stderr_bytes += text.len() + 1;
                         }
                     }
-                    _ => {}
+                    AgentEventPayload::TokenUsageLine(_) | AgentEventPayload::RawBytes(_) => {}
                 }
             }
         }
@@ -769,6 +784,7 @@ async fn execute_sdk_engine(
         exit_code: last_exit_code,
         iteration,
         events_artifact_path: Some(events_artifact_path),
+        token_usage: accumulated_token_usage,
     })
 }
 

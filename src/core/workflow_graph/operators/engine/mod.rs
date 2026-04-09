@@ -71,44 +71,91 @@ pub fn default_registry() -> HashMap<String, Box<dyn EngineDriver>> {
     m
 }
 
+/// Token usage metrics emitted by an AI engine execution.
+///
+/// Mirrors the `aikit-sdk` `TokenUsageLine` contract for SDK delegation.
+/// Once aikit-sdk v0.1.75+ is available, replace with direct SDK type.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TokenUsageLine {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: Option<u64>,
+    pub cache_read_tokens: Option<u64>,
+    pub cache_creation_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
+    pub source: String,
+}
+
+/// Typed SDK event payload — mirrors the `aikit-sdk` `AgentEventPayload` enum.
+///
+/// This enum is designed for direct replacement with the SDK type once
+/// `aikit-sdk v0.1.75+` provides `run_agent_events` with typed `AgentEventPayload`.
+/// Until then, Newton emits these typed variants from its own event parsing layer
+/// wrapping `aikit_sdk::run_agent`.
+///
+/// Variant semantics match the SDK contract:
+/// - `JsonLine` — structured JSON output from the engine
+/// - `RawLine` — plain text output line from the engine
+/// - `RawBytes` — binary output (MUST NOT participate in signal matching)
+/// - `TokenUsageLine` — provider token usage metrics (MUST NOT participate in signal matching)
+#[derive(Debug, Clone)]
+pub enum AgentEventPayload {
+    /// Structured JSON output line from the engine.
+    JsonLine(serde_json::Value),
+    /// Plain text output line from the engine.
+    RawLine(String),
+    /// Binary output — excluded from signal matching.
+    RawBytes(Vec<u8>),
+    /// Provider token usage metrics — excluded from signal matching.
+    TokenUsageLine(TokenUsageLine),
+}
+
 /// A record representing a single typed event from an AI engine execution.
 ///
-/// The `payload` field stores a raw JSON value following the SDK's AgentEventPayload naming:
-/// - `{"type": "JsonLine", "data": {...}}` — structured JSON output line
-/// - `{"type": "RawLine", "data": "..."}` — plain text output line
-/// - `{"type": "RawBytes", "length": N}` — binary output (excluded from signal matching)
-/// - `{"type": "TokenUsageLine", "data": {...}}` — provider token usage metrics (excluded from signal matching)
+/// The `payload` field holds a typed `AgentEventPayload` variant, mirroring
+/// the `aikit-sdk` `AgentEventPayload` contract for future SDK delegation.
 ///
-/// This layout matches the `aikit-sdk` AgentEventPayload contract and is ready for direct
-/// consumption once the SDK provides `run_agent_events` (requires aikit-sdk v0.1.75+).
+/// Once `aikit-sdk v0.1.75+` provides `run_agent_events`, replace the
+/// `run_agent`-based conversion in `execute_engine_events` with direct
+/// consumption of SDK-emitted `AgentEventPayload` values.
 #[derive(Debug, Clone)]
 pub struct AikitEventRecord {
     pub seq: u64,
     /// "stdout" or "stderr"
     pub stream: String,
-    /// Raw AgentEventPayload JSON — use SDK naming for type field.
-    pub payload: serde_json::Value,
+    /// Typed event payload — use `AgentEventPayload` variant matching, not JSON string checks.
+    pub payload: AgentEventPayload,
 }
 
 impl AikitEventRecord {
     /// Serialize this record to a JSON value for NDJSON artifact writing.
     pub fn to_json_value(&self) -> serde_json::Value {
         use serde_json::json;
+        let payload_json = match &self.payload {
+            AgentEventPayload::JsonLine(v) => json!({"type": "JsonLine", "data": v}),
+            AgentEventPayload::RawLine(s) => json!({"type": "RawLine", "data": s}),
+            AgentEventPayload::RawBytes(b) => json!({"type": "RawBytes", "length": b.len()}),
+            AgentEventPayload::TokenUsageLine(t) => {
+                json!({"type": "TokenUsageLine", "data": serde_json::to_value(t).unwrap_or(serde_json::Value::Null)})
+            }
+        };
         json!({
             "seq": self.seq,
             "stream": self.stream,
-            "payload": self.payload,
+            "payload": payload_json,
         })
     }
 }
 
 /// Manages AI engine execution by delegating to aikit-sdk.
 ///
-/// Currently wraps `aikit_sdk::run_agent` (available in aikit-sdk v0.1.49).
-/// Full delegation to `aikit_sdk::run_agent_events` with typed `AgentEventPayload`
-/// requires aikit-sdk v0.1.75+. Once that version is available, replace the
-/// `run_agent` call in `execute_engine_events` with `run_agent_events` and
-/// remove the manual stdout/stderr conversion below.
+/// Currently wraps `aikit_sdk::run_agent` (available in aikit-sdk v0.1.49) and
+/// emits typed `AgentEventPayload` variants from the parsed output.
+///
+/// Once `aikit-sdk v0.1.75+` provides `run_agent_events` with native
+/// `AgentEventPayload` emission (including `TokenUsageLine`), replace the
+/// `run_agent` call and `run_result_to_event_records` conversion with direct
+/// consumption of SDK events.
 pub struct AikitEngineManager {
     pub workspace_root: PathBuf,
 }
@@ -118,14 +165,15 @@ impl AikitEngineManager {
         Ok(Self { workspace_root })
     }
 
-    /// Execute an AI engine via aikit-sdk and return collected event records.
+    /// Execute an AI engine via aikit-sdk and return typed event records.
     ///
-    /// Delegates to `aikit_sdk::run_agent`. Each stdout/stderr line is converted
-    /// to an `AikitEventRecord` with a `serde_json::Value` payload using the SDK's
-    /// AgentEventPayload naming convention (`JsonLine` / `RawLine`).
+    /// Delegates to `aikit_sdk::run_agent` and converts stdout/stderr output
+    /// into typed `AgentEventPayload` variants:
+    /// - JSON lines → `AgentEventPayload::JsonLine` (or `TokenUsageLine` if token usage fields detected)
+    /// - Plain text lines → `AgentEventPayload::RawLine`
     ///
-    /// NOTE: Full event-stream delegation via `run_agent_events` requires aikit-sdk
-    /// v0.1.75+. Until then, `run_agent` is used as the available SDK entry point.
+    /// Signal matching and token usage extraction are driven by typed enum matching
+    /// in the caller (`execute_sdk_engine`), not by JSON string field inspection.
     pub async fn execute_engine_events(
         &self,
         engine_name: &str,
@@ -165,8 +213,7 @@ impl AikitEngineManager {
         })?
         .map_err(map_run_error)?;
 
-        // Convert run_agent output to AikitEventRecord using SDK AgentEventPayload naming.
-        // Each line becomes a serde_json::Value payload; no Newton-owned typed enum.
+        // Convert run_agent output to typed AikitEventRecord values using AgentEventPayload enum.
         let events = run_result_to_event_records(result, engine_name);
         Ok(events)
     }
@@ -201,19 +248,20 @@ pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
     }
 }
 
-/// Convert `RunResult` stdout/stderr into `AikitEventRecord` values using SDK naming.
+/// Convert `RunResult` stdout/stderr bytes into typed `AikitEventRecord` values.
 ///
-/// Each line is converted to a `serde_json::Value` payload:
-/// - Lines that parse as JSON → `{"type": "JsonLine", "data": <json>}`
-/// - Plain text lines → `{"type": "RawLine", "data": "<line>"}`
+/// Each line is classified into a typed `AgentEventPayload` variant:
+/// - JSON lines containing token usage fields → `AgentEventPayload::TokenUsageLine`
+/// - Other JSON lines → `AgentEventPayload::JsonLine`
+/// - Plain text lines → `AgentEventPayload::RawLine`
 ///
-/// This produces the event record format that `run_agent_events` would emit directly
-/// once aikit-sdk v0.1.75+ is available.
+/// This function is the compatibility shim that bridges `aikit_sdk::run_agent`
+/// (v0.1.49) output to the typed `AgentEventPayload` contract that `run_agent_events`
+/// will provide natively in `aikit-sdk v0.1.75+`.
 fn run_result_to_event_records(
     result: aikit_sdk::RunResult,
-    _engine_name: &str,
+    engine_name: &str,
 ) -> Vec<AikitEventRecord> {
-    use serde_json::json;
     let mut events = Vec::new();
     let mut seq: u64 = 0;
 
@@ -227,9 +275,14 @@ fn run_result_to_event_records(
         let text = String::from_utf8_lossy(raw_bytes);
         for line in text.lines() {
             let payload = if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(line) {
-                json!({"type": "JsonLine", "data": json_val})
+                // Check if this JSON line represents token usage metrics
+                if let Some(token_usage) = try_parse_token_usage(&json_val, engine_name) {
+                    AgentEventPayload::TokenUsageLine(token_usage)
+                } else {
+                    AgentEventPayload::JsonLine(json_val)
+                }
             } else {
-                json!({"type": "RawLine", "data": line})
+                AgentEventPayload::RawLine(line.to_string())
             };
             events.push(AikitEventRecord {
                 seq,
@@ -243,6 +296,41 @@ fn run_result_to_event_records(
     events
 }
 
+/// Attempt to parse token usage metrics from a JSON line.
+///
+/// Detects token usage patterns emitted by AI engines (claude, opencode, etc.)
+/// and converts them into a typed `TokenUsageLine`. Returns `None` if the JSON
+/// does not contain recognizable token usage fields.
+fn try_parse_token_usage(json: &serde_json::Value, engine_name: &str) -> Option<TokenUsageLine> {
+    // Direct token usage fields at top level (e.g. from SDK TokenUsageLine format)
+    let input_tokens = json
+        .get("input_tokens")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            json.get("usage")
+                .and_then(|u| u.get("input_tokens"))
+                .and_then(|v| v.as_u64())
+        })?;
+    let output_tokens = json
+        .get("output_tokens")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            json.get("usage")
+                .and_then(|u| u.get("output_tokens"))
+                .and_then(|v| v.as_u64())
+        })?;
+
+    Some(TokenUsageLine {
+        input_tokens,
+        output_tokens,
+        total_tokens: json.get("total_tokens").and_then(|v| v.as_u64()),
+        cache_read_tokens: json.get("cache_read_tokens").and_then(|v| v.as_u64()),
+        cache_creation_tokens: json.get("cache_creation_tokens").and_then(|v| v.as_u64()),
+        reasoning_tokens: json.get("reasoning_tokens").and_then(|v| v.as_u64()),
+        source: engine_name.to_string(),
+    })
+}
+
 /// Extract text for signal matching from an `AikitEventRecord`.
 ///
 /// Follows the deterministic rule order from spec section 4:
@@ -251,19 +339,12 @@ fn run_result_to_event_records(
 /// 3. `RawBytes` → None (MUST NOT participate in signal matching)
 /// 4. `TokenUsageLine` → None (MUST NOT participate in signal matching)
 pub fn extract_text_from_event(record: &AikitEventRecord) -> Option<String> {
-    let payload_type = record.payload.get("type").and_then(|t| t.as_str())?;
-    match payload_type {
-        "RawLine" => record
-            .payload
-            .get("data")
-            .and_then(|d| d.as_str())
-            .map(str::to_string),
-        "JsonLine" => {
-            let data = record.payload.get("data")?;
-            extract_text_from_json(data)
-        }
+    match &record.payload {
+        AgentEventPayload::RawLine(s) => Some(s.clone()),
+        AgentEventPayload::JsonLine(json) => extract_text_from_json(json),
         // RawBytes and TokenUsageLine MUST NOT participate in signal matching
-        _ => None,
+        AgentEventPayload::RawBytes(_) => None,
+        AgentEventPayload::TokenUsageLine(_) => None,
     }
 }
 
