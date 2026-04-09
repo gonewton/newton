@@ -116,7 +116,7 @@ impl ConfigLoader {
         &[
             "NEWTON_PROJECT_NAME - Override project name",
             "NEWTON_PROJECT_TEMPLATE - Override project template",
-            "NEWTON_EXECUTOR_CODING_AGENT - Override executor coding agent (default: opencode)",
+            "NEWTON_EXECUTOR_CODING_AGENT - Override executor coding agent",
             "NEWTON_EXECUTOR_CODING_AGENT_MODEL - Override executor coding agent model (default: zai-coding-plan/glm-4.7)",
             "NEWTON_EXECUTOR_AUTO_COMMIT - Override auto commit setting (true/false, case-insensitive)",
             "NEWTON_EVALUATOR_TEST_COMMAND - Override evaluator test command",
@@ -203,7 +203,7 @@ mod tests {
 
         // Should return default config when file doesn't exist
         assert_eq!(result.project.name, "newton-project");
-        assert_eq!(result.executor.coding_agent, "opencode");
+        assert_eq!(result.executor.coding_agent, "");
     }
 
     #[test]
@@ -300,7 +300,7 @@ score_threshold = 75.0
         assert_eq!(result.executor.coding_agent_model, "env-model");
 
         // Other values should use defaults
-        assert_eq!(result.executor.coding_agent, "opencode");
+        assert_eq!(result.executor.coding_agent, "");
 
         // Clean up environment variables
         env::remove_var("NEWTON_PROJECT_NAME");

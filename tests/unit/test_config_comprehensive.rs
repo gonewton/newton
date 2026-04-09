@@ -70,7 +70,7 @@ fn test_all_default_values() {
     assert_eq!(config.project.template, None);
 
     // Executor defaults
-    assert_eq!(config.executor.coding_agent, "opencode");
+    assert_eq!(config.executor.coding_agent, "");
     assert_eq!(
         config.executor.coding_agent_model,
         "zai-coding-plan/glm-4.7"

@@ -8,7 +8,6 @@ use std::io::Write;
 use std::path::Path;
 
 const DEFAULT_TEMPLATE_SOURCE: &str = "gonewton/newton-templates";
-const DEFAULT_CODING_AGENT: &str = "opencode";
 const DEFAULT_CODING_MODEL: &str = "zai-coding-plan/glm-4.7";
 
 /// Handles `newton init` by creating a `.newton/` workspace and installing the Newton template via aikit-sdk.
@@ -143,11 +142,6 @@ fn write_default_config(newton_dir: &Path, project_root: &Path) -> Result<()> {
 
     // Load defaults from ExecutorConfig
     let defaults = ExecutorConfig::default();
-    let coding_agent = if defaults.coding_agent.is_empty() {
-        DEFAULT_CODING_AGENT
-    } else {
-        &defaults.coding_agent
-    };
     let coding_model = if defaults.coding_agent_model.is_empty() {
         DEFAULT_CODING_MODEL
     } else {
@@ -158,7 +152,6 @@ fn write_default_config(newton_dir: &Path, project_root: &Path) -> Result<()> {
 
     // Write key=value lines
     writeln!(config_file, "project_root={}", project_root.display())?;
-    writeln!(config_file, "coding_agent={}", coding_agent)?;
     writeln!(config_file, "coding_model={}", coding_model)?;
     writeln!(config_file)?;
 
