@@ -105,7 +105,7 @@ impl Operator for CommandOperator {
                 fs::create_dir_all(parent).map_err(|err| {
                     AppError::new(
                         ErrorCategory::IoError,
-                        format!("failed to create directory for write_stdout: {}", err),
+                        format!("failed to create directory for write_stdout: {err}"),
                     )
                     .with_code("WFG-CMD-004")
                 })?;
@@ -125,7 +125,7 @@ impl Operator for CommandOperator {
                 fs::create_dir_all(parent).map_err(|err| {
                     AppError::new(
                         ErrorCategory::IoError,
-                        format!("failed to create directory for write_stderr: {}", err),
+                        format!("failed to create directory for write_stderr: {err}"),
                     )
                     .with_code("WFG-CMD-004")
                 })?;
@@ -236,7 +236,7 @@ impl CommandRunner for TokioCommandRunner {
         let output = command.output().await.map_err(|err| {
             AppError::new(
                 ErrorCategory::ToolExecutionError,
-                format!("failed to execute command: {}", err),
+                format!("failed to execute command: {err}"),
             )
             .with_code("WFG-CMD-002")
         })?;

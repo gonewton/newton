@@ -91,7 +91,7 @@ pub fn save_execution_at(
     let content = serde_json::to_vec_pretty(execution).map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::SerializationError,
-            format!("failed to serialize execution.json: {}", err),
+            format!("failed to serialize execution.json: {err}"),
         )
     })?;
     atomic_write(&paths.execution_file, &content)
@@ -117,7 +117,7 @@ pub fn save_checkpoint_at(
     let content = serde_json::to_vec_pretty(checkpoint).map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::SerializationError,
-            format!("failed to serialize checkpoint.json: {}", err),
+            format!("failed to serialize checkpoint.json: {err}"),
         )
     })?;
     atomic_write(&paths.checkpoint_file, &content)?;
@@ -140,7 +140,7 @@ pub fn save_checkpoint_at(
             .replace(':', "-");
         let historic = paths
             .checkpoints_dir
-            .join(format!("checkpoint-{}.json", timestamp));
+            .join(format!("checkpoint-{timestamp}.json"));
         atomic_write(&historic, &content)?;
     }
     Ok(())
@@ -160,7 +160,7 @@ pub fn load_execution(
     serde_json::from_slice(&bytes).map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::SerializationError,
-            format!("failed to deserialize execution.json: {}", err),
+            format!("failed to deserialize execution.json: {err}"),
         )
     })
 }
@@ -183,7 +183,7 @@ pub fn load_checkpoint(
     serde_json::from_slice(&bytes).map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::SerializationError,
-            format!("failed to deserialize checkpoint.json: {}", err),
+            format!("failed to deserialize checkpoint.json: {err}"),
         )
     })
 }
@@ -206,7 +206,7 @@ pub fn list_checkpoints(workspace_root: &Path) -> Result<Vec<CheckpointSummary>,
         .map_err(|err| {
             AppError::new(
                 crate::core::types::ErrorCategory::IoError,
-                format!("failed to list workflows state: {}", err),
+                format!("failed to list workflows state: {err}"),
             )
         })?
         .flatten()
@@ -252,7 +252,7 @@ pub fn clean_checkpoints(workspace_root: &Path, older_than: Duration) -> Result<
         .map_err(|err| {
             AppError::new(
                 crate::core::types::ErrorCategory::IoError,
-                format!("failed to list workflows state: {}", err),
+                format!("failed to list workflows state: {err}"),
             )
         })?
         .flatten()
@@ -265,7 +265,7 @@ pub fn clean_checkpoints(workspace_root: &Path, older_than: Duration) -> Result<
             .map_err(|err| {
                 AppError::new(
                     crate::core::types::ErrorCategory::IoError,
-                    format!("failed to scan checkpoints dir: {}", err),
+                    format!("failed to scan checkpoints dir: {err}"),
                 )
             })?
             .flatten()
@@ -300,7 +300,7 @@ pub fn collect_live_artifact_paths(
         .map_err(|err| {
             AppError::new(
                 crate::core::types::ErrorCategory::IoError,
-                format!("failed to list workflows state: {}", err),
+                format!("failed to list workflows state: {err}"),
             )
         })?
         .flatten()

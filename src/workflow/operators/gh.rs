@@ -71,7 +71,7 @@ impl Operator for GhOperator {
             _ => {
                 return Err(AppError::new(
                     ErrorCategory::ValidationError,
-                    format!("unknown operation: {}", operation),
+                    format!("unknown operation: {operation}"),
                 ));
             }
         }
@@ -96,7 +96,7 @@ impl Operator for GhOperator {
             "pr_view" => self.execute_pr_view(map).await,
             _ => Err(AppError::new(
                 ErrorCategory::ValidationError,
-                format!("unknown operation: {}", operation),
+                format!("unknown operation: {operation}"),
             )),
         }
     }
@@ -171,8 +171,7 @@ fn validate_project_item_set_status(map: &Map<String, Value>) -> Result<(), AppE
         return Err(AppError::new(
             ErrorCategory::ValidationError,
             format!(
-                "status must be one of: Ready, In progress, In review, Done, Backlog; got: {}",
-                status
+                "status must be one of: Ready, In progress, In review, Done, Backlog; got: {status}"
             ),
         ));
     }
@@ -259,7 +258,7 @@ impl GhOperator {
         let view_json: Value = serde_json::from_str(&view_output.stdout).map_err(|e| {
             AppError::new(
                 ErrorCategory::ToolExecutionError,
-                format!("failed to parse project view JSON: {}", e),
+                format!("failed to parse project view JSON: {e}"),
             )
             .with_code("WFG-GH-001")
         })?;
@@ -288,7 +287,7 @@ impl GhOperator {
         let fields_json: Value = serde_json::from_str(&fields_output.stdout).map_err(|e| {
             AppError::new(
                 ErrorCategory::ToolExecutionError,
-                format!("failed to parse project field-list JSON: {}", e),
+                format!("failed to parse project field-list JSON: {e}"),
             )
             .with_code("WFG-GH-001")
         })?;
@@ -307,7 +306,7 @@ impl GhOperator {
             .ok_or_else(|| {
                 AppError::new(
                     ErrorCategory::ToolExecutionError,
-                    format!("field '{}' not found", field_name),
+                    format!("field '{field_name}' not found"),
                 )
                 .with_code("WFG-GH-001")
             })?;
@@ -363,8 +362,7 @@ impl GhOperator {
                 return Err(AppError::new(
                     ErrorCategory::ToolExecutionError,
                     format!(
-                        "required option '{}' not found. Found options: {:?}",
-                        required, found_options
+                        "required option '{required}' not found. Found options: {found_options:?}"
                     ),
                 )
                 .with_code("WFG-GH-001"));
@@ -542,7 +540,7 @@ impl GhOperator {
         let pr_number = pr.parse::<u64>().map_err(|_| {
             AppError::new(
                 ErrorCategory::ValidationError,
-                format!("pr must be a valid number, got: {}", pr),
+                format!("pr must be a valid number, got: {pr}"),
             )
         })?;
 
@@ -554,7 +552,7 @@ impl GhOperator {
         let pr_json: Value = serde_json::from_str(&output.stdout).map_err(|e| {
             AppError::new(
                 ErrorCategory::ToolExecutionError,
-                format!("failed to parse pr view JSON: {}", e),
+                format!("failed to parse pr view JSON: {e}"),
             )
             .with_code("WFG-GH-002")
         })?;
@@ -592,7 +590,7 @@ fn resolve_option_id(board: &Map<String, Value>, status: &str) -> Result<String,
         _ => {
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
-                format!("unknown status: {}", status),
+                format!("unknown status: {status}"),
             ))
         }
     };
@@ -604,7 +602,7 @@ fn resolve_option_id(board: &Map<String, Value>, status: &str) -> Result<String,
         .ok_or_else(|| {
             AppError::new(
                 ErrorCategory::ValidationError,
-                format!("option id for '{}' not found in board", status),
+                format!("option id for '{status}' not found in board"),
             )
         })
 }
@@ -639,7 +637,7 @@ fn extract_pr_number(url: &str) -> Result<u64, AppError> {
         .ok_or_else(|| {
             AppError::new(
                 ErrorCategory::ToolExecutionError,
-                format!("failed to extract PR number from: {}", url),
+                format!("failed to extract PR number from: {url}"),
             )
             .with_code("WFG-GH-002")
         })
@@ -673,7 +671,7 @@ impl GhRunner for TokioGhRunner {
         let output = cmd.output().await.map_err(|e| {
             AppError::new(
                 ErrorCategory::ToolExecutionError,
-                format!("failed to execute gh: {}", e),
+                format!("failed to execute gh: {e}"),
             )
             .with_code("WFG-GH-003")
         })?;
@@ -685,7 +683,7 @@ impl GhRunner for TokioGhRunner {
         if exit_code != 0 {
             return Err(AppError::new(
                 ErrorCategory::ToolExecutionError,
-                format!("gh command failed with exit code {}: {}", exit_code, stderr),
+                format!("gh command failed with exit code {exit_code}: {stderr}"),
             )
             .with_code("WFG-GH-004"));
         }

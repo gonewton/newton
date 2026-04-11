@@ -40,7 +40,7 @@ pub fn load_monitor_endpoints(
     if accumulator.ready() {
         return accumulator
             .into_endpoints(workspace_root.to_path_buf())
-            .map_err(|e| anyhow!("Failed to parse monitor endpoint URLs: {}", e));
+            .map_err(|e| anyhow!("Failed to parse monitor endpoint URLs: {e}"));
     }
 
     // Otherwise, check for config directory
@@ -134,7 +134,7 @@ fn finalize_endpoints(
 
     accumulator
         .into_endpoints(workspace_root.to_path_buf())
-        .map_err(|e| anyhow!("Failed to parse monitor endpoint URLs: {}", e))
+        .map_err(|e| anyhow!("Failed to parse monitor endpoint URLs: {e}"))
 }
 
 struct ConfigPair {
@@ -195,13 +195,13 @@ impl ConfigPair {
                 .as_ref()
                 .ok_or_else(|| anyhow!("missing HTTP endpoint"))?,
         )
-        .map_err(|e| anyhow!("Invalid HTTP URL: {}", e))?;
+        .map_err(|e| anyhow!("Invalid HTTP URL: {e}"))?;
         let ws_url = Url::parse(
             self.ws_url
                 .as_ref()
                 .ok_or_else(|| anyhow!("missing WebSocket endpoint"))?,
         )
-        .map_err(|e| anyhow!("Invalid WebSocket URL: {}", e))?;
+        .map_err(|e| anyhow!("Invalid WebSocket URL: {e}"))?;
 
         let workflow_service_url = self
             .workflow_service_url

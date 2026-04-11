@@ -68,13 +68,13 @@ fn interpolate_value(
         }
         Value::Array(items) => {
             for (index, item) in items.iter_mut().enumerate() {
-                let field = format!("{}[{}]", field, index);
+                let field = format!("{field}[{index}]");
                 interpolate_value(item, engine, ctx, &field)?;
             }
         }
         Value::Object(map) => {
             for (key, item) in map.iter_mut() {
-                let field = format!("{}.{}", field, key);
+                let field = format!("{field}.{key}");
                 interpolate_value(item, engine, ctx, &field)?;
             }
         }

@@ -71,8 +71,7 @@ fn load_and_validate_workflow(
         .count();
     if error_count > 0 {
         return Err(anyhow!(
-            "workflow lint detected {} error(s); fix before running",
-            error_count
+            "workflow lint detected {error_count} error(s); fix before running"
         ));
     }
 
@@ -195,10 +194,7 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
     if error_count > 0 {
         return Err(AppError::new(
             ErrorCategory::ValidationError,
-            format!(
-                "workflow lint detected {} error(s); fix before running",
-                error_count
-            ),
+            format!("workflow lint detected {error_count} error(s); fix before running"),
         ));
     }
     apply_context_overrides(&mut document.workflow.context, &args.set);
@@ -261,7 +257,7 @@ pub fn validate(args: ValidateArgs) -> StdResult<(), AppError> {
     let document = workflow_schema::load_workflow(&workflow_path)?;
     let unreachable = workflow_dot::reachability_warnings(&document);
     for id in &unreachable {
-        eprintln!("warning: task '{}' is not reachable from entry_task", id);
+        eprintln!("warning: task '{id}' is not reachable from entry_task");
     }
     println!("Workflow definition is valid");
     Ok(())
@@ -281,11 +277,11 @@ pub fn dot(args: DotArgs) -> StdResult<(), AppError> {
         fs::write(path, dot).map_err(|err| {
             AppError::new(
                 ErrorCategory::IoError,
-                format!("failed to write DOT: {}", err),
+                format!("failed to write DOT: {err}"),
             )
         })?;
     } else {
-        println!("{}", dot);
+        println!("{dot}");
     }
     Ok(())
 }
@@ -324,7 +320,7 @@ pub fn lint(args: LintArgs) -> StdResult<(), AppError> {
     if error_count > 0 {
         return Err(AppError::new(
             ErrorCategory::ValidationError,
-            format!("workflow lint found {} error(s)", error_count),
+            format!("workflow lint found {error_count} error(s)"),
         ));
     }
     Ok(())
@@ -435,24 +431,24 @@ fn format_duration_short(duration: Duration) -> String {
 
     if remaining >= SECONDS_PER_DAY {
         let days = remaining / SECONDS_PER_DAY;
-        parts.push(format!("{}d", days));
+        parts.push(format!("{days}d"));
         remaining %= SECONDS_PER_DAY;
     }
 
     if remaining >= SECONDS_PER_HOUR && parts.len() < 2 {
         let hours = remaining / SECONDS_PER_HOUR;
-        parts.push(format!("{}h", hours));
+        parts.push(format!("{hours}h"));
         remaining %= SECONDS_PER_HOUR;
     }
 
     if remaining >= SECONDS_PER_MINUTE && parts.len() < 2 {
         let minutes = remaining / SECONDS_PER_MINUTE;
-        parts.push(format!("{}m", minutes));
+        parts.push(format!("{minutes}m"));
         remaining %= SECONDS_PER_MINUTE;
     }
 
     if parts.is_empty() && parts.len() < 2 {
-        parts.push(format!("{}s", remaining));
+        parts.push(format!("{remaining}s"));
     }
 
     parts.join(" ")
@@ -489,10 +485,10 @@ fn workflow_checkpoints_list(
         let serialized = serde_json::to_string_pretty(&items).map_err(|err| {
             AppError::new(
                 ErrorCategory::SerializationError,
-                format!("failed to serialize checkpoint list: {}", err),
+                format!("failed to serialize checkpoint list: {err}"),
             )
         })?;
-        println!("{}", serialized);
+        println!("{serialized}");
         return Ok(());
     }
 
@@ -523,7 +519,7 @@ fn workflow_checkpoints_clean(
     let workspace = resolve_workflow_workspace(workspace)?;
     let duration = parse_duration_arg(&older_than)?;
     checkpoint::clean_checkpoints(&workspace, duration)?;
-    println!("Removed checkpoints older than {}", older_than);
+    println!("Removed checkpoints older than {older_than}");
     Ok(())
 }
 
@@ -543,7 +539,7 @@ fn workflow_artifacts_clean(
     let workspace = resolve_workflow_workspace(workspace)?;
     let duration = parse_duration_arg(&older_than)?;
     artifacts::ArtifactStore::clean_artifacts(&workspace, duration)?;
-    println!("Cleaned artifacts older than {}", older_than);
+    println!("Cleaned artifacts older than {older_than}");
     Ok(())
 }
 
@@ -576,10 +572,7 @@ async fn workflow_webhook_serve(args: WebhookServeArgs) -> StdResult<(), AppErro
     if error_count > 0 {
         return Err(AppError::new(
             ErrorCategory::ValidationError,
-            format!(
-                "workflow lint detected {} error(s); fix before starting webhook",
-                error_count
-            ),
+            format!("workflow lint detected {error_count} error(s); fix before starting webhook"),
         ));
     }
     document.validate(&ExpressionEngine::default())?;
@@ -641,7 +634,7 @@ fn parse_duration_arg(value: &str) -> StdResult<Duration, AppError> {
     parse_duration(value).map_err(|err| {
         AppError::new(
             ErrorCategory::ValidationError,
-            format!("failed to parse duration {}: {}", value, err),
+            format!("failed to parse duration {value}: {err}"),
         )
     })
 }
@@ -667,7 +660,7 @@ fn resolve_workflow_workspace(path: Option<PathBuf>) -> StdResult<PathBuf, AppEr
         None => Ok(env::current_dir().map_err(|err| {
             AppError::new(
                 ErrorCategory::IoError,
-                format!("failed to resolve workspace path: {}", err),
+                format!("failed to resolve workspace path: {err}"),
             )
         })?),
     }
@@ -719,7 +712,7 @@ fn print_lint_results_text(results: &[LintResult]) {
             println!("{} {} : {}", result.severity, result.code, result.message);
         }
         if let Some(suggestion) = &result.suggestion {
-            println!("  Suggestion: {}", suggestion);
+            println!("  Suggestion: {suggestion}");
         }
     }
 }
@@ -729,10 +722,10 @@ fn print_lint_results_json(results: &[LintResult]) -> StdResult<(), AppError> {
     let serialized = serde_json::to_string_pretty(&payload).map_err(|err| {
         AppError::new(
             ErrorCategory::SerializationError,
-            format!("failed to serialize lint results: {}", err),
+            format!("failed to serialize lint results: {err}"),
         )
     })?;
-    println!("{}", serialized);
+    println!("{serialized}");
     Ok(())
 }
 
@@ -749,7 +742,7 @@ fn print_explain_text(
                 macro_names.join(", ")
             );
         } else {
-            println!("Source: {} tasks, 0 macro invocations", task_count);
+            println!("Source: {task_count} tasks, 0 macro invocations");
         }
         println!();
     }
@@ -782,16 +775,16 @@ fn print_explain_json(output: &explain::ExplainOutput) -> StdResult<(), AppError
     let serialized = serde_json::to_string_pretty(output).map_err(|err| {
         AppError::new(
             ErrorCategory::SerializationError,
-            format!("failed to serialize explain output: {}", err),
+            format!("failed to serialize explain output: {err}"),
         )
     })?;
-    println!("{}", serialized);
+    println!("{serialized}");
     Ok(())
 }
 
 fn print_explain_prose(output: &explain::ExplainOutput) -> StdResult<(), AppError> {
     let prose = explain::format_explain_prose(output)?;
-    println!("{}", prose);
+    println!("{prose}");
     Ok(())
 }
 
@@ -799,7 +792,7 @@ fn pretty_json(value: &impl Serialize) -> StdResult<String, AppError> {
     serde_json::to_string_pretty(value).map_err(|err| {
         AppError::new(
             ErrorCategory::SerializationError,
-            format!("failed to serialize explain section: {}", err),
+            format!("failed to serialize explain section: {err}"),
         )
     })
 }
@@ -848,7 +841,7 @@ fn build_trigger_payload(
 
 fn resolve_trigger_arg_value(value: &str) -> StdResult<Value, AppError> {
     if let Some(path) = value.strip_prefix("@@") {
-        return Ok(Value::String(format!("@{}", path)));
+        return Ok(Value::String(format!("@{path}")));
     }
     if let Some(path) = value.strip_prefix('@') {
         if path.trim().is_empty() {
@@ -860,7 +853,7 @@ fn resolve_trigger_arg_value(value: &str) -> StdResult<Value, AppError> {
         let content = fs::read_to_string(path).map_err(|err| {
             AppError::new(
                 ErrorCategory::IoError,
-                format!("failed to read trigger arg file {}: {}", path, err),
+                format!("failed to read trigger arg file {path}: {err}"),
             )
         })?;
         return Ok(Value::String(content));
@@ -914,7 +907,7 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         .iter()
         .map(|name: &String| newton_types::OperatorDescriptor {
             operator_type: name.clone(),
-            description: format!("{} operator", name),
+            description: format!("{name} operator"),
             params_schema: serde_json::json!({}),
         })
         .collect();
@@ -926,14 +919,14 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     let socket_addr: SocketAddr = addr.parse().map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::ValidationError,
-            format!("invalid bind address: {}", err),
+            format!("invalid bind address: {err}"),
         )
     })?;
 
     let listener = TcpListener::bind(&socket_addr).await.map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::IoError,
-            format!("failed to bind to {}: {}", addr, err),
+            format!("failed to bind to {addr}: {err}"),
         )
     })?;
 
@@ -944,7 +937,7 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         .map_err(|err| {
             AppError::new(
                 crate::core::types::ErrorCategory::IoError,
-                format!("server error: {}", err),
+                format!("server error: {err}"),
             )
         })?;
 
@@ -1116,7 +1109,7 @@ async fn execute_workflow_for_plan(
 
     result
         .map(|_| ())
-        .map_err(|e| anyhow::anyhow!("Workflow execution failed: {}", e))
+        .map_err(|e| anyhow::anyhow!("Workflow execution failed: {e}"))
 }
 
 #[derive(Debug)]

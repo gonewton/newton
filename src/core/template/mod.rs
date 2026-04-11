@@ -210,7 +210,7 @@ impl TemplateRenderer {
             })?;
 
             for (key, value) in variables {
-                contents = contents.replace(&format!("{{{{{}}}}}", key), value);
+                contents = contents.replace(&format!("{{{{{key}}}}}"), value);
             }
 
             fs::write(&target_path, contents).map_err(|e| {

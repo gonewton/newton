@@ -73,14 +73,14 @@ fn interpolate_task(
     let mut serialized = serde_json::to_value(task).map_err(|err| {
         AppError::new(
             ErrorCategory::SerializationError,
-            format!("failed to serialize macro task template: {}", err),
+            format!("failed to serialize macro task template: {err}"),
         )
     })?;
     interpolate_value(&mut serialized, engine, ctx, "macro_task")?;
     serde_json::from_value(serialized).map_err(|err| {
         AppError::new(
             ErrorCategory::ValidationError,
-            format!("failed to deserialize expanded macro task: {}", err),
+            format!("failed to deserialize expanded macro task: {err}"),
         )
     })
 }
@@ -106,13 +106,13 @@ fn interpolate_value(
         }
         Value::Array(items) => {
             for (index, item) in items.iter_mut().enumerate() {
-                let location = format!("{}[{}]", field, index);
+                let location = format!("{field}[{index}]");
                 interpolate_value(item, engine, ctx, &location)?;
             }
         }
         Value::Object(map) => {
             for (key, item) in map.iter_mut() {
-                let location = format!("{}.{}", field, key);
+                let location = format!("{field}.{key}");
                 interpolate_value(item, engine, ctx, &location)?;
             }
         }

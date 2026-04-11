@@ -215,7 +215,7 @@ impl OrchestratorNotifier {
         let endpoint = format!("{}/events/{}", context.http_url(), context.channel());
 
         let payload = serde_json::to_value(event).map_err(|e| {
-            SendError::SerializationError(format!("Failed to serialize event: {}", e))
+            SendError::SerializationError(format!("Failed to serialize event: {e}"))
         })?;
 
         let response = client

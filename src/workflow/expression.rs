@@ -88,7 +88,7 @@ impl ExpressionEngine {
         self.engine.compile(expr).map_err(|err| {
             AppError::new(
                 ErrorCategory::ValidationError,
-                format!("expression compile error: {}", err),
+                format!("expression compile error: {err}"),
             )
             .with_code("WFG-EXPR-001")
         })
@@ -104,7 +104,7 @@ impl ExpressionEngine {
             .map_err(|err| {
                 AppError::new(
                     ErrorCategory::ValidationError,
-                    format!("expression execution error: {}", err),
+                    format!("expression execution error: {err}"),
                 )
                 .with_code("WFG-EXPR-001")
             })?;
@@ -155,7 +155,7 @@ impl ExpressionEngine {
                 .map_err(|err| {
                     AppError::new(
                         ErrorCategory::ValidationError,
-                        format!("template interpolation execution error: {}", err),
+                        format!("template interpolation execution error: {err}"),
                     )
                     .with_code("WFG-TPL-001")
                 })?;
@@ -166,7 +166,7 @@ impl ExpressionEngine {
                     let encoded = serde_json::to_string(&other).map_err(|err| {
                         AppError::new(
                             ErrorCategory::SerializationError,
-                            format!("template interpolation stringify failed: {}", err),
+                            format!("template interpolation stringify failed: {err}"),
                         )
                         .with_code("WFG-TPL-001")
                     })?;

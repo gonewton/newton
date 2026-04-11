@@ -166,10 +166,7 @@ impl GraphHandle {
         let barrier_task = graph.get_mut(barrier_task_id).ok_or_else(|| {
             AppError::new(
                 ErrorCategory::ValidationError,
-                format!(
-                    "Barrier task '{}' not found in runtime graph",
-                    barrier_task_id
-                ),
+                format!("Barrier task '{barrier_task_id}' not found in runtime graph"),
             )
             .with_code("WFG-DYN-004")
         })?;
@@ -177,7 +174,7 @@ impl GraphHandle {
         if barrier_task.operator != "barrier" {
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
-                format!("Task '{}' is not a barrier operator", barrier_task_id),
+                format!("Task '{barrier_task_id}' is not a barrier operator"),
             )
             .with_code("WFG-DYN-004"));
         }
@@ -193,7 +190,7 @@ impl GraphHandle {
         barrier_task.params = serde_json::to_value(&barrier_params).map_err(|err| {
             AppError::new(
                 ErrorCategory::SerializationError,
-                format!("Failed to serialize barrier params: {}", err),
+                format!("Failed to serialize barrier params: {err}"),
             )
         })?;
 
@@ -316,7 +313,7 @@ impl WorkflowRuntime {
             self.persist_checkpoint_force().await?;
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
-                format!("task {} reached iteration cap", task_id),
+                format!("task {task_id} reached iteration cap"),
             )
             .with_code("WFG-ITER-002"));
         }
@@ -706,7 +703,7 @@ impl WorkflowRuntime {
         if let Some(task_id) = terminal_failure_task {
             let err = AppError::new(
                 ErrorCategory::ValidationError,
-                format!("workflow terminated at failure terminal task '{}'", task_id),
+                format!("workflow terminated at failure terminal task '{task_id}'"),
             )
             .with_code("WFG-EXEC-002");
             return (WorkflowExecutionStatus::Failed, Some(err));
@@ -954,20 +951,20 @@ impl WorkflowRuntime {
         if let Value::Object(output_map) = output {
             if let Some(Value::String(stdout)) = output_map.get("stdout") {
                 if !stdout.trim().is_empty() {
-                    print!("{}", stdout);
+                    print!("{stdout}");
                 }
             }
             if let Some(Value::String(stderr)) = output_map.get("stderr") {
                 if !stderr.trim().is_empty() {
-                    eprint!("{}", stderr);
+                    eprint!("{stderr}");
                 }
             }
             // For AgentOperator tasks, print artifact paths instead
             if let Some(Value::String(artifact_path)) = output_map.get("stdout_artifact") {
-                println!("stdout artifact: {}", artifact_path);
+                println!("stdout artifact: {artifact_path}");
             }
             if let Some(Value::String(artifact_path)) = output_map.get("stderr_artifact") {
-                eprintln!("stderr artifact: {}", artifact_path);
+                eprintln!("stderr artifact: {artifact_path}");
             }
         }
     }
@@ -1016,7 +1013,7 @@ fn build_workflow_runtime(
     let workflow_definition_json = serde_json::to_value(&document).map_err(|e| {
         AppError::new(
             ErrorCategory::ValidationError,
-            format!("Failed to serialize workflow definition: {}", e),
+            format!("Failed to serialize workflow definition: {e}"),
         )
         .with_code("API-WORKFLOW-004")
     })?;
@@ -1352,7 +1349,7 @@ fn validate_required_triggers(required: &[String], payload: &Value) -> Result<()
         if payload.as_object().and_then(|map| map.get(key)).is_none() {
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
-                format!("trigger payload missing required key '{}'", key),
+                format!("trigger payload missing required key '{key}'"),
             )
             .with_code("WFG-TRIG-001"));
         }

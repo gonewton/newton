@@ -45,14 +45,14 @@ pub fn append_entry(
     let mut payload = serde_json::to_value(entry).map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::SerializationError,
-            format!("failed to serialize audit entry: {}", err),
+            format!("failed to serialize audit entry: {err}"),
         )
     })?;
     redact_value(&mut payload, redact_keys);
     let line = serde_json::to_string(&payload).map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::SerializationError,
-            format!("failed to serialize audit entry: {}", err),
+            format!("failed to serialize audit entry: {err}"),
         )
     })?;
     let audit_file = target_dir.join("audit.jsonl");
@@ -73,13 +73,13 @@ pub fn append_entry(
     file.write_all(line.as_bytes()).map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::IoError,
-            format!("failed to write audit entry: {}", err),
+            format!("failed to write audit entry: {err}"),
         )
     })?;
     file.write_all(b"\n").map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::IoError,
-            format!("failed to write audit entry newline: {}", err),
+            format!("failed to write audit entry newline: {err}"),
         )
     })?;
     Ok(())

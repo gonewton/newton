@@ -35,7 +35,7 @@ impl fmt::Display for LintSeverity {
             LintSeverity::Warning => "warning",
             LintSeverity::Info => "info",
         };
-        write!(f, "{}", value)
+        write!(f, "{value}")
     }
 }
 

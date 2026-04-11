@@ -28,7 +28,7 @@ async fn read_line_blocking() -> Result<String, AppError> {
         io::stdin().read_line(&mut buffer).map_err(|err| {
             Box::new(AppError::new(
                 ErrorCategory::IoError,
-                format!("failed to read stdin: {}", err),
+                format!("failed to read stdin: {err}"),
             ))
         })?;
         Ok(buffer)
@@ -37,7 +37,7 @@ async fn read_line_blocking() -> Result<String, AppError> {
     .map_err(|err| {
         AppError::new(
             ErrorCategory::InternalError,
-            format!("console input task cancelled: {}", err),
+            format!("console input task cancelled: {err}"),
         )
     })?
     .map_err(|e: Box<AppError>| *e)
@@ -70,7 +70,7 @@ impl Interviewer for ConsoleInterviewer {
         default_on_timeout: Option<ApprovalDefault>,
     ) -> Result<ApprovalResult, AppError> {
         loop {
-            print!("{} (approve/reject): ", prompt);
+            print!("{prompt} (approve/reject): ");
             io::stdout().flush().ok();
             let (line_opt, timed_out) = read_input_with_timeout(timeout).await?;
             if timed_out {
@@ -129,7 +129,7 @@ impl Interviewer for ConsoleInterviewer {
         timeout: Option<Duration>,
         default_choice: Option<&str>,
     ) -> Result<DecisionResult, AppError> {
-        println!("{}", prompt);
+        println!("{prompt}");
         for (idx, choice) in choices.iter().enumerate() {
             println!("{:>2}: {}", idx + 1, choice);
         }

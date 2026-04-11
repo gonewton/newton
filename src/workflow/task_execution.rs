@@ -192,7 +192,7 @@ async fn execute_with_timeout(
             Ok(res) => res,
             Err(_) => Err(AppError::new(
                 ErrorCategory::TimeoutError,
-                format!("task {} timed out", task_id),
+                format!("task {task_id} timed out"),
             )
             .with_code("WFG-TIME-002")),
         }

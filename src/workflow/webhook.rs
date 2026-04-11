@@ -131,13 +131,13 @@ async fn serve_webhook_internal(
     let listener = TcpListener::bind(bind_addr).await.map_err(|err| {
         AppError::new(
             ErrorCategory::IoError,
-            format!("failed to bind webhook listener {}: {}", bind_addr, err),
+            format!("failed to bind webhook listener {bind_addr}: {err}"),
         )
     })?;
     let local_addr = listener.local_addr().map_err(|err| {
         AppError::new(
             ErrorCategory::IoError,
-            format!("failed to determine webhook listener address: {}", err),
+            format!("failed to determine webhook listener address: {err}"),
         )
     })?;
     if let Some(tx) = ready_notifier {
@@ -149,7 +149,7 @@ async fn serve_webhook_internal(
         .map_err(|err| {
             AppError::new(
                 ErrorCategory::ResourceError,
-                format!("webhook server terminated: {}", err),
+                format!("webhook server terminated: {err}"),
             )
         })
 }

@@ -160,7 +160,7 @@ fn build_header_lines<'a>(params: &'a HeaderParams<'a>) -> Vec<Line<'a>> {
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::styled(connection, Style::default().fg(Color::LightGreen)),
-            Span::raw(format!(" {}", connection_detail)),
+            Span::raw(format!(" {connection_detail}")),
             Span::raw(" | "),
             Span::styled("Filter: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(filter_text),
@@ -311,7 +311,7 @@ fn render_queue<B: ratatui::backend::Backend>(
             lines.push(Line::from(Span::raw(item.message.summary.clone())));
             if let Some(remaining) = render_remaining(item) {
                 lines.push(Line::from(vec![Span::styled(
-                    format!(" ({})", remaining),
+                    format!(" ({remaining})"),
                     Style::default().fg(Color::Red),
                 )]));
             }
@@ -417,10 +417,14 @@ fn handle_key(
 
     match state.input_mode.clone() {
         InputMode::Filter => handle_filter_input(key, state),
-        InputMode::Answer { target } => handle_answer_input(key, state, command_tx, target),
-        InputMode::Authorization { target } => {
-            handle_authorization_input(key, state, command_tx, target)
-        }
+        InputMode::Answer {
+            target,
+            instance_id,
+        } => handle_answer_input(key, state, command_tx, target, instance_id),
+        InputMode::Authorization {
+            target,
+            instance_id,
+        } => handle_authorization_input(key, state, command_tx, target, instance_id),
         InputMode::Normal => handle_normal_input(key, state, command_tx),
     }
 }
@@ -452,6 +456,7 @@ fn handle_answer_input(
     state: &mut MonitorState,
     command_tx: &UnboundedSender<MonitorCommand>,
     target: Uuid,
+    instance_id: String,
 ) {
     match key.code {
         KeyCode::Char(c) => {
@@ -464,6 +469,7 @@ fn handle_answer_input(
             let answer = state.answer_buffer.trim().to_string();
             let _ = command_tx.send(MonitorCommand::Respond {
                 message_id: target,
+                instance_id,
                 answer: Some(answer),
                 response_type: ResponseType::Text,
             });
@@ -484,12 +490,14 @@ fn handle_authorization_input(
     state: &mut MonitorState,
     command_tx: &UnboundedSender<MonitorCommand>,
     target: Uuid,
+    instance_id: String,
 ) {
     match key.code {
         KeyCode::Char('a') => {
             send_response(
                 command_tx,
                 target,
+                instance_id,
                 None,
                 ResponseType::AuthorizationApproved,
             );
@@ -497,7 +505,13 @@ fn handle_authorization_input(
             state.next_queue();
         }
         KeyCode::Char('d') => {
-            send_response(command_tx, target, None, ResponseType::AuthorizationDenied);
+            send_response(
+                command_tx,
+                target,
+                instance_id,
+                None,
+                ResponseType::AuthorizationDenied,
+            );
             state.input_mode = InputMode::Normal;
             state.next_queue();
         }
@@ -552,6 +566,7 @@ fn handle_action_key(state: &mut MonitorState, command_tx: &UnboundedSender<Moni
         MessageKind::Question => {
             state.input_mode = InputMode::Answer {
                 target: item.message.id,
+                instance_id: item.message.instance_id.clone(),
             };
             state.answer_buffer.clear();
         }
@@ -559,6 +574,7 @@ fn handle_action_key(state: &mut MonitorState, command_tx: &UnboundedSender<Moni
             send_response(
                 command_tx,
                 item.message.id,
+                item.message.instance_id.clone(),
                 None,
                 ResponseType::AuthorizationApproved,
             );
@@ -577,6 +593,7 @@ fn handle_deny_key(state: &mut MonitorState, command_tx: &UnboundedSender<Monito
         send_response(
             command_tx,
             item.message.id,
+            item.message.instance_id.clone(),
             None,
             ResponseType::AuthorizationDenied,
         );
@@ -593,12 +610,14 @@ fn handle_enter_key(state: &mut MonitorState) {
         MessageKind::Question => {
             state.input_mode = InputMode::Answer {
                 target: item.message.id,
+                instance_id: item.message.instance_id.clone(),
             };
             state.answer_buffer.clear();
         }
         MessageKind::Authorization => {
             state.input_mode = InputMode::Authorization {
                 target: item.message.id,
+                instance_id: item.message.instance_id.clone(),
             };
         }
         _ => {}
@@ -614,11 +633,13 @@ fn handle_escape_key(state: &mut MonitorState) {
 fn send_response(
     command_tx: &UnboundedSender<MonitorCommand>,
     message_id: uuid::Uuid,
+    instance_id: String,
     answer: Option<String>,
     response_type: ResponseType,
 ) {
     let _ = command_tx.send(MonitorCommand::Respond {
         message_id,
+        instance_id,
         answer,
         response_type,
     });
@@ -628,7 +649,7 @@ fn render_message_span(message: &MonitorMessage) -> Line<'_> {
     let timestamp = message.timestamp.format("%H:%M:%S").to_string();
     Line::from(vec![
         Span::styled(
-            format!("[{}] ", timestamp),
+            format!("[{timestamp}] "),
             Style::default().fg(Color::DarkGray),
         ),
         Span::styled(
@@ -665,7 +686,7 @@ fn render_remaining(item: &QueueItem) -> Option<String> {
             return Some("timed out".to_string());
         }
         let remaining = timeout.saturating_sub(elapsed.as_secs());
-        return Some(format!("{}s left", remaining));
+        return Some(format!("{remaining}s left"));
     }
     None
 }

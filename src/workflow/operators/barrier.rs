@@ -28,7 +28,7 @@ impl Operator for BarrierOperator {
             serde_json::from_value(params.clone()).map_err(|err| {
                 AppError::new(
                     ErrorCategory::ValidationError,
-                    format!("Invalid barrier operator parameters: {}", err),
+                    format!("Invalid barrier operator parameters: {err}"),
                 )
             })?;
 
@@ -39,7 +39,7 @@ impl Operator for BarrierOperator {
         let barrier_params: BarrierParams = serde_json::from_value(params).map_err(|err| {
             AppError::new(
                 ErrorCategory::ValidationError,
-                format!("Invalid barrier operator parameters: {}", err),
+                format!("Invalid barrier operator parameters: {err}"),
             )
         })?;
 

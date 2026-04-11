@@ -79,7 +79,7 @@ impl Operator for AssertCompletedOperator {
             if status == "missing" {
                 return Err(AppError::new(
                     ErrorCategory::ValidationError,
-                    format!("task {} is not yet completed", task_id),
+                    format!("task {task_id} is not yet completed"),
                 )
                 .with_code("WFG-ASSERT-001"));
             }

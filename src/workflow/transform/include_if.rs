@@ -144,8 +144,7 @@ fn evaluate_include_if(
                 return Err(AppError::new(
                     ErrorCategory::ValidationError,
                     format!(
-                        "include_if may not reference `tasks` — task results are not available at transform time (location: '{}')",
-                        task_id
+                        "include_if may not reference `tasks` — task results are not available at transform time (location: '{task_id}')"
                     ),
                 )
                 .with_code("WFG-INCLUDE-001"));
@@ -153,10 +152,7 @@ fn evaluate_include_if(
             let evaluated = engine.evaluate(expr, eval_ctx).map_err(|err| {
                 AppError::new(
                     ErrorCategory::ValidationError,
-                    format!(
-                        "template interpolation error in '{}.{}': {}",
-                        task_id, field, err
-                    ),
+                    format!("template interpolation error in '{task_id}.{field}': {err}"),
                 )
                 .with_code("WFG-TPL-001")
             })?;

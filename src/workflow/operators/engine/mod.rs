@@ -104,8 +104,7 @@ impl AikitEngineManager {
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
                 format!(
-                    "engine '{}' is not runnable by aikit-sdk; supported: codex, claude, gemini, opencode, agent",
-                    engine_name
+                    "engine '{engine_name}' is not runnable by aikit-sdk; supported: codex, claude, gemini, opencode, agent"
                 ),
             )
             .with_code("WFG-SDK-002"));
@@ -140,7 +139,7 @@ impl AikitEngineManager {
         .map_err(|e| {
             AppError::new(
                 ErrorCategory::IoError,
-                format!("aikit-sdk task panicked: {}", e),
+                format!("aikit-sdk task panicked: {e}"),
             )
             .with_code("WFG-SDK-001")
         })??;
@@ -154,25 +153,22 @@ pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
     match err {
         aikit_sdk::RunError::AgentNotRunnable(key) => AppError::new(
             ErrorCategory::ValidationError,
-            format!(
-                "engine '{}' is not runnable by aikit-sdk (AgentNotRunnable)",
-                key
-            ),
+            format!("engine '{key}' is not runnable by aikit-sdk (AgentNotRunnable)"),
         )
         .with_code("WFG-SDK-002"),
         aikit_sdk::RunError::SpawnFailed(io_err) => AppError::new(
             ErrorCategory::IoError,
-            format!("aikit-sdk engine process failed to start: {}", io_err),
+            format!("aikit-sdk engine process failed to start: {io_err}"),
         )
         .with_code("WFG-SDK-001"),
         aikit_sdk::RunError::StdinFailed(io_err) => AppError::new(
             ErrorCategory::IoError,
-            format!("aikit-sdk engine stdin write failed: {}", io_err),
+            format!("aikit-sdk engine stdin write failed: {io_err}"),
         )
         .with_code("WFG-SDK-001"),
         aikit_sdk::RunError::OutputFailed(io_err) => AppError::new(
             ErrorCategory::IoError,
-            format!("aikit-sdk engine output read failed: {}", io_err),
+            format!("aikit-sdk engine output read failed: {io_err}"),
         )
         .with_code("WFG-SDK-001"),
         aikit_sdk::RunError::CallbackPanic(_) => AppError::new(
@@ -182,15 +178,15 @@ pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
         .with_code("WFG-SDK-001"),
         aikit_sdk::RunError::ReaderFailed { stream, source } => AppError::new(
             ErrorCategory::IoError,
-            format!("aikit-sdk reader failed on {:?}: {}", stream, source),
+            format!("aikit-sdk reader failed on {stream:?}: {source}"),
         )
         .with_code("WFG-SDK-001"),
         aikit_sdk::RunError::TimedOut { timeout, .. } => AppError::new(
             ErrorCategory::IoError,
-            format!("aikit-sdk agent timed out after {:?}", timeout),
+            format!("aikit-sdk agent timed out after {timeout:?}"),
         )
         .with_code("WFG-SDK-001"),
-        _ => AppError::new(ErrorCategory::IoError, format!("aikit-sdk error: {}", err))
+        _ => AppError::new(ErrorCategory::IoError, format!("aikit-sdk error: {err}"))
             .with_code("WFG-SDK-001"),
     }
 }

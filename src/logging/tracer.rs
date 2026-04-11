@@ -9,7 +9,7 @@ impl Tracer {
 
     /// Emit a trace message to standard output.
     pub fn trace(&self, message: &str) {
-        println!("[TRACING] {}", message);
+        println!("[TRACING] {message}");
     }
 }
 

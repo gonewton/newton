@@ -80,7 +80,7 @@ impl OperatorRegistryBuilder {
     pub fn register<T: Operator>(&mut self, operator: T) -> &mut Self {
         let name = operator.name();
         if self.operators.contains_key(name) {
-            panic!("duplicate operator registered: {}", name);
+            panic!("duplicate operator registered: {name}");
         }
         self.operators.insert(name.to_string(), Arc::new(operator));
         self

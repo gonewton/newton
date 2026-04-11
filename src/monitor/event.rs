@@ -5,13 +5,15 @@ use uuid::Uuid;
 /// Commands emitted by the UI that require HTTP requests.
 #[derive(Debug)]
 pub enum MonitorCommand {
-    /// Respond to a question or authorization via POST /api/v1/messages/:id/response.
+    /// Respond to a question or authorization via POST /api/hil/workflows/:instance_id/:event_id/action.
     Respond {
         /// Original message being answered/approved.
         message_id: Uuid,
+        /// Workflow instance that owns the HIL event.
+        instance_id: String,
         /// Optional textual answer (used for `text` responses).
         answer: Option<String>,
-        /// How the response should be treated by ailoop.
+        /// How the response should be treated.
         response_type: ResponseType,
     },
 }

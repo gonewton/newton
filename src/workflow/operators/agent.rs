@@ -182,17 +182,14 @@ fn validate_and_compile_signals(
         if pattern.contains('\n') {
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
-                format!(
-                    "signal '{}' contains \\n; cross-line matching is not supported",
-                    name
-                ),
+                format!("signal '{name}' contains \\n; cross-line matching is not supported"),
             )
             .with_code("WFG-AGENT-004"));
         }
         let re = Regex::new(pattern).map_err(|err| {
             AppError::new(
                 ErrorCategory::ValidationError,
-                format!("invalid regex in signal '{}': {}", name, err),
+                format!("invalid regex in signal '{name}': {err}"),
             )
             .with_code("WFG-AGENT-004")
         })?;
@@ -342,7 +339,7 @@ impl Operator for AgentOperator {
         std::fs::create_dir_all(&task_artifact_dir).map_err(|err| {
             AppError::new(
                 ErrorCategory::IoError,
-                format!("failed to create artifact directory: {}", err),
+                format!("failed to create artifact directory: {err}"),
             )
         })?;
 
@@ -620,7 +617,7 @@ async fn execute_sdk_engine(
         .map_err(|e| {
             AppError::new(
                 ErrorCategory::IoError,
-                format!("failed to open events NDJSON artifact: {}", e),
+                format!("failed to open events NDJSON artifact: {e}"),
             )
             .with_code("WFG-SDK-003")
         })?;
@@ -630,7 +627,7 @@ async fn execute_sdk_engine(
         if iteration > max_iters {
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
-                format!("agent exceeded max_iterations ({}) in loop mode", max_iters),
+                format!("agent exceeded max_iterations ({max_iters}) in loop mode"),
             )
             .with_code("WFG-AGENT-003"));
         }
@@ -667,7 +664,7 @@ async fn execute_sdk_engine(
             .map_err(|e| {
                 AppError::new(
                     ErrorCategory::IoError,
-                    format!("failed to open stdout artifact: {}", e),
+                    format!("failed to open stdout artifact: {e}"),
                 )
             })?;
 
@@ -680,7 +677,7 @@ async fn execute_sdk_engine(
             let event_json = serde_json::to_string(event).map_err(|e| {
                 AppError::new(
                     ErrorCategory::IoError,
-                    format!("failed to serialize event to NDJSON artifact: {}", e),
+                    format!("failed to serialize event to NDJSON artifact: {e}"),
                 )
                 .with_code("WFG-SDK-003")
             })?;
@@ -690,7 +687,7 @@ async fn execute_sdk_engine(
                 .map_err(|e| {
                     AppError::new(
                         ErrorCategory::IoError,
-                        format!("failed to write event to NDJSON artifact: {}", e),
+                        format!("failed to write event to NDJSON artifact: {e}"),
                     )
                     .with_code("WFG-SDK-003")
                 })?;
@@ -743,7 +740,7 @@ async fn execute_sdk_engine(
                 .map_err(|e| {
                     AppError::new(
                         ErrorCategory::IoError,
-                        format!("failed to open stderr artifact: {}", e),
+                        format!("failed to open stderr artifact: {e}"),
                     )
                 })?;
             let mut stderr_bytes: usize = 0;
@@ -874,7 +871,7 @@ async fn spawn_engine_process(
     let mut child = cmd_builder.spawn().map_err(|err| {
         AppError::new(
             ErrorCategory::IoError,
-            format!("failed to start engine process: {}", err),
+            format!("failed to start engine process: {err}"),
         )
         .with_code("WFG-AGENT-002")
     })?;
@@ -906,7 +903,7 @@ fn open_stdout_artifact_file(stdout_path: &std::path::Path) -> Result<std::fs::F
         .map_err(|err| {
             AppError::new(
                 ErrorCategory::IoError,
-                format!("failed to open stdout artifact: {}", err),
+                format!("failed to open stdout artifact: {err}"),
             )
         })
 }
@@ -1021,7 +1018,7 @@ async fn wait_for_process_completion(
     let exit_status = child.wait().await.map_err(|err| {
         AppError::new(
             ErrorCategory::IoError,
-            format!("failed to wait for engine process: {}", err),
+            format!("failed to wait for engine process: {err}"),
         )
     })?;
 
@@ -1065,7 +1062,7 @@ async fn execute_loop(
         if iteration > max_iters {
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
-                format!("agent exceeded max_iterations ({}) in loop mode", max_iters),
+                format!("agent exceeded max_iterations ({max_iters}) in loop mode"),
             )
             .with_code("WFG-AGENT-003"));
         }

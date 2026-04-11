@@ -47,7 +47,7 @@ impl WorkflowLintRule for DuplicateTaskIdsRule {
                 out.push(LintResult::new(
                     "WFG-LINT-001",
                     LintSeverity::Error,
-                    format!("duplicate task id '{}' found {} times", task_id, count),
+                    format!("duplicate task id '{task_id}' found {count} times"),
                     Some(task_id),
                     Some("rename tasks so every task id is unique".to_string()),
                 ));
@@ -485,9 +485,8 @@ impl WorkflowLintRule for GoalGateNoRemediationRule {
                     "WFG-LINT-103",
                     LintSeverity::Warning,
                     format!(
-                        "goal gate task '{}' has no retry or remediation path back to it; \
-                         if it fails the workflow cannot recover",
-                        gate_id
+                        "goal gate task '{gate_id}' has no retry or remediation path back to it; \
+                         if it fails the workflow cannot recover"
                     ),
                     Some((*gate_id).to_string()),
                     Some(
@@ -943,8 +942,7 @@ impl BarrierExpectedNonExistentTaskRule {
             ),
             Some(barrier_task.id.clone()),
             Some(format!(
-                "Remove '{}' from expected list or add the missing task",
-                expected_id
+                "Remove '{expected_id}' from expected list or add the missing task"
             )),
         ));
     }

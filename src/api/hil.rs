@@ -14,12 +14,26 @@ use uuid::Uuid;
 /// Routes for the human-in-the-loop (HIL) API resource.
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
+        .route("/api/hil/instances", get(list_hil_instances))
         .route("/api/hil/workflows/{id}", get(list_hil_events))
         .route(
             "/api/hil/workflows/{id}/{event_id}/action",
             post(submit_hil_action),
         )
         .with_state(state)
+}
+
+/// List distinct workflow instance IDs that currently have HIL events.
+async fn list_hil_instances(State(state): State<Arc<AppState>>) -> Json<Vec<String>> {
+    let mut instance_ids: Vec<String> = state
+        .hil_events
+        .iter()
+        .map(|entry| entry.value().instance_id.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    instance_ids.sort();
+    Json(instance_ids)
 }
 
 async fn list_hil_events(Path(id): Path<String>, State(state): State<Arc<AppState>>) -> Response {

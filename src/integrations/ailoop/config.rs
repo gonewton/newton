@@ -231,7 +231,7 @@ fn load_ailoop_config(workspace_root: &Path) -> Result<AiloopConfig> {
 
 /// Validate a URL string and return parsed URL.
 fn validate_url(url_str: &str, source: &str) -> Result<Url> {
-    Url::parse(url_str).map_err(|e| anyhow!("Invalid URL in {}: '{}' - {}", source, url_str, e))
+    Url::parse(url_str).map_err(|e| anyhow!("Invalid URL in {source}: '{url_str}' - {e}"))
 }
 
 /// Validate a channel identifier.

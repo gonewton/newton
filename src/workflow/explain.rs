@@ -71,7 +71,7 @@ pub fn build_explain_outcome(
     let settings = serde_json::to_value(&document.workflow.settings).map_err(|err| {
         AppError::new(
             ErrorCategory::SerializationError,
-            format!("failed to serialize workflow settings: {}", err),
+            format!("failed to serialize workflow settings: {err}"),
         )
     })?;
     let engine = ExpressionEngine::default();
@@ -357,7 +357,7 @@ fn format_execution_notes(prose: &mut String) {
 
 fn format_runtime_placeholders(json_str: &str) -> String {
     json_str.replace(
-        &format!("\"{}\"", RUNTIME_PLACEHOLDER),
-        &format!("\"{}\" (value provided at runtime)", RUNTIME_PLACEHOLDER),
+        &format!("\"{RUNTIME_PLACEHOLDER}\""),
+        &format!("\"{RUNTIME_PLACEHOLDER}\" (value provided at runtime)"),
     )
 }

@@ -364,7 +364,7 @@ impl Filter {
 
     pub fn display(&self) -> String {
         match (&self.project, &self.branch) {
-            (Some(project), Some(branch)) => format!("{}/{}", project, branch),
+            (Some(project), Some(branch)) => format!("{project}/{branch}"),
             (Some(project), None) => project.clone(),
             _ => String::new(),
         }
@@ -376,8 +376,8 @@ impl Filter {
 pub enum InputMode {
     Normal,
     Filter,
-    Answer { target: Uuid },
-    Authorization { target: Uuid },
+    Answer { target: Uuid, instance_id: String },
+    Authorization { target: Uuid, instance_id: String },
 }
 
 fn split_channel(channel: &str) -> (String, String) {

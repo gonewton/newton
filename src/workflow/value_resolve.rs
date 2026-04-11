@@ -85,8 +85,7 @@ pub fn evaluate_condition(
                 Err(AppError::new(
                     ErrorCategory::ValidationError,
                     format!(
-                        "expression in condition evaluated to a non-boolean value at runtime: {:?}",
-                        result
+                        "expression in condition evaluated to a non-boolean value at runtime: {result:?}"
                     ),
                 )
                 .with_code("WFG-EXPR-BOOL-001"))

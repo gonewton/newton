@@ -4,10 +4,9 @@ use crate::monitor::event::{
 };
 use crate::monitor::message::MonitorMessage;
 use futures::{SinkExt, StreamExt};
+use newton_types::{HilAction, HilEvent};
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use reqwest::StatusCode;
-use serde::Serialize;
-use serde_json::Value;
 use std::collections::HashSet;
 use std::time::Duration as StdDuration;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -40,120 +39,59 @@ impl AiloopClient {
         &self.endpoints.ws_url
     }
 
-    /// Fetch all known channels from the server.
+    /// Fetch all active HIL workflow instance IDs from the server.
     pub async fn fetch_channels(&self) -> crate::Result<Vec<String>> {
-        let url = join_path(&self.endpoints.http_url, &["api", "channels"]);
+        let url = join_path(&self.endpoints.http_url, &["api", "hil", "instances"]);
         let resp = self.http.get(url).send().await?;
-        let value: Value = resp.json().await?;
-
-        if let Some(channels_section) = value.get("channels") {
-            // Parse structured ChannelInfo objects from "channels" array
-            if let Some(entries) = channels_section.as_array() {
-                let channels: Vec<String> = entries
-                    .iter()
-                    .filter_map(|entry| {
-                        entry
-                            .get("name")
-                            .and_then(|name| name.as_str())
-                            .map(std::string::ToString::to_string)
-                    })
-                    .collect();
-
-                if !channels.is_empty() {
-                    tracing::debug!("Fetched {} channels from server", channels.len());
-                    return Ok(channels);
-                }
-            }
-
-            // Older responses exposed channels as a map instead of an array
-            if let Some(map) = channels_section.as_object() {
-                let mut channels: Vec<String> = map.keys().cloned().collect();
-                channels.sort();
-                if !channels.is_empty() {
-                    tracing::debug!(
-                        "Fetched {} channels from server (map format)",
-                        channels.len()
-                    );
-                    return Ok(channels);
-                }
-            }
-        }
-
-        // Fallback: try parsing as direct array for backward compatibility
-        if let Some(arr) = value.as_array() {
-            let channels: Vec<String> = arr
-                .iter()
-                .filter_map(|entry| entry.as_str().map(std::string::ToString::to_string))
-                .collect();
-
-            if !channels.is_empty() {
-                tracing::debug!(
-                    "Fetched {} channels from server (legacy format)",
-                    channels.len()
-                );
-                return Ok(channels);
-            }
-        }
-
-        tracing::warn!(
-            "Channel list parsing returned empty result. Response: {:?}",
-            value
-        );
-        Ok(Vec::new())
+        let instances = resp.json::<Vec<String>>().await?;
+        tracing::debug!("Fetched {} HIL instances from server", instances.len());
+        Ok(instances)
     }
 
-    /// Fetch the most recent messages for a channel (used for backfill/polling).
+    /// Fetch HIL events for a workflow instance (used for backfill/polling).
     pub async fn fetch_channel_messages(
         &self,
-        channel: &str,
-        limit: usize,
+        instance_id: &str,
+        _limit: usize,
     ) -> crate::Result<Vec<MonitorMessage>> {
-        let encoded = encode_segment(channel);
-        let mut url = join_path(
+        let encoded = encode_segment(instance_id);
+        let url = join_path(
             &self.endpoints.http_url,
-            &["api", "channels", &encoded, "messages"],
+            &["api", "hil", "workflows", &encoded],
         );
-        let limit = limit.min(200);
-        url.push_str(&format!("?limit={limit}"));
         let resp = self.http.get(url).send().await?;
-        let messages = resp.json::<Vec<MonitorMessage>>().await?;
+        let events = resp.json::<Vec<HilEvent>>().await?;
+        let messages = events.into_iter().map(MonitorMessage::from).collect();
         Ok(messages)
     }
 
-    /// Post an answer/approval to a queued message.
+    /// Post an answer/approval to a queued HIL event.
     pub async fn post_response(
         &self,
+        instance_id: &str,
         message_id: Uuid,
         answer: Option<String>,
         response_type: ResponseType,
     ) -> crate::Result<()> {
+        let encoded_instance = encode_segment(instance_id);
         let url = format!(
-            "{}/api/v1/messages/{}/response",
+            "{}/api/hil/workflows/{}/{}/action",
             self.endpoints.http_url.as_str().trim_end_matches('/'),
+            encoded_instance,
             message_id
         );
-        let payload = ResponsePayload {
+        let action = HilAction {
             answer,
-            response_type: response_type.as_str(),
+            response_type: response_type.as_str().to_string(),
         };
-        let resp = self.http.post(&url).json(&payload).send().await?;
+        let resp = self.http.post(&url).json(&action).send().await?;
         let status = resp.status();
         if status != StatusCode::OK {
-            let text = resp.text().await.unwrap_or_else(|_| "".to_string());
-            return Err(anyhow::anyhow!(
-                "ailoop response POST failed: {} {}",
-                status,
-                text
-            ));
+            let text = resp.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!("HIL action POST failed: {status} {text}"));
         }
         Ok(())
     }
-}
-
-#[derive(Serialize)]
-struct ResponsePayload<'a> {
-    answer: Option<String>,
-    response_type: &'a str,
 }
 
 fn encode_segment(segment: &str) -> String {
@@ -235,7 +173,7 @@ pub async fn websocket_loop(client: AiloopClient, event_tx: UnboundedSender<Moni
             Err(err) => {
                 let _ = event_tx.send(MonitorEvent::ConnectionStatus(ConnectionStatus {
                     state: ConnectionState::Disconnected,
-                    detail: Some(format!("ws connect failed: {}", err)),
+                    detail: Some(format!("ws connect failed: {err}")),
                 }));
             }
         }
@@ -343,17 +281,18 @@ pub async fn command_loop(
         match command {
             MonitorCommand::Respond {
                 message_id,
+                instance_id,
                 answer,
                 response_type,
             } => {
                 if let Err(err) = client
-                    .post_response(message_id, answer, response_type)
+                    .post_response(&instance_id, message_id, answer, response_type)
                     .await
                 {
                     error!("failed to post response: {}", err);
                     let _ = event_tx.send(MonitorEvent::ConnectionStatus(ConnectionStatus {
                         state: ConnectionState::Disconnected,
-                        detail: Some(format!("response failed: {}", err)),
+                        detail: Some(format!("response failed: {err}")),
                     }));
                 } else {
                     let _ = event_tx.send(MonitorEvent::ConnectionStatus(ConnectionStatus {
@@ -385,114 +324,81 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_fetch_channels_parses_structured_response() {
-        let mock_server = MockServer::start().await;
-
-        Mock::given(method("GET"))
-            .and(path("/api/channels"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "channels": [
-                    {
-                        "name": "project1/branch1",
-                        "message_count": 5,
-                        "oldest_message": "2026-02-14T10:00:00Z",
-                        "newest_message": "2026-02-14T11:30:00Z"
-                    },
-                    {
-                        "name": "project2/branch2",
-                        "message_count": 3,
-                        "oldest_message": "2026-02-14T09:00:00Z",
-                        "newest_message": "2026-02-14T10:15:00Z"
-                    }
-                ]
-            })))
-            .mount(&mock_server)
-            .await;
-
-        let endpoints = build_endpoints(&mock_server);
-
-        let client = AiloopClient::new(endpoints);
-        let channels = client.fetch_channels().await.unwrap();
-
-        assert_eq!(channels.len(), 2);
-        assert_eq!(channels[0], "project1/branch1");
-        assert_eq!(channels[1], "project2/branch2");
+    fn hil_event_json(event_id: &str, instance_id: &str, channel: &str) -> serde_json::Value {
+        json!({
+            "event_id": event_id,
+            "instance_id": instance_id,
+            "channel": channel,
+            "event_type": "question",
+            "question": "Proceed?",
+            "choices": ["yes", "no"],
+            "timestamp": "2026-04-11T10:00:00Z",
+            "correlation_id": null,
+            "timeout_seconds": 60,
+            "status": "pending"
+        })
     }
 
     #[tokio::test]
-    async fn test_fetch_channels_handles_empty_list() {
+    async fn test_fetch_hil_instances_returns_list() {
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
-            .and(path("/api/channels"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "channels": []
-            })))
-            .mount(&mock_server)
-            .await;
-
-        let endpoints = build_endpoints(&mock_server);
-
-        let client = AiloopClient::new(endpoints);
-        let channels = client.fetch_channels().await.unwrap();
-
-        assert!(channels.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_fetch_channels_backwards_compatible() {
-        let mock_server = MockServer::start().await;
-
-        Mock::given(method("GET"))
-            .and(path("/api/channels"))
+            .and(path("/api/hil/instances"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(json!(["simple/channel", "another/channel"])),
+                ResponseTemplate::new(200).set_body_json(json!(["instance-aaa", "instance-bbb"])),
             )
             .mount(&mock_server)
             .await;
 
-        let endpoints = build_endpoints(&mock_server);
+        let client = AiloopClient::new(build_endpoints(&mock_server));
+        let instances = client.fetch_channels().await.unwrap();
 
-        let client = AiloopClient::new(endpoints);
-        let channels = client.fetch_channels().await.unwrap();
-
-        assert_eq!(channels.len(), 2);
-        assert_eq!(channels[0], "simple/channel");
-        assert_eq!(channels[1], "another/channel");
+        assert_eq!(instances, vec!["instance-aaa", "instance-bbb"]);
     }
 
     #[tokio::test]
-    async fn test_fetch_channels_handles_map_response() {
+    async fn test_fetch_hil_instances_empty() {
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
-            .and(path("/api/channels"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "channels": {
-                    "project-z/feature-b": {
-                        "message_count": 1
-                    },
-                    "project-a/main": {
-                        "message_count": 2
-                    }
-                }
-            })))
+            .and(path("/api/hil/instances"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&mock_server)
             .await;
 
-        let endpoints = build_endpoints(&mock_server);
+        let client = AiloopClient::new(build_endpoints(&mock_server));
+        let instances = client.fetch_channels().await.unwrap();
 
-        let client = AiloopClient::new(endpoints);
-        let channels = client.fetch_channels().await.unwrap();
+        assert!(instances.is_empty());
+    }
 
-        assert_eq!(
-            channels,
-            vec![
-                "project-a/main".to_string(),
-                "project-z/feature-b".to_string()
-            ]
-        );
+    #[tokio::test]
+    async fn test_fetch_channel_messages_converts_hil_events() {
+        let mock_server = MockServer::start().await;
+        let event_id = "a1b2c3d4-0000-0000-0000-000000000001";
+        let instance_id = "instance-xyz";
+
+        Mock::given(method("GET"))
+            .and(path(format!("/api/hil/workflows/{instance_id}")))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!([hil_event_json(
+                    event_id,
+                    instance_id,
+                    "project/main"
+                )])),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = AiloopClient::new(build_endpoints(&mock_server));
+        let messages = client
+            .fetch_channel_messages(instance_id, 20)
+            .await
+            .unwrap();
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].instance_id, instance_id);
+        assert_eq!(messages[0].channel, "project/main");
     }
 }

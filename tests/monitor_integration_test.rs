@@ -24,55 +24,56 @@ fn build_endpoints(server: &MockServer) -> MonitorEndpoints {
     }
 }
 
+fn hil_event_json(
+    event_id: &str,
+    instance_id: &str,
+    event_type: &str,
+    question: &str,
+) -> serde_json::Value {
+    json!({
+        "event_id": event_id,
+        "instance_id": instance_id,
+        "node_id": null,
+        "channel": format!("project/{instance_id}"),
+        "event_type": event_type,
+        "question": question,
+        "choices": ["yes", "no"],
+        "timeout_seconds": 60,
+        "correlation_id": null,
+        "status": "pending",
+        "timestamp": "2026-04-11T12:00:00Z"
+    })
+}
+
 #[tokio::test]
 async fn test_initial_backfill_retrieves_messages_from_server() {
     let mock_server = MockServer::start().await;
-    let channel = "test-backfill-channel";
+    let instance_id = Uuid::new_v4().to_string();
+    let question_event_id = Uuid::new_v4().to_string();
+    let auth_event_id = Uuid::new_v4().to_string();
 
     Mock::given(method("GET"))
-        .and(path("/api/channels"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "channels": [
-                {
-                    "name": channel,
-                    "message_count": 2,
-                    "oldest_message": "2026-02-14T10:00:00Z",
-                    "newest_message": "2026-02-14T11:00:00Z"
-                }
-            ]
-        })))
+        .and(path("/api/hil/instances"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([instance_id])))
         .mount(&mock_server)
         .await;
 
-    let question_id = Uuid::new_v4().to_string();
-    let auth_id = Uuid::new_v4().to_string();
-    let messages = json!([
-        {
-            "id": question_id,
-            "channel": channel,
-            "content": {
-                "type": "question",
-                "text": "Test question?",
-                "timeout_seconds": 60
-            },
-            "timestamp": "2026-02-14T12:00:00Z"
-        },
-        {
-            "id": auth_id,
-            "channel": channel,
-            "content": {
-                "type": "authorization",
-                "action": "Test authorization",
-                "timeout_seconds": 45
-            },
-            "timestamp": "2026-02-14T12:05:00Z"
-        }
-    ]);
-
-    let messages_path = format!("/api/channels/{}/messages", channel);
     Mock::given(method("GET"))
-        .and(path(messages_path))
-        .respond_with(ResponseTemplate::new(200).set_body_json(messages))
+        .and(path(format!("/api/hil/workflows/{instance_id}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            hil_event_json(
+                &question_event_id,
+                &instance_id,
+                "question",
+                "Test question?"
+            ),
+            hil_event_json(
+                &auth_event_id,
+                &instance_id,
+                "authorization",
+                "Approve action?"
+            ),
+        ])))
         .mount(&mock_server)
         .await;
 

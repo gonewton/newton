@@ -258,6 +258,6 @@ fn collect_artifact_files(base: &Path) -> Result<Vec<ArtifactFile>, AppError> {
 fn internal_serialization_error(target: &str, err: serde_json::Error) -> AppError {
     AppError::new(
         ErrorCategory::SerializationError,
-        format!("failed to serialize {}: {}", target, err),
+        format!("failed to serialize {target}: {err}"),
     )
 }

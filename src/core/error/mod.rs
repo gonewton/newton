@@ -75,7 +75,7 @@ impl std::fmt::Display for AppError {
             write!(f, " (Context: {:?})", self.context)?;
         }
         if let Some(ref source) = self.source {
-            write!(f, "\nCaused by: {}", source)?;
+            write!(f, "\nCaused by: {source}")?;
         }
         Ok(())
     }
@@ -160,23 +160,23 @@ impl ErrorReporter for DefaultErrorReporter {
             eprintln!("  Context: {:?}", error.context);
         }
         if let Some(ref source) = error.source {
-            eprintln!("  Caused by: {}", source);
+            eprintln!("  Caused by: {source}");
         }
     }
 
     fn report_warning(&self, message: &str, context: Option<String>) {
-        eprintln!("[WARNING] {}", message);
+        eprintln!("[WARNING] {message}");
         if let Some(ref ctx) = context {
-            eprintln!("  Context: {}", ctx);
+            eprintln!("  Context: {ctx}");
         }
     }
 
     fn report_info(&self, message: &str) {
-        println!("[INFO] {}", message);
+        println!("[INFO] {message}");
     }
 
     fn report_debug(&self, message: &str) {
-        println!("[DEBUG] {}", message);
+        println!("[DEBUG] {message}");
     }
 }
 
