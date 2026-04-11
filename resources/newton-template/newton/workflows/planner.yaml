@@ -1,0 +1,236 @@
+version: "2.0"
+mode: workflow_graph
+
+metadata:
+  name: "planner-workflow"
+  description: "Enrich a user spec with mandatory planning aspects; human-in-the-loop for missing aspects. Optional trigger payload key output_path sets where the final enriched spec is saved (default .newton/plan/enriched.md and .newton/plan/enriched-final.md)."
+
+triggers:
+  type: manual
+  schema_version: "1.0"
+  payload:
+    prompt: ""
+    output_path: ""
+    board_item_id: ""
+    board_content_id: ""
+    board_issue_number: ""
+    board_item_title: ""
+
+workflow:
+  settings:
+    entry_task: resolve_board_ids
+    max_time_seconds: 3600
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 15
+
+    default_engine: claude
+    model_stylesheet:
+      model: claude-sonnet-4-20250514
+
+    command_operator:
+      allow_shell: true
+
+  context:
+    preamble: |-
+      You are enriching a product/spec document so that requirements are clearly and explicitly defined and implementation-ready. The user provided a spec (path or content below).
+
+      CODEBASE GROUNDING (do this first):
+      Before writing the enriched document, you MUST explore the target codebase (read key files, list directories) to ground every section in the actual project structure. File paths in the "Modified files" table MUST correspond to real files. If the spec references entities (commands, endpoints, modules), enumerate them from the source, not from the user's prose.
+
+      You MUST produce an enriched markdown document that MANDATORILY covers these aspects in this order (use the exact section headers):
+
+      TECHNICAL CONTEXT (sections 1-7):
+      1. **Problem statement** - What is broken or missing today. One paragraph grounded in actual codebase state. MUST include an explicit "out of scope" sentence for related work not in this spec.
+      2. **Goals** - Numbered list of concrete outcomes. Each goal MUST be verifiable.
+      3. **Current behavior** - Table: Component | Role | Mutable at runtime? Plus 1-2 sentences on current build and resume flow. Grounded in code inspection.
+      4. **Design** - The core "how". Subsections for each major mechanism (data structures, concurrency model, API surface, integration points). MUST include: storage types and data structure choices with concrete types, concurrency/locking strategy, invariants, identity/naming conventions, collision and error conditions, tick/lifecycle visibility rules. Include YAML or config examples where applicable.
+      5. **Schema and API** - Exact struct/type definitions and method signatures that implementers will create or modify. Use the project's language (Rust, Python, etc.) for code blocks.
+      6. **Error codes** - Table: Code | Category | Trigger. One row per error the implementation introduces.
+      7. **Acceptance criteria** - Numbered, testable conditions. Each criterion MUST be a single verifiable statement (not a vague goal). Produce at least one criterion per goal, one per error code, and one for backward-compatibility regression.
+
+      PLANNING (sections 8-14):
+      8. **Functionality comparison (before vs after)** - What exists today vs what will exist after implementation.
+      9. **Benefit of implementing this functionality** - Why implement this; value and impact.
+      10. **Stages** - Break the work into ordered stages. Each stage MUST define: (a) a concrete deliverable or output, (b) the explicit scope (enumerate items, NEVER use "etc." or ellipsis), and (c) any blocking dependency on a prior stage. If a stage produces a document or artifact that later stages consume, describe its expected content or structure.
+      11. **Breaking changes** - API, config, or behavioral changes that affect existing users or callers.
+      12. **Modified files and summary** - A table: | File/path | Summary of modifications |. Every path MUST be verified against the actual codebase. If existing tests or configs already cover the area, reference them.
+      13. **Dependencies** - External or internal dependencies (libraries, services, teams). For each dependency on a person or team, state whether it is blocking or non-blocking and which stage it gates. If a dependency is marked "recommended" or "optional", state what happens if it is skipped.
+      14. **Proposed folder structure** - If this is a new project, write complete folder structure; otherwise only modified files and paths.
+
+      VERIFICATION AND REFERENCE (sections 15-17):
+      15. **Design decisions** - Table: # | Question | Decision | Rationale. Captures key trade-offs so implementers do not re-debate them.
+      16. **Out of scope (explicit)** - Bulleted list of things explicitly excluded. Prevents scope creep.
+      17. **References** - Pointers to real files, functions, and structs in the codebase that the implementer should start from.
+
+      Requirements quality (apply throughout the spec):
+      - State requirements in normative language where applicable: MUST (mandatory), SHOULD (recommended), MAY (optional). Avoid vague wording; make obligations and options explicit.
+      - For each major capability or command, make applicability explicit (e.g. which commands get which options, or "all read-only commands" with a defined list).
+      - NEVER use "etc.", "and so on", or ellipsis to scope work items. If a stage or requirement applies to a subset of entities, enumerate them explicitly. If the full list is unknown, flag it with [NEED_USER_INPUT].
+      - Include test expectations where relevant (e.g. "Format selection MUST be covered by tests for each updated command").
+      - Ensure success criteria are measurable or verifiable. When a criterion uses a comparative metric (e.g. "2x longer", "50% faster"), it MUST include or reference a concrete baseline value so the criterion can be checked.
+      - If the spec defines options or formats (e.g. output formats, flags), specify per-entity applicability or a clear rule so implementers know exactly where each option applies.
+
+      For each of the 17 aspects: if you can fill it from the spec, codebase inspection, or well-grounded inference, write the section. If you are inventing names, paths, or details that cannot be verified from the spec or codebase, write exactly "[NEED_USER_INPUT: <aspect_name>]" in that section and add the aspect_name to the gaps list. Valid aspect_name values: problem_statement, goals, current_behavior, design, schema_api, error_codes, acceptance_criteria, functionality_comparison, benefit, stages, breaking_changes, modified_files_table, dependencies, folder_structure, design_decisions, out_of_scope, references.
+
+      When presenting multiple options to the user, present a recommended one and the rationale.
+
+  tasks:
+    - id: resolve_board_ids
+      operator: GhOperator
+      params:
+        operation: project_resolve_board
+        owner:
+          $expr: 'env("GH_PROJECT_OWNER")'
+        project_number:
+          $expr: 'env("GH_PROJECT_NUMBER")'
+        required_option_names:
+          - Backlog
+      transitions:
+        - to: enrich_spec
+
+    - id: enrich_spec
+      operator: AgentOperator
+      max_iterations: 2
+      params:
+        engine: claude
+        prompt:
+          $expr: 'context.preamble + "\n\nOutput format:\n- Write the full enriched markdown to the file " + (if triggers.output_path != () && triggers.output_path != "" { triggers.output_path + ".draft.md" } else { ".newton/plan/enriched.md" }) + " in the workspace (create directory if needed).\n- Write the list of aspect names that need user input (one per line) to .newton/plan/gaps.txt. If none need input, write a single line \"none\". Use only these aspect names when listing gaps: problem_statement, goals, current_behavior, design, schema_api, error_codes, acceptance_criteria, functionality_comparison, benefit, stages, breaking_changes, modified_files_table, dependencies, folder_structure, design_decisions, out_of_scope, references.\n\n---\nUser spec (path or content):\n\n" + triggers.prompt'
+      transitions:
+        - to: check_gaps
+
+    - id: check_gaps
+      operator: AgentOperator
+      max_iterations: 1
+      params:
+        engine: claude
+        prompt:
+          $expr: '"Read the file " + (if triggers.output_path != () && triggers.output_path != "" { triggers.output_path + ".draft.md" } else { ".newton/plan/enriched.md" }) + " in the workspace. Does it contain the exact text \"NEED_USER_INPUT\"? Reply with exactly <status>HAS_GAPS</status> if it does, otherwise <status>NO_GAPS</status>."'
+        signals:
+          has_gaps: "<status>HAS_GAPS</status>"
+          no_gaps: "<status>NO_GAPS</status>"
+      transitions:
+        - to: cat_gaps
+          priority: 0
+          when: { "$expr": 'tasks.check_gaps.output.signal == "has_gaps"' }
+        - to: copy_draft_to_final
+          priority: 10
+
+    - id: cat_gaps
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: "cat .newton/plan/gaps.txt 2>/dev/null || echo 'none'"
+        capture_stdout: true
+      transitions:
+        - to: ask_user
+
+    - id: ask_user
+      operator: HumanDecisionOperator
+      params:
+        prompt:
+          $expr: '"The enriched spec draft is at " + (if triggers.output_path != () && triggers.output_path != "" { triggers.output_path + ".draft.md" } else { ".newton/plan/enriched.md" }) + ". The following aspects need your input (add content for them in the draft):\n\n" + tasks.cat_gaps.output.stdout + "\n\nEdit the draft file, then choose Continue. To finalize without adding more, choose Skip."'
+        choices:
+          - "Continue"
+          - "Skip"
+        default_choice: "Continue"
+      transitions:
+        - to: merge_spec
+          priority: 0
+          when: { "$expr": 'tasks.ask_user.output.choice == "Continue"' }
+        - to: copy_draft_to_final
+          priority: 10
+
+    - id: merge_spec
+      operator: AgentOperator
+      max_iterations: 1
+      params:
+        engine: claude
+        prompt:
+          $expr: '"Read " + (if triggers.output_path != () && triggers.output_path != "" { triggers.output_path + ".draft.md" } else { ".newton/plan/enriched.md" }) + " in the workspace. Produce a final version that removes any remaining \"[NEED_USER_INPUT: ...]\" placeholders (replace with a short note if needed). Write the result to " + (if triggers.output_path != () && triggers.output_path != "" { triggers.output_path } else { ".newton/plan/enriched-final.md" }) + "."'
+      transitions:
+        - to: cleanup_draft
+
+    - id: copy_draft_to_final
+      operator: CommandOperator
+      params:
+        shell: true
+        env:
+          DRAFT_PATH:
+            $expr: 'if triggers.output_path != () && triggers.output_path != "" { triggers.output_path + ".draft.md" } else { ".newton/plan/enriched.md" }'
+          FINAL_PATH:
+            $expr: 'if triggers.output_path != () && triggers.output_path != "" { triggers.output_path } else { ".newton/plan/enriched-final.md" }'
+        cmd: "mkdir -p \"$(dirname \"$FINAL_PATH\")\" 2>/dev/null; cp \"$DRAFT_PATH\" \"$FINAL_PATH\""
+        capture_stdout: false
+      transitions:
+        - to: cleanup_draft
+
+    - id: cleanup_draft
+      operator: CommandOperator
+      params:
+        shell: true
+        env:
+          DRAFT_PATH:
+            $expr: 'if triggers.output_path != () && triggers.output_path != "" { triggers.output_path + ".draft.md" } else { ".newton/plan/enriched.md" }'
+        cmd: "rm -f \"$DRAFT_PATH\""
+        capture_stdout: false
+      transitions:
+        - to: finalize
+
+    - id: finalize
+      operator: CommandOperator
+      params:
+        shell: true
+        env:
+          OUT:
+            $expr: 'if triggers.output_path != () && triggers.output_path != "" { triggers.output_path } else { ".newton/plan/enriched-final.md" }'
+        cmd: "echo Enriched spec written to $OUT"
+        capture_stdout: false
+      transitions:
+        - to: update_board_body
+
+    - id: update_board_body
+      operator: CommandOperator
+      params:
+        shell: true
+        env:
+          ITEM_ID:
+            $expr: 'triggers.board_content_id'
+          ITEM_TITLE:
+            $expr: 'triggers.board_item_title'
+          ISSUE_NUMBER:
+            $expr: 'triggers.board_issue_number'
+          OUT:
+            $expr: 'if triggers.output_path != () && triggers.output_path != "" { triggers.output_path } else { ".newton/plan/enriched-final.md" }'
+        cmd: |
+          set -e
+          if [[ "$ITEM_ID" == DI_* ]]; then
+            gh project item-edit --id "$ITEM_ID" --title "$ITEM_TITLE" --body "$(cat "$OUT")"
+          else
+            gh issue edit "$ISSUE_NUMBER" --body "$(cat "$OUT")"
+          fi
+        capture_stdout: false
+      transitions:
+        - to: move_to_backlog
+
+    - id: move_to_backlog
+      operator: GhOperator
+      params:
+        operation: project_item_set_status
+        item_id:
+          $expr: 'triggers.board_item_id'
+        board:
+          $expr: 'tasks.resolve_board_ids.output'
+        status: "Backlog"
+        on_error: fail
+      transitions:
+        - to: success
+
+    - id: success
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: 'echo "Planner completed; item moved to Backlog"'
+        capture_stdout: false
+      terminal: success

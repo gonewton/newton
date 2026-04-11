@@ -1,27 +1,22 @@
-# Newton Workspace Template
+# Newton workspace template
 
-This template provides a complete Newton workspace with scripts for evaluator, advisor, post-success, and post-failure hooks.
+This template scaffolds a Newton workspace with **workflow YAML** definitions and small **shell helpers** under `.newton/`.
 
-## Scripts
+## Layout
 
-The following scripts are installed in `.newton/scripts/`:
+- **`.newton/workflows/`**  
+  - `develop.yaml`, `planner.yaml`, `documenter.yaml` (example workflow graphs you can run or customize).
 
-- `advisor.sh`: Advisor script for Newton's planning phase
-- `evaluator.sh`: Evaluator script for validating plan progress
-- `post-success.sh`: Script to run after a successful `newton run` in batch mode
-- `post-failure.sh`: Script to run after a failed `newton run` in batch mode
+- **`.newton/scripts/`**  
+  - `newton-project-root.sh` – shared helpers (config dir, `project_root` resolution).  
+  - `develop.sh`, `planner.sh`, `documenter.sh` – convenience entrypoints that invoke `newton run` with the matching workflow (see script headers for usage).
 
-## Usage
+## After `newton init`
 
-After installing this template with `aikit install`, you can customize these scripts to fit your project's workflow.
+1. Edit `.newton/configs/default.conf`: set `workflow_file` to the workflow you want `newton batch` to use (path relative to `project_root` or your workspace), for example:
+   - `workflow_file=.newton/workflows/develop.yaml`
+2. Run a workflow directly:
+   - `newton run .newton/workflows/develop.yaml --workspace .`
+3. Use the helper scripts from your workspace root if you prefer (they expect a matching `<project_id>.conf` under `.newton/configs/`).
 
-## Post-Success Behavior
-
-The `post-success.sh` script is called after a successful `newton run` in batch mode:
-- Exit code 0: Plan is moved to `completed/`
-- Non-zero exit code: Plan is moved to `failed/`
-
-## Post-Failure Behavior
-
-The `post-failure.sh` script is called after a failed `newton run` in batch mode:
-- After this script runs, the plan is moved to `failed/`
+Customize workflows and scripts to match your repositories and automation.

@@ -1,0 +1,503 @@
+version: "2.0"
+mode: workflow_graph
+
+metadata:
+  name: "develop-workflow"
+  description: "Run a implementation workflow for a given spec"
+
+triggers:
+  type: manual
+  schema_version: "1.0"
+  payload:
+    prompt: ""
+
+workflow:
+  settings:
+    entry_task: ensure_clean_main
+    max_time_seconds: 604800
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 15000
+    max_workflow_iterations: 25000
+
+    default_engine: opencode
+    # Fallback when a task omits params.model. Use sonnet so claude_code never inherits a GLM id.
+    model_stylesheet:
+      model: zai-coding-plan/glm-5
+
+    command_operator:
+      allow_shell: true
+
+  context:
+    preamble: |-
+      Implement the following spec in the target source code target.
+      After you have applied the changes and ./scripts/run-tests.sh completes with no errors, print exactly <status>COMPLETED</status> in your final output.
+    codescene_preamble: |-
+      Fix code health issues reported by CodeScene. Work in the target source code base; run ./scripts/run-tests.sh to verify. Do not require a COMPLETED marker.
+    precommit_fix_preamble: |-
+      The pre-commit hook rejected a commit. The full hook output is below.
+      Fix all reported issues in the codebase. Run ./scripts/run-tests.sh to verify.
+      Do not attempt to commit; only fix the code.
+    validation_preamble: |-
+      You are a reviewer. You will be given the spec path, the spec content (or path if passed as reference), and the diff vs main.
+      Determine whether the provided diff fully implements the given spec.
+      Reply with exactly one of <status>VALID</status> or <status>INVALID</status>.
+      If INVALID, include a single block <feedback>...</feedback> with clear, actionable feedback.
+
+  tasks:
+    - id: ensure_clean_main
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: |
+          set -e
+          git fetch origin
+          git checkout main
+          git pull --rebase origin main
+          git diff --quiet || { echo "Precondition failed: unstaged changes"; exit 1; }
+          git diff --cached --quiet || { echo "Precondition failed: staged changes"; exit 1; }
+        capture_stdout: false
+      transitions:
+        - to: resolve_board_ids
+
+    - id: resolve_board_ids
+      operator: GhOperator
+      params:
+        operation: project_resolve_board
+        owner:
+          $expr: 'env("GH_PROJECT_OWNER")'
+        project_number:
+          $expr: 'env("GH_PROJECT_NUMBER")'
+      transitions:
+        - to: move_to_in_progress
+
+    - id: move_to_in_progress
+      operator: GhOperator
+      params:
+        operation: project_item_set_status
+        item_id:
+          $expr: 'triggers.board_item_id'
+        board:
+          $expr: 'tasks.resolve_board_ids.output'
+        status: "In progress"
+        on_error: warn
+      transitions:
+        - to: create_branch
+
+    - id: create_branch
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: |
+          BRANCH_NAME=$(basename "$PROMPT_PATH" | sed 's/\.[^.]*$//')
+          git checkout -b "feature/$BRANCH_NAME"
+        env:
+          PROMPT_PATH:
+            $expr: 'triggers.prompt'
+        capture_stdout: false
+      transitions:
+        - to: load_spec
+
+    - id: load_spec
+      operator: CommandOperator
+      params:
+        shell: true
+        env:
+          SPEC_PATH:
+            $expr: 'triggers.prompt'
+        cmd: |
+          set -e
+          cat "$SPEC_PATH"
+        capture_stdout: true
+        capture_stderr: true
+      transitions:
+        - to: implement_spec
+
+    - id: implement_spec
+      operator: "AgentOperator"
+      max_iterations: 3
+      params:
+        engine: claude
+        model: sonnet
+        prompt:
+          $expr: 'context.preamble + "\n\nSpec path: " + triggers.prompt + "\n\nSpec content:\n" + tasks.load_spec.output.stdout'
+        signals:
+          complete: '<status>COMPLETED</status>'
+      transitions:
+        - to: run_tests
+          priority: 0
+          when: { "$expr": 'tasks.implement_spec.output.signal == "complete"' }
+        - to: retry_implementation
+          priority: 10
+
+    - id: run_tests
+      max_iterations: 60
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: |
+          OUTPUT=$(./scripts/run-tests.sh 2>&1)
+          EXIT=$?
+          echo "$OUTPUT"
+          [ $EXIT -eq 0 ] && echo "TEST_STATUS: passed" || echo "TEST_STATUS: failed"
+        capture_stdout: true
+        capture_stderr: true
+      transitions:
+        - to: snapshot_commit
+          priority: 0
+          when: { "$expr": "contains(tasks.run_tests.output.stdout, \"TEST_STATUS: passed\")" }
+        - to: fix_test_failures
+          priority: 10
+
+    - id: fix_test_failures
+      operator: AgentOperator
+      max_iterations: 3
+      params:
+        engine: opencode
+        model: zai-coding-plan/glm-5
+        prompt:
+          $expr: 'context.preamble + "\n\nSpec path: " + triggers.prompt + "\n\nSpec content:\n" + tasks.load_spec.output.stdout + "\n\nTests failed. Fix the issues and re-run ./scripts/run-tests.sh:\n" + tasks.run_tests.output.stdout'
+      transitions:
+        - to: run_tests
+
+    - id: snapshot_commit
+      max_iterations: 90
+      operator: CommandOperator
+      params:
+        shell: true
+        env:
+          SPEC_PATH:
+            $expr: 'triggers.prompt'
+        cmd: |
+          SPEC_BASENAME=$(basename "$SPEC_PATH" | sed 's/\.[^.]*$//')
+          git add -A
+          git diff --cached --name-only | { grep -E '^test_results\.' || true; } | xargs -r git reset --
+          if git diff --cached --quiet; then
+            echo "COMMIT_STATUS: skipped"
+            exit 0
+          fi
+          OUTPUT=$(git commit -m "chore(develop): $SPEC_BASENAME" 2>&1)
+          EXIT=$?
+          echo "$OUTPUT"
+          [ $EXIT -eq 0 ] && echo "COMMIT_STATUS: success" || echo "COMMIT_STATUS: failed"
+        capture_stdout: true
+        capture_stderr: true
+      transitions:
+        - to: get_diff
+          priority: 0
+          when: { "$expr": "contains(tasks.snapshot_commit.output.stdout, \"COMMIT_STATUS: success\") || contains(tasks.snapshot_commit.output.stdout, \"COMMIT_STATUS: skipped\")" }
+        - to: fix_snapshot_precommit
+          priority: 10
+
+    - id: fix_snapshot_precommit
+      operator: AgentOperator
+      max_iterations: 3
+      params:
+        engine: opencode
+        model: zai-coding-plan/glm-5
+        prompt:
+          $expr: 'context.precommit_fix_preamble + "\n\nPre-commit hook output:\n" + tasks.snapshot_commit.output.stdout'
+      transitions:
+        - to: snapshot_commit
+
+    - id: get_diff
+      max_iterations: 60
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: 'git diff main...HEAD'
+        capture_stdout: true
+      transitions:
+        - to: validate_against_spec
+
+    - id: validate_against_spec
+      max_iterations: 60
+      operator: AgentOperator
+      params:
+        engine: claude
+        model: sonnet
+        prompt:
+          $expr: 'context.validation_preamble + "\n\nSpec path: " + triggers.prompt + "\n\nSpec content:\n" + tasks.load_spec.output.stdout + "\n\nDiff vs main:\n" + tasks.get_diff.output.stdout'
+        signals:
+          valid: '<status>VALID</status>'
+          invalid: '<status>INVALID</status>'
+      transitions:
+        - to: analyze_code_health
+          priority: 0
+          when: { "$expr": 'tasks.validate_against_spec.output.signal == "valid"' }
+        - to: load_validation_feedback
+          priority: 10
+
+    - id: load_validation_feedback
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: true
+        env:
+          VALIDATION_STDOUT_ARTIFACT:
+            $expr: 'tasks.validate_against_spec.output.stdout_artifact'
+        cmd: 'cat "$VALIDATION_STDOUT_ARTIFACT"'
+      transitions:
+        - to: implement_feedback
+
+    - id: implement_feedback
+      operator: AgentOperator
+      max_iterations: 60
+      params:
+        engine: claude
+        model: sonnet
+        prompt:
+          $expr: 'context.preamble + "\n\nSpec path: " + triggers.prompt + "\n\nSpec content:\n" + tasks.load_spec.output.stdout + "\n\nValidation feedback (address and re-run tests):\n" + tasks.load_validation_feedback.output.stdout'
+        signals:
+          complete: '<status>COMPLETED</status>'
+      transitions:
+        - to: run_tests
+
+    - id: analyze_code_health
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: 'cs delta --output-format json'
+        capture_stdout: true
+      transitions:
+        - to: fix_code_health
+          priority: 0
+          when: { "$expr": "contains(tasks.analyze_code_health.output.stdout, \"{\")" }
+        - to: git_stage
+          priority: 10
+
+    - id: fix_code_health
+      operator: "AgentOperator"
+      params:
+        engine: opencode
+        model: zai-coding-plan/glm-5
+        prompt:
+          $expr: 'context.codescene_preamble + "\n\nCodeScene delta report (JSON):\n" + tasks.analyze_code_health.output.stdout'
+      transitions:
+        - to: git_stage
+
+    - id: git_stage
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: |
+          set -e
+          git add -A
+          git diff --cached --name-only | { grep -E '^test_results\.' || true; } | xargs -r git reset --
+          if git diff --cached --quiet; then
+            if git diff --quiet main...HEAD; then
+              echo "NO_CHANGES"
+            else
+              echo "COMMITTED_ONLY"
+            fi
+            exit 0
+          fi
+          echo "HAS_CHANGES"
+        capture_stdout: true
+      transitions:
+        - to: no_changes_done
+          priority: 0
+          when: { "$expr": "contains(tasks.git_stage.output.stdout, \"NO_CHANGES\")" }
+        - to: git_push
+          priority: 5
+          when: { "$expr": "contains(tasks.git_stage.output.stdout, \"COMMITTED_ONLY\")" }
+        - to: git_commit
+          priority: 10
+          when: { "$expr": "contains(tasks.git_stage.output.stdout, \"HAS_CHANGES\")" }
+
+    - id: no_changes_done
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: 'echo "No changes to commit; skipping PR."'
+        capture_stdout: false
+      terminal: success
+
+    - id: git_commit
+      operator: CommandOperator
+      params:
+        shell: true
+        env:
+          PROMPT_PATH:
+            $expr: 'triggers.prompt'
+        cmd: |
+          MSG="feat: implement $(basename "$PROMPT_PATH" .md 2>/dev/null || echo "spec")"
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            echo "COMMIT_STATUS: skipped"
+            exit 0
+          fi
+          OUTPUT=$(git commit -m "$MSG" 2>&1)
+          EXIT=$?
+          echo "$OUTPUT"
+          [ $EXIT -eq 0 ] && echo "COMMIT_STATUS: success" || echo "COMMIT_STATUS: failed"
+        capture_stdout: true
+        capture_stderr: true
+      transitions:
+        - to: git_push
+          priority: 0
+          when: { "$expr": "contains(tasks.git_commit.output.stdout, \"COMMIT_STATUS: success\") || contains(tasks.git_commit.output.stdout, \"COMMIT_STATUS: skipped\")" }
+        - to: fix_final_precommit
+          priority: 10
+
+    - id: fix_final_precommit
+      operator: AgentOperator
+      max_iterations: 3
+      params:
+        engine: opencode
+        model: zai-coding-plan/glm-5
+        prompt:
+          $expr: 'context.precommit_fix_preamble + "\n\nPre-commit hook output:\n" + tasks.git_commit.output.stdout'
+      transitions:
+        - to: git_commit
+
+    - id: git_push
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: |
+          for i in 1 2 3; do
+            git push -u origin HEAD && exit 0
+            sleep 5
+          done
+          echo "git push failed after 3 attempts"; exit 1
+        capture_stdout: true
+        capture_stderr: true
+      transitions:
+        - to: gh_create_pr
+
+    - id: gh_create_pr
+      operator: GhOperator
+      params:
+        operation: pr_create
+        base: main
+        title:
+          $expr: '"feat: implement " + file_stem(triggers.prompt)'
+        body: "Implements spec. Merge with squash."
+        retry_count: 3
+        retry_delay_ms: 5000
+      transitions:
+        - to: move_to_in_review
+
+    - id: move_to_in_review
+      operator: GhOperator
+      params:
+        operation: project_item_set_status
+        item_id:
+          $expr: 'triggers.board_item_id'
+        board:
+          $expr: 'tasks.resolve_board_ids.output'
+        status: "In review"
+        on_error: warn
+      transitions:
+        - to: poll_pr
+
+    - id: poll_pr
+      operator: GhOperator
+      max_iterations: 15000
+      timeout_ms: 120000
+      params:
+        operation: pr_view
+        pr:
+          $expr: 'tasks.gh_create_pr.output.pr_number'
+      transitions:
+        - to: merge_git_cleanup
+          priority: 0
+          when: { "$expr": 'tasks.poll_pr.output.state == "MERGED"' }
+        - to: move_to_ready_on_close
+          priority: 1
+          when: { "$expr": 'tasks.poll_pr.output.state == "CLOSED"' }
+        - to: sleep_merge_wait
+          priority: 5
+          when: { "$expr": 'tasks.poll_pr.output.state == "OPEN"' }
+        - to: sleep_merge_unknown
+          priority: 10
+          when: { "$expr": 'tasks.poll_pr.output.state != "OPEN" && tasks.poll_pr.output.state != "MERGED" && tasks.poll_pr.output.state != "CLOSED"' }
+
+    - id: sleep_merge_wait
+      operator: CommandOperator
+      max_iterations: 15000
+      params:
+        shell: true
+        cmd: "sleep 60"
+        capture_stdout: false
+      transitions:
+        - to: poll_pr
+
+    - id: sleep_merge_unknown
+      operator: CommandOperator
+      max_iterations: 15000
+      params:
+        shell: true
+        cmd: 'echo "Unexpected PR state; waiting 30s"; sleep 30'
+        capture_stdout: false
+      transitions:
+        - to: poll_pr
+
+    - id: move_to_ready_on_close
+      operator: GhOperator
+      params:
+        operation: project_item_set_status
+        item_id:
+          $expr: 'triggers.board_item_id'
+        board:
+          $expr: 'tasks.resolve_board_ids.output'
+        status: "Ready"
+        on_error: warn
+      transitions:
+        - to: fail_pr_closed
+
+    - id: fail_pr_closed
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: 'echo "PR closed without merge" >&2; exit 1'
+        capture_stdout: false
+      terminal: failure
+
+    - id: merge_git_cleanup
+      operator: CommandOperator
+      timeout_ms: 600000
+      params:
+        shell: true
+        cmd: |
+          set -e
+          BRANCH=$(git branch --show-current)
+          git checkout main
+          git pull --rebase origin main
+          git branch -d "$BRANCH" 2>/dev/null || true
+          git push origin --delete "$BRANCH" 2>/dev/null || true
+        capture_stdout: false
+      transitions:
+        - to: move_to_done
+
+    - id: move_to_done
+      operator: GhOperator
+      params:
+        operation: project_item_set_status
+        item_id:
+          $expr: 'triggers.board_item_id'
+        board:
+          $expr: 'tasks.resolve_board_ids.output'
+        status: "Done"
+        on_error: warn
+      transitions:
+        - to: success
+
+    - id: success
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: 'echo "Job is completed based on opencode output" | tee /dev/tty'
+        capture_stdout: false
+      terminal: success
+
+    - id: retry_implementation
+      operator: CommandOperator
+      max_iterations: 3
+      params:
+        shell: true
+        cmd: 'echo "Job failed (status != COMPLETED), retrying implement_spec task..."'
+        capture_stdout: false
+      transitions:
+        - to: implement_spec

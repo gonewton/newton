@@ -49,14 +49,14 @@ pub async fn run(args: InitArgs) -> Result<()> {
         .unwrap_or_else(|| DEFAULT_TEMPLATE_SOURCE.to_string());
     install_template(&path, &template_source)?;
 
-    // Create minimal executor.sh stub if it doesn't exist
-    ensure_executor_script(&newton_dir)?;
-
     // Write .newton/configs/default.conf
     write_default_config(&newton_dir, &path)?;
 
     println!("Initialized Newton workspace at {}", path.display());
-    println!("Run: newton run");
+    println!(
+        "Set workflow_file in .newton/configs/default.conf to your workflow YAML, then run newton run with that file and --workspace {}",
+        path.display()
+    );
 
     Ok(())
 }
@@ -106,36 +106,6 @@ fn install_template(project_root: &Path, template_source: &str) -> Result<()> {
     Ok(())
 }
 
-/// Ensures executor.sh exists, creating a minimal stub if the template didn't provide one
-fn ensure_executor_script(newton_dir: &Path) -> Result<()> {
-    let executor_path = newton_dir.join("scripts/executor.sh");
-
-    if !executor_path.exists() {
-        fs::create_dir_all(executor_path.parent().unwrap())?;
-
-        let stub_content = r#"#!/bin/bash
-# Minimal executor stub
-# Replace with your actual executor implementation
-
-echo "Executor stub: implement your coding agent integration here"
-exit 1
-"#;
-
-        fs::write(&executor_path, stub_content)?;
-
-        // Make executable on Unix
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&executor_path)?.permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(&executor_path, perms)?;
-        }
-    }
-
-    Ok(())
-}
-
 /// Writes .newton/configs/default.conf with key=value pairs
 fn write_default_config(newton_dir: &Path, project_root: &Path) -> Result<()> {
     let config_path = newton_dir.join("configs/default.conf");
@@ -154,34 +124,11 @@ fn write_default_config(newton_dir: &Path, project_root: &Path) -> Result<()> {
     writeln!(config_file, "project_root={}", project_root.display())?;
     writeln!(config_file, "coding_model={}", coding_model)?;
     writeln!(config_file)?;
-
-    // Script paths (optional - defaults to .newton/scripts/*.sh)
     writeln!(
         config_file,
-        "# Can be absolute paths or relative to project/workspace root"
+        "# Required for newton batch <project_id>: path to a workflow YAML (relative to project_root or workspace)"
     )?;
-    writeln!(config_file, "# evaluator_cmd=.newton/scripts/evaluator.sh")?;
-    writeln!(config_file, "# advisor_cmd=.newton/scripts/advisor.sh")?;
-    writeln!(config_file, "# executor_cmd=.newton/scripts/executor.sh")?;
-    writeln!(config_file, "# coder_cmd=.newton/scripts/coder.sh")?;
-    writeln!(config_file)?;
-
-    // Optionally add script paths if they exist
-    let post_success_script = newton_dir.join("scripts/post-success.sh");
-    if post_success_script.exists() {
-        writeln!(
-            config_file,
-            "post_success_script=.newton/scripts/post-success.sh"
-        )?;
-    }
-
-    let post_fail_script = newton_dir.join("scripts/post-failure.sh");
-    if post_fail_script.exists() {
-        writeln!(
-            config_file,
-            "post_fail_script=.newton/scripts/post-failure.sh"
-        )?;
-    }
+    writeln!(config_file, "# workflow_file=path/to/workflow.yaml")?;
 
     Ok(())
 }
