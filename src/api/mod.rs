@@ -1,6 +1,6 @@
 pub mod hil;
 pub mod legacy_channels;
-pub mod operators_api;
+pub mod operators;
 pub mod state;
 pub mod streaming_api;
 pub mod workflows;
@@ -20,7 +20,7 @@ pub fn create_router(state: AppState, ui_dir: Option<PathBuf>) -> Router {
         .merge(workflows::routes(arc_state.clone()))
         .merge(hil::routes(arc_state.clone()))
         .merge(streaming_api::routes(arc_state.clone()))
-        .merge(operators_api::routes(arc_state.clone()))
+        .merge(operators::routes(arc_state.clone()))
         .merge(legacy_channels::routes(arc_state.clone()))
         .route("/health", get(health_check))
         .layer(CorsLayer::permissive());
