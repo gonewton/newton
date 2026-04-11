@@ -75,9 +75,9 @@ Follow the **Setting up a new project** flow below to go from a blank directory 
 
 1. Create a project directory and `cd` into it.
 2. Run `newton init .` to scaffold the workspace.
-3. Run a workflow from the template (optional input file as second positional):
+3. Run a workflow (path comes from your template or your own YAML; optional input file as second positional):
    ```bash
-   newton run .newton/workflows/develop.yaml --workspace .
+   newton run path/to/workflow.yaml --workspace .
    ```
 
 ### Setting up a new project
@@ -85,7 +85,7 @@ Follow the **Setting up a new project** flow below to go from a blank directory 
 1. Create a project directory and `cd` into it.
 2. Run `newton init .` to scaffold `.newton/` (layout, template files such as workflows and helper scripts, and `.newton/configs/default.conf`).
 3. Edit `.newton/configs/default.conf`: set `workflow_file` to the workflow YAML `newton batch` should run (see comment in that file). Add a `<project_id>.conf` copy or symlink if you use batch with a non-default id.
-4. Run a workflow explicitly, for example: `newton run .newton/workflows/develop.yaml --workspace .` (pick the YAML that matches your template).
+4. Run a workflow explicitly, for example: `newton run path/to/workflow.yaml --workspace .` (use the paths described in your template README).
 
 For an existing repository, run `newton init .` at the repo root instead of creating a new directory.
 
@@ -375,7 +375,7 @@ Use simple `key=value` lines. For `newton batch`, set:
 ```conf
 # Required for batch
 project_root=/path/to/project
-workflow_file=.newton/workflows/develop.yaml
+workflow_file=path/to/workflow.yaml
 
 # Optional: kept in default.conf after init for templates and tooling; ignored by batch
 coding_model=zai-coding-plan/glm-4.7

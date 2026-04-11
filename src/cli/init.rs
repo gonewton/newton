@@ -54,7 +54,7 @@ pub async fn run(args: InitArgs) -> Result<()> {
 
     println!("Initialized Newton workspace at {}", path.display());
     println!(
-        "Next: newton run .newton/workflows/<workflow>.yaml --workspace {}",
+        "Set workflow_file in .newton/configs/default.conf to your workflow YAML, then run newton run with that file and --workspace {}",
         path.display()
     );
 
@@ -128,10 +128,7 @@ fn write_default_config(newton_dir: &Path, project_root: &Path) -> Result<()> {
         config_file,
         "# Required for newton batch <project_id>: path to a workflow YAML (relative to project_root or workspace)"
     )?;
-    writeln!(
-        config_file,
-        "# workflow_file=.newton/workflows/develop.yaml"
-    )?;
+    writeln!(config_file, "# workflow_file=path/to/workflow.yaml")?;
 
     Ok(())
 }
