@@ -9,7 +9,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use newton_types::ApiError;
+use newton_types::{ApiError, BroadcastEvent};
 use serde::Deserialize;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -165,22 +165,31 @@ async fn workflow_sse(
         .into_response()
 }
 
-fn should_send_event(
-    event: &newton_types::BroadcastEvent,
-    instance_id: &str,
-    filters: &StreamFilters,
-) -> bool {
+fn should_send_event(event: &BroadcastEvent, instance_id: &str, filters: &StreamFilters) -> bool {
     if let Some(ref filter_inst) = filters.instance_id {
         if filter_inst != instance_id {
             return false;
         }
     }
 
+    if let Some(ref filter_type) = filters.event_type {
+        let event_type = match event {
+            BroadcastEvent::WorkflowInstanceUpdated { .. } => "workflowInstanceUpdated",
+            BroadcastEvent::NodeStateChanged { .. } => "nodeStateChanged",
+            BroadcastEvent::LogMessage { .. } => "logMessage",
+            BroadcastEvent::HilEvent { .. } => "hilEvent",
+        };
+
+        if filter_type != event_type {
+            return false;
+        }
+    }
+
     match event {
-        newton_types::BroadcastEvent::WorkflowInstanceUpdated {
+        BroadcastEvent::WorkflowInstanceUpdated {
             instance_id: ref evt_id,
         } => evt_id == instance_id,
-        newton_types::BroadcastEvent::NodeStateChanged {
+        BroadcastEvent::NodeStateChanged {
             instance_id: ref evt_id,
             node_id: ref evt_node,
         } => {
@@ -193,7 +202,7 @@ fn should_send_event(
                 true
             }
         }
-        newton_types::BroadcastEvent::LogMessage {
+        BroadcastEvent::LogMessage {
             instance_id: ref evt_id,
             node_id: ref evt_node,
             ..
@@ -207,7 +216,7 @@ fn should_send_event(
                 true
             }
         }
-        newton_types::BroadcastEvent::HilEvent {
+        BroadcastEvent::HilEvent {
             instance_id: ref evt_id,
             ..
         } => evt_id == instance_id,
