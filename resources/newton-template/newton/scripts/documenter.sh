@@ -15,7 +15,7 @@ config_file="$NEWTON_CONFIG_DIR/${project_id}.conf"
 # shellcheck disable=SC1090
 . "$config_file"
 
-WORKFLOW="/home/sysuser/ws001/.newton/workflows/documenter.yaml"
+WORKFLOW=".newton/workflows/documenter.yaml"
 
 trigger_json="${1:-}"
 if [[ -z "$trigger_json" ]]; then
