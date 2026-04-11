@@ -1,0 +1,337 @@
+version: "2.0"
+mode: workflow_graph
+
+metadata:
+  name: "documenter-workflow"
+  description: "Triage and update documentation from git diff vs base ref; allowlist-enforced"
+
+triggers:
+  type: manual
+  schema_version: "1.0"
+  payload:
+    base_ref: ""
+    allowlist: ""
+    prompt: ""
+    commit_docs: false
+    require_plan_approval: false
+
+workflow:
+  settings:
+    entry_task: normalize_documenter_config
+    max_time_seconds: 604800
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 15000
+    max_workflow_iterations: 25000
+
+    default_engine: opencode
+    model_stylesheet:
+      model: zai-coding-plan/glm-5
+
+    command_operator:
+      allow_shell: true
+
+    human:
+      default_timeout_seconds: 86400
+      audit_path: .newton/state/workflows
+
+  context:
+    documenter_triage_preamble: |-
+      You are a technical writer and release engineer.
+      Inputs: (1) doc allowlist: only these repo-relative paths may be edited later; (2) changed paths; (3) unified diff vs base; (4) optional spec text.
+      For every allowlisted path (expand directory entries to concrete files in the table when needed), decide if this branch's changes require a doc update.
+      Tie decisions to observable facts in the diff (flags, commands, APIs, config).
+      Do not edit any file in this step. Output only:
+      - Exactly one status line matching one of the signal patterns below (as its own line).
+      - A machine-readable block:
+      <doc_plan>
+      | path | action | rationale |
+      | ... | UPDATE or NO_CHANGE or DEFER | ... |
+      </doc_plan>
+      Use UPDATE only when the diff clearly implies the doc is stale or wrong. NO_CHANGE when unrelated. DEFER when unclear without more context.
+    documenter_apply_preamble: |-
+      You are a technical writer. Implement documentation updates only for rows marked UPDATE in the provided <doc_plan>.
+      Edit only files that fall under the allowlist. Do not modify application source unless that path is explicitly on the allowlist.
+      Ground statements in the provided diff and spec. When done, print exactly <status>DOC_APPLY_DONE</status> on its own line in your final output.
+    documenter_precommit_fix_preamble: |-
+      Pre-commit rejected the documentation commit. Fix only issues under the doc allowlist. Do not commit; only fix files.
+      After fixes, the workflow will retry the commit.
+
+  tasks:
+    - id: normalize_documenter_config
+      operator: SetContextOperator
+      params:
+        patch:
+          documenter:
+            base_ref:
+              $expr: 'if triggers.base_ref != () && triggers.base_ref != "" { triggers.base_ref } else { "main" }'
+            allowlist:
+              $expr: 'if triggers.allowlist != () { triggers.allowlist } else { "" }'
+      transitions:
+        - to: ensure_allowlist_nonempty
+
+    - id: ensure_allowlist_nonempty
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: true
+        env:
+          ALLOWLIST:
+            $expr: 'context.documenter.allowlist'
+        cmd: |
+          set -e
+          if [ -z "$ALLOWLIST" ]; then
+            echo "documenter: allowlist is empty; set allowlist in trigger JSON (newline-separated paths)"
+            exit 1
+          fi
+          echo "ALLOWLIST_OK"
+      transitions:
+        - to: precondition_git
+
+    - id: precondition_git
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: false
+        cmd: |
+          set -e
+          git fetch origin
+      transitions:
+        - to: collect_changed_paths
+
+    - id: collect_changed_paths
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: true
+        env:
+          BASE_REF:
+            $expr: 'context.documenter.base_ref'
+        cmd: |
+          set -e
+          git diff --name-only "${BASE_REF}...HEAD"
+      transitions:
+        - to: collect_diff
+
+    - id: collect_diff
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: true
+        env:
+          BASE_REF:
+            $expr: 'context.documenter.base_ref'
+        cmd: |
+          set -e
+          git diff "${BASE_REF}...HEAD"
+      transitions:
+        - to: load_spec
+
+    - id: load_spec
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: true
+        env:
+          SPEC_PATH:
+            $expr: 'if triggers.prompt != () { triggers.prompt } else { "" }'
+        cmd: |
+          set -e
+          if [ -n "$SPEC_PATH" ] && [ -f "$SPEC_PATH" ]; then
+            cat "$SPEC_PATH"
+          else
+            echo ""
+          fi
+      transitions:
+        - to: agent_doc_triage
+
+    - id: agent_doc_triage
+      operator: AgentOperator
+      max_iterations: 5
+      params:
+        engine: opencode
+        prompt:
+          $expr: 'context.documenter_triage_preamble + "\n\n## Allowlist (only these paths may be edited later)\n" + context.documenter.allowlist + "\n\n## Changed paths (name-only)\n" + tasks.collect_changed_paths.output.stdout + "\n\n## Unified diff\n" + tasks.collect_diff.output.stdout + "\n\n## Optional spec\n" + tasks.load_spec.output.stdout + "\n\n## Signals\n" + "If no allowlisted doc needs changes, output a line containing exactly: <status>DOC_STATUS_NO_UPDATES</status>\n" + "If at least one allowlisted doc needs changes, output a line containing exactly: <status>DOC_STATUS_UPDATES_NEEDED</status>\n"'
+        signals:
+          no_updates: '<status>DOC_STATUS_NO_UPDATES</status>'
+          updates_needed: '<status>DOC_STATUS_UPDATES_NEEDED</status>'
+      transitions:
+        - to: terminal_no_edits
+          priority: 0
+          when:
+            $expr: 'tasks.agent_doc_triage.output.signal == "no_updates"'
+        - to: approve_doc_plan
+          priority: 1
+          when:
+            $expr: 'tasks.agent_doc_triage.output.signal == "updates_needed"'
+        - to: agent_doc_apply
+          priority: 10
+          when:
+            $expr: 'tasks.agent_doc_triage.output.signal == "updates_needed"'
+        - to: terminal_triage_exhausted
+          priority: 100
+
+    - id: approve_doc_plan
+      operator: HumanApprovalOperator
+      include_if:
+        $expr: 'triggers.require_plan_approval == true'
+      params:
+        prompt:
+          $expr: '"Approve documentation plan and proceed to apply edits?\n\n" + tasks.agent_doc_triage.output.stdout'
+      transitions:
+        - to: agent_doc_apply
+          priority: 0
+          when:
+            $expr: 'tasks.approve_doc_plan.output.approved == true'
+        - to: terminal_plan_rejected
+          priority: 10
+          when:
+            $expr: 'tasks.approve_doc_plan.output.approved == false'
+
+    - id: agent_doc_apply
+      operator: AgentOperator
+      max_iterations: 5
+      params:
+        engine: opencode
+        prompt:
+          $expr: 'context.documenter_apply_preamble + "\n\n## Allowlist\n" + context.documenter.allowlist + "\n\n## Triage output (follow <doc_plan> for UPDATE rows only)\n" + tasks.agent_doc_triage.output.stdout + "\n\n## Diff (reference)\n" + tasks.collect_diff.output.stdout'
+        signals:
+          done: '<status>DOC_APPLY_DONE</status>'
+      transitions:
+        - to: verify_allowlist
+          priority: 0
+          when:
+            $expr: 'tasks.agent_doc_apply.output.signal == "done"'
+        - to: terminal_apply_incomplete
+          priority: 10
+          when:
+            $expr: 'tasks.agent_doc_apply.output.signal != "done"'
+
+    - id: verify_allowlist
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: true
+        env:
+          ALLOWLIST:
+            $expr: 'context.documenter.allowlist'
+        cmd: |
+          set -e
+          CHANGED=$(git diff --name-only)
+          if [ -z "$CHANGED" ]; then
+            echo "VERIFY_OK"
+            exit 0
+          fi
+          FAIL=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            MATCH=0
+            while IFS= read -r prefix; do
+              [ -z "$prefix" ] && continue
+              if [[ "$f" == "$prefix" ]] || [[ "$f" == "$prefix/"* ]]; then
+                MATCH=1
+                break
+              fi
+            done <<< "$ALLOWLIST"
+            if [ "$MATCH" -eq 0 ]; then
+              echo "OUTSIDE_ALLOWLIST: $f"
+              FAIL=1
+            fi
+          done <<< "$CHANGED"
+          if [ "$FAIL" -eq 0 ]; then
+            echo "VERIFY_OK"
+          else
+            echo "VERIFY_FAIL"
+          fi
+          exit 0
+      transitions:
+        - to: terminal_verify_failed
+          priority: 0
+          when:
+            $expr: 'contains(tasks.verify_allowlist.output.stdout, "VERIFY_FAIL")'
+        - to: commit_docs
+          priority: 1
+          when:
+            $expr: 'contains(tasks.verify_allowlist.output.stdout, "VERIFY_OK")'
+        - to: terminal_doc_done
+          priority: 10
+          when:
+            $expr: 'contains(tasks.verify_allowlist.output.stdout, "VERIFY_OK")'
+
+    - id: commit_docs
+      operator: CommandOperator
+      include_if:
+        $expr: 'triggers.commit_docs == true'
+      max_iterations: 10
+      params:
+        shell: true
+        capture_stdout: true
+        env:
+          ALLOWLIST:
+            $expr: 'context.documenter.allowlist'
+        cmd: |
+          set -e
+          while IFS= read -r prefix; do
+            [ -z "$prefix" ] && continue
+            git add -- "$prefix" 2>/dev/null || true
+          done <<< "$ALLOWLIST"
+          if git diff --cached --quiet; then
+            echo "COMMIT_STATUS: skipped"
+            exit 0
+          fi
+          OUTPUT=$(git commit -m "docs: sync documentation with branch changes" 2>&1) || true
+          EXIT=$?
+          echo "$OUTPUT"
+          if [ $EXIT -eq 0 ]; then
+            echo "COMMIT_STATUS: success"
+          else
+            echo "COMMIT_STATUS: failed"
+          fi
+          exit 0
+      transitions:
+        - to: terminal_doc_done
+          priority: 0
+          when:
+            $expr: 'contains(tasks.commit_docs.output.stdout, "COMMIT_STATUS: success") || contains(tasks.commit_docs.output.stdout, "COMMIT_STATUS: skipped")'
+        - to: fix_doc_commit_precommit
+          priority: 10
+
+    - id: fix_doc_commit_precommit
+      operator: AgentOperator
+      max_iterations: 3
+      params:
+        engine: opencode
+        prompt:
+          $expr: 'context.documenter_precommit_fix_preamble + "\n\nCommit output:\n" + tasks.commit_docs.output.stdout'
+      transitions:
+        - to: commit_docs
+
+    - id: terminal_no_edits
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+
+    - id: terminal_doc_done
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+
+    - id: terminal_verify_failed
+      operator: NoOpOperator
+      params: {}
+      terminal: failure
+
+    - id: terminal_plan_rejected
+      operator: NoOpOperator
+      params: {}
+      terminal: failure
+
+    - id: terminal_triage_exhausted
+      operator: NoOpOperator
+      params: {}
+      terminal: failure
+
+    - id: terminal_apply_incomplete
+      operator: NoOpOperator
+      params: {}
+      terminal: failure
