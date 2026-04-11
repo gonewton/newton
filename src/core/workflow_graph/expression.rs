@@ -48,10 +48,39 @@ impl Default for ExpressionEngine {
         engine.register_fn("env", |name: String| -> String {
             std::env::var(&name).unwrap_or_default()
         });
+        // documenter.yaml: coerce trigger allowlist (JSON string or array of strings) to newline-separated paths.
+        engine.register_fn("documenter_allowlist_str", documenter_allowlist_str);
         engine.on_print(|_| {});
         engine.on_debug(|_, _, _| {});
         ExpressionEngine { engine }
     }
+}
+
+fn dynamic_as_path_segment(value: Dynamic) -> Option<String> {
+    if let Some(s) = value.clone().try_cast::<String>() {
+        return Some(s);
+    }
+    if let Some(s) = value.try_cast::<rhai::ImmutableString>() {
+        return Some(s.to_string());
+    }
+    None
+}
+
+fn documenter_allowlist_str(value: Dynamic) -> String {
+    if value.is_unit() {
+        return String::new();
+    }
+    if let Some(s) = dynamic_as_path_segment(value.clone()) {
+        return s;
+    }
+    if let Some(arr) = value.try_cast::<Array>() {
+        return arr
+            .into_iter()
+            .filter_map(dynamic_as_path_segment)
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    String::new()
 }
 
 impl ExpressionEngine {
@@ -228,4 +257,36 @@ fn from_dynamic(value: Dynamic) -> Value {
         return Value::Object(json_map);
     }
     Value::Null
+}
+
+#[cfg(test)]
+mod documenter_allowlist_str_tests {
+    use super::{EvaluationContext, ExpressionEngine};
+    use serde_json::json;
+
+    fn eval_allowlist_expr(triggers: serde_json::Value) -> serde_json::Value {
+        let engine = ExpressionEngine::default();
+        let ctx = EvaluationContext::new(json!({}), json!({}), triggers);
+        engine
+            .evaluate("documenter_allowlist_str(triggers.allowlist)", &ctx)
+            .expect("eval")
+    }
+
+    #[test]
+    fn string_passthrough() {
+        let v = eval_allowlist_expr(json!({"allowlist": "a\nb"}));
+        assert_eq!(v, json!("a\nb"));
+    }
+
+    #[test]
+    fn array_joins_with_newline() {
+        let v = eval_allowlist_expr(json!({"allowlist": ["README.md", "docs/"]}));
+        assert_eq!(v, json!("README.md\ndocs/"));
+    }
+
+    #[test]
+    fn missing_key_is_empty() {
+        let v = eval_allowlist_expr(json!({}));
+        assert_eq!(v, json!(""));
+    }
 }
