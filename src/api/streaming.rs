@@ -27,6 +27,7 @@ pub struct StreamFilters {
     pub event_type: Option<String>,
 }
 
+/// Routes for streaming endpoints (WebSocket + SSE).
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/stream/workflow/{id}/ws", get(workflow_stream))

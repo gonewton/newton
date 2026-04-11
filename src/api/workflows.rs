@@ -14,6 +14,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// Routes for the workflows API resource.
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/workflows", get(list_workflows))

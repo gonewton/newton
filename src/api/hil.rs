@@ -11,6 +11,7 @@ use newton_types::{ApiError, BroadcastEvent, HilAction, HilEvent, HilStatus};
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// Routes for the human-in-the-loop (HIL) API resource.
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/hil/workflows/{id}", get(list_hil_events))

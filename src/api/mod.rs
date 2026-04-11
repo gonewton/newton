@@ -14,6 +14,10 @@ use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
+/// Build the Axum router for Newton's HTTP API.
+///
+/// This is a pure composition function that merges per-resource routers, applies
+/// shared middleware (CORS), and optionally serves static UI assets.
 pub fn create_router(state: AppState, ui_dir: Option<PathBuf>) -> Router {
     let arc_state = Arc::new(state);
 
