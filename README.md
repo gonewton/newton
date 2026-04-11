@@ -5,25 +5,19 @@
 
 ## What is Newton?
 
-Newton is an iterative optimization framework for agentic AI goals that benefit from structured feedback and controlled execution. The classic loop orchestrates three phases:
+Newton is a **workflow-first** tool for running structured, repeatable automation: you describe steps in YAML (shell commands, agents, human approvals, branching, and checks), and the CLI runs them with clear completion rules, checkpoints, and artifacts. It fits agent-assisted coding, release checklists, and other tasks where you want a defined graph instead of ad hoc scripts.
 
-- **Evaluator**: Assesses the current state/solution and provides quality metrics
-- **Advisor**: Generates improvement recommendations based on evaluation
-- **Executor**: Implements the recommended changes to improve the solution
-
-This evaluation-advice-execution loop continues until goals are met or iteration limits are reached.
-
-Instead of just trying the same thing over and over and hoping it gets better, this kind of loop pauses to check how things are going, think about what could improve, and then make targeted changes. Each round learns from the last, so progress is more guided than random. It also keeps track of what worked best so far, which is helpful when goals involve trade-offs or gradual improvements rather than a simple yes/no result. Overall, it feels less like “try again” and more like “let’s see what happened and do a bit better next time,” which makes it a good fit for a wide range of problems.
+You can still think in terms of **evaluate → advise → act** when designing workflows (measure, decide, apply), but the unit of execution is always the workflow file you run with `newton run` or `newton batch`.
 
 ## Workflow Graph Capabilities
 
 Newton includes a production workflow runner with YAML-defined tasks and deterministic execution semantics:
 
 - Workflow commands: `newton run|lint|validate|dot|explain|resume|checkpoints|artifacts|webhook`
-- Safety checks: lint rules, expression precompile validation, shell opt-in, reachability analysis
+- Safety checks: workflow lint, early validation of expressions, guarded shell usage, reachability checks
 - Deterministic completion: goal gates, terminal tasks, explicit completion policy, stable error codes
 - Runtime durability: checkpoint persistence, resume support, artifact routing/cleanup, execution warnings
-- Authoring ergonomics: transform pipeline with macro expansion, `include_if` filtering, `{{ ... }}` interpolation, and `$expr` evaluation
+- Authoring support: macros, `include_if` filtering, `{{ ... }}` interpolation, and `$expr` evaluation
 
 ### Built-in Workflow Operators
 
@@ -81,19 +75,17 @@ Follow the **Setting up a new project** flow below to go from a blank directory 
 
 1. Create a project directory and `cd` into it.
 2. Run `newton init .` to scaffold the workspace.
-3. Run the loop with an inline goal (no `GOAL.md` needed):
+3. Run a workflow from the template (optional input file as second positional):
    ```bash
-   newton run workflow.yaml input.txt
+   newton run .newton/workflows/develop.yaml --workspace .
    ```
-
-For a project with a persistent goal file or custom evaluator/advisor/executor scripts, follow **Setting up a new project** below.
 
 ### Setting up a new project
 
 1. Create a project directory and `cd` into it.
-2. Run `newton init .` to scaffold `.newton/`, install the template under `.newton/scripts/`, write `.newton/configs/default.conf`, and prompt the template to add `GOAL.md` if it was missing.
-3. Optionally edit `GOAL.md` after initialization so it reflects your real goal.
-4. Run `newton run` in that directory—`run` uses the `.newton/scripts/` toolchain by default, so no additional paths are required.
+2. Run `newton init .` to scaffold `.newton/` (layout, template files such as workflows and helper scripts, and `.newton/configs/default.conf`).
+3. Edit `.newton/configs/default.conf`: set `workflow_file` to the workflow YAML `newton batch` should run (see comment in that file). Add a `<project_id>.conf` copy or symlink if you use batch with a non-default id.
+4. Run a workflow explicitly, for example: `newton run .newton/workflows/develop.yaml --workspace .` (pick the YAML that matches your template).
 
 For an existing repository, run `newton init .` at the repo root instead of creating a new directory.
 
@@ -116,10 +108,6 @@ Usage: newton <COMMAND>
 ```
 
 The help output now includes the same version banner at the top, so you can confirm which release is installed even when scanning command descriptions.
-
-## Repository
-
-This repository includes a Repomix pack (`repomix-output.xml`) for contributors who want AI-assisted analysis or review assistance.
 
 ## Commands Reference
 
@@ -154,10 +142,10 @@ newton run workflow.yaml --max-time-seconds 3600
 
 ### `init [workspace-path]`
 
-Create the `.newton` workspace layout, install the default Newton template via `aikit-sdk`, and write `.newton/configs/default.conf` with `project_root=.`, `coding_agent=opencode`, and the default `zai-coding-plan/glm-4.7` model.
+Create the `.newton` workspace layout, install the default Newton workspace template, and write `.newton/configs/default.conf` with `project_root` (absolute path to the directory you initialized), a default `coding_model` (typically `zai-coding-plan/glm-4.7`), and commented guidance for `workflow_file` (set this when using `newton batch`).
 
 **Options:**
-- `--template-source <SOURCE>`: Optional template locator (default: `gonewton/newton-templates`). Paths that exist on disk are copied directly, otherwise the built-in template is used.
+- `--template-source <SOURCE>`: Optional template locator (default: `gonewton/newton-templates`). If the value is a path on disk, that template is used; otherwise the built-in template shipped with the CLI is used.
 
 **Examples:**
 ```bash
@@ -167,44 +155,17 @@ newton init /path/to/project
 
 ### `batch <project_id>`
 
-Process queued plan files for a project straight from the CLI. `newton batch` discovers the workspace root by walking up from the current directory (or use `--workspace PATH`) until it finds `.newton`. It expects `.newton/configs/<project_id>.conf` to contain at least `project_root`, `coding_agent`, and `coding_model`, and `.newton/plan/<project_id>/todo` to house queued plan files. Each plan is copied into `project_root/.newton/tasks/<task_id>/input/spec.md` and fed to the regular `newton run` flow.
+Process queued plan files for a project. `newton batch` discovers the workspace root by walking up from the current directory (or use `--workspace PATH`) until it finds `.newton`. It reads `.newton/configs/<project_id>.conf`, which **must** include `project_root` and `workflow_file` (path to a workflow YAML, resolved relative to `project_root` or the workspace root). Queued items live under `.newton/plan/<project_id>/todo/`. For each plan, Newton runs that workflow the same way as `newton run` on that YAML.
 
 - `--workspace PATH`: Override workspace discovery.
 - `--once`: Process one todo file then exit.
 - `--sleep SECONDS`: Poll interval when the queue is empty (default 60).
 
-Plan files move from `todo` to `completed` only after a successful run, and the same task ID is reused when a plan is re-queued. Batch also sets `CODING_AGENT`, `CODING_AGENT_MODEL`, `NEWTON_EXECUTOR_CODING_AGENT`, and `NEWTON_EXECUTOR_CODING_AGENT_MODEL` based on the `.conf` so the project honors those overrides.
+Plan files move from `todo` to `completed` when the workflow succeeds, or to `failed` when it errors.
 
+Other keys in `.conf` files are ignored by `newton batch` unless documented for another command.
 
-Batch configs now support additional optional keys for parity with `start.sh`/`loop.sh`:
-
-| Key | Description |
-| --- | --- |
-| `evaluator_cmd`, `advisor_cmd`, `executor_cmd` | Override the tool invocations. When omitted, batch derives defaults that match the workspace layout created by `newton init` (`project_root/.newton/scripts/{evaluator,advisor}.sh` and `workspace_root/.newton/scripts/executor.sh`). |
-| `resume` | `true`/`1` keeps the task and project state directories intact; when false the directories are wiped before the run. |
-| `max_iterations`, `max_time` | Optional limits that mirror the values passed to `newton run`. Without a control file signal, hitting either limit counts as failure. |
-| `verbose` | Passes `--verbose` through to the run so tool stdout/stderr is rendered. |
-| `control_file` | The filename (default `newton_control.json`) stored inside the task state directory; evaluators must write `{"done": true}` to `NEWTON_CONTROL_FILE` in that folder to signal success. |
-
-Batch exposes the following environment variables for pre-run hooks, tool runs, and post hooks: `NEWTON_STATE_DIR`, `NEWTON_WS_ROOT`, `NEWTON_CODER_CMD`, `NEWTON_CONTROL_FILE`, `NEWTON_BRANCH_NAME`, `NEWTON_BASE_BRANCH`, `CODING_AGENT`, and `CODING_AGENT_MODEL`. Pre-run scripts also see `NEWTON_PROJECT_ROOT`, `NEWTON_PROJECT_ID`, `NEWTON_TASK_ID`, `NEWTON_GOAL_FILE`, and `NEWTON_RESUME`. Post hooks additionally receive `NEWTON_RESULT`, `NEWTON_BRANCH_NAME`, `NEWTON_BASE_BRANCH`, `NEWTON_STATE_DIR`, and `NEWTON_CONTROL_FILE` so they can reference the same artifacts without re-reading the plan.
-
-The feature branch name is derived from the plan frontmatter (`branch: feature/foo`) when present; otherwise batch uses `feature/<task_id>` with underscores replaced by dashes. This value populates `NEWTON_BRANCH_NAME` everywhere so hooks can operate on the right Git branch without re-parsing the spec.
-
-Success is gatekept by the control file that lives under `NEWTON_STATE_DIR`. Evaluator scripts must write `{"done": true}` to `NEWTON_CONTROL_FILE` when the goal is reached and `{"done": false}` (or remove the file) when more iterations are required. The loop stops only when the control file reports `done: true`; every other termination (limits, errors, or missing file) is treated as failure and sends the plan to `failed/`.
-
-Projects can opt into git hooks by adding a `[hooks]` section to `newton.toml`:
-
-```toml
-[hooks]
-before_run = "git checkout main"
-after_run = "git checkout $NEWTON_RESULT"
-```
-
-Hook commands always run with `sh -c "<value>"` inside the project root. `before_run` executes before the orchestrator and sees `NEWTON_GOAL_FILE`, `NEWTON_PROJECT_ID`, and `NEWTON_TASK_ID` if those variables exist. `after_run` always runs (even on failure) and is passed `NEWTON_RESULT=success|failure` plus `NEWTON_EXECUTION_ID` when available.
-
-Workspace discovery and the `.conf` parser in `core/batch_config` are shared with the upcoming monitor so logic is not duplicated.
-
-### Plan-Based Batch Processing Architecture
+### Plans and the batch queue
 
 Newton uses a plan-based queue system for processing multiple tasks through batch mode:
 
@@ -248,40 +209,39 @@ Each plan creates a task directory at `.newton/tasks/{task_id}/` with:
 
 The task ID is derived from the plan filename (sanitized to remove special characters).
 
-#### Plan Lifecycle
+#### Plan lifecycle
 
 1. Plan file is created in `.newton/plan/{project_id}/todo/`
 2. `newton batch {project_id}` picks it up for processing
 3. Plan content is copied to `.newton/tasks/{task_id}/input/spec.md`
-4. `newton run` executes with the plan as the goal
-5. On success (control file shows `done: true`), plan moves to `completed/`
-6. On failure (limits hit, errors, or `done: false`), plan moves to `failed/`
+4. Newton runs the workflow from `workflow_file` in your `.conf`, passing the spec path and workspace in the trigger payload (same as running that workflow yourself with `newton run`)
+5. If the workflow completes successfully, the plan moves to `completed/`
+6. If the workflow errors, the plan moves to `failed/`
 
-Re-queuing a plan (moving it back to `todo/`) reuses the same task ID, allowing state to be preserved if `resume=true` is set in the configuration.
+Re-queuing a plan (moving it back to `todo/`) reuses the same task ID and task directories under `.newton/tasks/`.
 
 ## Logging
 
-Newton routing now keeps logs deterministic across every command by mapping the CLI command and environment to an execution context. Contexts are:
+Newton sends log output to files and sometimes to the terminal depending on how you invoke the CLI:
 
-- **TUI**: `newton monitor` with no console output (logs persist to file only).
-- **LocalDev**: interactive commands such as `run`, `step`, `status`, `report`, `error`, and `init`; console output defaults to `stderr`.
-- **Batch**: `newton batch` runs in quiet mode, writing only to files unless overridden.
-- **RemoteAgent**: any command run with `NEWTON_REMOTE_AGENT=1` (except `monitor`) – file logging stays enabled and console output remains disabled.
+- **`newton monitor`**: logs go to the log file; the TUI is not mixed with debug log lines by default.
+- **Interactive commands** (for example `newton run`, `newton init`): console output defaults to `stderr` for normal messages.
+- **`newton batch`**: quiet terminal by default; inspect the log file when troubleshooting.
+- **`NEWTON_REMOTE_AGENT=1`**: keeps file logging on and avoids spamming the agent console (does not apply to `monitor`).
 
 All commands write to `<workspace>/.newton/logs/newton.log` when a workspace is detected, or to `$HOME/.newton/logs/newton.log` as a fallback. The directory is created automatically when missing, and paths provided via config are normalized to avoid accidental traversal.
 
 Newton looks for an optional `.newton/config/logging.toml` file and applies the settings only when the file exists. Invalid values (such as a malformed OpenTelemetry endpoint) fail fast with a clear message, while the absence of the config file is not treated as an error.
 
-### Configuration precedence
+### Log configuration
 
-Logging behavior can be customized via:
+You can tune logging with:
 
-1. CLI flags (future-proof – none exist yet for this feature).
-2. Environment variables such as `RUST_LOG`, `NEWTON_REMOTE_AGENT`, and `OTEL_EXPORTER_OTLP_ENDPOINT`.
-3. `.newton/config/logging.toml` using keys like `logging.log_dir`, `logging.default_level`, `logging.enable_file`, `logging.console_output`, and the `logging.opentelemetry.*` table.
-4. Built-in defaults (`info` level, file enabled, console only for local dev, no telemetry).
+1. Optional `.newton/config/logging.toml` (keys such as `logging.log_dir`, `logging.default_level`, `logging.enable_file`, `logging.console_output`, and `logging.opentelemetry.*` when present).
+2. Environment variables, including `RUST_LOG` (verbose Newton messages), `NEWTON_REMOTE_AGENT`, and `OTEL_EXPORTER_OTLP_ENDPOINT` for OpenTelemetry export when configured.
+3. Built-in defaults when no file is present: typically `info`, file logging on, console on for local interactive use, telemetry off unless you enable it.
 
-OpenTelemetry exports only activate when either `logging.opentelemetry.endpoint` or `OTEL_EXPORTER_OTLP_ENDPOINT` provides a valid URL, and the endpoint string is validated before use. The framework always honors `RUST_LOG` as the highest-priority level filter so you can drive verbosity without touching the config file.
+OpenTelemetry export runs only when a valid endpoint is set in config or via `OTEL_EXPORTER_OTLP_ENDPOINT`. `RUST_LOG` overrides the default level when set.
 
 ### Troubleshooting TUI/logging conflicts
 
@@ -294,7 +254,7 @@ OpenTelemetry exports only activate when either `logging.opentelemetry.endpoint`
 Stream live ailoop channels for every project/branch in the workspace via a terminal UI that highlights blocking questions and authorizations, keeps a queue of pending prompts, lets you answer/approve/deny directly in the terminal, and provides filtering (`/`), layout toggle (`V`), queue tab (`Q`), and help (`?`).
 
 **Behavior:**
-`newton monitor` walks up from the current directory to find the workspace root containing `.newton`, then reads `ailoop_server_http_url` and `ailoop_server_ws_url` from the first `.newton/configs/*.conf` file that exposes both keys (alphabetically) or from `.newton/configs/monitor.conf` when present. It connects to the configured HTTP and WebSocket endpoints, backfills up to 50 messages per channel, subscribes to channels, and renders a ratatui interface with tiles/list stream views, a 30% queue panel, a filter status line, and optional queue-only mode.
+`newton monitor` walks up from the current directory to find the workspace root containing `.newton`, then reads `ailoop_server_http_url` and `ailoop_server_ws_url` from the first `.newton/configs/*.conf` file that defines both keys (alphabetically) or from `.newton/configs/monitor.conf` when present. It connects to those HTTP and WebSocket endpoints, loads recent messages per channel, and opens a full-screen terminal UI with stream views, a queue for pending prompts, filtering, and keyboard shortcuts (see `?` in the UI for help).
 
 **Options:**
 - `--http-url <URL>`: Override the HTTP base URL for this session.
@@ -309,14 +269,7 @@ newton monitor
 
 `newton monitor` works with [ailoop](https://github.com/goailoop/ailoop), a human-in-the-loop messaging server for AI agents. To use newton monitor:
 
-1. **Install ailoop:**
-   ```bash
-   # Using Homebrew
-   brew install ailoop
-
-   # Or using cargo
-   cargo install ailoop-cli
-   ```
+1. **Install ailoop** (for example with Homebrew: `brew install ailoop`, or follow the [ailoop installation docs](https://github.com/goailoop/ailoop)).
 
 2. **Start the ailoop server:**
    ```bash
@@ -356,28 +309,9 @@ Then simply run:
 newton monitor
 ```
 
-### `init <workspace-path>`
+### `init <workspace-path>` (same as `init [workspace-path]`)
 
-Bootstrap a workspace from an installed Newton template. See **Quick Start → Setting up a new project** for the minimal flow that gets a fresh directory to `newton run`. `newton init` renders `.newton/scripts`, `.newton/state`, and `newton.toml`, seeds `GOAL.md`, and keeps everything in sync with the template variables (`project_name`, `coding_agent`, `coding_agent_model`, `test_command`, `language`). The command requires `aikit` to be available on `PATH` and at least one template directory under `.newton/templates/` (templates can be installed via `aikit` packages or checked in alongside your projects).
-
-**Options:**
-- `--template <NAME>`: Choose a template (default: `basic`). The template name must match a subdirectory under `.newton/templates/`.
-- `--name <NAME>`: Override the project name written to `newton.toml` and used in the GOAL stub.
-- `--coding-agent <AGENT>`: Specify the coding agent that will be listed in `newton.toml`.
-- `--model <MODEL>`: Override the coding agent model in the generated config.
-- `--interactive`: Prompt for missing values instead of assuming defaults.
-- `--force`: Proceed even if `.newton/` already exists (existing files are overwritten).
-
-**Behavior:**
-- Validates that `aikit` is installed (`aikit --version` must succeed); otherwise prints an install hint (`https://aikit.readthedocs.io`) and exits with an error.
-- Clears `.newton/state/context.md`, writes fresh `promise.txt`/`executor_prompt.md`/`iteration.txt`, and renders the selected template into `.newton/`.
-- Writes `newton.toml` only when it does not already exist, defaults the `project.template` to the template name, and populates `executor.coding_agent`/`coding_agent_model` plus the recommended `test_command`.
-- Creates `GOAL.md` with a placeholder goal if it is missing.
-
-**Example:**
-```bash
-newton init . --template basic --interactive
-```
+See **Commands Reference → `init [workspace-path]`** above. The command installs the bundled or selected template, creates the usual `.newton/` directories, and writes `configs/default.conf`.
 
 ## Advanced Usage
 
@@ -396,58 +330,9 @@ newton run workflow.yaml --parallel-limit 4
 newton run workflow.yaml --max-time-seconds 3600 --parallel-limit 2
 ```
 
-### Git Integration
+### Git and plans
 
-Newton includes built-in git integration for batch processing workflows:
-
-#### Automatic Branch Management
-
-Each plan can specify a git branch in its frontmatter:
-
-```markdown
----
-branch: feature/add-authentication
----
-
-# Task Description
-...
-```
-
-**Branch name resolution:**
-1. Plan file frontmatter (`branch:` field) - highest priority
-2. Auto-generated from task ID (`feature/{task_id}`) with underscores converted to dashes
-3. Environment variables (`NEWTON_BRANCH_NAME`, `NEWTON_BASE_BRANCH`)
-
-The resolved branch name is exposed via `NEWTON_BRANCH_NAME` environment variable to all tools and hooks.
-
-#### Git Hooks in newton.toml
-
-Configure git operations in your project's `newton.toml`:
-
-```toml
-[hooks]
-before_run = "git checkout -b $NEWTON_BRANCH_NAME"
-after_run = "git add . && git commit -m 'Automated changes' || true"
-```
-
-**Hook environment variables:**
-- `before_run`: Receives `NEWTON_GOAL_FILE`, `NEWTON_PROJECT_ID`, `NEWTON_TASK_ID`, `NEWTON_BRANCH_NAME`, `NEWTON_BASE_BRANCH`
-- `after_run`: Receives all of the above plus `NEWTON_RESULT` (success|failure) and `NEWTON_EXECUTION_ID`
-
-Hooks run with `sh -c "<command>"` from the project root directory.
-
-#### Git Operations in Scripts
-
-Batch mode automatically detects and exposes:
-- Current git branch
-- Base branch (typically `main` or `master`)
-- Both values are available in `NEWTON_BRANCH_NAME` and `NEWTON_BASE_BRANCH`
-
-Your custom scripts can use these for:
-- Creating feature branches
-- Committing changes during optimization
-- Creating pull requests after successful completion
-- Rolling back on failure
+Plan files are Markdown and may include YAML frontmatter (for example a `branch` field) for **your** workflows and scripts to read. Newton batch copies the plan into `.newton/tasks/<task_id>/input/spec.md` and runs the configured workflow; any git checkout, commit, or PR steps belong in workflow tasks or helper scripts you invoke from the workflow.
 
 ## Configuration
 
@@ -458,12 +343,9 @@ Newton expects the following workspace structure:
 ```
 workspace/
 ├── .newton/                # Newton workspace directory
-│   ├── scripts/            # Tool scripts
-│   │   ├── evaluator.sh
-│   │   ├── advisor.sh
-│   │   ├── executor.sh
-│   │   └── coder.sh        # Optional coder script
-│   ├── configs/            # Batch configuration files
+│   ├── workflows/          # Workflow YAML (after init from default template)
+│   ├── scripts/            # Optional helper shell scripts from template
+│   ├── configs/            # Batch configuration files (*.conf)
 │   │   └── default.conf
 │   ├── plan/               # Batch processing plans
 │   │   └── {project_id}/
@@ -479,264 +361,30 @@ workspace/
 │   ├── state/              # Execution state
 │   ├── logs/               # Execution logs
 │   └── artifacts/          # Generated artifacts
-└── GOAL.md                 # Optimization objectives (optional)
+└── (project files)
 ```
 
-### Toolchain Configuration
+### Workflows and shell tasks
 
-Each tool script receives environment variables:
+What your commands and agents see at runtime is defined by your workflow YAML (for example `CommandOperator` and `AgentOperator` tasks) and any wrapper scripts you call from there. Use `.newton/tasks/<task_id>/` under the project for per-plan inputs and state when using batch.
 
-**Common Environment Variables:**
-- `NEWTON_WORKSPACE_PATH`: Absolute path to workspace root
-- `NEWTON_ITERATION`: Current iteration number
-- `NEWTON_STATE_DIR`: Path to state directory
-- `NEWTON_ARTIFACTS_DIR`: Path to artifacts directory
+### Batch configuration file (`.newton/configs/*.conf`)
 
-**Evaluator Environment Variables:**
-- `NEWTON_SCORE_FILE`: Path where score must be written
-- `NEWTON_EVALUATOR_DIR`: Path for evaluator output files
-
-**Advisor Environment Variables:**
-- `NEWTON_ADVISOR_DIR`: Path for advisor recommendations
-
-**Executor Environment Variables:**
-- `NEWTON_EXECUTOR_DIR`: Path for executor logs
-- `NEWTON_SOLUTION_FILE`: Path to current solution file
-
-### Batch Configuration File (.newton/configs/*.conf)
-
-Newton uses simple key=value configuration files for batch processing:
+Use simple `key=value` lines. For `newton batch`, set:
 
 ```conf
-# Required settings
+# Required for batch
 project_root=/path/to/project
-coding_agent=claude
-coding_model=claude-sonnet-4-5
+workflow_file=.newton/workflows/develop.yaml
 
-# Optional tool commands
-evaluator_cmd=.newton/scripts/evaluator.sh
-advisor_cmd=.newton/scripts/advisor.sh
-executor_cmd=.newton/scripts/executor.sh
-coder_cmd=.newton/scripts/coder.sh
-
-# Hook scripts
-
-# Execution control
-resume=true
-max_iterations=10
-max_time=3600
-verbose=true
-control_file=newton_control.json
+# Optional: kept in default.conf after init for templates and tooling; ignored by batch
+coding_model=zai-coding-plan/glm-4.7
 ```
 
-**Configuration Keys:**
-- `project_root`: Root directory of your project (required)
-- `coding_agent`: AI agent to use, e.g., "claude", "openai" (required)
-- `coding_model`: Specific model identifier (required)
-- `evaluator_cmd`, `advisor_cmd`, `executor_cmd`, `coder_cmd`: Custom tool commands (optional, defaults to `.newton/scripts/*.sh`)
-- `resume`: Whether to resume from previous state - `true`/`1` or `false`/`0` (optional, default: false)
-- `max_iterations`: Maximum optimization iterations per task (optional)
-- `max_time`: Maximum execution time in seconds (optional)
-- `verbose`: Enable verbose logging - `true`/`1` or `false`/`0` (optional, default: false)
-- `control_file`: Filename for control file stored in task state directory (optional, default: `newton_control.json`)
+- **`project_root`**: Your project directory; must already contain a `.newton` folder (required for batch).
+- **`workflow_file`**: Workflow YAML to run for each queued plan. Relative paths are resolved against `project_root` first, then the workspace root (required for batch).
 
-### Control Files for Success Determination
-
-Control files provide a mechanism for evaluator scripts to signal task completion in batch processing workflows.
-
-#### How Control Files Work
-
-The control file is a JSON file stored in the task's state directory (`NEWTON_STATE_DIR`) that the evaluator writes to indicate whether the optimization goal has been met:
-
-```json
-{
-  "done": true
-}
-```
-
-**File location:** `{task_state_dir}/{control_file_name}`
-- Path is available via `NEWTON_CONTROL_FILE` environment variable
-- Default filename is `newton_control.json` (configurable via `control_file` config key)
-
-#### Success Criteria
-
-The batch orchestrator determines task success based on the control file:
-
-- **Success:** Control file exists with `"done": true`
-- **Failure:** Any of the following:
-  - Control file missing
-  - Control file has `"done": false`
-  - Iteration or time limits reached without `"done": true`
-  - Errors during execution
-
-#### Evaluator Script Example
-
-```bash
-#!/bin/bash
-# evaluator.sh
-
-# Run tests
-if npm test; then
-  # Tests passed - signal completion
-  echo '{"done": true}' > "$NEWTON_CONTROL_FILE"
-  echo "All tests passed!" > "$NEWTON_EVALUATOR_DIR/status.md"
-else
-  # Tests failed - need more iterations
-  echo '{"done": false}' > "$NEWTON_CONTROL_FILE"
-  echo "Tests failed, needs improvement" > "$NEWTON_EVALUATOR_DIR/status.md"
-fi
-```
-
-#### Extended Control File Format
-
-You can include additional metadata in the control file:
-
-```json
-{
-  "done": true,
-  "message": "All acceptance criteria met",
-  "score": 95,
-  "tests_passed": 42,
-  "tests_failed": 0
-}
-```
-
-The orchestrator only checks the `done` field; additional fields are for logging and debugging purposes.
-
-### Hook Scripts
-
-Hook scripts allow you to run custom commands at different stages of the batch processing lifecycle.
-
-#### Configuring Hooks
-
-Add hook script paths to your `.newton/configs/{project_id}.conf`:
-
-```conf
-# Pre-run hook: executes before newton run starts
-
-# Post-success hook: executes after successful task completion
-
-# Post-failure hook: executes after task failure
-```
-
-All hooks run with `sh -c "<script_path>"` from the project root directory.
-
-#### Hook Types
-
-- Executes once before `newton run` starts
-- Use for: environment setup, dependency installation, test database initialization
-- Environment variables available:
-  - `NEWTON_PROJECT_ROOT`, `NEWTON_PROJECT_ID`, `NEWTON_TASK_ID`
-  - `NEWTON_GOAL_FILE`, `NEWTON_RESUME`
-  - All batch environment variables
-
-- Executes after successful task completion (control file shows `done: true`)
-- Exit code determines final plan state:
-  - `0` - Plan moves to `completed/`
-  - Non-zero - Plan moves to `failed/` (overrides success)
-- Use for: deployment, creating pull requests, notifications, cleanup
-- Environment variables available:
-  - All batch environment variables
-  - `NEWTON_RESULT=success`
-  - `NEWTON_BRANCH_NAME`, `NEWTON_BASE_BRANCH`
-  - `NEWTON_STATE_DIR`, `NEWTON_CONTROL_FILE`
-
-- Executes after task failure
-- Exit code is ignored (plan always moves to `failed/`)
-- Use for: rollback, error notifications, cleanup, logging
-- Environment variables available:
-  - All batch environment variables
-  - `NEWTON_RESULT=failure`
-  - `NEWTON_BRANCH_NAME`, `NEWTON_BASE_BRANCH`
-  - `NEWTON_STATE_DIR`, `NEWTON_CONTROL_FILE`
-
-#### Example Hook Scripts
-
-**Pre-run hook (setup environment):**
-```bash
-#!/bin/bash
-# .newton/scripts/pre-run.sh
-
-echo "Setting up environment for task $NEWTON_TASK_ID"
-
-# Install dependencies
-npm install
-
-# Create feature branch if it doesn't exist
-if ! git rev-parse --verify "$NEWTON_BRANCH_NAME" >/dev/null 2>&1; then
-  git checkout -b "$NEWTON_BRANCH_NAME"
-else
-  git checkout "$NEWTON_BRANCH_NAME"
-fi
-```
-
-**Post-success hook (create PR):**
-```bash
-#!/bin/bash
-# .newton/scripts/post-success.sh
-
-echo "Task completed successfully: $NEWTON_TASK_ID"
-
-# Commit changes
-git add .
-git commit -m "feat: $NEWTON_TASK_ID" || true
-
-# Push to remote
-git push origin "$NEWTON_BRANCH_NAME"
-
-# Create pull request
-gh pr create --title "$NEWTON_TASK_ID" --body "Automated implementation" --base "$NEWTON_BASE_BRANCH"
-```
-
-**Post-failure hook (cleanup and notify):**
-```bash
-#!/bin/bash
-# .newton/scripts/post-failure.sh
-
-echo "Task failed: $NEWTON_TASK_ID"
-
-# Send notification
-curl -X POST https://hooks.slack.com/... \
-  -H 'Content-Type: application/json' \
-  -d "{\"text\":\"Task $NEWTON_TASK_ID failed\"}"
-
-# Cleanup partial changes
-git reset --hard HEAD
-```
-
-### Environment Variables Available to Tools
-
-Tools can access Newton's environment variables:
-
-#### Basic Environment Variables
-
-| Variable | Purpose | Example |
-|----------|---------|---------|
-| `NEWTON_WORKSPACE_PATH` | Workspace root directory | `/path/to/workspace` |
-| `NEWTON_ITERATION` | Current iteration number | `5` |
-| `NEWTON_SCORE_FILE` | Evaluator output file | `/path/to/workspace/.newton/score.txt` |
-| `NEWTON_STATE_DIR` | State directory | `/path/to/workspace/.newton/state` |
-| `NEWTON_ARTIFACTS_DIR` | Artifacts directory | `/path/to/workspace/.newton/artifacts` |
-
-#### Batch Processing Environment Variables
-
-| Variable | Purpose | Example |
-|----------|---------|---------|
-| `NEWTON_PROJECT_ROOT` | Project root directory | `/path/to/project` |
-| `NEWTON_PROJECT_ID` | Current project identifier | `myproject` |
-| `NEWTON_TASK_ID` | Current task identifier | `feature-123-abc` |
-| `NEWTON_RESUME` | Whether resuming from previous state | `1` or `0` |
-| `NEWTON_RESULT` | Result status (in post hooks) | `success` or `failure` |
-| `NEWTON_CONTROL_FILE` | Path to control file | `/path/.newton/tasks/abc/state/newton_control.json` |
-| `NEWTON_WS_ROOT` | Workspace root path | `/path/to/workspace` |
-| `NEWTON_CODER_CMD` | Coder tool command | `.newton/scripts/coder.sh` |
-| `NEWTON_BRANCH_NAME` | Git branch name for task | `feature/add-auth` |
-| `NEWTON_BASE_BRANCH` | Git base branch | `main` |
-| `NEWTON_GOAL_FILE` | Path to goal file | `/path/.newton/state/goal.txt` |
-| `CODING_AGENT` | AI agent identifier | `claude` |
-| `CODING_AGENT_MODEL` | AI model identifier | `claude-sonnet-4-5` |
-| `NEWTON_EXECUTOR_CODING_AGENT` | Executor's coding agent | `claude` |
-| `NEWTON_EXECUTOR_CODING_AGENT_MODEL` | Executor's model | `claude-sonnet-4-5` |
+Any other keys in that file are ignored by `newton batch` unless documented for a different command.
 
 ### Resource Limits
 
@@ -747,87 +395,9 @@ Configure execution limits for workflow runs:
 --parallel-limit N      Maximum number of tasks to run concurrently
 ```
 
-## Output and Artifacts
+## Output, logs, and artifacts
 
-### Generated Artifacts
-
-Newton generates several artifacts during execution:
-
-**Evaluator Outputs:**
-- `evaluator_status.md`: Evaluation results and metrics
-- `evaluation_score.txt`: Numeric quality score
-
-**Advisor Outputs:**
-- `advisor_recommendations.md`: Improvement suggestions
-- `recommendations.json`: Machine-readable recommendations
-
-**Executor Outputs:**
-- `executor_log.md`: Detailed execution logs
-- `changes_applied.md`: List of changes made
-- `solution_state.json`: Current solution state
-
-### Execution History
-
-All execution state is persisted in the `.newton/` directory:
-
-```
-.newton/
-├── state/
-│   ├── execution.json      # Execution metadata
-│   ├── current_solution.json
-│   └── iteration_history.json
-├── artifacts/
-│   ├── evaluator_status.md
-│   ├── advisor_recommendations.md
-│   └── executor_log.md
-└── logs/
-    └── execution.log
-```
-
-### Report Formats
-
-Reports can be generated in multiple formats:
-
-**Text Format** (human-readable):
-```bash
-newton report <execution-id>
-```
-
-**JSON Format** (machine-readable):
-```bash
-newton report <execution-id> --format json
-```
-
-**JSON Output Structure:**
-```json
-{
-  "execution_id": "abc-123",
-  "status": "completed",
-  "iteration": 10,
-  "start_time": "2024-01-15T10:00:00Z",
-  "end_time": "2024-01-15T10:05:30Z",
-  "total_duration": 330,
-  "final_score": 85.7,
-  "goals_met": true,
-  "metrics": {
-    "evaluation_count": 10,
-    "advisor_recommendations": 25,
-    "changes_applied": 18
-  }
-}
-```
-
-### Statistics and Performance Metrics
-
-Reports include detailed statistics:
-
-- Execution duration by phase
-- Tool execution times
-- Evaluation score progression
-- Number of recommendations generated
-- Changes applied per iteration
-- Resource usage metrics
-- Success/failure rates
+Each workflow run writes checkpoints, task output, and artifacts under your workspace, typically under `.newton/state/` and `.newton/artifacts/` (exact layout depends on the workflow and operators you use). Use `newton run ... --verbose` to print task stdout/stderr to the terminal after each task. Log files are described in **Logging** above.
 
 ## Troubleshooting
 
@@ -841,11 +411,11 @@ Reports include detailed statistics:
    lsof -i :8080 -i :8081
    ```
 
-2. **Check connection in monitor logs:**
+2. **Verbose Newton logging:**
    ```bash
    RUST_LOG=newton=debug,info newton monitor --http-url http://127.0.0.1:8081 --ws-url ws://127.0.0.1:8080
    ```
-   Look for "Subscription message sent successfully" and "Parsed message" logs.
+   Then inspect `<workspace>/.newton/logs/newton.log` for connection or parse errors.
 
 3. **Test ailoop server directly:**
    ```bash
