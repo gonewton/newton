@@ -1,5 +1,5 @@
 use insta::assert_snapshot;
-use newton::core::workflow_graph::{
+use newton::workflow::{
     lint::{LintRegistry, LintSeverity},
     schema,
 };

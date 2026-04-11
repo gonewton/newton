@@ -8,8 +8,9 @@ use crate::cli::args::{
 use crate::core::batch_config::BatchProjectConfig;
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
-use crate::core::workflow_graph::operator::OperatorRegistry;
-use crate::core::workflow_graph::{
+use crate::monitor;
+use crate::workflow::operator::OperatorRegistry;
+use crate::workflow::{
     artifacts, checkpoint, dot as workflow_dot,
     executor::{self as workflow_executor, ExecutionOverrides},
     explain,
@@ -19,7 +20,6 @@ use crate::core::workflow_graph::{
     server_notifier::ServerNotifier,
     transform as workflow_transform, webhook,
 };
-use crate::monitor;
 use crate::Result;
 use anyhow::anyhow;
 use clap::CommandFactory;
@@ -894,7 +894,7 @@ fn load_trigger_payload(path: &Path) -> StdResult<Value, AppError> {
 /// Launch the Newton HTTP API server
 pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     use crate::api::{self, state::AppState};
-    use crate::core::workflow_graph::operators;
+    use crate::workflow::operators;
     use std::net::SocketAddr;
     use tokio::net::TcpListener;
     use tracing::info;

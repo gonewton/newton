@@ -1,5 +1,5 @@
-use newton::core::workflow_graph::checkpoint;
-use newton::core::workflow_graph::{
+use newton::workflow::checkpoint;
+use newton::workflow::{
     executor::{self, ExecutionOverrides},
     operator::OperatorRegistry,
     operators, schema, state,

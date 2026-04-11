@@ -1,4 +1,4 @@
-use newton::core::workflow_graph::schema;
+use newton::workflow::schema;
 use std::fs;
 use tempfile::NamedTempFile;
 

@@ -1,5 +1,5 @@
 /// Integration tests for AgentOperator and engine drivers (017-h spec).
-use newton::core::workflow_graph::{
+use newton::workflow::{
     lint::{LintRegistry, LintSeverity},
     schema::{self, ContextFidelity, ModelStylesheet, WorkflowSettings},
 };

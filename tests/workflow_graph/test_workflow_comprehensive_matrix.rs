@@ -2,16 +2,14 @@ use async_trait::async_trait;
 use chrono::Utc;
 use newton::core::error::AppError;
 use newton::core::types::ErrorCategory;
-use newton::core::workflow_graph::executor::{self, ExecutionOverrides, ExecutionSummary};
-use newton::core::workflow_graph::human::{
-    ApprovalDefault, ApprovalResult, DecisionResult, Interviewer,
-};
-use newton::core::workflow_graph::operator::OperatorRegistry;
-use newton::core::workflow_graph::operators::command::{
+use newton::workflow::executor::{self, ExecutionOverrides, ExecutionSummary};
+use newton::workflow::human::{ApprovalDefault, ApprovalResult, DecisionResult, Interviewer};
+use newton::workflow::operator::OperatorRegistry;
+use newton::workflow::operators::command::{
     CommandExecutionOutput, CommandExecutionRequest, CommandRunner,
 };
-use newton::core::workflow_graph::operators::{self, BuiltinOperatorDeps};
-use newton::core::workflow_graph::schema::{self, TriggerType, WorkflowTrigger};
+use newton::workflow::operators::{self, BuiltinOperatorDeps};
+use newton::workflow::schema::{self, TriggerType, WorkflowTrigger};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
@@ -156,7 +154,7 @@ impl Interviewer for FakeInterviewer {
 
 fn build_registry(
     workspace: PathBuf,
-    settings: newton::core::workflow_graph::state::GraphSettings,
+    settings: newton::workflow::state::GraphSettings,
     deps: BuiltinOperatorDeps,
 ) -> OperatorRegistry {
     let mut builder = OperatorRegistry::builder();

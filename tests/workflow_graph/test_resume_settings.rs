@@ -4,7 +4,7 @@
 /// 1. Resume with allow_workflow_change=true updates iteration limits from current document
 /// 2. Resume without allow_workflow_change=false preserves checkpoint settings
 /// 3. Other settings (parallel_limit, max_time_seconds, continue_on_error) are preserved
-use newton::core::workflow_graph::{
+use newton::workflow::{
     executor::{self, ExecutionOverrides},
     operator::OperatorRegistry,
     operators, schema, state,

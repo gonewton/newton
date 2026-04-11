@@ -1,5 +1,5 @@
 use insta::assert_snapshot;
-use newton::core::workflow_graph::{explain, schema};
+use newton::workflow::{explain, schema};
 use serde_json::json;
 use std::fs;
 use tempfile::NamedTempFile;

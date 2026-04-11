@@ -1,10 +1,10 @@
 use async_trait::async_trait;
 use newton::core::error::AppError;
 use newton::core::types::ErrorCategory;
-use newton::core::workflow_graph::executor::{ExecutionOverrides, ExecutionSummary};
-use newton::core::workflow_graph::operator::OperatorRegistry;
-use newton::core::workflow_graph::operators::gh::{GhOutput, GhRunner};
-use newton::core::workflow_graph::operators::{self, BuiltinOperatorDeps};
+use newton::workflow::executor::{ExecutionOverrides, ExecutionSummary};
+use newton::workflow::operator::OperatorRegistry;
+use newton::workflow::operators::gh::{GhOutput, GhRunner};
+use newton::workflow::operators::{self, BuiltinOperatorDeps};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::Write;
@@ -66,12 +66,12 @@ async fn execute_yaml_with_gh_runner(
     let mut workflow_file = tempfile::NamedTempFile::new().expect("workflow temp file");
     write!(workflow_file, "{}", yaml).expect("write workflow");
 
-    let document = newton::core::workflow_graph::schema::load_workflow(workflow_file.path())
-        .expect("load workflow");
+    let document =
+        newton::workflow::schema::load_workflow(workflow_file.path()).expect("load workflow");
 
     let registry = build_registry_with_gh_runner(workspace.to_path_buf(), runner);
 
-    newton::core::workflow_graph::executor::execute_workflow(
+    newton::workflow::executor::execute_workflow(
         document,
         workflow_file.path().to_path_buf(),
         registry,

@@ -1,6 +1,6 @@
-use newton::core::workflow_graph::executor::GraphHandle;
-use newton::core::workflow_graph::operator::{ExecutionContext, Operator, StateView};
-use newton::core::workflow_graph::operators::read_control_file::ReadControlFileOperator;
+use newton::workflow::executor::GraphHandle;
+use newton::workflow::operator::{ExecutionContext, Operator, StateView};
+use newton::workflow::operators::read_control_file::ReadControlFileOperator;
 use serde_json::json;
 use std::collections::HashMap;
 use tempfile::tempdir;

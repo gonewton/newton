@@ -1,7 +1,7 @@
-use newton::core::workflow_graph::artifacts::ArtifactStore;
-use newton::core::workflow_graph::schema::{ArtifactCleanupPolicy, ArtifactStorageSettings};
-use newton::core::workflow_graph::state::compute_sha256_hex;
-use newton::core::workflow_graph::state::OutputRef;
+use newton::workflow::artifacts::ArtifactStore;
+use newton::workflow::schema::{ArtifactCleanupPolicy, ArtifactStorageSettings};
+use newton::workflow::state::compute_sha256_hex;
+use newton::workflow::state::OutputRef;
 use serde_json::json;
 use std::fs;
 use std::path::PathBuf;

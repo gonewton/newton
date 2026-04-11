@@ -3,7 +3,6 @@ pub mod legacy_channels;
 pub mod operators;
 pub mod state;
 pub mod streaming;
-pub mod streaming_api;
 pub mod workflows;
 
 use crate::api::state::AppState;

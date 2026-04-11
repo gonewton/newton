@@ -11,17 +11,14 @@
 ///   E7 – terminal:failure task completes → Failed (WFG-EXEC-002)
 ///   E8 – terminal:success completes while other tasks queued → executor stops early
 use async_trait::async_trait;
-use newton::core::{
-    error::AppError,
-    types::ErrorCategory,
-    workflow_graph::{
-        executor::{self, ExecutionOverrides},
-        lint::LintRegistry,
-        operator::{ExecutionContext, Operator, OperatorRegistry},
-        operators,
-        schema::{self},
-        state::GraphSettings,
-    },
+use newton::core::{error::AppError, types::ErrorCategory};
+use newton::workflow::{
+    executor::{self, ExecutionOverrides},
+    lint::LintRegistry,
+    operator::{ExecutionContext, Operator, OperatorRegistry},
+    operators,
+    schema::{self},
+    state::GraphSettings,
 };
 use serde_json::Value;
 use std::io::Write;
