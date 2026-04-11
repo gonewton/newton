@@ -44,15 +44,17 @@ dependencies = [
 
 [[package]]
 name = "aikit-sdk"
-version = "0.1.49"
+version = "0.1.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efeb63a7affb101f8a4c353f413a16792910a1810f6ac0c1f83ae921d3b1872d"
+checksum = "15cf14b1fbeacb863cb32495139009455bd52d59d028fdc1dd488b4ba02122c6"
 dependencies = [
  "glob",
  "reqwest 0.12.28",
  "serde",
+ "serde_json",
  "tempfile",
  "toml",
+ "tracing",
  "walkdir",
  "zip",
 ]
@@ -1636,7 +1638,7 @@ dependencies = [
 
 [[package]]
 name = "newton"
-version = "0.5.71"
+version = "0.5.76"
 dependencies = [
  "aikit-sdk",
  "anyhow",

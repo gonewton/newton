@@ -191,11 +191,12 @@ impl AikitEngineManager {
             .with_code("WFG-SDK-002"));
         }
 
-        let options = aikit_sdk::RunOptions {
-            model: model.map(str::to_string),
-            yolo: true,
-            stream: false,
-        };
+        let mut options = aikit_sdk::RunOptions::new()
+            .with_yolo(true)
+            .with_stream(false);
+        if let Some(m) = model {
+            options = options.with_model(m);
+        }
 
         let prompt_owned = prompt.to_string();
         let engine_name_owned = engine_name.to_string();
@@ -245,6 +246,23 @@ pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
             format!("aikit-sdk engine output read failed: {}", io_err),
         )
         .with_code("WFG-SDK-001"),
+        aikit_sdk::RunError::CallbackPanic(_) => AppError::new(
+            ErrorCategory::IoError,
+            "aikit-sdk event callback panicked".to_string(),
+        )
+        .with_code("WFG-SDK-001"),
+        aikit_sdk::RunError::ReaderFailed { stream, source } => AppError::new(
+            ErrorCategory::IoError,
+            format!("aikit-sdk reader failed on {:?}: {}", stream, source),
+        )
+        .with_code("WFG-SDK-001"),
+        aikit_sdk::RunError::TimedOut { timeout, .. } => AppError::new(
+            ErrorCategory::IoError,
+            format!("aikit-sdk agent timed out after {:?}", timeout),
+        )
+        .with_code("WFG-SDK-001"),
+        _ => AppError::new(ErrorCategory::IoError, format!("aikit-sdk error: {}", err))
+            .with_code("WFG-SDK-001"),
     }
 }
 
