@@ -4,7 +4,6 @@
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::core::workflow_graph::artifacts::ArtifactStore;
-use crate::core::workflow_graph::context;
 use crate::core::workflow_graph::operator::{
     ExecutionContext as OperatorContext, OperatorRegistry, StateView,
 };
@@ -12,6 +11,7 @@ use crate::core::workflow_graph::schema::WorkflowTask;
 use crate::core::workflow_graph::state::{
     redact_value, summarize_error, GraphSettings, TaskRunRecord, TaskStatus, WorkflowTaskRunRecord,
 };
+use crate::core::workflow_graph::value_resolve as context;
 use chrono::Utc;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde_json::Value;

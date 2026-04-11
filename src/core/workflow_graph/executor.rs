@@ -5,7 +5,6 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::core::workflow_graph::artifacts::ArtifactStore;
 use crate::core::workflow_graph::checkpoint;
-use crate::core::workflow_graph::context;
 use crate::core::workflow_graph::expression::ExpressionEngine;
 use crate::core::workflow_graph::operator::{OperatorRegistry, StateView};
 use crate::core::workflow_graph::schema::{
@@ -18,6 +17,7 @@ use crate::core::workflow_graph::state::{
     WorkflowTaskRunRecord, WorkflowTaskRunSummary, WORKFLOW_EXECUTION_FORMAT_VERSION,
 };
 use crate::core::workflow_graph::task_execution;
+use crate::core::workflow_graph::value_resolve as context;
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
 use newton_types::{NodeState, NodeStatus, WorkflowInstance, WorkflowStatus};

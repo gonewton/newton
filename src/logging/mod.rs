@@ -2,6 +2,9 @@
 pub mod config;
 pub mod context;
 pub mod layers;
+pub mod tracer;
+
+pub use tracer::Tracer;
 
 pub use context::{detect_context, ExecutionContext};
 

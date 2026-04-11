@@ -2,7 +2,6 @@
 
 pub mod artifacts;
 pub mod checkpoint;
-pub mod context;
 pub mod dot;
 pub mod executor;
 pub mod explain;
@@ -16,4 +15,10 @@ pub mod server_notifier;
 pub mod state;
 pub mod task_execution;
 pub mod transform;
+pub mod value_resolve;
 pub mod webhook;
+
+/// Backward-compatible re-export: `workflow_graph::context` still resolves to `workflow_graph::value_resolve`.
+pub mod context {
+    pub use super::value_resolve::*;
+}

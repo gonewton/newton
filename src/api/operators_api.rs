@@ -1,7 +1,14 @@
 use crate::api::state::AppState;
-use axum::{extract::State, Json};
+use axum::{extract::State, routing::get, Json, Router};
 use newton_types::OperatorDescriptor;
+use std::sync::Arc;
 
-pub async fn list_operators(State(state): State<AppState>) -> Json<Vec<OperatorDescriptor>> {
+pub fn routes(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/api/operators", get(list_operators))
+        .with_state(state)
+}
+
+pub async fn list_operators(State(state): State<Arc<AppState>>) -> Json<Vec<OperatorDescriptor>> {
     Json(state.operators.as_ref().clone())
 }
