@@ -25,11 +25,15 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+/// Query parameters for listing workflow instances.
 #[derive(Debug, Deserialize)]
-struct WorkflowQuery {
-    status: Option<WorkflowStatus>,
-    limit: Option<usize>,
-    offset: Option<usize>,
+pub struct WorkflowListQuery {
+    /// Optional status filter.
+    pub status: Option<WorkflowStatus>,
+    /// Maximum number of items to return.
+    pub limit: Option<usize>,
+    /// Number of items to skip before collecting results.
+    pub offset: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,7 +56,7 @@ struct WorkflowUpdateBody {
 }
 
 async fn list_workflows(
-    Query(query): Query<WorkflowQuery>,
+    Query(query): Query<WorkflowListQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Json<Vec<WorkflowInstance>> {
     let mut instances: Vec<WorkflowInstance> = state
