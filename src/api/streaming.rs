@@ -21,9 +21,15 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Clone)]
+/// Optional query-string filters applied to workflow event streams.
+///
+/// These fields are accepted on both the WebSocket and SSE streaming endpoints.
 pub struct StreamFilters {
+    /// Override the instance id used for filtering (primarily for legacy clients).
     pub instance_id: Option<String>,
+    /// Filter down to a single node id (where applicable).
     pub node_id: Option<String>,
+    /// Filter by event type (e.g. `logMessage`, `nodeStateChanged`).
     pub event_type: Option<String>,
 }
 

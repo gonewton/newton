@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// Routes for legacy channel/message endpoints kept for backward compatibility.
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/channels", get(legacy_list_channels_v1))
