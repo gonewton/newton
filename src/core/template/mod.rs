@@ -227,8 +227,7 @@ impl TemplateRenderer {
             if target_path
                 .extension()
                 .and_then(|ext| ext.to_str())
-                .map(|ext| ext.eq_ignore_ascii_case("sh"))
-                .unwrap_or(false)
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("sh"))
             {
                 Self::make_executable(&target_path)?;
             }

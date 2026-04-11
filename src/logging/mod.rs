@@ -187,15 +187,15 @@ fn workspace_root_for_command(command: &Command) -> Result<Option<PathBuf>> {
         }
         Command::Validate(args) => args
             .resolved_workflow_path()
-            .and_then(|workflow| workflow.parent().map(|p| p.to_path_buf()))
+            .and_then(|workflow| workflow.parent().map(std::path::Path::to_path_buf))
             .or_else(|| env::current_dir().ok()),
         Command::Dot(args) => args
             .resolved_workflow_path()
-            .and_then(|workflow| workflow.parent().map(|p| p.to_path_buf()))
+            .and_then(|workflow| workflow.parent().map(std::path::Path::to_path_buf))
             .or_else(|| env::current_dir().ok()),
         Command::Lint(args) => args
             .resolved_workflow_path()
-            .and_then(|workflow| workflow.parent().map(|p| p.to_path_buf()))
+            .and_then(|workflow| workflow.parent().map(std::path::Path::to_path_buf))
             .or_else(|| env::current_dir().ok()),
         Command::Explain(args) => args.workspace.clone(),
         Command::Resume(args) => args.workspace.clone(),

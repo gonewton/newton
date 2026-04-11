@@ -77,8 +77,8 @@ async fn legacy_list_channels_v1(State(state): State<Arc<AppState>>) -> Json<Val
             LegacyChannelInfo {
                 name: workflow_id,
                 message_count: timestamps.len(),
-                oldest_message: timestamps.first().map(|ts| ts.to_rfc3339()),
-                newest_message: timestamps.last().map(|ts| ts.to_rfc3339()),
+                oldest_message: timestamps.first().map(chrono::DateTime::to_rfc3339),
+                newest_message: timestamps.last().map(chrono::DateTime::to_rfc3339),
             }
         })
         .collect();

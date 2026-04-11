@@ -313,7 +313,7 @@ Configure authentication tokens and HTTPS for production deployments."
 pub async fn run(args: Args) -> crate::Result<()> {
     match args.command {
         Command::Run(run_args) => commands::run(run_args).await,
-        Command::Init(init_args) => init::run(init_args).await,
+        Command::Init(init_args) => init::run(init_args),
         Command::Batch(batch_args) => commands::batch(batch_args).await,
         Command::Serve(serve_args) => commands::serve(serve_args)
             .await

@@ -28,11 +28,10 @@ impl WorkflowTransform for IncludeIfTransform {
     fn transform(&self, doc: WorkflowDocument) -> Result<WorkflowDocument, AppError> {
         let mut doc = doc;
         let engine = ExpressionEngine::default();
-        let triggers = doc
-            .triggers
-            .as_ref()
-            .map(|trigger| trigger.payload.clone())
-            .unwrap_or_else(|| Value::Object(Map::new()));
+        let triggers = doc.triggers.as_ref().map_or_else(
+            || Value::Object(Map::new()),
+            |trigger| trigger.payload.clone(),
+        );
         let context = doc.workflow.context.clone();
         let eval_ctx = EvaluationContext::new(context, Value::Object(Map::new()), triggers);
 

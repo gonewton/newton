@@ -11,7 +11,7 @@ const DEFAULT_TEMPLATE_SOURCE: &str = "gonewton/newton-templates";
 const DEFAULT_CODING_MODEL: &str = "zai-coding-plan/glm-4.7";
 
 /// Handles `newton init` by creating a `.newton/` workspace and installing the Newton template via aikit-sdk.
-pub async fn run(args: InitArgs) -> Result<()> {
+pub fn run(args: InitArgs) -> Result<()> {
     // Resolve target path (default: current directory)
     let path = args
         .path

@@ -147,8 +147,7 @@ impl MonitorState {
     /// Whether the flash indicator is currently visible.
     pub fn flash_active(&self) -> bool {
         self.flash_until
-            .map(|deadline| Instant::now() <= deadline)
-            .unwrap_or(false)
+            .is_some_and(|deadline| Instant::now() <= deadline)
     }
 
     /// Advance to the next queue item (wrap-around).
@@ -302,8 +301,7 @@ impl QueueItem {
     /// Whether this queue item currently has the flash flag.
     pub fn is_flashing(&self) -> bool {
         self.flash_until
-            .map(|deadline| Instant::now() <= deadline)
-            .unwrap_or(false)
+            .is_some_and(|deadline| Instant::now() <= deadline)
     }
 }
 

@@ -156,11 +156,7 @@ pub fn build_tasks_value(completed: &HashMap<String, TaskRunRecord>) -> Value {
         entry.insert("output".to_string(), record.output.clone());
         entry.insert(
             "error_code".to_string(),
-            record
-                .error_code
-                .clone()
-                .map(Value::String)
-                .unwrap_or(Value::Null),
+            record.error_code.clone().map_or(Value::Null, Value::String),
         );
         entry.insert(
             "duration_ms".to_string(),

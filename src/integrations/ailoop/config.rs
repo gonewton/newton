@@ -142,8 +142,7 @@ fn load_ailoop_config(workspace_root: &Path) -> Result<AiloopConfig> {
             enabled: true,
             fail_fast: env::var("NEWTON_AILOOP_FAIL_FAST")
                 .ok()
-                .map(|v| v == "1" || v.to_lowercase() == "true")
-                .unwrap_or(false),
+                .is_some_and(|v| v == "1" || v.to_lowercase() == "true"),
         });
     }
 
@@ -177,10 +176,10 @@ fn load_ailoop_config(workspace_root: &Path) -> Result<AiloopConfig> {
     // If still incomplete, scan other config files alphabetically
     if !config_pair.is_complete() {
         let mut entries: Vec<_> = fs::read_dir(&configs_dir)?
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|entry| entry.path().is_file() && entry.path() != monitor_conf)
             .collect();
-        entries.sort_by_key(|entry| entry.file_name());
+        entries.sort_by_key(std::fs::DirEntry::file_name);
 
         for entry in entries {
             if let Some(pair) = parse_config_file(&entry.path())? {
@@ -215,8 +214,7 @@ fn load_ailoop_config(workspace_root: &Path) -> Result<AiloopConfig> {
         workspace_root
             .file_name()
             .and_then(|n| n.to_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "default".to_string())
+            .map_or_else(|| "default".to_string(), std::string::ToString::to_string)
     });
     validate_channel(&channel)?;
 

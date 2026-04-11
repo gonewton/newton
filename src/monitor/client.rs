@@ -42,7 +42,7 @@ impl AiloopClient {
 
     /// Fetch all known channels from the server.
     pub async fn fetch_channels(&self) -> crate::Result<Vec<String>> {
-        let url = join_path(&self.endpoints.http_url, &["api", "channels"])?;
+        let url = join_path(&self.endpoints.http_url, &["api", "channels"]);
         let resp = self.http.get(url).send().await?;
         let value: Value = resp.json().await?;
 
@@ -55,7 +55,7 @@ impl AiloopClient {
                         entry
                             .get("name")
                             .and_then(|name| name.as_str())
-                            .map(|s| s.to_string())
+                            .map(std::string::ToString::to_string)
                     })
                     .collect();
 
@@ -83,7 +83,7 @@ impl AiloopClient {
         if let Some(arr) = value.as_array() {
             let channels: Vec<String> = arr
                 .iter()
-                .filter_map(|entry| entry.as_str().map(|s| s.to_string()))
+                .filter_map(|entry| entry.as_str().map(std::string::ToString::to_string))
                 .collect();
 
             if !channels.is_empty() {
@@ -112,7 +112,7 @@ impl AiloopClient {
         let mut url = join_path(
             &self.endpoints.http_url,
             &["api", "channels", &encoded, "messages"],
-        )?;
+        );
         let limit = limit.min(200);
         url.push_str(&format!("?limit={limit}"));
         let resp = self.http.get(url).send().await?;
@@ -160,7 +160,7 @@ fn encode_segment(segment: &str) -> String {
     utf8_percent_encode(segment, PATH_SEGMENT_ENCODE_SET).to_string()
 }
 
-fn join_path(base: &reqwest::Url, segments: &[&str]) -> crate::Result<String> {
+fn join_path(base: &reqwest::Url, segments: &[&str]) -> String {
     let mut url = base.as_str().trim_end_matches('/').to_string();
     for segment in segments {
         if !segment.is_empty() {
@@ -168,7 +168,7 @@ fn join_path(base: &reqwest::Url, segments: &[&str]) -> crate::Result<String> {
             url.push_str(segment);
         }
     }
-    Ok(url)
+    url
 }
 
 /// Run a synchronous backfill that harvests existing messages before the UI starts.

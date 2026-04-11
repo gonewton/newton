@@ -86,10 +86,10 @@ fn load_monitor_conf(configs_dir: &Path, accumulator: &mut ConfigPair) -> Result
 fn scan_config_files(configs_dir: &Path, accumulator: &mut ConfigPair) -> Result<()> {
     let monitor_conf = configs_dir.join("monitor.conf");
     let mut entries: Vec<_> = fs::read_dir(configs_dir)?
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|entry| entry.path().is_file())
         .collect();
-    entries.sort_by_key(|entry| entry.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
 
     for entry in entries {
         if entry.path() == monitor_conf {

@@ -71,18 +71,18 @@ pub async fn run_task(
 
         match execution_result {
             Ok(output) => {
-                return build_success_outcome(
+                return Ok(build_success_outcome(
                     task.id,
                     output,
                     duration_ms,
                     run_seq,
                     started_at,
                     completed_at,
-                );
+                ));
             }
             Err(err) => {
                 if retry_state.attempts >= retry_state.max_attempts {
-                    return build_failure_outcome(
+                    return Ok(build_failure_outcome(
                         task.id,
                         &err,
                         duration_ms,
@@ -90,7 +90,7 @@ pub async fn run_task(
                         started_at,
                         completed_at,
                         redact_keys.as_ref(),
-                    );
+                    ));
                 }
                 apply_backoff_and_retry(&mut retry_state, &mut rng).await;
             }
@@ -131,8 +131,8 @@ fn prepare_retry_state(task: &WorkflowTask) -> RetryState {
 
     RetryState {
         attempts: 0,
-        max_attempts: retry_config.map(|r| r.max_attempts).unwrap_or(1),
-        backoff_ms: retry_config.map(|r| r.backoff_ms).unwrap_or(0),
+        max_attempts: retry_config.map_or(1, |r| r.max_attempts),
+        backoff_ms: retry_config.map_or(0, |r| r.backoff_ms),
         multiplier: retry_config
             .and_then(|r| r.backoff_multiplier)
             .unwrap_or(1.0),
@@ -209,14 +209,14 @@ fn build_success_outcome(
     run_seq: u64,
     started_at: chrono::DateTime<Utc>,
     completed_at: chrono::DateTime<Utc>,
-) -> Result<TaskOutcome, AppError> {
+) -> TaskOutcome {
     tracing::info!(
         task_id = %task_id,
         duration_ms = duration_ms,
         "task completed"
     );
     let patch = context::extract_context_patch(&output);
-    Ok(TaskOutcome {
+    TaskOutcome {
         task_id,
         record: TaskRunRecord {
             status: TaskStatus::Success,
@@ -230,7 +230,7 @@ fn build_success_outcome(
         started_at,
         completed_at,
         error_summary: None,
-    })
+    }
 }
 
 /// Builds failure TaskOutcome from execution error.
@@ -242,7 +242,7 @@ fn build_failure_outcome(
     started_at: chrono::DateTime<Utc>,
     completed_at: chrono::DateTime<Utc>,
     redact_keys: &[String],
-) -> Result<TaskOutcome, AppError> {
+) -> TaskOutcome {
     tracing::warn!(
         task_id = %task_id,
         error_code = %err.code,
@@ -255,7 +255,7 @@ fn build_failure_outcome(
     } else {
         Value::String(err.message.clone())
     };
-    Ok(TaskOutcome {
+    TaskOutcome {
         task_id,
         record: TaskRunRecord {
             status: TaskStatus::Failed,
@@ -269,7 +269,7 @@ fn build_failure_outcome(
         started_at,
         completed_at,
         error_summary: Some(summarize_error(err, redact_keys)),
-    })
+    }
 }
 
 /// Applies backoff delay and prepares for retry.

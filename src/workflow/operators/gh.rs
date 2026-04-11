@@ -235,8 +235,7 @@ impl GhOperator {
             .get("project_number")
             .map(|v| {
                 v.as_str()
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| v.to_string())
+                    .map_or_else(|| v.to_string(), std::string::ToString::to_string)
             })
             .unwrap();
         let field_name = map
@@ -336,7 +335,7 @@ impl GhOperator {
             arr.as_array()
                 .map(|a| {
                     a.iter()
-                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .filter_map(|v| v.as_str().map(std::string::ToString::to_string))
                         .collect()
                 })
                 .unwrap_or_default()
@@ -601,7 +600,7 @@ fn resolve_option_id(board: &Map<String, Value>, status: &str) -> Result<String,
     board
         .get(flat_key)
         .and_then(Value::as_str)
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .ok_or_else(|| {
             AppError::new(
                 ErrorCategory::ValidationError,

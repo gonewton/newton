@@ -305,8 +305,9 @@ impl WorkflowRuntime {
         let limit = self
             .runtime_graph
             .get_task(task_id)
-            .map(|task| task.iteration_limit(self.config.max_task_iterations))
-            .unwrap_or(self.config.max_task_iterations);
+            .map_or(self.config.max_task_iterations, |task| {
+                task.iteration_limit(self.config.max_task_iterations)
+            });
         let entry = self.task_iterations.entry(task_id.to_string()).or_insert(0);
         if *entry >= limit {
             self.workflow_execution.status = WorkflowExecutionStatus::Failed;
@@ -727,7 +728,7 @@ impl WorkflowRuntime {
 
             // Verbose output: print task stdout/stderr after completion
             if self.verbose {
-                self.print_task_verbose_output(outcome);
+                Self::print_task_verbose_output(outcome);
             }
 
             if outcome.failed && !self.config.continue_on_error {
@@ -946,7 +947,7 @@ impl WorkflowRuntime {
     }
 
     /// Print task stdout/stderr for verbose mode
-    fn print_task_verbose_output(&self, outcome: &TaskOutcome) {
+    fn print_task_verbose_output(outcome: &TaskOutcome) {
         let output = &outcome.record.output;
 
         // For CommandOperator tasks, stdout/stderr are in the task output
@@ -1030,22 +1031,21 @@ fn build_workflow_runtime(
     if let Some(artifact_base_path) = &overrides.artifact_base_path {
         graph_settings.artifact_storage.base_path = artifact_base_path.clone();
     }
-    let checkpoint_root = overrides
-        .checkpoint_base_path
-        .as_ref()
-        .map(|path| {
+    let checkpoint_root = overrides.checkpoint_base_path.as_ref().map_or_else(
+        || {
+            workspace_root
+                .join(".newton")
+                .join("state")
+                .join("workflows")
+        },
+        |path| {
             if path.is_absolute() {
                 path.clone()
             } else {
                 workspace_root.join(path)
             }
-        })
-        .unwrap_or_else(|| {
-            workspace_root
-                .join(".newton")
-                .join("state")
-                .join("workflows")
-        });
+        },
+    );
     validate_required_triggers(&graph_settings.required_triggers, &trigger_payload)?;
     let workflow_file = canonicalize_workflow_path(&workflow_path)?;
     let workflow_bytes = fs::read(&workflow_file).map_err(|err| {
@@ -1338,11 +1338,10 @@ pub async fn resume_workflow(
 }
 
 fn extract_trigger_payload(document: &WorkflowDocument) -> Value {
-    document
-        .triggers
-        .as_ref()
-        .map(|trigger| trigger.payload.clone())
-        .unwrap_or_else(|| Value::Object(Map::new()))
+    document.triggers.as_ref().map_or_else(
+        || Value::Object(Map::new()),
+        |trigger| trigger.payload.clone(),
+    )
 }
 
 fn validate_required_triggers(required: &[String], payload: &Value) -> Result<(), AppError> {

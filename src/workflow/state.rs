@@ -316,8 +316,7 @@ pub fn summarize_error(error: &AppError, redact_keys: &[String]) -> AppErrorSumm
         if error
             .context
             .get("context")
-            .map(|ctx| ctx.to_lowercase().contains(&pattern.to_lowercase()))
-            .unwrap_or(false)
+            .is_some_and(|ctx| ctx.to_lowercase().contains(&pattern.to_lowercase()))
         {
             message = "[REDACTED]".to_string();
             break;

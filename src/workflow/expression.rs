@@ -41,8 +41,7 @@ impl Default for ExpressionEngine {
             std::path::Path::new(&path)
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .map(std::string::ToString::to_string)
-                .unwrap_or_else(|| "spec".to_string())
+                .map_or_else(|| "spec".to_string(), std::string::ToString::to_string)
         });
         // Reads process env at eval time (same as `newton run`). Empty if unset.
         engine.register_fn("env", |name: String| -> String {

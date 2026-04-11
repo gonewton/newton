@@ -35,8 +35,7 @@ impl ToolClient {
     pub fn from_env() -> Option<Self> {
         let enabled = std::env::var("NEWTON_AILOOP_ENABLED")
             .ok()
-            .map(|v| v == "1")
-            .unwrap_or(false);
+            .is_some_and(|v| v == "1");
 
         if !enabled {
             return None;

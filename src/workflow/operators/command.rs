@@ -68,11 +68,10 @@ impl Operator for CommandOperator {
 
     async fn execute(&self, params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {
         let parsed = CommandParams::from_value(&params)?;
-        let resolved_cwd = parsed
-            .cwd
-            .as_deref()
-            .map(|cwd| self.workspace_root.join(cwd))
-            .unwrap_or_else(|| self.workspace_root.clone());
+        let resolved_cwd = parsed.cwd.as_deref().map_or_else(
+            || self.workspace_root.clone(),
+            |cwd| self.workspace_root.join(cwd),
+        );
 
         tracing::debug!(
             cmd = %parsed.cmd,
@@ -281,7 +280,7 @@ impl CommandParams {
             .get("cwd")
             .and_then(Value::as_str)
             .map(str::trim)
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
         if let Some(cwd_str) = &cwd {
             if Path::new(cwd_str).is_absolute() {
                 return Err(

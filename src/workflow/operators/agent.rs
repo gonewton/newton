@@ -309,7 +309,7 @@ impl Operator for AgentOperator {
                     .as_ref()
                     .map(|ms| ms.model.as_str())
             })
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
 
         // Validate and compile signal patterns
         let compiled_signals = validate_and_compile_signals(&config.signals)?;
@@ -349,12 +349,16 @@ impl Operator for AgentOperator {
         // Workspace-relative paths for output
         let stdout_rel_path = stdout_abs_path
             .strip_prefix(&self.workspace_root)
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| stdout_abs_path.to_string_lossy().to_string());
+            .map_or_else(
+                |_| stdout_abs_path.to_string_lossy().to_string(),
+                |p| p.to_string_lossy().to_string(),
+            );
         let stderr_rel_path = stderr_abs_path
             .strip_prefix(&self.workspace_root)
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| stderr_abs_path.to_string_lossy().to_string());
+            .map_or_else(
+                |_| stderr_abs_path.to_string_lossy().to_string(),
+                |p| p.to_string_lossy().to_string(),
+            );
 
         // events_artifact and token_usage are only set for AI engine (SDK) paths
         let mut sdk_events_artifact: Option<String> = None;
@@ -398,17 +402,16 @@ impl Operator for AgentOperator {
             let invocation = driver.build_invocation(&driver_config, &self.workspace_root)?;
 
             // Resolve timeout
-            let timeout_duration = config
-                .timeout_seconds
-                .map(Duration::from_secs)
-                .unwrap_or_else(|| Duration::from_secs(self.settings.max_time_seconds));
+            let timeout_duration = config.timeout_seconds.map_or_else(
+                || Duration::from_secs(self.settings.max_time_seconds),
+                Duration::from_secs,
+            );
 
             // Resolve working directory
-            let working_dir = config
-                .working_dir
-                .as_deref()
-                .map(|d| self.workspace_root.join(d))
-                .unwrap_or_else(|| self.workspace_root.clone());
+            let working_dir = config.working_dir.as_deref().map_or_else(
+                || self.workspace_root.clone(),
+                |d| self.workspace_root.join(d),
+            );
 
             let stream_to_terminal = config
                 .stream_stdout
@@ -442,10 +445,10 @@ impl Operator for AgentOperator {
             let prompt = resolve_prompt(&config, &self.engine_manager.workspace_root)?;
 
             // Resolve timeout
-            let timeout_duration = config
-                .timeout_seconds
-                .map(Duration::from_secs)
-                .unwrap_or_else(|| Duration::from_secs(self.settings.max_time_seconds));
+            let timeout_duration = config.timeout_seconds.map_or_else(
+                || Duration::from_secs(self.settings.max_time_seconds),
+                Duration::from_secs,
+            );
 
             // Path for the NDJSON events artifact
             let events_ndjson_abs_path = task_artifact_dir.join("events.ndjson");
@@ -785,10 +788,10 @@ async fn execute_sdk_engine(
     }
 
     // Compute relative path to events artifact
-    let events_artifact_path = events_ndjson_path
-        .strip_prefix(workspace_root)
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| events_ndjson_path.to_string_lossy().to_string());
+    let events_artifact_path = events_ndjson_path.strip_prefix(workspace_root).map_or_else(
+        |_| events_ndjson_path.to_string_lossy().to_string(),
+        |p| p.to_string_lossy().to_string(),
+    );
 
     // Token usage precedence: RunResult.token_usage when Some, else latest TokenUsageLine fallback.
     let token_usage = primary_token_usage.or(fallback_token_usage);

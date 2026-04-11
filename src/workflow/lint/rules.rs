@@ -656,8 +656,7 @@ impl WorkflowLintRule for AgentNoEngineRule {
                 .params
                 .get("engine")
                 .and_then(Value::as_str)
-                .map(|s| !s.is_empty())
-                .unwrap_or(false);
+                .is_some_and(|s| !s.is_empty());
 
             if !has_engine_in_params && !has_default_engine {
                 out.push(LintResult::new(
@@ -794,8 +793,7 @@ impl WorkflowLintRule for AgentCommandNoEngineCommandRule {
             let has_engine_command = task
                 .params
                 .get("engine_command")
-                .map(|v| v.is_array())
-                .unwrap_or(false);
+                .is_some_and(serde_json::Value::is_array);
             if !has_engine_command {
                 out.push(LintResult::new(
                     "WFG-LINT-114",
@@ -922,12 +920,11 @@ impl BarrierExpectedNonExistentTaskRule {
 
         // Check each expected task ID
         for expected_id in &barrier_params.expected {
-            self.check_expected_task_exists(task, expected_id, task_ids, results);
+            Self::check_expected_task_exists(task, expected_id, task_ids, results);
         }
     }
 
     fn check_expected_task_exists(
-        &self,
         barrier_task: &crate::workflow::schema::WorkflowTask,
         expected_id: &str,
         task_ids: &HashSet<String>,
