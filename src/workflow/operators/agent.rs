@@ -56,6 +56,55 @@ impl AgentOperator {
         Self::with_aikit_sdk(workspace_root, settings)
             .expect("AikitEngineManager::new should not fail")
     }
+
+    /// Create the artifact directory for a task run and return the resolved paths.
+    fn setup_artifact_paths(&self, ctx: &ExecutionContext) -> Result<ArtifactPaths, AppError> {
+        let artifact_base = if self.settings.artifact_storage.base_path.is_absolute() {
+            self.settings.artifact_storage.base_path.clone()
+        } else {
+            self.workspace_root
+                .join(&self.settings.artifact_storage.base_path)
+        };
+        let run_seq = ctx.iteration as usize;
+        let task_artifact_dir = artifact_base
+            .join("workflows")
+            .join(&ctx.execution_id)
+            .join("task")
+            .join(&ctx.task_id)
+            .join(run_seq.to_string());
+        let stdout_abs = task_artifact_dir.join("stdout.txt");
+        let stderr_abs = task_artifact_dir.join("stderr.txt");
+        std::fs::create_dir_all(&task_artifact_dir).map_err(|err| {
+            AppError::new(
+                ErrorCategory::IoError,
+                format!("failed to create artifact directory: {err}"),
+            )
+        })?;
+        let stdout_rel = stdout_abs.strip_prefix(&self.workspace_root).map_or_else(
+            |_| stdout_abs.to_string_lossy().to_string(),
+            |p| p.to_string_lossy().to_string(),
+        );
+        let stderr_rel = stderr_abs.strip_prefix(&self.workspace_root).map_or_else(
+            |_| stderr_abs.to_string_lossy().to_string(),
+            |p| p.to_string_lossy().to_string(),
+        );
+        Ok(ArtifactPaths {
+            task_artifact_dir,
+            stdout_abs,
+            stderr_abs,
+            stdout_rel,
+            stderr_rel,
+        })
+    }
+}
+
+/// Resolved artifact paths for a single task run.
+struct ArtifactPaths {
+    task_artifact_dir: PathBuf,
+    stdout_abs: PathBuf,
+    stderr_abs: PathBuf,
+    stdout_rel: String,
+    stderr_rel: String,
 }
 
 /// Parsed from task.params at execution time.
@@ -317,49 +366,11 @@ impl Operator for AgentOperator {
         // Interpolate env values
         let interpolated_env = interpolate_env(&config.env, &eval_ctx)?;
 
-        // Set up artifact paths
-        let artifact_base = if self.settings.artifact_storage.base_path.is_absolute() {
-            self.settings.artifact_storage.base_path.clone()
-        } else {
-            self.workspace_root
-                .join(&self.settings.artifact_storage.base_path)
-        };
-
-        let run_seq = ctx.iteration as usize;
-        let task_artifact_dir = artifact_base
-            .join("workflows")
-            .join(&ctx.execution_id)
-            .join("task")
-            .join(&ctx.task_id)
-            .join(run_seq.to_string());
-
-        let stdout_abs_path = task_artifact_dir.join("stdout.txt");
-        let stderr_abs_path = task_artifact_dir.join("stderr.txt");
-
-        std::fs::create_dir_all(&task_artifact_dir).map_err(|err| {
-            AppError::new(
-                ErrorCategory::IoError,
-                format!("failed to create artifact directory: {err}"),
-            )
-        })?;
-
-        // Workspace-relative paths for output
-        let stdout_rel_path = stdout_abs_path
-            .strip_prefix(&self.workspace_root)
-            .map_or_else(
-                |_| stdout_abs_path.to_string_lossy().to_string(),
-                |p| p.to_string_lossy().to_string(),
-            );
-        let stderr_rel_path = stderr_abs_path
-            .strip_prefix(&self.workspace_root)
-            .map_or_else(
-                |_| stderr_abs_path.to_string_lossy().to_string(),
-                |p| p.to_string_lossy().to_string(),
-            );
+        // Set up artifact directory and resolve paths
+        let paths = self.setup_artifact_paths(&ctx)?;
 
         // events_artifact and token_usage are only set for AI engine (SDK) paths
         let mut sdk_events_artifact: Option<String> = None;
-        // token_usage from the SDK run result.
         let mut sdk_events_token_usage: Option<serde_json::Value> = None;
 
         let (signal, signal_data, exit_code, final_iteration) = if engine_name == "command" {
@@ -398,28 +409,22 @@ impl Operator for AgentOperator {
             };
             let invocation = driver.build_invocation(&driver_config, &self.workspace_root)?;
 
-            // Resolve timeout
             let timeout_duration = config.timeout_seconds.map_or_else(
                 || Duration::from_secs(self.settings.max_time_seconds),
                 Duration::from_secs,
             );
-
-            // Resolve working directory
             let working_dir = config.working_dir.as_deref().map_or_else(
                 || self.workspace_root.clone(),
                 |d| self.workspace_root.join(d),
             );
-
             let stream_to_terminal = config
                 .stream_stdout
                 .unwrap_or(self.settings.stream_agent_stdout);
-
             let exec_paths = ExecPaths {
                 working_dir: &working_dir,
-                stdout_path: &stdout_abs_path,
-                stderr_path: &stderr_abs_path,
+                stdout_path: &paths.stdout_abs,
+                stderr_path: &paths.stderr_abs,
             };
-
             let start = Instant::now();
             let exec_params = ExecParams {
                 invocation: &invocation,
@@ -440,15 +445,11 @@ impl Operator for AgentOperator {
         } else {
             // AI engine: delegate to aikit-sdk via AikitEngineManager
             let prompt = resolve_prompt(&config, &self.engine_manager.workspace_root)?;
-
-            // Resolve timeout
             let timeout_duration = config.timeout_seconds.map_or_else(
                 || Duration::from_secs(self.settings.max_time_seconds),
                 Duration::from_secs,
             );
-
-            // Path for the NDJSON events artifact
-            let events_ndjson_abs_path = task_artifact_dir.join("events.ndjson");
+            let events_ndjson_abs_path = paths.task_artifact_dir.join("events.ndjson");
 
             let sdk_result = execute_sdk_engine(
                 &self.engine_manager,
@@ -457,8 +458,8 @@ impl Operator for AgentOperator {
                 model.as_deref(),
                 &config,
                 &compiled_signals,
-                &stdout_abs_path,
-                &stderr_abs_path,
+                &paths.stdout_abs,
+                &paths.stderr_abs,
                 &events_ndjson_abs_path,
                 &self.workspace_root,
                 timeout_duration,
@@ -476,71 +477,96 @@ impl Operator for AgentOperator {
             )
         };
 
-        // Determine stderr artifact
-        let stderr_artifact = if stderr_abs_path.exists()
-            && stderr_abs_path
-                .metadata()
-                .map(|m| m.len() > 0)
-                .unwrap_or(false)
-        {
-            Value::String(stderr_rel_path)
-        } else {
-            Value::Null
-        };
-
-        // Build output
-        let mut output_map = Map::new();
-
-        let signal_value = match signal {
-            Some(ref s) => Value::String(s.clone()),
-            None => {
-                if config.signals.is_empty() {
-                    Value::String("exited".to_string())
-                } else {
-                    Value::Null
-                }
-            }
-        };
-        output_map.insert("signal".to_string(), signal_value);
-        output_map.insert(
-            "signal_data".to_string(),
-            Value::Object(
-                signal_data
-                    .into_iter()
-                    .map(|(k, v)| (k, Value::String(v)))
-                    .collect(),
-            ),
-        );
-        output_map.insert(
-            "exit_code".to_string(),
-            Value::Number(Number::from(exit_code)),
-        );
-        output_map.insert(
-            "stdout_artifact".to_string(),
-            Value::String(stdout_rel_path),
-        );
-        output_map.insert("stderr_artifact".to_string(), stderr_artifact);
-        if config.loop_mode {
-            output_map.insert(
-                "iteration".to_string(),
-                Value::Number(Number::from(final_iteration)),
-            );
-        }
-
-        // AI engine SDK outputs: token_usage from the SDK run result,
-        // and events_artifact NDJSON path.
-        if engine_name != "command" {
-            // Use SDK token_usage when available; null otherwise.
-            let token_usage_value = sdk_events_token_usage.unwrap_or(Value::Null);
-            output_map.insert("token_usage".to_string(), token_usage_value);
-        }
-
-        if let Some(events_path) = sdk_events_artifact {
-            output_map.insert("events_artifact".to_string(), Value::String(events_path));
-        }
-
-        Ok(Value::Object(output_map))
+        Ok(build_agent_output(AgentOutput {
+            signal,
+            signal_data,
+            exit_code,
+            final_iteration,
+            stdout_rel: paths.stdout_rel,
+            stderr_abs: paths.stderr_abs,
+            stderr_rel: paths.stderr_rel,
+            loop_mode: config.loop_mode,
+            signals_empty: config.signals.is_empty(),
+            engine_is_command: engine_name == "command",
+            sdk_token_usage: sdk_events_token_usage,
+            sdk_events_artifact,
+        }))
     }
+}
+
+/// Parameters for assembling the agent task output JSON.
+struct AgentOutput {
+    signal: Option<String>,
+    signal_data: HashMap<String, String>,
+    exit_code: i32,
+    final_iteration: u32,
+    stdout_rel: String,
+    stderr_abs: PathBuf,
+    stderr_rel: String,
+    loop_mode: bool,
+    signals_empty: bool,
+    engine_is_command: bool,
+    sdk_token_usage: Option<serde_json::Value>,
+    sdk_events_artifact: Option<String>,
+}
+
+/// Assemble the `Value::Object` returned by `AgentOperator::execute`.
+fn build_agent_output(out: AgentOutput) -> Value {
+    let stderr_artifact = if out.stderr_abs.exists()
+        && out
+            .stderr_abs
+            .metadata()
+            .map(|m| m.len() > 0)
+            .unwrap_or(false)
+    {
+        Value::String(out.stderr_rel)
+    } else {
+        Value::Null
+    };
+
+    let signal_value = match out.signal {
+        Some(ref s) => Value::String(s.clone()),
+        None => {
+            if out.signals_empty {
+                Value::String("exited".to_string())
+            } else {
+                Value::Null
+            }
+        }
+    };
+
+    let mut map = Map::new();
+    map.insert("signal".to_string(), signal_value);
+    map.insert(
+        "signal_data".to_string(),
+        Value::Object(
+            out.signal_data
+                .into_iter()
+                .map(|(k, v)| (k, Value::String(v)))
+                .collect(),
+        ),
+    );
+    map.insert(
+        "exit_code".to_string(),
+        Value::Number(Number::from(out.exit_code)),
+    );
+    map.insert("stdout_artifact".to_string(), Value::String(out.stdout_rel));
+    map.insert("stderr_artifact".to_string(), stderr_artifact);
+    if out.loop_mode {
+        map.insert(
+            "iteration".to_string(),
+            Value::Number(Number::from(out.final_iteration)),
+        );
+    }
+    if !out.engine_is_command {
+        let token_usage = out.sdk_token_usage.unwrap_or(Value::Null);
+        map.insert("token_usage".to_string(), token_usage);
+    }
+    if let Some(events_path) = out.sdk_events_artifact {
+        map.insert("events_artifact".to_string(), Value::String(events_path));
+    }
+
+    Value::Object(map)
 }
 
 /// Resolve the prompt string from config.

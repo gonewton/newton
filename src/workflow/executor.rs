@@ -380,6 +380,86 @@ impl WorkflowRuntime {
         Ok(false)
     }
 
+    /// Build the list of pre-seeded node states sent to the server at startup.
+    fn build_preseed_nodes(&self) -> Vec<NodeState> {
+        if self.pre_seed_nodes {
+            self.runtime_graph
+                .get_all_tasks()
+                .into_iter()
+                .map(|task| NodeState {
+                    node_id: task.id.clone(),
+                    status: NodeStatus::Pending,
+                    started_at: None,
+                    ended_at: None,
+                    operator_type: Some(task.operator.clone()),
+                })
+                .collect()
+        } else {
+            vec![]
+        }
+    }
+
+    /// Notify the server that a set of tasks is now running.
+    fn notify_task_starts(&self, tick_tasks: &[(String, u64)]) {
+        if let Some(notifier) = &self.server_notifier {
+            let instance_id = self.workflow_execution.execution_id.to_string();
+            let now = Utc::now();
+            for (task_id, _) in tick_tasks {
+                let operator_type = self
+                    .runtime_graph
+                    .get_task(task_id)
+                    .map(|t| t.operator.clone());
+                let node = NodeState {
+                    node_id: task_id.clone(),
+                    status: NodeStatus::Running,
+                    started_at: Some(now),
+                    ended_at: None,
+                    operator_type,
+                };
+                notifier.notify_node_updated(instance_id.clone(), node);
+            }
+        }
+    }
+
+    /// Notify the server of all task outcomes from the current tick.
+    fn notify_task_completions(&self, frontier: &[TaskOutcome]) {
+        if let Some(notifier) = &self.server_notifier {
+            let instance_id = self.workflow_execution.execution_id.to_string();
+            for outcome in frontier {
+                let node_status = if outcome.failed {
+                    NodeStatus::Failed
+                } else {
+                    NodeStatus::Succeeded
+                };
+                let operator_type = self
+                    .runtime_graph
+                    .get_task(&outcome.task_id)
+                    .map(|t| t.operator.clone());
+                let node = NodeState {
+                    node_id: outcome.task_id.clone(),
+                    status: node_status,
+                    started_at: Some(outcome.started_at),
+                    ended_at: Some(outcome.completed_at),
+                    operator_type,
+                };
+                notifier.notify_node_updated(instance_id.clone(), node);
+            }
+        }
+    }
+
+    /// Notify the server that the workflow has completed with the given status.
+    fn notify_completion(&self, status: WorkflowStatus) {
+        if let Some(notifier) = &self.server_notifier {
+            notifier.notify_workflow_completed(
+                self.workflow_execution.execution_id.to_string(),
+                status,
+                self.workflow_execution
+                    .completed_at
+                    .unwrap_or_else(Utc::now),
+            );
+        }
+    }
+
     async fn run(mut self) -> Result<ExecutionSummary, AppError> {
         tracing::info!(
             execution_id = %self.workflow_execution.execution_id,
@@ -390,26 +470,11 @@ impl WorkflowRuntime {
 
         // Notify server that workflow has started.
         if let Some(notifier) = &self.server_notifier {
-            let pre_seeded_nodes: Vec<NodeState> = if self.pre_seed_nodes {
-                self.runtime_graph
-                    .get_all_tasks()
-                    .into_iter()
-                    .map(|task| NodeState {
-                        node_id: task.id.clone(),
-                        status: NodeStatus::Pending,
-                        started_at: None,
-                        ended_at: None,
-                        operator_type: Some(task.operator.clone()),
-                    })
-                    .collect()
-            } else {
-                vec![]
-            };
             let instance = WorkflowInstance {
                 instance_id: self.workflow_execution.execution_id.to_string(),
                 workflow_id: self.workflow_execution.workflow_file.clone(),
                 status: WorkflowStatus::Running,
-                nodes: pre_seeded_nodes,
+                nodes: self.build_preseed_nodes(),
                 started_at: self.workflow_execution.started_at,
                 ended_at: None,
                 definition: self.workflow_definition_json.clone(),
@@ -427,25 +492,7 @@ impl WorkflowRuntime {
                 break;
             }
 
-            // Notify server of task starts.
-            if let Some(notifier) = &self.server_notifier {
-                let instance_id = self.workflow_execution.execution_id.to_string();
-                let now = Utc::now();
-                for (task_id, _) in &tick_tasks {
-                    let operator_type = self
-                        .runtime_graph
-                        .get_task(task_id)
-                        .map(|t| t.operator.clone());
-                    let node = NodeState {
-                        node_id: task_id.clone(),
-                        status: NodeStatus::Running,
-                        started_at: Some(now),
-                        ended_at: None,
-                        operator_type,
-                    };
-                    notifier.notify_node_updated(instance_id.clone(), node);
-                }
-            }
+            self.notify_task_starts(&tick_tasks);
 
             let snapshot = { self.state.read().await.snapshot() };
             let tick_tasks_owned = tick_tasks.clone();
@@ -487,15 +534,7 @@ impl WorkflowRuntime {
                     self.workflow_execution.status = WorkflowExecutionStatus::Failed;
                     self.workflow_execution.completed_at = Some(Utc::now());
                     self.persist_checkpoint_force().await?;
-                    if let Some(notifier) = &self.server_notifier {
-                        notifier.notify_workflow_completed(
-                            self.workflow_execution.execution_id.to_string(),
-                            WorkflowStatus::Failed,
-                            self.workflow_execution
-                                .completed_at
-                                .unwrap_or_else(Utc::now),
-                        );
-                    }
+                    self.notify_completion(WorkflowStatus::Failed);
                     return Err(err);
                 }
             };
@@ -508,41 +547,11 @@ impl WorkflowRuntime {
                 self.workflow_execution.status = WorkflowExecutionStatus::Failed;
                 self.workflow_execution.completed_at = Some(Utc::now());
                 self.persist_checkpoint_force().await?;
-                if let Some(notifier) = &self.server_notifier {
-                    notifier.notify_workflow_completed(
-                        self.workflow_execution.execution_id.to_string(),
-                        WorkflowStatus::Failed,
-                        self.workflow_execution
-                            .completed_at
-                            .unwrap_or_else(Utc::now),
-                    );
-                }
+                self.notify_completion(WorkflowStatus::Failed);
                 return Err(err);
             }
 
-            // Notify server of task completions.
-            if let Some(notifier) = &self.server_notifier {
-                let instance_id = self.workflow_execution.execution_id.to_string();
-                for outcome in &frontier {
-                    let node_status = if outcome.failed {
-                        NodeStatus::Failed
-                    } else {
-                        NodeStatus::Succeeded
-                    };
-                    let operator_type = self
-                        .runtime_graph
-                        .get_task(&outcome.task_id)
-                        .map(|t| t.operator.clone());
-                    let node = NodeState {
-                        node_id: outcome.task_id.clone(),
-                        status: node_status,
-                        started_at: Some(outcome.started_at),
-                        ended_at: Some(outcome.completed_at),
-                        operator_type,
-                    };
-                    notifier.notify_node_updated(instance_id.clone(), node);
-                }
-            }
+            self.notify_task_completions(&frontier);
 
             // Handle terminal tasks - check if we should stop
             if self.handle_terminal_tasks(&frontier).await? {
@@ -563,15 +572,7 @@ impl WorkflowRuntime {
         self.workflow_execution.completed_at = Some(Utc::now());
         if let Some(err) = maybe_err {
             self.persist_checkpoint_force().await?;
-            if let Some(notifier) = &self.server_notifier {
-                notifier.notify_workflow_completed(
-                    self.workflow_execution.execution_id.to_string(),
-                    WorkflowStatus::Failed,
-                    self.workflow_execution
-                        .completed_at
-                        .unwrap_or_else(Utc::now),
-                );
-            }
+            self.notify_completion(WorkflowStatus::Failed);
             return Err(err);
         }
         if self.graph_settings.checkpoint.checkpoint_enabled {
@@ -595,19 +596,11 @@ impl WorkflowRuntime {
         }
 
         // Notify server of workflow completion.
-        if let Some(notifier) = &self.server_notifier {
-            let status = match self.workflow_execution.status {
-                WorkflowExecutionStatus::Completed => WorkflowStatus::Succeeded,
-                _ => WorkflowStatus::Failed,
-            };
-            notifier.notify_workflow_completed(
-                self.workflow_execution.execution_id.to_string(),
-                status,
-                self.workflow_execution
-                    .completed_at
-                    .unwrap_or_else(Utc::now),
-            );
-        }
+        let final_status = match self.workflow_execution.status {
+            WorkflowExecutionStatus::Completed => WorkflowStatus::Succeeded,
+            _ => WorkflowStatus::Failed,
+        };
+        self.notify_completion(final_status);
 
         Ok(ExecutionSummary {
             execution_id: self.workflow_execution.execution_id,
