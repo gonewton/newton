@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use newton::core::error::AppError;
 use newton::core::types::ErrorCategory;
-use newton::core::workflow_graph::{
+use newton::workflow::{
     executor::{self, ExecutionOverrides},
     operator::OperatorRegistry,
     operators,

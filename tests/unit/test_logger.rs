@@ -1,4 +1,4 @@
-use newton::core::logger::Tracer;
+use newton::logging::tracer::Tracer;
 
 #[test]
 fn test_tracer_creation() {

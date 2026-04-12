@@ -40,7 +40,7 @@ pub fn load_monitor_endpoints(
     if accumulator.ready() {
         return accumulator
             .into_endpoints(workspace_root.to_path_buf())
-            .map_err(|e| anyhow!("Failed to parse monitor endpoint URLs: {}", e));
+            .map_err(|e| anyhow!("Failed to parse monitor endpoint URLs: {e}"));
     }
 
     // Otherwise, check for config directory
@@ -86,10 +86,10 @@ fn load_monitor_conf(configs_dir: &Path, accumulator: &mut ConfigPair) -> Result
 fn scan_config_files(configs_dir: &Path, accumulator: &mut ConfigPair) -> Result<()> {
     let monitor_conf = configs_dir.join("monitor.conf");
     let mut entries: Vec<_> = fs::read_dir(configs_dir)?
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|entry| entry.path().is_file())
         .collect();
-    entries.sort_by_key(|entry| entry.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
 
     for entry in entries {
         if entry.path() == monitor_conf {
@@ -134,7 +134,7 @@ fn finalize_endpoints(
 
     accumulator
         .into_endpoints(workspace_root.to_path_buf())
-        .map_err(|e| anyhow!("Failed to parse monitor endpoint URLs: {}", e))
+        .map_err(|e| anyhow!("Failed to parse monitor endpoint URLs: {e}"))
 }
 
 struct ConfigPair {
@@ -195,13 +195,13 @@ impl ConfigPair {
                 .as_ref()
                 .ok_or_else(|| anyhow!("missing HTTP endpoint"))?,
         )
-        .map_err(|e| anyhow!("Invalid HTTP URL: {}", e))?;
+        .map_err(|e| anyhow!("Invalid HTTP URL: {e}"))?;
         let ws_url = Url::parse(
             self.ws_url
                 .as_ref()
                 .ok_or_else(|| anyhow!("missing WebSocket endpoint"))?,
         )
-        .map_err(|e| anyhow!("Invalid WebSocket URL: {}", e))?;
+        .map_err(|e| anyhow!("Invalid WebSocket URL: {e}"))?;
 
         let workflow_service_url = self
             .workflow_service_url

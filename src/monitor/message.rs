@@ -1,4 +1,5 @@
 use chrono::{DateTime, TimeZone, Utc};
+use newton_types::{HilEvent, HilEventType};
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -8,7 +9,9 @@ use uuid::Uuid;
 pub struct MonitorMessage {
     /// Unique identifier of the message.
     pub id: Uuid,
-    /// Full channel name (project/branch).
+    /// Workflow instance ID — needed to post HIL responses.
+    pub instance_id: String,
+    /// Full channel name (workflow file path / project/branch).
     pub channel: String,
     /// Parsed kind of message content.
     pub kind: MessageKind,
@@ -41,7 +44,38 @@ impl MonitorMessage {
 
     /// Pretty string describing the timeout threshold (if any).
     pub fn timeout_description(&self) -> Option<String> {
-        self.timeout_seconds.map(|seconds| format!("{}s", seconds))
+        self.timeout_seconds.map(|seconds| format!("{seconds}s"))
+    }
+}
+
+impl From<HilEvent> for MonitorMessage {
+    fn from(event: HilEvent) -> Self {
+        let kind = match event.event_type {
+            HilEventType::Question => MessageKind::Question,
+            HilEventType::Authorization => MessageKind::Authorization,
+        };
+        let summary_params = SummaryParams {
+            kind: &kind,
+            text: Some(event.question.as_str()),
+            detail: None,
+            choices: &event.choices,
+            response_type: None,
+        };
+        let summary = build_summary(&summary_params);
+        MonitorMessage {
+            id: event.event_id,
+            instance_id: event.instance_id,
+            channel: event.channel,
+            kind,
+            summary,
+            text: Some(event.question),
+            detail: None,
+            timestamp: event.timestamp,
+            correlation_id: event.correlation_id,
+            timeout_seconds: event.timeout_seconds,
+            choices: event.choices,
+            response_type: None,
+        }
     }
 }
 
@@ -61,6 +95,8 @@ fn parse_message(value: Value) -> Result<MonitorMessage, anyhow::Error> {
     let id =
         string_field(&value, &["id", "message_id"]).ok_or_else(|| anyhow::anyhow!("missing id"))?;
     let id = Uuid::parse_str(&id).context("invalid message id")?;
+
+    let instance_id = string_field(&value, &["instance_id"]).unwrap_or_default();
 
     let channel = string_field(&value, &["channel", "channel_id"])
         .ok_or_else(|| anyhow::anyhow!("missing channel"))?;
@@ -97,6 +133,7 @@ fn parse_message(value: Value) -> Result<MonitorMessage, anyhow::Error> {
 
     Ok(MonitorMessage {
         id,
+        instance_id,
         channel,
         kind,
         summary,
@@ -123,22 +160,22 @@ fn build_summary(params: &SummaryParams) -> String {
         MessageKind::Question => {
             let question = params.text.unwrap_or("Question");
             if params.choices.is_empty() {
-                format!("Question: {}", question)
+                format!("Question: {question}")
             } else {
                 let choice_list = params.choices.join(", ");
-                format!("Question: {} [{}]", question, choice_list)
+                format!("Question: {question} [{choice_list}]")
             }
         }
         MessageKind::Authorization => {
             let action = params.detail.unwrap_or("Authorization required");
-            format!("Authorization: {}", action)
+            format!("Authorization: {action}")
         }
         MessageKind::Notification => {
             format!("Notification: {}", params.text.unwrap_or("Notification"))
         }
         MessageKind::Response => {
             let target = params.response_type.unwrap_or("response");
-            format!("Response: {}", target)
+            format!("Response: {target}")
         }
         MessageKind::Navigate => {
             format!("Navigate: {}", params.text.unwrap_or("Navigate"))
@@ -202,7 +239,7 @@ fn timestamp_field(value: &Value) -> Option<DateTime<Utc>> {
 fn numeric_field(value: &Value, keys: &[&str]) -> Option<u64> {
     keys.iter()
         .find_map(|key| value.get(*key))
-        .and_then(|v| v.as_u64())
+        .and_then(serde_json::Value::as_u64)
 }
 
 fn array_field_strings(value: &Value, keys: &[&str]) -> Vec<String> {

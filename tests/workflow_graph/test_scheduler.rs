@@ -1,6 +1,4 @@
-use newton::core::workflow_graph::{
-    executor, operator::OperatorRegistry, operators, schema, state,
-};
+use newton::workflow::{executor, operator::OperatorRegistry, operators, schema, state};
 use std::io::Write;
 use tempfile::NamedTempFile;
 

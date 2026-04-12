@@ -76,7 +76,7 @@ impl Config {
                 "--message" => {
                     message = args.next();
                 }
-                other => bail!("unknown argument: {}", other),
+                other => bail!("unknown argument: {other}"),
             }
         }
 

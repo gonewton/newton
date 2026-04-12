@@ -546,64 +546,37 @@ async fn test_workflow_stream_invalid_uuid() {
 }
 
 #[tokio::test]
-async fn test_legacy_list_channels() {
+async fn test_list_hil_instances() {
     let state = create_test_state();
 
-    let instance_id = Uuid::new_v4().to_string();
-    let instance = WorkflowInstance {
-        instance_id: instance_id.clone(),
-        workflow_id: "test-workflow".to_string(),
-        status: WorkflowStatus::Running,
-        nodes: vec![],
-        started_at: chrono::Utc::now(),
-        ended_at: None,
-        definition: None,
-    };
+    let instance_id_a = Uuid::new_v4().to_string();
+    let instance_id_b = Uuid::new_v4().to_string();
 
-    state.instances.insert(instance_id.clone(), instance);
-
-    let app = newton::api::create_router(state, None);
-
-    let request = Request::builder()
-        .uri("/channels")
-        .body(Body::empty())
-        .unwrap();
-
-    let response = app.oneshot(request).await.unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-
-    assert!(json["channels"].is_array());
-    assert_eq!(json["channels"].as_array().unwrap().len(), 1);
-    assert_eq!(json["channels"][0], "test-workflow");
-}
-
-#[tokio::test]
-async fn test_legacy_api_list_channels() {
-    let state = create_test_state();
-
-    let instance_id = Uuid::new_v4().to_string();
-    state.instances.insert(
-        instance_id.clone(),
-        WorkflowInstance {
-            instance_id: instance_id.clone(),
-            workflow_id: "workflow-a".to_string(),
-            status: WorkflowStatus::Running,
-            nodes: vec![],
-            started_at: chrono::Utc::now(),
-            ended_at: None,
-            definition: None,
-        },
-    );
+    for (iid, eid) in [
+        (&instance_id_a, Uuid::new_v4()),
+        (&instance_id_b, Uuid::new_v4()),
+    ] {
+        state.hil_events.insert(
+            eid,
+            HilEvent {
+                event_id: eid,
+                instance_id: iid.clone(),
+                node_id: None,
+                channel: format!("project/{iid}"),
+                event_type: HilEventType::Question,
+                question: "Continue?".to_string(),
+                choices: vec![],
+                timeout_seconds: None,
+                correlation_id: None,
+                status: HilStatus::Pending,
+                timestamp: chrono::Utc::now(),
+            },
+        );
+    }
 
     let app = newton::api::create_router(state, None);
     let request = Request::builder()
-        .uri("/api/channels")
+        .uri("/api/hil/instances")
         .body(Body::empty())
         .unwrap();
 
@@ -613,100 +586,11 @@ async fn test_legacy_api_list_channels() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let instances: Vec<String> = serde_json::from_slice(&body).unwrap();
 
-    assert!(json["channels"].is_array());
-    assert_eq!(json["channels"][0]["name"], "workflow-a");
-}
-
-#[tokio::test]
-async fn test_legacy_api_list_channel_messages() {
-    let state = create_test_state();
-
-    let instance_id = Uuid::new_v4().to_string();
-    let event_id = Uuid::new_v4();
-    state.hil_events.insert(
-        event_id,
-        HilEvent {
-            event_id,
-            instance_id,
-            node_id: Some("task-1".to_string()),
-            channel: "workflow-a".to_string(),
-            event_type: HilEventType::Question,
-            question: "Proceed?".to_string(),
-            choices: vec!["yes".to_string(), "no".to_string()],
-            timeout_seconds: Some(30),
-            correlation_id: None,
-            status: HilStatus::Pending,
-            timestamp: chrono::Utc::now(),
-        },
-    );
-
-    let app = newton::api::create_router(state, None);
-    let request = Request::builder()
-        .uri("/api/channels/workflow-a/messages?limit=10")
-        .body(Body::empty())
-        .unwrap();
-
-    let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-
-    assert!(json.is_array());
-    assert_eq!(json.as_array().unwrap().len(), 1);
-    assert_eq!(json[0]["id"], event_id.to_string());
-    assert_eq!(json[0]["content"]["type"], "question");
-}
-
-#[tokio::test]
-async fn test_legacy_api_submit_message_response() {
-    let state = create_test_state();
-
-    let instance_id = Uuid::new_v4().to_string();
-    let event_id = Uuid::new_v4();
-    state.hil_events.insert(
-        event_id,
-        HilEvent {
-            event_id,
-            instance_id,
-            node_id: Some("task-1".to_string()),
-            channel: "workflow-a".to_string(),
-            event_type: HilEventType::Question,
-            question: "Proceed?".to_string(),
-            choices: vec!["yes".to_string(), "no".to_string()],
-            timeout_seconds: Some(30),
-            correlation_id: None,
-            status: HilStatus::Pending,
-            timestamp: chrono::Utc::now(),
-        },
-    );
-
-    let app = newton::api::create_router(state, None);
-    let action = HilAction {
-        answer: Some("yes".to_string()),
-        response_type: "text".to_string(),
-    };
-
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri(format!("/api/v1/messages/{}/response", event_id))
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(serde_json::to_vec(&action).unwrap()))
-        .unwrap();
-
-    let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["ok"], true);
-    assert_eq!(json["event_id"], event_id.to_string());
+    assert_eq!(instances.len(), 2);
+    assert!(instances.contains(&instance_id_a));
+    assert!(instances.contains(&instance_id_b));
 }
 
 #[tokio::test]

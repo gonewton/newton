@@ -1,29 +1,42 @@
 use crate::api::state::AppState;
 use axum::{
     extract::Path,
+    extract::State,
     http::StatusCode,
     response::{IntoResponse, Json, Response},
-    routing::get,
+    routing::{get, post},
     Router,
 };
-use newton_types::{ApiError, HilAction, HilEvent};
+use newton_types::{ApiError, BroadcastEvent, HilAction, HilEvent, HilStatus};
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// Routes for the human-in-the-loop (HIL) API resource.
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
+        .route("/api/hil/instances", get(list_hil_instances))
         .route("/api/hil/workflows/{id}", get(list_hil_events))
         .route(
             "/api/hil/workflows/{id}/{event_id}/action",
-            axum::routing::post(submit_hil_action),
+            post(submit_hil_action),
         )
         .with_state(state)
 }
 
-async fn list_hil_events(
-    Path(id): Path<String>,
-    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
-) -> Response {
+/// List distinct workflow instance IDs that currently have HIL events.
+async fn list_hil_instances(State(state): State<Arc<AppState>>) -> Json<Vec<String>> {
+    let mut instance_ids: Vec<String> = state
+        .hil_events
+        .iter()
+        .map(|entry| entry.value().instance_id.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    instance_ids.sort();
+    Json(instance_ids)
+}
+
+async fn list_hil_events(Path(id): Path<String>, State(state): State<Arc<AppState>>) -> Response {
     let events: Vec<HilEvent> = state
         .hil_events
         .iter()
@@ -35,7 +48,7 @@ async fn list_hil_events(
 
 async fn submit_hil_action(
     Path((instance_id, event_id)): Path<(String, Uuid)>,
-    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Json(action): Json<HilAction>,
 ) -> Response {
     match state.hil_events.get_mut(&event_id) {
@@ -66,36 +79,13 @@ async fn submit_hil_action(
                     .into_response();
             }
 
-            match action.response_type.as_str() {
-                "text" | "authorization_approved" | "authorization_denied" => {}
-                _ => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(ApiError {
-                            code: "API-HIL-002".to_string(),
-                            category: "ValidationError".to_string(),
-                            message: "Invalid response type for HIL event kind".to_string(),
-                            details: None,
-                        }),
-                    )
-                        .into_response()
-                }
+            if let Err((status, error)) = apply_hil_action(&mut hil_event, &action) {
+                return (status, Json(error)).into_response();
             }
-
-            if action.response_type == "text" && action.answer.is_none() {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(ApiError {
-                        code: "API-HIL-003".to_string(),
-                        category: "ValidationError".to_string(),
-                        message: "Missing answer field for text response type".to_string(),
-                        details: None,
-                    }),
-                )
-                    .into_response();
-            }
-
-            hil_event.status = newton_types::HilStatus::Resolved;
+            let _ = state.events_tx.send(BroadcastEvent::HilEvent {
+                instance_id: hil_event.instance_id.clone(),
+                event_id,
+            });
             (StatusCode::OK, Json(hil_event.clone())).into_response()
         }
         None => (
@@ -109,4 +99,43 @@ async fn submit_hil_action(
         )
             .into_response(),
     }
+}
+
+pub(crate) fn apply_hil_action(
+    hil_event: &mut HilEvent,
+    action: &HilAction,
+) -> Result<(), (StatusCode, ApiError)> {
+    match action.response_type.as_str() {
+        "text" | "authorization_approved" | "authorization_denied" | "timeout" | "cancelled" => {}
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                ApiError {
+                    code: "API-HIL-002".to_string(),
+                    category: "ValidationError".to_string(),
+                    message: "Invalid response type for HIL event kind".to_string(),
+                    details: None,
+                },
+            ))
+        }
+    }
+
+    if action.response_type == "text" && action.answer.is_none() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            ApiError {
+                code: "API-HIL-003".to_string(),
+                category: "ValidationError".to_string(),
+                message: "Missing answer field for text response type".to_string(),
+                details: None,
+            },
+        ));
+    }
+
+    hil_event.status = match action.response_type.as_str() {
+        "timeout" => HilStatus::TimedOut,
+        "cancelled" => HilStatus::Cancelled,
+        _ => HilStatus::Resolved,
+    };
+    Ok(())
 }

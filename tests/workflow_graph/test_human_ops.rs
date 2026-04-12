@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use newton::core::error::AppError;
 use newton::core::types::ErrorCategory;
-use newton::core::workflow_graph::{
+use newton::workflow::{
     executor::GraphHandle,
     human::{ApprovalDefault, ApprovalResult, DecisionResult, Interviewer},
     operator::{ExecutionContext, Operator, StateView},

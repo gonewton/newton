@@ -3,19 +3,15 @@ use chrono::Utc;
 use insta::assert_yaml_snapshot;
 use newton::core::error::AppError;
 use newton::core::types::ErrorCategory;
-use newton::core::workflow_graph::executor::{
-    resume_workflow, ExecutionOverrides, ExecutionSummary,
-};
-use newton::core::workflow_graph::human::{
-    ApprovalDefault, ApprovalResult, DecisionResult, Interviewer,
-};
-use newton::core::workflow_graph::operator::{OperatorRegistry, OperatorRegistryBuilder};
-use newton::core::workflow_graph::operators::command::{
+use newton::workflow::executor::{resume_workflow, ExecutionOverrides, ExecutionSummary};
+use newton::workflow::human::{ApprovalDefault, ApprovalResult, DecisionResult, Interviewer};
+use newton::workflow::operator::{OperatorRegistry, OperatorRegistryBuilder};
+use newton::workflow::operators::command::{
     CommandExecutionOutput, CommandExecutionRequest, CommandRunner,
 };
-use newton::core::workflow_graph::operators::{self, BuiltinOperatorDeps};
-use newton::core::workflow_graph::schema::{self, TriggerType, WorkflowTrigger};
-use newton::core::workflow_graph::state::GraphSettings;
+use newton::workflow::operators::{self, BuiltinOperatorDeps};
+use newton::workflow::schema::{self, TriggerType, WorkflowTrigger};
+use newton::workflow::state::GraphSettings;
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -215,9 +211,8 @@ impl WorkflowTestHarness {
             });
         }
 
-        document = newton::core::workflow_graph::transform::apply_default_pipeline(document)?;
-        document
-            .validate(&newton::core::workflow_graph::expression::ExpressionEngine::default())?;
+        document = newton::workflow::transform::apply_default_pipeline(document)?;
+        document.validate(&newton::workflow::expression::ExpressionEngine::default())?;
 
         let deps = BuiltinOperatorDeps {
             command_runner: Some(Arc::new(self.cmd_runner.clone())),
@@ -235,7 +230,7 @@ impl WorkflowTestHarness {
         );
         let registry = builder.build();
 
-        newton::core::workflow_graph::executor::execute_workflow(
+        newton::workflow::executor::execute_workflow(
             document,
             fixture_path.clone(),
             registry,
@@ -605,7 +600,7 @@ async fn test_scenario_14_error_fallback() {
     );
     assert_eq!(
         summary.completed_tasks["fail_cmd"].status,
-        newton::core::workflow_graph::executor::TaskStatus::Failed
+        newton::workflow::executor::TaskStatus::Failed
     );
 }
 
@@ -645,7 +640,7 @@ async fn test_scenario_15_retry_backoff() {
     // Task should succeed after retries
     assert_eq!(
         summary.completed_tasks["retry_task"].status,
-        newton::core::workflow_graph::executor::TaskStatus::Success
+        newton::workflow::executor::TaskStatus::Success
     );
     // run_seq is 1 because it was only queued once, even if it retried internally
     assert_eq!(summary.completed_tasks["retry_task"].run_seq, 1);
@@ -726,14 +721,12 @@ async fn test_scenario_17_checkpoint_resume() {
 
     // MANUAL FIX: Load checkpoint, remove step2 from completed, add to ready_queue
     {
-        let mut checkpoint = newton::core::workflow_graph::checkpoint::load_checkpoint(
-            harness.temp_dir.path(),
-            &execution_id,
-        )
-        .unwrap();
+        let mut checkpoint =
+            newton::workflow::checkpoint::load_checkpoint(harness.temp_dir.path(), &execution_id)
+                .unwrap();
         checkpoint.completed.remove("step2");
         checkpoint.ready_queue.push("step2".to_string());
-        newton::core::workflow_graph::checkpoint::save_checkpoint(
+        newton::workflow::checkpoint::save_checkpoint(
             harness.temp_dir.path(),
             &execution_id,
             &checkpoint,
@@ -1035,7 +1028,7 @@ async fn test_scenario_28_artifact_persistence() {
         .expect("gen_data must have run");
     assert_eq!(
         record.status,
-        newton::core::workflow_graph::executor::TaskStatus::Success
+        newton::workflow::executor::TaskStatus::Success
     );
 
     // Output must have been materialized back from the artifact file
@@ -1071,7 +1064,7 @@ async fn test_scenario_29_history_audit() {
     for (task_id, record) in &summary.completed_tasks {
         assert_eq!(
             record.status,
-            newton::core::workflow_graph::executor::TaskStatus::Success,
+            newton::workflow::executor::TaskStatus::Success,
             "task {task_id} must have succeeded",
         );
         // duration_ms is u64 — the field is always present (structural check)
@@ -1099,7 +1092,7 @@ async fn test_scenario_30_assert_completed_pass() {
     assert!(summary.completed_tasks.contains_key("checker"));
     assert_eq!(
         summary.completed_tasks["checker"].status,
-        newton::core::workflow_graph::executor::TaskStatus::Success
+        newton::workflow::executor::TaskStatus::Success
     );
 }
 

@@ -10,6 +10,7 @@ triggers:
   schema_version: "1.0"
   payload:
     base_ref: ""
+    # allowlist: JSON string (newline-separated paths) or JSON array of repo-relative path strings.
     allowlist: ""
     prompt: ""
     commit_docs: false

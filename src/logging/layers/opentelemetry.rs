@@ -39,9 +39,8 @@ where
         .build()
         .context("failed to build OTLP exporter")?;
 
-    let service_name_owned = service_name
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "newton".to_string());
+    let service_name_owned =
+        service_name.map_or_else(|| "newton".to_string(), std::string::ToString::to_string);
     let resource = Resource::builder()
         .with_service_name(service_name_owned)
         .build();

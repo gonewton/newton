@@ -2,6 +2,9 @@
 pub mod config;
 pub mod context;
 pub mod layers;
+pub mod tracer;
+
+pub use tracer::Tracer;
 
 pub use context::{detect_context, ExecutionContext};
 
@@ -184,15 +187,15 @@ fn workspace_root_for_command(command: &Command) -> Result<Option<PathBuf>> {
         }
         Command::Validate(args) => args
             .resolved_workflow_path()
-            .and_then(|workflow| workflow.parent().map(|p| p.to_path_buf()))
+            .and_then(|workflow| workflow.parent().map(std::path::Path::to_path_buf))
             .or_else(|| env::current_dir().ok()),
         Command::Dot(args) => args
             .resolved_workflow_path()
-            .and_then(|workflow| workflow.parent().map(|p| p.to_path_buf()))
+            .and_then(|workflow| workflow.parent().map(std::path::Path::to_path_buf))
             .or_else(|| env::current_dir().ok()),
         Command::Lint(args) => args
             .resolved_workflow_path()
-            .and_then(|workflow| workflow.parent().map(|p| p.to_path_buf()))
+            .and_then(|workflow| workflow.parent().map(std::path::Path::to_path_buf))
             .or_else(|| env::current_dir().ok()),
         Command::Explain(args) => args.workspace.clone(),
         Command::Resume(args) => args.workspace.clone(),
@@ -327,8 +330,7 @@ fn determine_opentelemetry(config: Option<&LoggingConfigFile>) -> Result<OtelDec
                 enabled: false,
                 service_name,
                 warning: Some(format!(
-                    "invalid OTEL_EXPORTER_OTLP_ENDPOINT ({}); OpenTelemetry disabled",
-                    err
+                    "invalid OTEL_EXPORTER_OTLP_ENDPOINT ({err}); OpenTelemetry disabled"
                 )),
             }),
         }
@@ -343,7 +345,7 @@ fn determine_opentelemetry(config: Option<&LoggingConfigFile>) -> Result<OtelDec
             });
         }
         let endpoint = Url::parse(trimmed)
-            .map_err(|err| anyhow!("invalid logging.opentelemetry.endpoint: {}", err))?;
+            .map_err(|err| anyhow!("invalid logging.opentelemetry.endpoint: {err}"))?;
         Ok(OtelDecision {
             endpoint: Some(endpoint),
             enabled: enabled_flag,

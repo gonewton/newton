@@ -11,7 +11,7 @@ const DEFAULT_TEMPLATE_SOURCE: &str = "gonewton/newton-templates";
 const DEFAULT_CODING_MODEL: &str = "zai-coding-plan/glm-4.7";
 
 /// Handles `newton init` by creating a `.newton/` workspace and installing the Newton template via aikit-sdk.
-pub async fn run(args: InitArgs) -> Result<()> {
+pub fn run(args: InitArgs) -> Result<()> {
     // Resolve target path (default: current directory)
     let path = args
         .path
@@ -24,7 +24,7 @@ pub async fn run(args: InitArgs) -> Result<()> {
             fs::create_dir_all(&path)?;
             fs::canonicalize(&path)
         })
-        .map_err(|e| anyhow!("Invalid path: {}", e))?;
+        .map_err(|e| anyhow!("Invalid path: {e}"))?;
 
     if !path.is_dir() {
         return Err(anyhow!("Path {} is not a directory", path.display()));
@@ -81,13 +81,8 @@ fn create_directory_layout(newton_dir: &Path) -> Result<()> {
 
 /// Installs the Newton template using aikit-sdk
 fn install_template(project_root: &Path, template_source: &str) -> Result<()> {
-    let source = TemplateSource::parse(template_source).map_err(|e| {
-        anyhow!(
-            "Failed to parse template source '{}': {}",
-            template_source,
-            e
-        )
-    })?;
+    let source = TemplateSource::parse(template_source)
+        .map_err(|e| anyhow!("Failed to parse template source '{template_source}': {e}"))?;
 
     let options = InstallTemplateFromSourceOptions {
         source,
@@ -95,13 +90,8 @@ fn install_template(project_root: &Path, template_source: &str) -> Result<()> {
         packages_dir: None, // Use temp directory, don't cache
     };
 
-    install_template_from_source(options).map_err(|e| {
-        anyhow!(
-            "Failed to install template from source '{}': {}",
-            template_source,
-            e
-        )
-    })?;
+    install_template_from_source(options)
+        .map_err(|e| anyhow!("Failed to install template from source '{template_source}': {e}"))?;
 
     Ok(())
 }
@@ -122,7 +112,7 @@ fn write_default_config(newton_dir: &Path, project_root: &Path) -> Result<()> {
 
     // Write key=value lines
     writeln!(config_file, "project_root={}", project_root.display())?;
-    writeln!(config_file, "coding_model={}", coding_model)?;
+    writeln!(config_file, "coding_model={coding_model}")?;
     writeln!(config_file)?;
     writeln!(
         config_file,
