@@ -26,6 +26,13 @@ fn default_trigger_payload_value() -> Value {
 pub struct WorkflowExecution {
     pub format_version: String,
     pub execution_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_execution_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_task_id: Option<String>,
+    /// Nesting depth of this workflow execution (0 = root workflow).
+    #[serde(default)]
+    pub nesting_depth: u32,
     pub workflow_file: String,
     pub workflow_version: String,
     pub workflow_hash: String,

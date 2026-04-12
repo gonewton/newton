@@ -44,6 +44,7 @@ fn default_overrides() -> ExecutionOverrides {
         max_time_seconds: None,
         checkpoint_base_path: None,
         artifact_base_path: None,
+        max_nesting_depth: None,
         verbose: false,
         server_notifier: None,
         pre_seed_nodes: true,

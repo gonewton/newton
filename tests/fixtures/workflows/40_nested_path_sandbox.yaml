@@ -1,0 +1,21 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Scenario 40: Nested Workflow Path Sandbox"
+workflow:
+  settings:
+    entry_task: "call_child"
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: true
+    max_task_iterations: 10
+    max_workflow_iterations: 100
+    completion:
+      success_requires_no_task_failures: false
+  tasks:
+    - id: "call_child"
+      operator: "WorkflowOperator"
+      params:
+        # This path resolves outside the workspace root in the integration test harness.
+        workflow_path: "../../outside-child.yaml"
+      terminal: success

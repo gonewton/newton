@@ -1155,7 +1155,7 @@ fn build_command(
 mod tests {
     use super::*;
     use crate::workflow::executor::GraphHandle;
-    use crate::workflow::operator::StateView;
+    use crate::workflow::operator::{OperatorRegistry, StateView};
     use crate::workflow::schema::WorkflowSettings;
     use serde_json::json;
     use std::collections::HashMap;
@@ -1169,6 +1169,19 @@ mod tests {
             iteration: 1,
             state_view: StateView::new(json!({}), json!({}), json!({})),
             graph: GraphHandle::new(HashMap::new()), // Empty graph for test
+            workflow_file: workspace.path().join("workflow.yaml"),
+            nesting_depth: 0,
+            execution_overrides: crate::workflow::executor::ExecutionOverrides {
+                parallel_limit: None,
+                max_time_seconds: None,
+                checkpoint_base_path: None,
+                artifact_base_path: None,
+                max_nesting_depth: None,
+                verbose: false,
+                server_notifier: None,
+                pre_seed_nodes: true,
+            },
+            operator_registry: OperatorRegistry::new(),
         }
     }
 

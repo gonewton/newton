@@ -4,9 +4,9 @@ use chrono::Utc;
 use newton::core::error::AppError;
 use newton::core::types::ErrorCategory;
 use newton::workflow::{
-    executor::GraphHandle,
+    executor::{ExecutionOverrides, GraphHandle},
     human::{ApprovalDefault, ApprovalResult, DecisionResult, Interviewer},
-    operator::{ExecutionContext, Operator, StateView},
+    operator::{ExecutionContext, Operator, OperatorRegistry, StateView},
     operators::{human_approval::HumanApprovalOperator, human_decision::HumanDecisionOperator},
     schema::HumanSettings,
 };
@@ -87,6 +87,19 @@ fn build_execution_context(workspace: &TempDir, execution_id: String) -> Executi
         iteration: 1,
         state_view: StateView::new(empty.clone(), empty.clone(), empty),
         graph: GraphHandle::new(HashMap::new()),
+        workflow_file: workspace.path().join("workflow.yaml"),
+        nesting_depth: 0,
+        execution_overrides: ExecutionOverrides {
+            parallel_limit: None,
+            max_time_seconds: None,
+            checkpoint_base_path: None,
+            artifact_base_path: None,
+            max_nesting_depth: None,
+            verbose: false,
+            server_notifier: None,
+            pre_seed_nodes: true,
+        },
+        operator_registry: OperatorRegistry::new(),
     }
 }
 
