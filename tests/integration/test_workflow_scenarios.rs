@@ -195,11 +195,76 @@ impl WorkflowTestHarness {
         fixture_name: &str,
         trigger_payload: Option<Value>,
     ) -> Result<ExecutionSummary, AppError> {
-        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        self.run_fixture_with_overrides(
+            fixture_name,
+            trigger_payload,
+            ExecutionOverrides {
+                parallel_limit: None,
+                max_time_seconds: None,
+                checkpoint_base_path: Some(self.temp_dir.path().join(".newton/state/workflows")),
+                artifact_base_path: Some(self.temp_dir.path().join(".newton/artifacts")),
+                max_nesting_depth: None,
+                verbose: false,
+                server_notifier: None,
+                pre_seed_nodes: true,
+            },
+        )
+        .await
+    }
+
+    #[allow(clippy::missing_errors_doc)]
+    pub async fn run_fixture_with_overrides(
+        &self,
+        fixture_name: &str,
+        trigger_payload: Option<Value>,
+        overrides: ExecutionOverrides,
+    ) -> Result<ExecutionSummary, AppError> {
+        let fixture_src_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests")
             .join("fixtures")
-            .join("workflows")
-            .join(fixture_name);
+            .join("workflows");
+
+        let workspace_workflows_dir = self.temp_dir.path().join("workflows");
+        std::fs::create_dir_all(&workspace_workflows_dir).map_err(|err| {
+            AppError::new(
+                ErrorCategory::IoError,
+                format!(
+                    "failed to create workspace workflows dir {}: {err}",
+                    workspace_workflows_dir.display()
+                ),
+            )
+        })?;
+
+        for entry in std::fs::read_dir(&fixture_src_dir).map_err(|err| {
+            AppError::new(
+                ErrorCategory::IoError,
+                format!(
+                    "failed to read fixture directory {}: {err}",
+                    fixture_src_dir.display()
+                ),
+            )
+        })? {
+            let entry = entry.map_err(|err| {
+                AppError::new(
+                    ErrorCategory::IoError,
+                    format!("failed to read fixture directory entry: {err}"),
+                )
+            })?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("yaml") {
+                continue;
+            }
+            let dest = workspace_workflows_dir
+                .join(path.file_name().expect("yaml fixture must have filename"));
+            std::fs::copy(&path, &dest).map_err(|err| {
+                AppError::new(
+                    ErrorCategory::IoError,
+                    format!("failed to copy fixture {}: {err}", path.display()),
+                )
+            })?;
+        }
+
+        let fixture_path = workspace_workflows_dir.join(fixture_name);
 
         let mut document = schema::parse_workflow(&fixture_path)?;
 
@@ -218,6 +283,7 @@ impl WorkflowTestHarness {
             command_runner: Some(Arc::new(self.cmd_runner.clone())),
             interviewer: Some(Arc::new(self.interviewer.clone())),
             gh_runner: None,
+            child_workflow_runner: None,
         };
 
         let settings = document.workflow.settings.clone();
@@ -235,15 +301,7 @@ impl WorkflowTestHarness {
             fixture_path.clone(),
             registry,
             self.temp_dir.path().to_path_buf(),
-            ExecutionOverrides {
-                parallel_limit: None,
-                max_time_seconds: None,
-                checkpoint_base_path: Some(self.temp_dir.path().join(".newton/state/workflows")),
-                artifact_base_path: Some(self.temp_dir.path().join(".newton/artifacts")),
-                verbose: false,
-                server_notifier: None,
-                pre_seed_nodes: true,
-            },
+            overrides,
         )
         .await
     }
@@ -745,6 +803,7 @@ async fn test_scenario_17_checkpoint_resume() {
                 command_runner: Some(Arc::new(cmd_runner.clone())),
                 interviewer: Some(Arc::new(harness.interviewer.clone())),
                 gh_runner: None,
+                child_workflow_runner: None,
             },
         );
         builder.build()
@@ -1219,4 +1278,146 @@ async fn test_scenario_34_agent_streaming_artifact_unchanged() {
         "Artifact should contain 'STREAMED_LINE_2', got: {}",
         artifact_content
     );
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 37: Nested Workflow Basic
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_37_nested_workflow_basic() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let summary = harness
+        .run_fixture("37_nested_workflow_basic.yaml", None)
+        .await
+        .expect("workflow must succeed");
+
+    let output = &summary
+        .completed_tasks
+        .get("call_child")
+        .expect("call_child must complete")
+        .output;
+    let child_execution_id = output["child_execution_id"]
+        .as_str()
+        .expect("child_execution_id must be string");
+
+    let child_execution_path = harness
+        .temp_dir
+        .path()
+        .join(".newton/state/workflows")
+        .join(child_execution_id)
+        .join("execution.json");
+    let child_execution_bytes =
+        std::fs::read(&child_execution_path).expect("read child execution.json");
+    let child_execution: Value =
+        serde_json::from_slice(&child_execution_bytes).expect("parse child execution.json");
+    assert_eq!(
+        child_execution["parent_execution_id"],
+        json!(summary.execution_id.to_string())
+    );
+    assert_eq!(child_execution["parent_task_id"], json!("call_child"));
+    assert_eq!(child_execution["nesting_depth"], json!(1));
+
+    assert_yaml_snapshot!(summary, {
+        ".execution_id" => "[uuid]",
+        ".completed_tasks.*.duration_ms" => "[duration]",
+        ".completed_tasks.call_child.output.child_execution_id" => "[uuid]",
+        ".completed_tasks.call_child.output.child_workflow_file" => "[path]",
+        ".completed_tasks.call_child.output.child_total_iterations" => "[iterations]",
+        ".completed_tasks.call_child.output.child_completed_task_count" => "[count]",
+    });
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 38: Nested Workflow Error Propagation
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_38_nested_workflow_error_propagates() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let err = harness
+        .run_fixture("38_nested_workflow_error.yaml", None)
+        .await
+        .expect_err("workflow must fail");
+
+    assert_eq!(err.category, ErrorCategory::ValidationError);
+    assert!(
+        err.message.contains("task call_child failed"),
+        "Error should mention parent task failure: {}",
+        err.message
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 39: Nested Workflow Depth Limit
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_39_nested_depth_limit_enforced() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let summary = harness
+        .run_fixture_with_overrides(
+            "39_nested_depth_limit.yaml",
+            None,
+            ExecutionOverrides {
+                parallel_limit: None,
+                max_time_seconds: None,
+                checkpoint_base_path: Some(harness.temp_dir.path().join(".newton/state/workflows")),
+                artifact_base_path: Some(harness.temp_dir.path().join(".newton/artifacts")),
+                max_nesting_depth: Some(0),
+                verbose: false,
+                server_notifier: None,
+                pre_seed_nodes: true,
+            },
+        )
+        .await
+        .expect("workflow must complete");
+
+    let call_child = summary
+        .completed_tasks
+        .get("call_child")
+        .expect("call_child must complete");
+    assert_eq!(call_child.error_code.as_deref(), Some("WFG-NEST-002"));
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 40: Nested Workflow Path Sandbox
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_40_nested_path_sandbox_enforced() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let outside_child = harness
+        .temp_dir
+        .path()
+        .parent()
+        .expect("workspace temp dir has parent")
+        .join("outside-child.yaml");
+    std::fs::write(
+        &outside_child,
+        r#"version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: start
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      terminal: success
+      params: {}
+"#,
+    )
+    .expect("write outside child workflow");
+
+    let summary = harness
+        .run_fixture("40_nested_path_sandbox.yaml", None)
+        .await
+        .expect("workflow must complete");
+
+    let call_child = summary
+        .completed_tasks
+        .get("call_child")
+        .expect("call_child must complete");
+    assert_eq!(call_child.error_code.as_deref(), Some("WFG-NEST-001"));
 }

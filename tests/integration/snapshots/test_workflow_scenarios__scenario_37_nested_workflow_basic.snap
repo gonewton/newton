@@ -1,0 +1,19 @@
+---
+source: tests/integration/test_workflow_scenarios.rs
+assertion_line: 1320
+expression: summary
+---
+execution_id: "[uuid]"
+total_iterations: 1
+completed_tasks:
+  call_child:
+    status: success
+    output:
+      child_completed_task_count: "[count]"
+      child_execution_id: "[uuid]"
+      child_status: Completed
+      child_total_iterations: "[iterations]"
+      child_workflow_file: "[path]"
+    error_code: ~
+    duration_ms: "[duration]"
+    run_seq: 1

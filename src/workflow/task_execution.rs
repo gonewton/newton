@@ -19,7 +19,7 @@ use std::time::Duration;
 use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 
-use crate::workflow::executor::{GraphHandle, TaskOutcome};
+use crate::workflow::executor::{ExecutionOverrides, GraphHandle, TaskOutcome};
 
 /// Executes a single workflow task with retry logic, timeout handling, and context patching.
 ///
@@ -40,6 +40,9 @@ pub async fn run_task(
     run_seq: u64,
     redact_keys: Arc<Vec<String>>,
     runtime_graph: GraphHandle,
+    workflow_file: PathBuf,
+    nesting_depth: u32,
+    execution_overrides: ExecutionOverrides,
 ) -> Result<TaskOutcome, AppError> {
     let operator = resolve_operator(&task, &registry)?;
     let resolved_params =
@@ -59,6 +62,10 @@ pub async fn run_task(
             run_seq,
             &snapshot,
             &runtime_graph,
+            &workflow_file,
+            nesting_depth,
+            registry.clone(),
+            execution_overrides.clone(),
         );
 
         let started_at = Utc::now();
@@ -163,6 +170,7 @@ fn log_task_start(task: &WorkflowTask, attempt: usize, max_attempts: usize) {
 }
 
 /// Builds operator execution context.
+#[allow(clippy::too_many_arguments)]
 fn build_operator_context(
     workspace_root: &Path,
     execution_id: &str,
@@ -170,6 +178,10 @@ fn build_operator_context(
     run_seq: u64,
     snapshot: &StateView,
     runtime_graph: &GraphHandle,
+    workflow_file: &Path,
+    nesting_depth: u32,
+    operator_registry: OperatorRegistry,
+    execution_overrides: ExecutionOverrides,
 ) -> OperatorContext {
     OperatorContext {
         workspace_path: workspace_root.to_path_buf(),
@@ -178,6 +190,10 @@ fn build_operator_context(
         iteration: run_seq,
         state_view: snapshot.clone(),
         graph: runtime_graph.clone(),
+        workflow_file: workflow_file.to_path_buf(),
+        nesting_depth,
+        execution_overrides,
+        operator_registry,
     }
 }
 

@@ -5,7 +5,9 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::artifacts::ArtifactStore;
 use crate::workflow::checkpoint;
+use crate::workflow::child_run::{ChildRunInput, ChildWorkflowRunSummary, ChildWorkflowRunner};
 use crate::workflow::expression::ExpressionEngine;
+use crate::workflow::lint::{LintRegistry, LintSeverity};
 use crate::workflow::operator::{OperatorRegistry, StateView};
 use crate::workflow::schema::{
     self, BarrierParams, GoalGateFailureBehavior, TerminalKind, WorkflowDocument, WorkflowTask,
@@ -17,7 +19,9 @@ use crate::workflow::state::{
     WorkflowTaskRunRecord, WorkflowTaskRunSummary, WORKFLOW_EXECUTION_FORMAT_VERSION,
 };
 use crate::workflow::task_execution;
+use crate::workflow::transform;
 use crate::workflow::value_resolve as context;
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
 use newton_types::{NodeState, NodeStatus, WorkflowInstance, WorkflowStatus};
@@ -40,6 +44,8 @@ pub struct ExecutionOverrides {
     pub max_time_seconds: Option<u64>,
     pub checkpoint_base_path: Option<PathBuf>,
     pub artifact_base_path: Option<PathBuf>,
+    /// Maximum allowed workflow nesting depth for `WorkflowOperator` (default: 16 when None).
+    pub max_nesting_depth: Option<u32>,
     pub verbose: bool,
     /// Optional server notifier for registering with a newton serve instance.
     pub server_notifier: Option<Arc<ServerNotifier>>,
@@ -63,6 +69,15 @@ pub struct ExecutionSummary {
     pub execution_id: Uuid,
     pub total_iterations: usize,
     pub completed_tasks: BTreeMap<String, TaskRunRecord>,
+}
+
+/// Link metadata used to record a parent-child relationship for nested workflow runs.
+#[derive(Debug, Clone)]
+pub struct ParentRunLink {
+    pub parent_execution_id: Uuid,
+    pub parent_task_id: String,
+    /// Nesting depth for the workflow being built (0 = root workflow).
+    pub nesting_depth: u32,
 }
 
 pub struct ExecutionState {
@@ -218,12 +233,14 @@ impl GraphHandle {
 
 struct WorkflowRuntime {
     workspace_root: PathBuf,
+    workflow_file: PathBuf,
     checkpoint_root: PathBuf,
     registry: OperatorRegistry,
     runtime_graph: GraphHandle,
     engine: Arc<ExpressionEngine>,
     graph_settings: GraphSettings,
     config: ExecutionConfig,
+    execution_overrides: ExecutionOverrides,
     artifact_store: ArtifactStore,
     state: Arc<tokio::sync::RwLock<ExecutionState>>,
     ready_queue: VecDeque<String>,
@@ -514,6 +531,9 @@ impl WorkflowRuntime {
                     run_seq,
                     Arc::clone(&self.redact_keys),
                     self.runtime_graph.clone(),
+                    self.workflow_file.clone(),
+                    self.workflow_execution.nesting_depth,
+                    self.execution_overrides.clone(),
                 ));
             }
 
@@ -996,12 +1016,114 @@ pub fn spawn_workflow_execution(
     Ok((execution_id, handle))
 }
 
+/// In-process runner for nested child workflow executions.
+#[derive(Debug, Default)]
+pub struct InProcessChildWorkflowRunner;
+
+impl InProcessChildWorkflowRunner {
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl ChildWorkflowRunner for InProcessChildWorkflowRunner {
+    async fn run(&self, input: ChildRunInput) -> Result<ChildWorkflowRunSummary, AppError> {
+        let child_depth = input.parent_nesting_depth.saturating_add(1);
+        let max_depth = input.execution_overrides.max_nesting_depth.unwrap_or(16);
+        if child_depth > max_depth {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                format!("nesting depth exceeded: requested {child_depth}, max {max_depth}"),
+            )
+            .with_code("WFG-NEST-002"));
+        }
+
+        let raw_document = schema::parse_workflow(&input.workflow_path)?;
+        let mut document = transform::apply_default_pipeline(raw_document)?;
+
+        if let Some(merge) = input.context_merge.as_ref() {
+            document.workflow.context = shallow_merge_objects(&document.workflow.context, merge)?;
+        }
+
+        if let Some(merge) = input.triggers_merge.as_ref() {
+            let current_payload = extract_trigger_payload(&document);
+            let merged = shallow_merge_objects(&current_payload, merge)?;
+            document.triggers = Some(schema::WorkflowTrigger {
+                trigger_type: schema::TriggerType::Manual,
+                schema_version: "1".to_string(),
+                payload: merged,
+            });
+        }
+
+        let lint_results = LintRegistry::new().run(&document);
+        let error_count = lint_results
+            .iter()
+            .filter(|result| result.severity == LintSeverity::Error)
+            .count();
+        if error_count > 0 {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                format!("workflow lint detected {error_count} error(s); fix before running"),
+            ));
+        }
+        document.validate(&ExpressionEngine::default())?;
+
+        let mut child_overrides = input.execution_overrides.clone();
+        // Child executions should not notify `newton serve` by default.
+        child_overrides.server_notifier = None;
+
+        let parent_link = ParentRunLink {
+            parent_execution_id: input.parent_execution_id,
+            parent_task_id: input.parent_task_id.clone(),
+            nesting_depth: child_depth,
+        };
+        let runtime = build_workflow_runtime_with_parent(
+            document,
+            input.workflow_path.clone(),
+            input.operator_registry.clone(),
+            input.workspace_root.clone(),
+            child_overrides,
+            Some(parent_link),
+        )?;
+        let workflow_file = canonicalize_workflow_path(&input.workflow_path)?
+            .display()
+            .to_string();
+        let summary = runtime.run().await?;
+        Ok(ChildWorkflowRunSummary {
+            execution_id: summary.execution_id,
+            workflow_file,
+            total_iterations: summary.total_iterations,
+            completed_task_count: summary.completed_tasks.len(),
+        })
+    }
+}
+
 fn build_workflow_runtime(
     document: WorkflowDocument,
     workflow_path: PathBuf,
     registry: OperatorRegistry,
     workspace_root: PathBuf,
     overrides: ExecutionOverrides,
+) -> Result<WorkflowRuntime, AppError> {
+    build_workflow_runtime_with_parent(
+        document,
+        workflow_path,
+        registry,
+        workspace_root,
+        overrides,
+        None,
+    )
+}
+
+fn build_workflow_runtime_with_parent(
+    document: WorkflowDocument,
+    workflow_path: PathBuf,
+    registry: OperatorRegistry,
+    workspace_root: PathBuf,
+    overrides: ExecutionOverrides,
+    parent_link: Option<ParentRunLink>,
 ) -> Result<WorkflowRuntime, AppError> {
     let workflow_definition_json = serde_json::to_value(&document).map_err(|e| {
         AppError::new(
@@ -1021,6 +1143,7 @@ fn build_workflow_runtime(
     if let Some(artifact_base_path) = &overrides.artifact_base_path {
         graph_settings.artifact_storage.base_path = artifact_base_path.clone();
     }
+    let execution_overrides = overrides.clone();
     let checkpoint_root = overrides.checkpoint_base_path.as_ref().map_or_else(
         || {
             workspace_root
@@ -1116,6 +1239,12 @@ fn build_workflow_runtime(
     let workflow_execution = WorkflowExecution {
         format_version: WORKFLOW_EXECUTION_FORMAT_VERSION.to_string(),
         execution_id: execution_uuid,
+        parent_execution_id: parent_link.as_ref().map(|link| link.parent_execution_id),
+        parent_task_id: parent_link.as_ref().map(|link| link.parent_task_id.clone()),
+        nesting_depth: parent_link
+            .as_ref()
+            .map(|link| link.nesting_depth)
+            .unwrap_or(0),
         workflow_file: workflow_file.display().to_string(),
         workflow_version: document.version.clone(),
         workflow_hash: workflow_hash.clone(),
@@ -1136,12 +1265,14 @@ fn build_workflow_runtime(
     };
     Ok(WorkflowRuntime {
         workspace_root: workspace_root.clone(),
+        workflow_file: workflow_file.clone(),
         checkpoint_root,
         registry,
         runtime_graph,
         engine,
         graph_settings: graph_settings.clone(),
         config,
+        execution_overrides,
         artifact_store,
         state,
         ready_queue,
@@ -1299,6 +1430,7 @@ pub async fn resume_workflow(
         ArtifactStore::new(workspace_root.clone(), &graph_settings.artifact_storage);
     let runtime = WorkflowRuntime {
         workspace_root: workspace_root.clone(),
+        workflow_file: workflow_path.clone(),
         checkpoint_root: workspace_root
             .join(".newton")
             .join("state")
@@ -1308,6 +1440,16 @@ pub async fn resume_workflow(
         engine,
         graph_settings: graph_settings.clone(),
         config,
+        execution_overrides: ExecutionOverrides {
+            parallel_limit: None,
+            max_time_seconds: None,
+            checkpoint_base_path: None,
+            artifact_base_path: None,
+            max_nesting_depth: None,
+            verbose: false,
+            server_notifier: None,
+            pre_seed_nodes: false,
+        },
         artifact_store,
         state,
         ready_queue,
@@ -1332,6 +1474,20 @@ fn extract_trigger_payload(document: &WorkflowDocument) -> Value {
         || Value::Object(Map::new()),
         |trigger| trigger.payload.clone(),
     )
+}
+
+fn shallow_merge_objects(base: &Value, overlay: &Value) -> Result<Value, AppError> {
+    let overlay_obj = overlay.as_object().ok_or_else(|| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            "merge value must be an object",
+        )
+    })?;
+    let mut merged = base.as_object().cloned().unwrap_or_default();
+    for (key, value) in overlay_obj {
+        merged.insert(key.clone(), value.clone());
+    }
+    Ok(Value::Object(merged))
 }
 
 fn validate_required_triggers(required: &[String], payload: &Value) -> Result<(), AppError> {

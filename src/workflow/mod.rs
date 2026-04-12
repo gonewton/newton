@@ -2,6 +2,7 @@
 
 pub mod artifacts;
 pub mod checkpoint;
+pub mod child_run;
 pub mod dot;
 pub mod executor;
 pub mod explain;

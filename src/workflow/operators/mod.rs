@@ -9,7 +9,9 @@ pub mod human_decision;
 pub mod noop;
 pub mod read_control_file;
 pub mod set_context;
+pub mod workflow;
 
+use crate::workflow::child_run::ChildWorkflowRunner;
 use crate::workflow::human::{ConsoleInterviewer, Interviewer};
 use crate::workflow::operator::OperatorRegistryBuilder;
 use crate::workflow::operators::engine::AikitEngineManager;
@@ -23,6 +25,8 @@ pub struct BuiltinOperatorDeps {
     pub command_runner: Option<Arc<dyn command::CommandRunner>>,
     /// GhRunner for GhOperator. Defaults to real gh CLI subprocess when None.
     pub gh_runner: Option<Arc<dyn gh::GhRunner>>,
+    /// Child workflow runner for WorkflowOperator. Defaults to in-process execution when None.
+    pub child_workflow_runner: Option<Arc<dyn ChildWorkflowRunner>>,
 }
 
 /// Register built-in operators into the supplied builder.
@@ -56,6 +60,10 @@ pub fn register_builtins_with_deps(
         Some(runner) => gh::GhOperator::with_runner(runner),
         None => gh::GhOperator::new(),
     };
+    let child_runner: Arc<dyn ChildWorkflowRunner> =
+        deps.child_workflow_runner.unwrap_or_else(|| {
+            Arc::new(crate::workflow::executor::InProcessChildWorkflowRunner::new())
+        });
     builder
         .register(noop::NoOpOperator::new())
         .register(command_operator)
@@ -63,6 +71,7 @@ pub fn register_builtins_with_deps(
         .register(barrier::BarrierOperator::new())
         .register(set_context::SetContextOperator::new())
         .register(read_control_file::ReadControlFileOperator::new())
+        .register(workflow::WorkflowOperator::new(child_runner))
         .register(agent_operator)
         .register(gh_operator)
         .register(human_approval::HumanApprovalOperator::new(

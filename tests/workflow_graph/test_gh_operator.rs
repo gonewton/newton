@@ -53,6 +53,7 @@ fn build_registry_with_gh_runner(
         interviewer: None,
         command_runner: None,
         gh_runner: Some(runner),
+        child_workflow_runner: None,
     };
     operators::register_builtins_with_deps(&mut builder, workspace, Default::default(), deps);
     builder.build()
@@ -81,6 +82,7 @@ async fn execute_yaml_with_gh_runner(
             max_time_seconds: None,
             checkpoint_base_path: None,
             artifact_base_path: None,
+            max_nesting_depth: None,
             verbose: false,
             server_notifier: None,
             pre_seed_nodes: true,

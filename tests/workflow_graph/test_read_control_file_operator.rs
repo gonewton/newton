@@ -1,5 +1,5 @@
-use newton::workflow::executor::GraphHandle;
-use newton::workflow::operator::{ExecutionContext, Operator, StateView};
+use newton::workflow::executor::{ExecutionOverrides, GraphHandle};
+use newton::workflow::operator::{ExecutionContext, Operator, OperatorRegistry, StateView};
 use newton::workflow::operators::read_control_file::ReadControlFileOperator;
 use serde_json::json;
 use std::collections::HashMap;
@@ -13,6 +13,21 @@ fn execution_context(workspace: std::path::PathBuf) -> ExecutionContext {
         iteration: 1,
         state_view: StateView::new(json!({}), json!({}), json!({})),
         graph: GraphHandle::new(HashMap::new()),
+        workflow_file: std::env::current_dir()
+            .expect("cwd")
+            .join("tests/fixtures/workflows/01_minimal_success.yaml"),
+        nesting_depth: 0,
+        execution_overrides: ExecutionOverrides {
+            parallel_limit: None,
+            max_time_seconds: None,
+            checkpoint_base_path: None,
+            artifact_base_path: None,
+            max_nesting_depth: None,
+            verbose: false,
+            server_notifier: None,
+            pre_seed_nodes: true,
+        },
+        operator_registry: OperatorRegistry::new(),
     }
 }
 
@@ -27,6 +42,21 @@ fn execution_context_with_triggers(
         iteration: 1,
         state_view: StateView::new(json!({}), json!({}), triggers),
         graph: GraphHandle::new(HashMap::new()),
+        workflow_file: std::env::current_dir()
+            .expect("cwd")
+            .join("tests/fixtures/workflows/01_minimal_success.yaml"),
+        nesting_depth: 0,
+        execution_overrides: ExecutionOverrides {
+            parallel_limit: None,
+            max_time_seconds: None,
+            checkpoint_base_path: None,
+            artifact_base_path: None,
+            max_nesting_depth: None,
+            verbose: false,
+            server_notifier: None,
+            pre_seed_nodes: true,
+        },
+        operator_registry: OperatorRegistry::new(),
     }
 }
 
