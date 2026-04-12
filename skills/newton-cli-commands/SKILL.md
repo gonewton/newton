@@ -1,56 +1,58 @@
 ---
 name: newton-cli-commands
-description: Summarizes Newton CLI workflows and links to detailed run/step/status/report/error command references. Use when documenting, explaining, or updating Newton's subcommand behavior.
+description: Summarizes Newton workflow-graph CLI usage and links to reference sheets for init, run, batch, and monitor. Use when documenting or explaining Newton subcommands, flags, or workspace layout.
 ---
 
 # Newton CLI Command Playbook
 
-Use this skill whenever you need to operate Newton from the command line and want a reminder of what each subcommand expects.
+Use this skill when operating Newton from the command line. Newton runs **workflow graphs** defined in YAML (tasks, operators, checkpoints, goal gates), not a legacy evaluator or advisor loop.
 
 ## Quick Start
 
-1. Run `newton --help` to see the global description and available commands.
-2. Inspect any subcommand with `newton <command> --help` to view supported options.
-3. Bootstrap the workspace with `newton init` (defaults to the current directory) so `.newton/` is created and populated via `aikit`.
-4. Refer to the reference sheets in this skill for typical workflows, mandatory arguments, and example invocations.
-5. Adjust values (paths, IDs, formats) to match your workspace before executing commands.
+1. Run `newton --help` for the command list; use `newton <command> --help` for flags.
+2. Run `newton init [PATH]` to create `.newton/` and install the template via `aikit` (PATH defaults to the current directory).
+3. Run a workflow with `newton run <workflow.yaml> --workspace <root>` (see [references/run.md](references/run.md)).
+4. Use the reference sheets below for init, batch queue mode, and monitor.
 
-## Primary Workflow
+## CLI commands (source order)
 
-1. `newton init WORKSPACE`: scaffold `.newton/`, templates, and config (requires `aikit`). See [references/init.md](references/init.md).
-2. `newton run WORKSPACE`: launch full optimization loop. See [references/run.md](references/run.md).
-3. `newton step WORKSPACE`: manually advance one iteration. See [references/step.md](references/step.md).
-4. `newton batch PROJECT_ID`: consume queued plans for a project with before/after hooks. See [references/batch.md](references/batch.md).
-5. `newton status EXECUTION`: inspect state. See [references/status.md](references/status.md).
-6. `newton report EXECUTION`: summarize results. See [references/report.md](references/report.md).
-7. `newton error EXECUTION`: diagnose failures. See [references/error.md](references/error.md).
-8. `newton monitor`: watch live channels. See [references/monitor.md](references/monitor.md).
+These thirteen subcommands match the current CLI:
 
-Each reference file lists required arguments, optional flags, and example invocations so you can run Newton without diving into implementation details.
+| Command | Role |
+| --- | --- |
+| `run` | Execute a workflow graph from YAML |
+| `init` | Create `.newton/` and install the default template |
+| `batch` | Process queued plans under `.newton/plan/<project_id>/` |
+| `serve` | HTTP/WebSocket API for workflow state and streaming |
+| `monitor` | Terminal UI for ailoop HIL channels |
+| `validate` | Validate workflow YAML before run |
+| `dot` | Emit Graphviz DOT for the workflow graph |
+| `lint` | Best-practice checks on a workflow file |
+| `explain` | Human-readable description of workflow behavior |
+| `resume` | Continue from a checkpoint (`--execution-id`) |
+| `checkpoints` | `list` / `clean` checkpoint data |
+| `artifacts` | `clean` old execution artifacts |
+| `webhook` | `serve` or `status` for webhook-triggered runs |
 
-## Usage Notes
+For commands without a reference file here, treat `newton <cmd> --help` as the source of truth for flags and examples.
 
-- `newton init` installs the Newton template via `aikit`, so `.newton/scripts/{evaluator,advisor,executor}.sh` and `.newton/state` exist without manual setup.
-- After initialization, run `newton run` from the workspace root without supplying a path; the CLI now assumes the current directory when no workspace argument is provided.
-- Interactive mode (`--interactive`) lets you confirm or override the project name, coding agent, and model before templates are rendered.
-- Strict mode toggles (`--evaluator-cmd`, etc.) still require real executables and the workspace layout produced by `init`.
-- Always make sure you have write permissions to the workspace before running `run` or `step`.
+## Typical flows
 
-## Initialization
+1. **New workspace**: `newton init .` then set `workflow_file` in `.newton/configs/default.conf` when using batch; run workflows with `newton run path/to/workflow.yaml --workspace .`.
+2. **Queue of plans**: Configure `.newton/configs/<project_id>.conf` with `project_root` and `workflow_file`; place plans in `.newton/plan/<project_id>/todo/`; run `newton batch <project_id>`.
+3. **Live HIL**: Start [ailoop](https://github.com/goailoop/ailoop), point `.newton/configs/monitor.conf` at HTTP and WebSocket URLs (or pass `--http-url` / `--ws-url`), then `newton monitor`.
+4. **API / dashboards**: `newton serve` exposes REST, WebSocket, and SSE endpoints for workflow instances and streams (see `newton serve --help` and repository `README.md` when updated).
 
-- `newton init [PATH]` renders the selected template into `.newton/`, writes `GOAL.md` when missing, and records defaults inside `newton.toml`.
-- Templates live under `.newton/templates/<NAME>` and can contain scripts plus an optional `newton.toml` shim; `.sh` files are marked executable when rendered.
-- Provided options include `--template`, `--name`, `--coding-agent`, `--model`, `--interactive`, and `--force`.
-- Without a `scripts/run-tests.sh`, Newton defaults the evaluator test command to `cargo test`.
-- The command exits with an install hint (`https://aikit.readthedocs.io`) when `aikit` is missing.
+## Usage notes
+
+- `newton init` requires `aikit` on `PATH` and refuses to run if `.newton` already exists (remove it or pick another directory).
+- `newton run` resolves the workflow path from `--file` if set, otherwise the first positional argument.
+- `--server <URL>` on `newton run` registers the run with a Newton API instance started via `newton serve` for lifecycle notifications.
+- Checkpoint and artifact layouts live under `.newton/` inside the workspace you pass with `--workspace` (or the discovered project root for batch).
 
 ## References
 
 - [references/init.md](references/init.md)
 - [references/run.md](references/run.md)
-- [references/step.md](references/step.md)
 - [references/batch.md](references/batch.md)
-- [references/status.md](references/status.md)
-- [references/report.md](references/report.md)
-- [references/error.md](references/error.md)
 - [references/monitor.md](references/monitor.md)

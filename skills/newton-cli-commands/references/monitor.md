@@ -18,6 +18,7 @@ The monitor discovers workspace configuration from `.newton/configs/` and looks 
 
 - `--http-url <URL>`: Override the HTTP base URL for this session
 - `--ws-url <URL>`: Override the WebSocket URL for this session
+- `--backend`: Spawn Newton's HTTP API (`newton serve`) on `127.0.0.1:8080` in parallel with the monitor TUI
 
 ## Configuration
 

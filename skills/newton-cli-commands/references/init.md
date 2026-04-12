@@ -1,24 +1,39 @@
 # newton init
 
 ## Purpose
-Bootstrap a workspace from a Newton template. `init` recreates the expected `.newton/state` layout, renders scripts/configuration from the selected template, and generates a placeholder `GOAL.md`.
+
+Create a **Newton workspace**: `.newton/` layout, plan queue directories, default config stub, and template content installed via **aikit**.
 
 ## Requirements
-- `aikit` must be available on `PATH` (`aikit --version` is used) because templates are distributed via aikit packages.
-- At least one template directory must exist under `.newton/templates/<template-name>`.
 
-## Important Flags
-- `--template <NAME>`: Template subdirectory name (default `basic`).
-- `--name <NAME>`: Project name injected into `newton.toml` and the GOAL stub.
-- `--coding-agent <AGENT>` / `--model <MODEL>`: Override executor configuration values in the generated config.
-- `--interactive`: Prompt for missing values instead of assuming defaults automatically.
-- `--force`: Proceed even if `.newton/` already exists.
+- Target path must be an existing directory.
+- `.newton` must **not** already exist under that path (command errors if it does).
+- **`aikit`** must be on `PATH`; templates are fetched/rendered through `aikit-sdk`.
 
-## Example Invocation
+## Arguments and options
+
+- **`PATH`** (optional positional): Directory to initialize (default: current working directory, canonicalized).
+- `--template-source <SOURCE>`: Template locator (GitHub slug, URL, or local path). Default: `gonewton/newton-templates`.
+
+## What gets created
+
+- `.newton/configs/`, `.newton/tasks/`, `.newton/plan/default/{todo,completed,failed,draft}/`, `.newton/state/`.
+- `.newton/configs/default.conf` with `project_root`, `coding_model`, and a commented `workflow_file=` line. Set `workflow_file` when using `newton batch` with the default project layout.
+
+## Example
+
 ```bash
-newton init . --template basic --interactive
+newton init .
+
+newton init /path/to/repo --template-source gonewton/newton-templates
 ```
 
-## Notes
-- The command writes `newton.toml` only when it does not already exist, defaults the `project.template` setting to the selected template, and records a test command (`scripts/run-tests.sh` or `cargo test` fallback).
-- Templates should include script files (`evaluator.sh`, `advisor.sh`, `executor.sh`, etc.) and may provide their own `newton.toml`. Rendered `.sh` files are automatically made executable.
+## Next steps
+
+After init, point `workflow_file` at your YAML (for batch), then run:
+
+```bash
+newton run path/to/workflow.yaml --workspace .
+```
+
+See the repository `README.md` for batch plan format and monitor setup.

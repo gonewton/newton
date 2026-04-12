@@ -1,26 +1,39 @@
 # newton run
 
 ## Purpose
-Runs the complete Newton optimization loop, repeatedly executing evaluator, advisor, and executor tools until limits defined in `RunArgs` are met.
 
-## Required Input
-- `[WORKSPACE]`: Optional path to the workspace directory containing Newton manifests. Defaults to the current directory when omitted, and will inherit `.newton/scripts/<tool>.sh` artifacts after `newton init`.
+Execute a **workflow graph** from a YAML file: tasks run according to dependencies, operators, completion policy, checkpoints, and goal gates.
 
-## Important Flags
-- `--max-iterations <N>`: stop after N iterations (default 10).
-- `--max-time <SECONDS>`: hard wall-clock cap (default 300).
-- `--evaluator-cmd/--advisor-cmd/--executor-cmd`: override tool binaries for strict mode.
-- `--evaluator-status-file`, `--advisor-recommendations-file`, `--executor-log-file`: redirect artifact paths.
-- `--tool-timeout-seconds` and per-tool `--*-timeout` overrides.
-- `--goal-file <FILE>`: Use an existing goal file instead of writing `--goal` text (`NEWTON_GOAL_FILE` still points to the provided path).
+## Arguments
 
-## Example Invocation
+- **`WORKFLOW`** (positional, optional if `--file` is set): Path to the workflow YAML.
+- **`INPUT_FILE`** (optional second positional): Stored in the trigger payload as `input_file` for workflows that expect a spec path.
+
+## Options
+
+- `--file <PATH>`: Workflow path (overrides positional `WORKFLOW` when both are set).
+- `--workspace <PATH>`: Workspace root (default: current directory). Checkpoints and artifacts resolve under this tree.
+- `--arg KEY=VALUE`: Merge into `triggers.payload` (repeatable). Values may use `@path` to read file contents; use `@@` for a literal `@`.
+- `--set KEY=VALUE`: Merge into workflow context at runtime (repeatable).
+- `--trigger-json <PATH>`: Load a JSON object as the base trigger payload before `--arg` merges.
+- `--parallel-limit N`: Override max concurrent tasks for this run.
+- `--max-time-seconds N`: Wall-clock limit for this run.
+- `--verbose`: Print each task's stdout/stderr after it finishes.
+- `--server <URL>`: Register this run with a Newton HTTP API (`newton serve`) for lifecycle updates.
+
+## Examples
+
 ```bash
-cargo run -- run ./workspace --max-iterations 5 --max-time 120
+newton run workflow.yaml --workspace .
+
+newton run workflow.yaml input/spec.md --workspace ./proj --arg env=prod
+
+newton run --file ./workflows/ci.yaml --workspace . --verbose
+
+newton run workflow.yaml --server http://127.0.0.1:8080 --workspace .
 ```
 
-- `newton run --help` shows every available flag with default values.
-- Strict-mode command overrides should point to executable binaries accessible from your PATH.
-- When redirecting artifact files, pre-create parent directories to avoid runtime errors.
-- Define `before_run` and `after_run` hooks inside `newton.toml` to run shell commands around `newton run`. Each hook executes with `sh -c "<value>"` in the project root, and the environment includes `NEWTON_GOAL_FILE`, `NEWTON_RESULT`, and (when batched) `NEWTON_PROJECT_ID`/`NEWTON_TASK_ID`.
-- After `newton init`, `newton run` automatically uses `.newton/scripts/evaluator.sh`, `.newton/scripts/advisor.sh`, and `.newton/scripts/executor.sh` (or the executor stub) unless you override commands with the strict-mode flags.
+## Notes
+
+- Use `newton validate` / `newton lint` / `newton explain` on the same file to check or document behavior before running.
+- Resume after interruption with `newton resume --execution-id <uuid>` once checkpoints exist for that execution.

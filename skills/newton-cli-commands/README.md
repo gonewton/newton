@@ -1,6 +1,8 @@
 # Newton CLI Commands Skill
 
-This skill summarizes the Newton CLI workflows and points to detailed reference sheets for each subcommand.
+Skill for the **Newton** workflow orchestration CLI: YAML workflow graphs, batch plan queues, optional HTTP server, and ailoop-backed monitor.
 
-- Highlights include initialization (`newton init`), loop execution (`newton run`), batching, stepping, and diagnostics.
-- Use the reference docs (`references/*.md`) to answer questions about arguments, defaults, and example invocations.
+- **Detailed sheets**: `references/init.md`, `references/run.md`, `references/batch.md`, `references/monitor.md`.
+- **Other commands**: use `newton <command> --help` for `serve`, `validate`, `dot`, `lint`, `explain`, `resume`, `checkpoints`, `artifacts`, and `webhook`.
+
+The CLI exposes thirteen subcommands in that order in help output; there is no `step`, `status`, `report`, or `error` subcommand in current releases.
