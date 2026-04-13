@@ -19,3 +19,6 @@ auto_release_trigger.txt
 
 # Opencode
 .opencode
+
+# Newton planner scratch (planner.sh ./tmp)
+/tmp/
