@@ -1,0 +1,18 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Scenario 41: Fail Immediate Task Run Persist"
+workflow:
+  settings:
+    entry_task: "fail_task"
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 100
+  tasks:
+    - id: "fail_task"
+      operator: "AssertCompletedOperator"
+      params:
+        require: ["nonexistent_task"]
+      terminal: success

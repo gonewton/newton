@@ -83,11 +83,11 @@ impl Operator for WorkflowOperator {
         let context_merge = Some(merge_objects_with_optional(
             &ctx.state_view.context,
             explicit_context.as_ref(),
-        ));
+        )?);
         let triggers_merge = Some(merge_objects_with_optional(
             &ctx.state_view.triggers,
             explicit_triggers.as_ref(),
-        ));
+        )?);
 
         let summary = self
             .runner
@@ -131,14 +131,34 @@ fn validate_optional_object(
     Ok(())
 }
 
-fn merge_objects_with_optional(base: &Value, overlay: Option<&Value>) -> Value {
-    let mut merged = base.as_object().cloned().unwrap_or_default();
+fn json_type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn merge_objects_with_optional(base: &Value, overlay: Option<&Value>) -> Result<Value, AppError> {
+    let mut merged = base.as_object().cloned().ok_or_else(|| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "context/triggers base must be a JSON object, got {}",
+                json_type_name(base)
+            ),
+        )
+        .with_code("WFG-NEST-005")
+    })?;
     if let Some(overlay) = overlay.and_then(Value::as_object) {
         for (key, value) in overlay {
             merged.insert(key.clone(), value.clone());
         }
     }
-    Value::Object(merged)
+    Ok(Value::Object(merged))
 }
 
 fn resolve_and_sandbox_child_path(
@@ -230,6 +250,27 @@ mod tests {
             },
             operator_registry: crate::workflow::operator::OperatorRegistry::new(),
         }
+    }
+
+    #[test]
+    fn merge_non_object_scalar_base_returns_err() {
+        let err = merge_objects_with_optional(&json!("scalar"), None)
+            .expect_err("scalar base must error");
+        assert_eq!(err.code, "WFG-NEST-005");
+    }
+
+    #[test]
+    fn merge_non_object_array_base_returns_err() {
+        let err = merge_objects_with_optional(&json!([1, 2, 3]), Some(&json!({"k": 1})))
+            .expect_err("array base must error");
+        assert_eq!(err.code, "WFG-NEST-005");
+    }
+
+    #[test]
+    fn merge_object_base_succeeds() {
+        let result = merge_objects_with_optional(&json!({"a": 1}), Some(&json!({"b": 2})))
+            .expect("object base must succeed");
+        assert_eq!(result, json!({"a": 1, "b": 2}));
     }
 
     #[test]

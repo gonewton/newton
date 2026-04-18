@@ -1,0 +1,19 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Scenario 45: Nested Non-Object Context"
+workflow:
+  context: "bad_scalar"
+  settings:
+    entry_task: "call_child"
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: true
+    max_task_iterations: 10
+    max_workflow_iterations: 100
+  tasks:
+    - id: "call_child"
+      operator: "WorkflowOperator"
+      params:
+        workflow_path: "./01_minimal_success.yaml"
+      terminal: success

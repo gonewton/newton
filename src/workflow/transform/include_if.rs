@@ -149,12 +149,17 @@ fn evaluate_include_if(
                 )
                 .with_code("WFG-INCLUDE-001"));
             }
+            let code = if field == "transition" {
+                "WFG-GRAPH-001"
+            } else {
+                "WFG-TPL-001"
+            };
             let evaluated = engine.evaluate(expr, eval_ctx).map_err(|err| {
                 AppError::new(
                     ErrorCategory::ValidationError,
                     format!("template interpolation error in '{task_id}.{field}': {err}"),
                 )
-                .with_code("WFG-TPL-001")
+                .with_code(code)
             })?;
             Ok(is_truthy(&evaluated))
         }

@@ -741,13 +741,6 @@ impl WorkflowRuntime {
                 Self::print_task_verbose_output(outcome);
             }
 
-            if outcome.failed && !self.config.continue_on_error {
-                return Err(AppError::new(
-                    ErrorCategory::ValidationError,
-                    format!("task {} failed", outcome.task_id),
-                )
-                .with_code("WFG-EXEC-001"));
-            }
             let record = task_execution::build_workflow_task_run_record(
                 outcome,
                 self.runtime_graph
@@ -763,6 +756,23 @@ impl WorkflowRuntime {
             self.workflow_execution
                 .task_runs
                 .push(WorkflowTaskRunSummary::from(record));
+
+            if outcome.failed && !self.config.continue_on_error {
+                if let Some(error) = outcome.error_summary.as_ref() {
+                    if error.code == "WFG-NEST-005" {
+                        return Err(AppError::new(
+                            ErrorCategory::ValidationError,
+                            error.message.clone(),
+                        )
+                        .with_code("WFG-NEST-005"));
+                    }
+                }
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    format!("task {} failed", outcome.task_id),
+                )
+                .with_code("WFG-EXEC-001"));
+            }
         }
         let snapshot = guard.snapshot();
         drop(guard);
@@ -929,9 +939,12 @@ impl WorkflowRuntime {
             let barrier_params: BarrierParams =
                 match serde_json::from_value(barrier_task.params.clone()) {
                     Ok(params) => params,
-                    Err(_) => {
-                        // Skip invalid barrier params
-                        continue;
+                    Err(e) => {
+                        return Err(AppError::new(
+                            ErrorCategory::ValidationError,
+                            format!("barrier task '{}' has invalid params: {e}", barrier_task.id),
+                        )
+                        .with_code("WFG-BARRIER-001"));
                     }
                 };
 
@@ -1193,16 +1206,20 @@ fn build_workflow_runtime_with_parent(
                     task_clone.transitions = task
                         .transitions
                         .iter()
-                        .filter(|t| {
+                        .filter_map(|t| {
                             if let Some(ref g) = t.include_if {
-                                context::evaluate_condition(g, engine.as_ref(), &eval_ctx)
-                                    .unwrap_or(true)
+                                match context::evaluate_condition(g, engine.as_ref(), &eval_ctx)
+                                    .map_err(|e| e.with_code("WFG-GRAPH-001"))
+                                {
+                                    Ok(true) => Some(Ok(t.clone())),
+                                    Ok(false) => None,
+                                    Err(e) => Some(Err(e)),
+                                }
                             } else {
-                                true
+                                Some(Ok(t.clone()))
                             }
                         })
-                        .cloned()
-                        .collect();
+                        .collect::<Result<Vec<_>, _>>()?;
                     tasks_map.insert(task.id.clone(), task_clone);
                 }
             }
@@ -1476,6 +1493,17 @@ fn extract_trigger_payload(document: &WorkflowDocument) -> Value {
     )
 }
 
+fn json_type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
 fn shallow_merge_objects(base: &Value, overlay: &Value) -> Result<Value, AppError> {
     let overlay_obj = overlay.as_object().ok_or_else(|| {
         AppError::new(
@@ -1483,7 +1511,16 @@ fn shallow_merge_objects(base: &Value, overlay: &Value) -> Result<Value, AppErro
             "merge value must be an object",
         )
     })?;
-    let mut merged = base.as_object().cloned().unwrap_or_default();
+    let mut merged = base.as_object().cloned().ok_or_else(|| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "merge base must be a JSON object, got {}",
+                json_type_name(base)
+            ),
+        )
+        .with_code("WFG-NEST-005")
+    })?;
     for (key, value) in overlay_obj {
         merged.insert(key.clone(), value.clone());
     }
@@ -1529,4 +1566,17 @@ fn hydrate_completed_records(
         );
     }
     Ok(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shallow_merge_objects;
+    use serde_json::json;
+
+    #[test]
+    fn shallow_merge_non_object_base_returns_err() {
+        let err = shallow_merge_objects(&json!("string"), &json!({}))
+            .expect_err("non-object base must error");
+        assert_eq!(err.code, "WFG-NEST-005");
+    }
 }

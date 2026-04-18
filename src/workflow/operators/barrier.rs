@@ -24,14 +24,13 @@ impl Operator for BarrierOperator {
     }
 
     fn validate_params(&self, params: &Value) -> Result<(), AppError> {
-        let _barrier_params: BarrierParams =
-            serde_json::from_value(params.clone()).map_err(|err| {
-                AppError::new(
-                    ErrorCategory::ValidationError,
-                    format!("Invalid barrier operator parameters: {err}"),
-                )
-            })?;
-
+        if !params.is_object() {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "barrier operator params must be an object",
+            )
+            .with_code("WFG-BARRIER-001"));
+        }
         Ok(())
     }
 
@@ -41,6 +40,7 @@ impl Operator for BarrierOperator {
                 ErrorCategory::ValidationError,
                 format!("Invalid barrier operator parameters: {err}"),
             )
+            .with_code("WFG-BARRIER-001")
         })?;
 
         // The actual barrier logic is handled by the scheduler in the executor.
