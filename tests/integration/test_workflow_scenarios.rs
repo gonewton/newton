@@ -13,11 +13,12 @@ use newton::workflow::operators::{self, BuiltinOperatorDeps};
 use newton::workflow::schema::{self, TriggerType, WorkflowTrigger};
 use newton::workflow::state::GraphSettings;
 use serde_json::{json, Value};
-use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 use tokio::time::{sleep, Duration};
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub enum MockCommandStep {
@@ -305,6 +306,58 @@ impl WorkflowTestHarness {
         )
         .await
     }
+}
+
+/// Read and parse execution.json for the given UUID from `<state_root>/<execution_id>/execution.json`.
+/// Panics with a descriptive message if the file does not exist or cannot be parsed.
+pub fn read_execution_json(state_root: &Path, execution_id: Uuid) -> Value {
+    let path = state_root
+        .join(execution_id.to_string())
+        .join("execution.json");
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("failed to read execution.json at {}: {e}", path.display()));
+    serde_json::from_slice(&bytes)
+        .unwrap_or_else(|e| panic!("failed to parse execution.json at {}: {e}", path.display()))
+}
+
+/// Return the set of `task_id` strings from `execution["task_runs"]`.
+/// Panics if `task_runs` is absent or not an array.
+pub fn task_run_ids(execution: &Value) -> HashSet<String> {
+    execution["task_runs"]
+        .as_array()
+        .expect("task_runs must be an array")
+        .iter()
+        .map(|entry| {
+            entry["task_id"]
+                .as_str()
+                .expect("task_run entry must have task_id string")
+                .to_string()
+        })
+        .collect()
+}
+
+/// Scan all subdirectories of `state_root`, read each `execution.json`, and
+/// collect execution_ids whose `parent_execution_id` matches `parent_id`.
+pub fn find_child_executions(state_root: &Path, parent_id: Uuid) -> Vec<Uuid> {
+    let parent_id_str = parent_id.to_string();
+    let mut children = Vec::new();
+    let entries = std::fs::read_dir(state_root)
+        .unwrap_or_else(|e| panic!("failed to read state_root {}: {e}", state_root.display()));
+    for entry in entries.flatten() {
+        let exec_json = entry.path().join("execution.json");
+        if let Ok(bytes) = std::fs::read(&exec_json) {
+            if let Ok(val) = serde_json::from_slice::<Value>(&bytes) {
+                if val["parent_execution_id"].as_str() == Some(&parent_id_str) {
+                    if let Some(id_str) = val["execution_id"].as_str() {
+                        if let Ok(id) = Uuid::parse_str(id_str) {
+                            children.push(id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    children
 }
 
 /// Result of executing a workflow via CLI command
@@ -1300,22 +1353,18 @@ async fn test_scenario_37_nested_workflow_basic() {
         .as_str()
         .expect("child_execution_id must be string");
 
-    let child_execution_path = harness
-        .temp_dir
-        .path()
-        .join(".newton/state/workflows")
-        .join(child_execution_id)
-        .join("execution.json");
-    let child_execution_bytes =
-        std::fs::read(&child_execution_path).expect("read child execution.json");
-    let child_execution: Value =
-        serde_json::from_slice(&child_execution_bytes).expect("parse child execution.json");
+    let state_root = harness.temp_dir.path().join(".newton/state/workflows");
+    let child_uuid =
+        Uuid::parse_str(child_execution_id).expect("child_execution_id must be valid UUID");
+    let child_execution = read_execution_json(&state_root, child_uuid);
+    let child_task_ids = task_run_ids(&child_execution);
     assert_eq!(
         child_execution["parent_execution_id"],
         json!(summary.execution_id.to_string())
     );
     assert_eq!(child_execution["parent_task_id"], json!("call_child"));
     assert_eq!(child_execution["nesting_depth"], json!(1));
+    assert!(child_task_ids.contains("start"));
 
     assert_yaml_snapshot!(summary, {
         ".execution_id" => "[uuid]",
@@ -1420,4 +1469,182 @@ workflow:
         .get("call_child")
         .expect("call_child must complete");
     assert_eq!(call_child.error_code.as_deref(), Some("WFG-NEST-001"));
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 41: Fail Task Persisted in execution.json
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_41_fail_task_persisted_in_execution_json() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let state_root = harness.temp_dir.path().join(".newton/state/workflows");
+
+    let err = harness
+        .run_fixture("41_fail_immediate_task_run_persist.yaml", None)
+        .await
+        .expect_err("workflow must fail");
+    assert_eq!(
+        err.code, "WFG-EXEC-001",
+        "expected WFG-EXEC-001 but got: {} — {}",
+        err.code, err.message
+    );
+
+    // Find the single execution directory that was created
+    let entries: Vec<_> = std::fs::read_dir(&state_root)
+        .expect("state_root must exist after a run")
+        .flatten()
+        .collect();
+    assert_eq!(entries.len(), 1, "exactly one execution directory expected");
+    let exec_id = Uuid::parse_str(
+        entries[0]
+            .file_name()
+            .to_str()
+            .expect("valid utf8 dir name"),
+    )
+    .expect("execution dir must be a UUID");
+
+    let execution = read_execution_json(&state_root, exec_id);
+    let ids = task_run_ids(&execution);
+    assert!(
+        ids.contains("fail_task"),
+        "fail_task must appear in task_runs; found: {ids:?}"
+    );
+    let task_run = execution["task_runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["task_id"].as_str() == Some("fail_task"))
+        .expect("fail_task run entry");
+    assert_eq!(task_run["status"].as_str(), Some("failed"));
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 42: Nested Fail Child Task Persisted
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_42_nested_fail_child_task_persisted() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let state_root = harness.temp_dir.path().join(".newton/state/workflows");
+    let err = harness
+        .run_fixture("42_nested_fail_task_run_persist.yaml", None)
+        .await
+        .expect_err("workflow must fail");
+    assert!(
+        !err.code.is_empty(),
+        "error must have a code; got: {}",
+        err.message
+    );
+
+    // Find the parent execution directory
+    let all_entries: Vec<_> = std::fs::read_dir(&state_root)
+        .expect("state_root must exist")
+        .flatten()
+        .collect();
+    assert!(
+        !all_entries.is_empty(),
+        "at least one execution directory expected"
+    );
+
+    // Find parent execution (nesting_depth == 0)
+    let parent_exec_id = all_entries
+        .iter()
+        .find_map(|entry| {
+            let exec_json = entry.path().join("execution.json");
+            let bytes = std::fs::read(&exec_json).ok()?;
+            let val: Value = serde_json::from_slice(&bytes).ok()?;
+            if val["nesting_depth"].as_u64() == Some(0) {
+                Uuid::parse_str(entry.file_name().to_str()?).ok()
+            } else {
+                None
+            }
+        })
+        .expect("parent execution directory must exist");
+
+    let child_ids = find_child_executions(&state_root, parent_exec_id);
+    assert_eq!(child_ids.len(), 1, "exactly one child execution expected");
+
+    let child_execution = read_execution_json(&state_root, child_ids[0]);
+    let ids = task_run_ids(&child_execution);
+    assert!(
+        ids.contains("assert_early"),
+        "assert_early must appear in child task_runs; found: {ids:?}"
+    );
+    let task_run = child_execution["task_runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["task_id"].as_str() == Some("assert_early"))
+        .expect("assert_early run entry");
+    assert_eq!(task_run["status"].as_str(), Some("failed"));
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 43: Transition IncludeIf Error Fails Fast
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_43_transition_include_if_error_fails_fast() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let err = harness
+        .run_fixture("43_transition_include_if_eval_error.yaml", None)
+        .await
+        .expect_err("workflow must fail on bad transition include_if");
+
+    assert_eq!(
+        err.code, "WFG-GRAPH-001",
+        "expected WFG-GRAPH-001 but got: {} — {}",
+        err.code, err.message
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 44: Barrier Invalid Params Fails
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_44_barrier_invalid_params_fails() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let err = harness
+        .run_fixture("44_barrier_invalid_params.yaml", None)
+        .await
+        .expect_err("workflow must fail on invalid barrier params");
+
+    assert_eq!(
+        err.code, "WFG-BARRIER-001",
+        "expected WFG-BARRIER-001 but got: {} — {}",
+        err.code, err.message
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 45: Nested Non-Object Context Fails
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_45_nested_non_object_context_fails() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let state_root = harness.temp_dir.path().join(".newton/state/workflows");
+    let err = harness
+        .run_fixture("45_nested_non_object_context.yaml", None)
+        .await
+        .expect_err("workflow must fail when parent context is non-object");
+    assert_eq!(err.code, "WFG-EXEC-001");
+
+    let entries: Vec<_> = std::fs::read_dir(&state_root)
+        .expect("state_root must exist after a run")
+        .flatten()
+        .collect();
+    assert_eq!(entries.len(), 1, "exactly one execution directory expected");
+    let exec_id = Uuid::parse_str(
+        entries[0]
+            .file_name()
+            .to_str()
+            .expect("valid utf8 dir name"),
+    )
+    .expect("execution dir must be a UUID");
+    let execution = read_execution_json(&state_root, exec_id);
+    let task_run = execution["task_runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["task_id"].as_str() == Some("call_child"))
+        .expect("call_child run entry");
+    assert_eq!(task_run["error_code"].as_str(), Some("WFG-NEST-005"));
 }
