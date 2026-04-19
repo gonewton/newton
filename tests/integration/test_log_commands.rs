@@ -508,26 +508,125 @@ fn resolved_params_snapshot_small_stored_verbatim() {
     assert_eq!(snap["key"], json!("value"));
 }
 
-// --- resolved_params_snapshot: large params get sentinel ---
+// --- resolved_params_snapshot: large params get sentinel (exercises production code path) ---
 
 #[test]
 fn resolved_params_snapshot_truncation_sentinel() {
-    use newton::workflow::state::redact_value;
-    use newton::workflow::task_execution::RESOLVED_PARAMS_SNAPSHOT_LIMIT_BYTES;
+    use newton::workflow::artifacts::ArtifactStore;
+    use newton::workflow::executor::TaskOutcome;
+    use newton::workflow::state::{GraphSettings, TaskRunRecord, TaskStatus};
+    use newton::workflow::task_execution::{
+        build_workflow_task_run_record, RESOLVED_PARAMS_SNAPSHOT_LIMIT_BYTES,
+    };
 
-    // Build a large value that exceeds 64 KiB.
-    let large_str = "x".repeat(RESOLVED_PARAMS_SNAPSHOT_LIMIT_BYTES + 1);
-    let mut params = json!({"data": large_str});
-    let redact_keys: Vec<String> = vec![];
-    redact_value(&mut params, &redact_keys);
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().to_path_buf();
 
-    let bytes = serde_json::to_vec(&params).unwrap();
-    assert!(bytes.len() > RESOLVED_PARAMS_SNAPSHOT_LIMIT_BYTES);
+    // Build a resolved_params value whose serialized form exceeds 64 KiB.
+    let large_str = "x".repeat(RESOLVED_PARAMS_SNAPSHOT_LIMIT_BYTES + 100);
+    let large_params = json!({"data": large_str});
 
-    // The sentinel should have _truncated: true.
-    let sentinel = json!({"_truncated": true, "size_bytes": bytes.len()});
-    assert_eq!(sentinel["_truncated"], json!(true));
-    assert!(sentinel["size_bytes"].as_u64().unwrap() > RESOLVED_PARAMS_SNAPSHOT_LIMIT_BYTES as u64);
+    let outcome = TaskOutcome {
+        task_id: "big_task".to_string(),
+        record: TaskRunRecord {
+            status: TaskStatus::Success,
+            output: json!({"result": "ok"}),
+            error_code: None,
+            duration_ms: 10,
+            run_seq: 1,
+        },
+        context_patch: None,
+        failed: false,
+        started_at: Utc::now(),
+        completed_at: Utc::now(),
+        error_summary: None,
+        resolved_params: large_params,
+    };
+
+    let settings = GraphSettings::default();
+    let mut artifact_store = ArtifactStore::new(workspace, &settings.artifact_storage);
+    let execution_id = Uuid::new_v4();
+
+    let record = build_workflow_task_run_record(
+        &outcome,
+        None,
+        &mut artifact_store,
+        &settings,
+        &execution_id,
+    )
+    .expect("build_workflow_task_run_record should succeed");
+
+    let snap = record
+        .resolved_params_snapshot
+        .expect("resolved_params_snapshot must be set");
+
+    assert_eq!(
+        snap["_truncated"],
+        json!(true),
+        "oversized params must be replaced with sentinel"
+    );
+    let size_bytes = snap["size_bytes"]
+        .as_u64()
+        .expect("size_bytes must be present");
+    assert!(
+        size_bytes > RESOLVED_PARAMS_SNAPSHOT_LIMIT_BYTES as u64,
+        "size_bytes in sentinel must reflect actual byte length"
+    );
+}
+
+// --- Integration test: newton run with failing task prints hint line to stdout (criterion 23) ---
+
+#[test]
+fn newton_run_failing_task_prints_hint_line_to_stdout() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().to_path_buf();
+    std::fs::create_dir_all(workspace.join(".newton/state/workflows")).unwrap();
+
+    // A workflow where the single task runs `/bin/false` (exit code 1) directly (no shell needed).
+    let workflow_yaml = r#"version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Hint line test"
+workflow:
+  settings:
+    entry_task: "fail_task"
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 1
+    max_workflow_iterations: 10
+  tasks:
+    - id: "fail_task"
+      operator: "CommandOperator"
+      params:
+        cmd: "/bin/false"
+      terminal: failure
+"#;
+    let workflow_path = workspace.join("fail_workflow.yaml");
+    std::fs::write(&workflow_path, workflow_yaml).unwrap();
+
+    let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
+    cmd.arg("run")
+        .arg(&workflow_path)
+        .arg("--workspace")
+        .arg(&workspace);
+
+    let output = cmd.output().expect("failed to run newton");
+    // The run should fail (non-zero exit).
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit from failing workflow"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Assert the normative hint line is present in stdout.
+    let hint_re = regex::Regex::new(
+        r"(?m)^newton: task failed execution_id=[0-9a-f-]{36} task_id=\S+ inspect: newton log show [0-9a-f-]{36} --task \S+$"
+    ).expect("valid regex");
+    assert!(
+        hint_re.is_match(&stdout),
+        "stdout must contain hint line matching normative format; got:\n{stdout}"
+    );
 }
 
 // --- CLI test: newton log --help ---

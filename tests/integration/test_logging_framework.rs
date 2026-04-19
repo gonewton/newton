@@ -114,7 +114,29 @@ fn log_dir_override_flag_is_accepted() {
     cmd.arg("localdev")
         .arg("--workspace")
         .arg(&workspace)
+        .arg("--log-dir")
+        .arg(&log_dir)
         .arg("--message")
         .arg("log dir override test");
     cmd.assert().success();
+
+    // The log file must appear in the custom directory, not in the default workspace location.
+    let custom_log_file = log_dir.join("newton.log");
+    assert!(
+        custom_log_file.exists(),
+        "newton.log must be created in the custom --log-dir directory: {}",
+        custom_log_file.display()
+    );
+
+    let default_log_file = log_file_path(&workspace);
+    assert!(
+        !default_log_file.exists(),
+        "newton.log must NOT appear in the default workspace location when --log-dir overrides it"
+    );
+
+    let contents = fs::read_to_string(&custom_log_file).expect("failed to read custom log file");
+    assert!(
+        contents.contains("log dir override test"),
+        "custom log file must contain the emitted message"
+    );
 }

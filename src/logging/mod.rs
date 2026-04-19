@@ -426,7 +426,7 @@ mod tests {
     use crate::logging::config::OpenTelemetryConfig;
     use serial_test::serial;
     use std::env;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn make_run_command() -> Command {
         Command::Run(RunArgs {
@@ -639,5 +639,32 @@ mod tests {
         let candidate = PathBuf::from("../evil");
         let normalized = normalize_path(&base, &candidate);
         assert_eq!(normalized, PathBuf::from("/tmp/evil"));
+    }
+
+    #[test]
+    #[serial]
+    fn build_effective_settings_log_dir_override_takes_precedence() {
+        env::remove_var("RUST_LOG");
+        env::remove_var("OTEL_EXPORTER_OTLP_ENDPOINT");
+        let custom_path = Path::new("/custom/log/path");
+        let config = LoggingConfigFile {
+            log_dir: Some(PathBuf::from("/other/path")),
+            default_level: None,
+            enable_file: None,
+            console_output: None,
+            opentelemetry: None,
+        };
+        let settings = build_effective_settings(
+            ExecutionContext::LocalDev,
+            None,
+            Some(&config),
+            Some(custom_path),
+        )
+        .expect("build_effective_settings must succeed");
+        // The override must win over config.log_dir.
+        assert_eq!(
+            settings.log_dir, custom_path,
+            "log_dir must equal the log_dir_override, not logging.toml's log_dir"
+        );
     }
 }

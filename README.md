@@ -282,6 +282,8 @@ When a task fails, Newton prints a hint to stdout:
 newton: task failed execution_id=<UUID> task_id=<TASK_ID> inspect: newton log show <UUID> --task <TASK_ID>
 ```
 
+If you invoke `newton log show` from a directory other than the workspace root, pass `--workspace <path>` so Newton can locate the execution state (e.g. `newton log show <UUID> --task <TASK_ID> --workspace /path/to/workspace`).
+
 ### Troubleshooting TUI/logging conflicts
 
 - If `newton monitor` shows garbled output when you run `RUST_LOG=debug`, confirm no console sink is configured (`console_output` defaults to `none` in the TUI context) and inspect `<workspace>/.newton/logs/newton.log` for the emitted events.

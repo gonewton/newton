@@ -12,10 +12,11 @@ fn main() -> Result<()> {
             .context("failed to set current working directory for helper")?;
     }
     let message = config.message.clone();
+    let log_dir_override = config.log_dir.clone();
     let command = config.into_command()?;
 
-    let _guard =
-        logging::init(&command, None).context("failed to initialize logging from helper binary")?;
+    let _guard = logging::init(&command, log_dir_override.as_deref())
+        .context("failed to initialize logging from helper binary")?;
 
     tracing::info!("{}", message);
 
@@ -53,6 +54,7 @@ struct Config {
     mode: Mode,
     workspace: Option<PathBuf>,
     message: String,
+    log_dir: Option<PathBuf>,
 }
 
 impl Config {
@@ -61,6 +63,7 @@ impl Config {
         let mut mode = None;
         let mut workspace = None;
         let mut message = None;
+        let mut log_dir = None;
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -76,6 +79,9 @@ impl Config {
                 "--message" => {
                     message = args.next();
                 }
+                "--log-dir" => {
+                    log_dir = args.next().map(PathBuf::from);
+                }
                 other => bail!("unknown argument: {other}"),
             }
         }
@@ -87,6 +93,7 @@ impl Config {
             mode,
             workspace,
             message,
+            log_dir,
         })
     }
 
