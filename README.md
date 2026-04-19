@@ -238,10 +238,10 @@ Newton looks for an optional `.newton/config/logging.toml` file and applies the 
 You can tune logging with:
 
 1. Optional `.newton/config/logging.toml` (keys such as `logging.log_dir`, `logging.default_level`, `logging.enable_file`, `logging.console_output`, and `logging.opentelemetry.*` when present).
-2. Environment variables, including `RUST_LOG` (verbose Newton messages), `NEWTON_REMOTE_AGENT`, and `OTEL_EXPORTER_OTLP_ENDPOINT` for OpenTelemetry export when configured.
+2. Environment variables, including `RUST_LOG` for tracing filter/verbosity only, `NEWTON_REMOTE_AGENT`, and `OTEL_EXPORTER_OTLP_ENDPOINT` for OpenTelemetry export when configured.
 3. Built-in defaults when no file is present: typically `info`, file logging on, console on for local interactive use, telemetry off unless you enable it.
 
-OpenTelemetry export runs only when a valid endpoint is set in config or via `OTEL_EXPORTER_OTLP_ENDPOINT`. `RUST_LOG` overrides the default level when set.
+OpenTelemetry export runs only when a valid endpoint is set in config or via `OTEL_EXPORTER_OTLP_ENDPOINT`. `RUST_LOG` overrides the tracing filter level when set; it does not change the log directory.
 
 ### Changing the log location
 
@@ -252,7 +252,9 @@ newton --log-dir /tmp/newton-logs run my-workflow.yaml
 newton --log-dir /var/log/newton batch --once
 ```
 
-The path is normalized relative to the current directory when it is not absolute. You can also set `logging.log_dir` in `.newton/config/logging.toml` to change the default permanently for a workspace.
+Relative log paths are normalized under the workspace `.newton` directory, or under `$HOME/.newton` when no workspace is detected. You can also set `logging.log_dir` in `.newton/config/logging.toml` to change the default permanently for a workspace.
+
+Log directory precedence is: `--log-dir` for the current invocation, then `logging.log_dir` from `.newton/config/logging.toml`, then the workspace default. Use `RUST_LOG` separately when you only want more or less verbose tracing output.
 
 ### Reviewing execution history
 

@@ -3,6 +3,17 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use uuid::Uuid;
 
+fn parse_positive_usize(value: &str) -> Result<usize, String> {
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|_| "LOG-003: --last must be a positive integer".to_string())?;
+    if parsed == 0 {
+        Err("LOG-003: --last must be a positive integer".to_string())
+    } else {
+        Ok(parsed)
+    }
+}
+
 #[derive(Args, Clone)]
 pub struct LogArgs {
     #[command(subcommand)]
@@ -16,7 +27,7 @@ pub enum LogCommand {
         #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
         /// Only list the N most recent executions (after sort by started_at desc)
-        #[arg(long, value_name = "N")]
+        #[arg(long, value_name = "N", value_parser = parse_positive_usize)]
         last: Option<usize>,
         /// Emit machine-readable JSON (stable keys per spec §4.2)
         #[arg(long)]
