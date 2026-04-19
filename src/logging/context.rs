@@ -50,6 +50,7 @@ pub fn detect_context(command: &Command) -> ExecutionContext {
         | Command::Checkpoints(_)
         | Command::Artifacts(_)
         | Command::Webhook(_)
+        | Command::Log(_)
         | Command::Init(_) => ExecutionContext::LocalDev,
         Command::Monitor(_) => ExecutionContext::Tui,
         Command::Serve(_) => ExecutionContext::Server,

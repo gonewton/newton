@@ -113,6 +113,10 @@ pub struct WorkflowTaskRunRecord {
     pub goal_gate_group: Option<String>,
     pub output_ref: OutputRef,
     pub error: Option<AppErrorSummary>,
+    /// Resolved operator parameters at task execution time, capped at 64 KiB.
+    /// None for records written before this field was introduced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_params_snapshot: Option<Value>,
 }
 
 /// Simplified summary of errors persisted to disk.

@@ -238,10 +238,53 @@ Newton looks for an optional `.newton/config/logging.toml` file and applies the 
 You can tune logging with:
 
 1. Optional `.newton/config/logging.toml` (keys such as `logging.log_dir`, `logging.default_level`, `logging.enable_file`, `logging.console_output`, and `logging.opentelemetry.*` when present).
-2. Environment variables, including `RUST_LOG` (verbose Newton messages), `NEWTON_REMOTE_AGENT`, and `OTEL_EXPORTER_OTLP_ENDPOINT` for OpenTelemetry export when configured.
+2. Environment variables, including `RUST_LOG` for tracing filter/verbosity only, `NEWTON_REMOTE_AGENT`, and `OTEL_EXPORTER_OTLP_ENDPOINT` for OpenTelemetry export when configured.
 3. Built-in defaults when no file is present: typically `info`, file logging on, console on for local interactive use, telemetry off unless you enable it.
 
-OpenTelemetry export runs only when a valid endpoint is set in config or via `OTEL_EXPORTER_OTLP_ENDPOINT`. `RUST_LOG` overrides the default level when set.
+OpenTelemetry export runs only when a valid endpoint is set in config or via `OTEL_EXPORTER_OTLP_ENDPOINT`. `RUST_LOG` overrides the tracing filter level when set; it does not change the log directory.
+
+### Changing the log location
+
+By default Newton writes the tracing log to `<workspace>/.newton/logs/newton.log`. To redirect it to a different directory for a single invocation, pass `--log-dir`:
+
+```bash
+newton --log-dir /tmp/newton-logs run my-workflow.yaml
+newton --log-dir /var/log/newton batch --once
+```
+
+Relative log paths are normalized under the workspace `.newton` directory, or under `$HOME/.newton` when no workspace is detected. You can also set `logging.log_dir` in `.newton/config/logging.toml` to change the default permanently for a workspace.
+
+Log directory precedence is: `--log-dir` for the current invocation, then `logging.log_dir` from `.newton/config/logging.toml`, then the workspace default. Use `RUST_LOG` separately when you only want more or less verbose tracing output.
+
+### Reviewing execution history
+
+Newton records each workflow run to `.newton/state/workflows/<execution-id>/`. Use `newton log` subcommands to inspect past runs:
+
+```bash
+# List recent runs in the current workspace (newest first)
+newton log list
+
+# Limit output to the last 5 runs
+newton log list --last 5
+
+# Show task-by-task replay for a specific run
+newton log show <execution-id>
+
+# Filter to a single task and show resolved parameters
+newton log show <execution-id> --task my-task-id --verbose
+
+# Output as JSON (for scripting)
+newton log list --json
+newton log show <execution-id> --json
+```
+
+When a task fails, Newton prints a hint to stdout:
+
+```
+newton: task failed execution_id=<UUID> task_id=<TASK_ID> inspect: newton log show <UUID> --task <TASK_ID>
+```
+
+If you invoke `newton log show` from a directory other than the workspace root, pass `--workspace <path>` so Newton can locate the execution state (e.g. `newton log show <UUID> --task <TASK_ID> --workspace /path/to/workspace`).
 
 ### Troubleshooting TUI/logging conflicts
 

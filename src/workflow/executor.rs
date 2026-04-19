@@ -281,6 +281,8 @@ pub struct TaskOutcome {
     pub started_at: DateTime<Utc>,
     pub completed_at: DateTime<Utc>,
     pub error_summary: Option<AppErrorSummary>,
+    /// Resolved operator parameters; passed through to WorkflowTaskRunRecord.
+    pub resolved_params: Value,
 }
 
 impl WorkflowRuntime {
@@ -586,11 +588,31 @@ impl WorkflowRuntime {
         let final_state = self.state.read().await;
         let (final_exec_status, maybe_err) =
             self.compute_final_status(&final_state, terminal_stop_triggered);
+        // Collect failed task ids for hint printing (ascending order).
+        let mut final_failed_task_ids: Vec<String> = final_state
+            .completed
+            .iter()
+            .filter(|(_, r)| r.status == crate::workflow::state::TaskStatus::Failed)
+            .map(|(id, _)| id.clone())
+            .collect();
+        final_failed_task_ids.sort();
         drop(final_state);
 
         self.workflow_execution.status = final_exec_status;
         self.workflow_execution.completed_at = Some(Utc::now());
         if let Some(err) = maybe_err {
+            // Print hint lines for task failures before propagating error.
+            if err.code == "WFG-EXEC-001" && !final_failed_task_ids.is_empty() {
+                for task_id in &final_failed_task_ids {
+                    println!(
+                        "newton: task failed execution_id={} task_id={} inspect: newton log show {} --task {}",
+                        self.workflow_execution.execution_id,
+                        task_id,
+                        self.workflow_execution.execution_id,
+                        task_id
+                    );
+                }
+            }
             self.persist_checkpoint_force().await?;
             self.notify_completion(WorkflowStatus::Failed);
             return Err(err);
@@ -728,6 +750,7 @@ impl WorkflowRuntime {
 
     async fn process_frontier(&mut self, frontier: Vec<TaskOutcome>) -> Result<(), AppError> {
         let mut guard = self.state.write().await;
+        let mut failed_outcomes: Vec<&TaskOutcome> = Vec::new();
         for outcome in &frontier {
             guard
                 .completed
@@ -758,21 +781,41 @@ impl WorkflowRuntime {
                 .push(WorkflowTaskRunSummary::from(record));
 
             if outcome.failed && !self.config.continue_on_error {
-                if let Some(error) = outcome.error_summary.as_ref() {
-                    if error.code == "WFG-NEST-005" {
-                        return Err(AppError::new(
-                            ErrorCategory::ValidationError,
-                            error.message.clone(),
-                        )
-                        .with_code("WFG-NEST-005"));
-                    }
-                }
-                return Err(AppError::new(
-                    ErrorCategory::ValidationError,
-                    format!("task {} failed", outcome.task_id),
-                )
-                .with_code("WFG-EXEC-001"));
+                failed_outcomes.push(outcome);
             }
+        }
+        if let Some(nested_error) = failed_outcomes.iter().find_map(|outcome| {
+            outcome
+                .error_summary
+                .as_ref()
+                .filter(|error| error.code == "WFG-NEST-005")
+        }) {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                nested_error.message.clone(),
+            )
+            .with_code("WFG-NEST-005"));
+        }
+        if !failed_outcomes.is_empty() {
+            let mut failed_task_ids: Vec<&str> = failed_outcomes
+                .iter()
+                .map(|outcome| outcome.task_id.as_str())
+                .collect();
+            failed_task_ids.sort_unstable();
+            for task_id in &failed_task_ids {
+                println!(
+                    "newton: task failed execution_id={} task_id={} inspect: newton log show {} --task {}",
+                    self.workflow_execution.execution_id,
+                    task_id,
+                    self.workflow_execution.execution_id,
+                    task_id
+                );
+            }
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                format!("task {} failed", failed_task_ids[0]),
+            )
+            .with_code("WFG-EXEC-001"));
         }
         let snapshot = guard.snapshot();
         drop(guard);

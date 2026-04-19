@@ -5,10 +5,11 @@ pub mod init;
 
 pub use args::{
     ArtifactCommand, ArtifactsArgs, BatchArgs, CheckpointCommand, CheckpointsArgs, DotArgs,
-    ExplainArgs, InitArgs, LintArgs, MonitorArgs, ResumeArgs, RunArgs, ServeArgs, ValidateArgs,
-    WebhookArgs, WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
+    ExplainArgs, InitArgs, LintArgs, LogArgs, LogCommand, MonitorArgs, ResumeArgs, RunArgs,
+    ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
 };
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 const HELP_TEMPLATE: &str = "\
 {name}\n\
@@ -28,6 +29,9 @@ WORKFLOW COMMANDS:\n{subcommands}\n";
 pub struct Args {
     #[command(subcommand)]
     pub command: Command,
+    /// Override log directory for this invocation (highest priority over logging.toml)
+    #[arg(long, global = true, value_name = "PATH")]
+    pub log_dir: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -308,6 +312,12 @@ Webhook endpoints include built-in security features like request validation and
 Configure authentication tokens and HTTPS for production deployments."
     )]
     Webhook(WebhookArgs),
+    #[command(
+        about = "List and replay workflow execution history",
+        long_about = "Log provides access to the per-task execution history stored in .newton/state/workflows/.\n\nUse 'log list' to enumerate executions, and 'log show <execution-id>' to display the resolved inputs, operator, and output for every task in that run.",
+        after_help = "DEFAULT LOG PATH:\n    <workspace>/.newton/logs/newton.log\n\nLOG LOCATION CONTROLS:\n    --log-dir PATH         Override log directory (highest priority)\n    logging.toml log_dir   Config file setting (second priority)\n    workspace default      <workspace>/.newton/logs/ (fallback)\n\nFILTER/VERBOSITY:\n    RUST_LOG=debug         Sets tracing filter level only; does NOT change log directory.\n\nINSPECTION FLOW:\n    newton log list --last 10\n    newton log show <execution-id>\n    newton log show <execution-id> --task <task-id> --verbose"
+    )]
+    Log(LogArgs),
 }
 
 pub async fn run(args: Args) -> crate::Result<()> {
@@ -339,5 +349,6 @@ pub async fn run(args: Args) -> crate::Result<()> {
         Command::Webhook(webhook_args) => commands::webhook(webhook_args)
             .await
             .map_err(anyhow::Error::from),
+        Command::Log(log_args) => commands::log(log_args).map_err(anyhow::Error::from),
     }
 }
