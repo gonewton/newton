@@ -18,6 +18,7 @@ Newton includes a production workflow runner with YAML-defined tasks and determi
 - Deterministic completion: goal gates, terminal tasks, explicit completion policy, stable error codes
 - Runtime durability: checkpoint persistence, resume support, artifact routing/cleanup, execution warnings
 - Authoring support: macros, `include_if` filtering, `{{ ... }}` interpolation, and `$expr` evaluation
+- **Sub-workflows**: a task can run another workflow file in-process (`WorkflowOperator`), with optional merged context and trigger payload, workspace-relative path sandboxing, and a configurable nesting depth limit
 
 ### Built-in Workflow Operators
 
@@ -28,8 +29,21 @@ Newton includes a production workflow runner with YAML-defined tasks and determi
 | `SetContextOperator` | Deep-merge a patch object into the global workflow context |
 | `ReadControlFileOperator` | Read and parse a JSON file from a path resolved at runtime |
 | `AssertCompletedOperator` | Assert that a set of task IDs have completed before proceeding |
+| `WorkflowOperator` | Run a **nested workflow** from another YAML file; merges parent context and triggers into the child, returns child execution summary (for example `child_execution_id`) |
 | `HumanApprovalOperator` | Pause for a boolean approve/reject decision from a human operator |
 | `HumanDecisionOperator` | Pause for a multiple-choice selection from a human operator |
+
+Newton also ships additional operators (for example agent and GitHub integrations); run `newton explain <workflow.yaml>` for the exact graph your file uses.
+
+#### Sub-workflows
+
+Use **`WorkflowOperator`** when you want to reuse a workflow graph or split a large file into smaller ones. In a task, set `operator: WorkflowOperator` and pass:
+
+- **`workflow_path`** (required): path to the child workflow YAML, relative to the **parent** workflow file and restricted to your workspace
+- **`context`** (optional): JSON object shallow-merged into the child workflow context (combined with the parent context)
+- **`triggers`** (optional): JSON object shallow-merged into the child trigger payload (combined with the parent triggers)
+
+Child runs are tracked separately; the task output includes identifiers such as `child_execution_id` so you can correlate parent and child in logs and checkpoints. Nesting is limited by a maximum depth (default allows typical reuse without unbounded recursion).
 
 ## Installation
 
@@ -98,10 +112,10 @@ For an existing repository, run `newton init .` at the repo root instead of crea
 
 ```bash
 newton --version
-newton 0.5.33
+newton 0.5.78
 
 $ newton --help
-newton 0.5.33
+newton 0.5.78
 Newton CLI for optimization and workflow automation
 
 Usage: newton <COMMAND>
