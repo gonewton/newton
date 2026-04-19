@@ -2,14 +2,19 @@
 
 use crate::cli::args::{
     ArtifactCommand, ArtifactsArgs, BatchArgs, CheckpointCommand, CheckpointsArgs, DotArgs,
-    ExplainArgs, KeyValuePair, LintArgs, MonitorArgs, OutputFormat, ResumeArgs, RunArgs, ServeArgs,
-    ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
+    ExplainArgs, KeyValuePair, LintArgs, LogArgs, LogCommand, MonitorArgs, OutputFormat,
+    ResumeArgs, RunArgs, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
+    WebhookStatusArgs,
 };
 use crate::core::batch_config::BatchProjectConfig;
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::monitor;
+use crate::workflow::checkpoint::WorkflowStatePaths;
 use crate::workflow::operator::OperatorRegistry;
+use crate::workflow::state::{
+    OutputRef, WorkflowCheckpoint, WorkflowExecution, WorkflowTaskRunRecord, WorkflowTaskStatus,
+};
 use crate::workflow::{
     artifacts, checkpoint, dot as workflow_dot,
     executor::{self as workflow_executor, ExecutionOverrides},
@@ -655,6 +660,598 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{:.1} {}", size, UNITS[index])
     }
+}
+
+pub fn log(args: LogArgs) -> StdResult<(), AppError> {
+    match args.command {
+        LogCommand::List {
+            workspace,
+            last,
+            json,
+        } => log_list(workspace, last, json),
+        LogCommand::Show {
+            execution_id,
+            workspace,
+            task,
+            verbose,
+            json,
+        } => log_show(execution_id, workspace, task, verbose, json),
+    }
+}
+
+fn log_list(
+    workspace: Option<PathBuf>,
+    last: Option<usize>,
+    emit_json: bool,
+) -> StdResult<(), AppError> {
+    if let Some(n) = last {
+        if n == 0 {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "--last must be a positive integer (greater than zero)",
+            )
+            .with_code("LOG-003"));
+        }
+    }
+
+    let workspace = resolve_workflow_workspace(workspace)?;
+    let base = WorkflowStatePaths::workspace_root(&workspace);
+
+    let mut entries: Vec<(WorkflowExecution, Option<usize>)> = Vec::new();
+
+    if base.exists() {
+        for entry in fs::read_dir(&base)
+            .map_err(|err| {
+                AppError::new(
+                    ErrorCategory::IoError,
+                    format!("failed to list workflows state: {err}"),
+                )
+            })?
+            .flatten()
+        {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            if let Ok(uuid) = uuid::Uuid::parse_str(&entry.file_name().to_string_lossy()) {
+                let exec_file = base.join(uuid.to_string()).join("execution.json");
+                if let Ok(bytes) = fs::read(&exec_file) {
+                    if let Ok(execution) = serde_json::from_slice::<WorkflowExecution>(&bytes) {
+                        // Try to get checkpoint task count.
+                        let checkpoint_task_count = {
+                            let ckpt_file = base.join(uuid.to_string()).join("checkpoint.json");
+                            fs::read(&ckpt_file)
+                                .ok()
+                                .and_then(|b| serde_json::from_slice::<WorkflowCheckpoint>(&b).ok())
+                                .map(|ckpt| ckpt.completed.len())
+                        };
+                        entries.push((execution, checkpoint_task_count));
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort: newest first by started_at, tie-break by execution_id descending.
+    entries.sort_by(|(a, _), (b, _)| {
+        b.started_at
+            .cmp(&a.started_at)
+            .then_with(|| b.execution_id.to_string().cmp(&a.execution_id.to_string()))
+    });
+
+    // Apply --last filter.
+    if let Some(n) = last {
+        entries.truncate(n);
+    }
+
+    if emit_json {
+        let items: Vec<Value> = entries
+            .iter()
+            .map(|(exec, ckpt_count)| {
+                let task_count = ckpt_count.unwrap_or(exec.task_runs.len());
+                let duration_ms = exec
+                    .completed_at
+                    .map(|completed| {
+                        completed
+                            .signed_duration_since(exec.started_at)
+                            .num_milliseconds()
+                    })
+                    .filter(|&ms| ms >= 0)
+                    .map(|ms| ms as u64);
+                let failed_task_id = exec
+                    .task_runs
+                    .iter()
+                    .find(|r| r.status == WorkflowTaskStatus::Failed)
+                    .map(|r| r.task_id.clone());
+                json!({
+                    "execution_id": exec.execution_id.to_string(),
+                    "workflow_file": exec.workflow_file,
+                    "status": exec.status.as_str(),
+                    "started_at": exec.started_at.to_rfc3339(),
+                    "task_count": task_count,
+                    "duration_ms": duration_ms,
+                    "failed_task_id": failed_task_id,
+                })
+            })
+            .collect();
+        let serialized = serde_json::to_string_pretty(&items).map_err(|err| {
+            AppError::new(
+                ErrorCategory::SerializationError,
+                format!("failed to serialize execution list: {err}"),
+            )
+        })?;
+        println!("{serialized}");
+        return Ok(());
+    }
+
+    // Text table output.
+    println!(
+        "{:<36}  {:<20}  {:<10}  {:<19}  {:>5}  DURATION",
+        "EXECUTION ID", "WORKFLOW", "STATUS", "STARTED AT", "TASKS"
+    );
+    println!("{}", "-".repeat(102));
+    for (exec, ckpt_count) in &entries {
+        let task_count = ckpt_count.unwrap_or(exec.task_runs.len());
+        let duration_str = exec
+            .completed_at
+            .map(|completed| {
+                let ms = completed
+                    .signed_duration_since(exec.started_at)
+                    .num_milliseconds();
+                if ms < 0 {
+                    "-".to_string()
+                } else {
+                    format_duration_short(Duration::from_millis(ms as u64))
+                }
+            })
+            .unwrap_or_else(|| "-".to_string());
+        let workflow_short = {
+            let wf = &exec.workflow_file;
+            if wf.len() > 20 {
+                format!("...{}", &wf[wf.len() - 17..])
+            } else {
+                wf.clone()
+            }
+        };
+        println!(
+            "{:<36}  {:<20}  {:<10}  {:<19}  {:>5}  {}",
+            exec.execution_id,
+            workflow_short,
+            exec.status.as_str(),
+            exec.started_at.format("%Y-%m-%d %H:%M:%S"),
+            task_count,
+            duration_str,
+        );
+    }
+    Ok(())
+}
+
+fn log_show(
+    execution_id: uuid::Uuid,
+    workspace: Option<PathBuf>,
+    task_filter: Option<String>,
+    verbose: bool,
+    emit_json: bool,
+) -> StdResult<(), AppError> {
+    let workspace = resolve_workflow_workspace(workspace)?;
+    let paths = WorkflowStatePaths::new(&workspace, &execution_id);
+
+    // Load execution.json — LOG-001 if not found.
+    if !paths.execution_file.exists() {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "execution not found: no execution.json at {} (LOG-001)",
+                paths.execution_file.display()
+            ),
+        )
+        .with_code("LOG-001"));
+    }
+    let exec_bytes = fs::read(&paths.execution_file).map_err(|err| {
+        AppError::new(
+            ErrorCategory::IoError,
+            format!("failed to read execution.json: {err}"),
+        )
+    })?;
+    let execution: WorkflowExecution = serde_json::from_slice(&exec_bytes).map_err(|err| {
+        AppError::new(
+            ErrorCategory::SerializationError,
+            format!("failed to deserialize execution.json: {err}"),
+        )
+    })?;
+
+    // Try to load checkpoint.json.
+    let checkpoint_opt: Option<WorkflowCheckpoint> = if paths.checkpoint_file.exists() {
+        fs::read(&paths.checkpoint_file)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+    } else {
+        None
+    };
+
+    if emit_json {
+        return log_show_json(
+            execution_id,
+            execution,
+            checkpoint_opt,
+            task_filter,
+            &workspace,
+        );
+    }
+
+    log_show_text(
+        execution_id,
+        execution,
+        checkpoint_opt,
+        task_filter,
+        verbose,
+        &workspace,
+    )
+}
+
+/// Collect and sort task run records for replay ordering.
+fn collect_sorted_records(checkpoint: &WorkflowCheckpoint) -> Vec<WorkflowTaskRunRecord> {
+    let mut records: Vec<WorkflowTaskRunRecord> = checkpoint.completed.values().cloned().collect();
+    records.sort_by(|a, b| {
+        a.started_at
+            .cmp(&b.started_at)
+            .then_with(|| a.task_id.cmp(&b.task_id))
+            .then_with(|| a.run_seq.cmp(&b.run_seq))
+    });
+    records
+}
+
+fn resolve_operator_str(task_id: &str, checkpoint: &WorkflowCheckpoint) -> String {
+    if let Some(tasks) = &checkpoint.runtime_tasks {
+        if let Some(task) = tasks.iter().find(|t| t.id == task_id) {
+            return task.operator.clone();
+        }
+    }
+    "(unknown)".to_string()
+}
+
+fn materialize_output(output_ref: &OutputRef, workspace: &Path) -> String {
+    match output_ref.materialize(workspace) {
+        Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_else(|_| "(error)".to_string()),
+        Err(err) => {
+            // Show artifact missing if IoError (file deleted).
+            if let OutputRef::Artifact { path, .. } = output_ref {
+                format!("(artifact missing: {})", path.display())
+            } else {
+                format!("(error: {err})")
+            }
+        }
+    }
+}
+
+fn log_show_text(
+    _execution_id: uuid::Uuid,
+    execution: WorkflowExecution,
+    checkpoint_opt: Option<WorkflowCheckpoint>,
+    task_filter: Option<String>,
+    verbose: bool,
+    workspace: &Path,
+) -> StdResult<(), AppError> {
+    // Print execution header.
+    let duration_str = execution
+        .completed_at
+        .map(|c| {
+            let ms = c
+                .signed_duration_since(execution.started_at)
+                .num_milliseconds();
+            if ms < 0 {
+                "-".to_string()
+            } else {
+                format_duration_short(Duration::from_millis(ms as u64))
+            }
+        })
+        .unwrap_or_else(|| "-".to_string());
+    println!("Execution: {}", execution.execution_id);
+    println!("Workflow:  {}", execution.workflow_file);
+    println!("Status:    {}", execution.status.as_str());
+    println!(
+        "Started:   {}",
+        execution.started_at.format("%Y-%m-%d %H:%M:%S UTC")
+    );
+    println!("Duration:  {duration_str}");
+
+    if let Some(checkpoint) = checkpoint_opt {
+        let records = collect_sorted_records(&checkpoint);
+        let filtered: Vec<WorkflowTaskRunRecord> = if let Some(ref filter) = task_filter {
+            records
+                .into_iter()
+                .filter(|r| &r.task_id == filter)
+                .collect()
+        } else {
+            records
+        };
+
+        // LOG-002: task filter matches nothing.
+        if let Some(ref filter) = task_filter {
+            if filtered.is_empty() {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    format!(
+                        "task filter '{filter}' did not match any task in this execution (LOG-002)",
+                    ),
+                )
+                .with_code("LOG-002"));
+            }
+        }
+
+        let total = filtered.len();
+        for (idx, record) in filtered.iter().enumerate() {
+            let operator = resolve_operator_str(&record.task_id, &checkpoint);
+            let is_failed = record.status == WorkflowTaskStatus::Failed;
+            let status_label = if is_failed {
+                "FAILED"
+            } else {
+                record.status.as_str()
+            };
+
+            if is_failed {
+                println!(
+                    "\n\u{2500}\u{2500}\u{2500} [FAILED] Task {} of {} {}",
+                    idx + 1,
+                    total,
+                    "\u{2500}".repeat(40)
+                );
+            } else {
+                println!(
+                    "\n\u{2500}\u{2500}\u{2500} Task {} of {} {}",
+                    idx + 1,
+                    total,
+                    "\u{2500}".repeat(40)
+                );
+            }
+
+            let duration_ms = record
+                .completed_at
+                .signed_duration_since(record.started_at)
+                .num_milliseconds();
+            let duration_str = if duration_ms >= 0 {
+                format_duration_short(Duration::from_millis(duration_ms as u64))
+            } else {
+                "-".to_string()
+            };
+
+            println!("  ID:       {}  (run {})", record.task_id, record.run_seq);
+            println!("  Operator: {operator}");
+            println!("  Status:   {status_label}");
+            println!("  Duration: {duration_str}");
+
+            if is_failed || verbose {
+                if let Some(ref err) = record.error {
+                    println!("\n  Error:");
+                    println!("    Code:    {}", err.code);
+                    println!("    Message: {}", err.message);
+                }
+            }
+
+            // Show inputs (resolved params).
+            match &record.resolved_params_snapshot {
+                Some(params) => {
+                    println!("\n  Inputs (resolved params):");
+                    let pretty = serde_json::to_string_pretty(params)
+                        .unwrap_or_else(|_| "(error)".to_string());
+                    for line in pretty.lines() {
+                        println!("  {line}");
+                    }
+                }
+                None => {
+                    println!("\n  Inputs (resolved params): (not available)");
+                }
+            }
+
+            // Show output.
+            println!("\n  Output:");
+            let output_str = materialize_output(&record.output_ref, workspace);
+            if output_str.starts_with("(artifact missing:") {
+                println!("  {output_str}");
+            } else {
+                for line in output_str.lines() {
+                    println!("  {line}");
+                }
+            }
+        }
+    } else {
+        // No checkpoint — fall back to execution.json task_runs.
+        println!("\n(full input replay requires completed checkpoint)\n");
+
+        let filtered: Vec<_> = if let Some(ref filter) = task_filter {
+            execution
+                .task_runs
+                .iter()
+                .filter(|r| &r.task_id == filter)
+                .collect()
+        } else {
+            execution.task_runs.iter().collect()
+        };
+
+        // LOG-002 check.
+        if let Some(ref filter) = task_filter {
+            if filtered.is_empty() {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    format!(
+                        "task filter '{filter}' did not match any task in this execution (LOG-002)",
+                    ),
+                )
+                .with_code("LOG-002"));
+            }
+        }
+
+        let total = filtered.len();
+        for (idx, record) in filtered.iter().enumerate() {
+            let is_failed = record.status == WorkflowTaskStatus::Failed;
+            if is_failed {
+                println!(
+                    "\u{2500}\u{2500}\u{2500} [FAILED] Task {} of {} {}",
+                    idx + 1,
+                    total,
+                    "\u{2500}".repeat(40)
+                );
+            } else {
+                println!(
+                    "\u{2500}\u{2500}\u{2500} Task {} of {} {}",
+                    idx + 1,
+                    total,
+                    "\u{2500}".repeat(40)
+                );
+            }
+            println!("  ID:       {}  (run {})", record.task_id, record.run_seq);
+            println!("  Status:   {}", record.status.as_str());
+            println!("  Duration: {}ms", record.duration_ms);
+            if let Some(ref code) = record.error_code {
+                println!("  Error Code: {code}");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn log_show_json(
+    _execution_id: uuid::Uuid,
+    execution: WorkflowExecution,
+    checkpoint_opt: Option<WorkflowCheckpoint>,
+    task_filter: Option<String>,
+    workspace: &Path,
+) -> StdResult<(), AppError> {
+    let tasks_array: Vec<Value>;
+
+    if let Some(ref checkpoint) = checkpoint_opt {
+        let records = collect_sorted_records(checkpoint);
+        let filtered: Vec<WorkflowTaskRunRecord> = if let Some(ref filter) = task_filter {
+            records
+                .into_iter()
+                .filter(|r| &r.task_id == filter)
+                .collect()
+        } else {
+            records
+        };
+
+        // LOG-002 check.
+        if let Some(ref filter) = task_filter {
+            if filtered.is_empty() {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    format!(
+                        "task filter '{filter}' did not match any task in this execution (LOG-002)",
+                    ),
+                )
+                .with_code("LOG-002"));
+            }
+        }
+
+        tasks_array = filtered
+            .iter()
+            .map(|record| {
+                let operator = resolve_operator_str(&record.task_id, checkpoint);
+                let duration_ms = record
+                    .completed_at
+                    .signed_duration_since(record.started_at)
+                    .num_milliseconds();
+                let output = match record.output_ref.materialize(workspace) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        if let OutputRef::Artifact { path, .. } = &record.output_ref {
+                            json!(format!("(artifact missing: {})", path.display()))
+                        } else {
+                            json!(null)
+                        }
+                    }
+                };
+                let error_val = record.error.as_ref().map(|e| {
+                    json!({
+                        "code": e.code,
+                        "category": e.category,
+                        "message": e.message,
+                    })
+                });
+                json!({
+                    "task_id": record.task_id,
+                    "run_seq": record.run_seq,
+                    "operator": operator,
+                    "status": record.status.as_str(),
+                    "started_at": record.started_at.to_rfc3339(),
+                    "completed_at": record.completed_at.to_rfc3339(),
+                    "duration_ms": if duration_ms >= 0 { json!(duration_ms) } else { json!(null) },
+                    "resolved_params": record.resolved_params_snapshot,
+                    "output": output,
+                    "error": error_val,
+                })
+            })
+            .collect();
+    } else {
+        // Fallback to execution.json.
+        let exec_records: Vec<_> = if let Some(ref filter) = task_filter {
+            execution
+                .task_runs
+                .iter()
+                .filter(|r| &r.task_id == filter)
+                .collect()
+        } else {
+            execution.task_runs.iter().collect()
+        };
+
+        if let Some(ref filter) = task_filter {
+            if exec_records.is_empty() {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    format!(
+                        "task filter '{filter}' did not match any task in this execution (LOG-002)",
+                    ),
+                )
+                .with_code("LOG-002"));
+            }
+        }
+
+        tasks_array = exec_records
+            .iter()
+            .map(|record| {
+                json!({
+                    "task_id": record.task_id,
+                    "run_seq": record.run_seq,
+                    "operator": "(unknown)",
+                    "status": record.status.as_str(),
+                    "started_at": null,
+                    "completed_at": null,
+                    "duration_ms": record.duration_ms,
+                    "resolved_params": null,
+                    "output": null,
+                    "error": record.error_code,
+                })
+            })
+            .collect();
+    }
+
+    let exec_val = serde_json::to_value(&execution).map_err(|err| {
+        AppError::new(
+            ErrorCategory::SerializationError,
+            format!("failed to serialize execution: {err}"),
+        )
+    })?;
+
+    let mut result = json!({
+        "execution": exec_val,
+        "tasks": tasks_array,
+    });
+
+    if let Some(filter) = task_filter {
+        result
+            .as_object_mut()
+            .unwrap()
+            .insert("task_filter".to_string(), json!(filter));
+    }
+
+    let serialized = serde_json::to_string_pretty(&result).map_err(|err| {
+        AppError::new(
+            ErrorCategory::SerializationError,
+            format!("failed to serialize log show output: {err}"),
+        )
+    })?;
+    println!("{serialized}");
+    Ok(())
 }
 
 fn resolve_workflow_workspace(path: Option<PathBuf>) -> StdResult<PathBuf, AppError> {

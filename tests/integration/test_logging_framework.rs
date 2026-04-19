@@ -3,8 +3,7 @@ use newton::cli::{args::MonitorArgs, Command};
 use newton::logging;
 use predicates::prelude::*;
 use std::{
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
 };
@@ -25,8 +24,7 @@ fn monitor_context_writes_file_without_console() {
         .current_dir(&workspace);
     cmd.assert().success().stderr(predicate::str::is_empty());
 
-    let contents =
-        fs::read_to_string(log_file_path(&workspace)).expect("failed to read log file");
+    let contents = fs::read_to_string(log_file_path(&workspace)).expect("failed to read log file");
     assert!(contents.contains("monitor integration test"));
 }
 
@@ -46,8 +44,7 @@ fn multi_sink_writes_console_and_file() {
         .success()
         .stderr(predicate::str::contains("multi sink event"));
 
-    let contents =
-        fs::read_to_string(log_file_path(&workspace)).expect("failed to read log file");
+    let contents = fs::read_to_string(log_file_path(&workspace)).expect("failed to read log file");
     assert!(contents.contains("multi sink event"));
 }
 
@@ -66,10 +63,9 @@ fn opentelemetry_failure_logs_warning_and_continues() {
         .env("OTEL_EXPORTER_OTLP_ENDPOINT", "bad url");
     cmd.assert()
         .success()
-        .stderr(predicate::str::contains("OpenTelemetry exporter disabled"));
+        .stderr(predicate::str::contains("OpenTelemetry disabled"));
 
-    let contents =
-        fs::read_to_string(log_file_path(&workspace)).expect("failed to read log file");
+    let contents = fs::read_to_string(log_file_path(&workspace)).expect("failed to read log file");
     assert!(contents.contains("otel failure test"));
 }
 
@@ -83,14 +79,14 @@ fn logging_guard_flushes_on_drop() {
     let command = Command::Monitor(MonitorArgs {
         http_url: None,
         ws_url: None,
+        backend: false,
     });
     let guard =
-        logging::init(&command).expect("failed to initialize logging for guard flush test");
+        logging::init(&command, None).expect("failed to initialize logging for guard flush test");
     tracing::info!("logging guard flush test");
     drop(guard);
 
-    let contents =
-        fs::read_to_string(log_file_path(&workspace)).expect("failed to read log file");
+    let contents = fs::read_to_string(log_file_path(&workspace)).expect("failed to read log file");
     assert!(contents.contains("logging guard flush test"));
 
     env::set_current_dir(original_dir).expect("failed to restore cwd");
@@ -104,4 +100,21 @@ fn workspace_path(temp_dir: &TempDir, name: &str) -> PathBuf {
 
 fn log_file_path(workspace: &Path) -> PathBuf {
     workspace.join(".newton/logs/newton.log")
+}
+
+#[test]
+fn log_dir_override_flag_is_accepted() {
+    let temp_dir = TempDir::new().expect("failed to create temp dir");
+    let log_dir = temp_dir.path().join("custom_logs");
+    fs::create_dir_all(&log_dir).expect("failed to create custom log dir");
+    let workspace = workspace_path(&temp_dir, "logdir_test");
+
+    let mut cmd =
+        ProcessCommand::cargo_bin("logging_integration_helper").expect("failed to build helper");
+    cmd.arg("localdev")
+        .arg("--workspace")
+        .arg(&workspace)
+        .arg("--message")
+        .arg("log dir override test");
+    cmd.assert().success();
 }

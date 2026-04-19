@@ -13,7 +13,7 @@ use crate::logging::layers as layers_mod;
 use crate::logging::layers::{console, file, opentelemetry};
 use crate::{
     cli::{
-        args::{ArtifactCommand, CheckpointCommand, WebhookCommand},
+        args::{ArtifactCommand, CheckpointCommand, LogCommand, WebhookCommand},
         Command,
     },
     core::find_workspace_root,
@@ -55,7 +55,7 @@ impl LoggingGuard {
 /// Initialize the reusable logging framework for the given CLI command.
 ///
 /// This registers tracing subscribers, creates log directories, and keeps optional OpenTelemetry resources alive.
-pub fn init(command: &Command) -> Result<LoggingGuard> {
+pub fn init(command: &Command, log_dir_override: Option<&Path>) -> Result<LoggingGuard> {
     if LOGGING_INITIALIZED.load(Ordering::SeqCst) {
         return Err(anyhow!("logging already initialized"));
     }
@@ -69,7 +69,12 @@ pub fn init(command: &Command) -> Result<LoggingGuard> {
         .transpose()?
         .flatten();
 
-    let settings = build_effective_settings(context, workspace_root.as_deref(), config.as_ref())?;
+    let settings = build_effective_settings(
+        context,
+        workspace_root.as_deref(),
+        config.as_ref(),
+        log_dir_override,
+    )?;
 
     let filter = EnvFilter::try_new(&settings.log_level)
         .with_context(|| format!("failed to create log filter from '{}'", settings.log_level))?;
@@ -154,8 +159,18 @@ pub(crate) fn build_effective_settings(
     context: ExecutionContext,
     workspace: Option<&Path>,
     config: Option<&LoggingConfigFile>,
+    log_dir_override: Option<&Path>,
 ) -> Result<EffectiveLoggingSettings> {
-    let log_dir = determine_log_dir(workspace, config)?;
+    let log_dir = if let Some(override_path) = log_dir_override {
+        // Use the base as workspace/.newton or home/.newton for relative path normalization.
+        let base = workspace
+            .map(|ws| ws.join(".newton"))
+            .or_else(|| dirs_next::home_dir().map(|h| h.join(".newton")))
+            .unwrap_or_else(|| PathBuf::from(".newton"));
+        normalize_path(&base, override_path)
+    } else {
+        determine_log_dir(workspace, config)?
+    };
     let log_file = log_dir.join(LOG_FILE_NAME);
     let log_level = select_log_level(config);
     let file_enabled = select_file_enabled(context, config);
@@ -209,6 +224,10 @@ fn workspace_root_for_command(command: &Command) -> Result<Option<PathBuf>> {
         Command::Webhook(args) => match &args.command {
             WebhookCommand::Serve(serve_args) => Some(serve_args.workspace.clone()),
             WebhookCommand::Status(status_args) => Some(status_args.workspace.clone()),
+        },
+        Command::Log(args) => match &args.command {
+            LogCommand::List { workspace, .. } => workspace.clone(),
+            LogCommand::Show { workspace, .. } => workspace.clone(),
         },
         Command::Monitor(_) => {
             let cwd = env::current_dir()?;

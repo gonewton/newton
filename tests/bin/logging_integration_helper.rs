@@ -15,7 +15,7 @@ fn main() -> Result<()> {
     let command = config.into_command()?;
 
     let _guard =
-        logging::init(&command).context("failed to initialize logging from helper binary")?;
+        logging::init(&command, None).context("failed to initialize logging from helper binary")?;
 
     tracing::info!("{}", message);
 

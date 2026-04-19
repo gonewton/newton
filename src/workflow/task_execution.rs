@@ -21,6 +21,8 @@ use uuid::Uuid;
 
 use crate::workflow::executor::{ExecutionOverrides, GraphHandle, TaskOutcome};
 
+pub const RESOLVED_PARAMS_SNAPSHOT_LIMIT_BYTES: usize = 65_536;
+
 /// Executes a single workflow task with retry logic, timeout handling, and context patching.
 ///
 /// This function handles the complete lifecycle of task execution including:
@@ -85,6 +87,7 @@ pub async fn run_task(
                     run_seq,
                     started_at,
                     completed_at,
+                    resolved_params.clone(),
                 ));
             }
             Err(err) => {
@@ -97,6 +100,7 @@ pub async fn run_task(
                         started_at,
                         completed_at,
                         redact_keys.as_ref(),
+                        resolved_params.clone(),
                     ));
                 }
                 apply_backoff_and_retry(&mut retry_state, &mut rng).await;
@@ -225,6 +229,7 @@ fn build_success_outcome(
     run_seq: u64,
     started_at: chrono::DateTime<Utc>,
     completed_at: chrono::DateTime<Utc>,
+    resolved_params: Value,
 ) -> TaskOutcome {
     tracing::info!(
         task_id = %task_id,
@@ -246,10 +251,12 @@ fn build_success_outcome(
         started_at,
         completed_at,
         error_summary: None,
+        resolved_params,
     }
 }
 
 /// Builds failure TaskOutcome from execution error.
+#[allow(clippy::too_many_arguments)]
 fn build_failure_outcome(
     task_id: String,
     err: &AppError,
@@ -258,6 +265,7 @@ fn build_failure_outcome(
     started_at: chrono::DateTime<Utc>,
     completed_at: chrono::DateTime<Utc>,
     redact_keys: &[String],
+    resolved_params: Value,
 ) -> TaskOutcome {
     tracing::warn!(
         task_id = %task_id,
@@ -285,6 +293,7 @@ fn build_failure_outcome(
         started_at,
         completed_at,
         error_summary: Some(summarize_error(err, redact_keys)),
+        resolved_params,
     }
 }
 
@@ -330,6 +339,21 @@ pub fn build_workflow_task_run_record(
     redact_value(&mut persisted_output, &graph_settings.redaction.redact_keys);
     let output_ref =
         artifact_store.route_output(execution_id, &outcome.task_id, run_seq, persisted_output)?;
+
+    // Build resolved_params_snapshot: redact, serialize, apply size cap.
+    let resolved_params_snapshot = {
+        let mut snapshot = outcome.resolved_params.clone();
+        redact_value(&mut snapshot, &graph_settings.redaction.redact_keys);
+        match serde_json::to_vec(&snapshot) {
+            Ok(bytes) if bytes.len() <= RESOLVED_PARAMS_SNAPSHOT_LIMIT_BYTES => Some(snapshot),
+            Ok(bytes) => {
+                let size_bytes = bytes.len();
+                Some(serde_json::json!({"_truncated": true, "size_bytes": size_bytes}))
+            }
+            Err(_) => None,
+        }
+    };
+
     Ok(WorkflowTaskRunRecord {
         task_id: outcome.task_id.clone(),
         run_seq,
@@ -339,5 +363,6 @@ pub fn build_workflow_task_run_record(
         goal_gate_group,
         output_ref,
         error: outcome.error_summary.clone(),
+        resolved_params_snapshot,
     })
 }

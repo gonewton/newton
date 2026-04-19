@@ -4,6 +4,43 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 #[derive(Args, Clone)]
+pub struct LogArgs {
+    #[command(subcommand)]
+    pub command: LogCommand,
+}
+
+#[derive(Subcommand, Clone)]
+pub enum LogCommand {
+    #[command(about = "List workflow execution history for a workspace")]
+    List {
+        #[arg(long, value_name = "PATH")]
+        workspace: Option<PathBuf>,
+        /// Only list the N most recent executions (after sort by started_at desc)
+        #[arg(long, value_name = "N")]
+        last: Option<usize>,
+        /// Emit machine-readable JSON (stable keys per spec §4.2)
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = "Replay task-by-task execution detail for a specific run")]
+    Show {
+        #[arg(value_name = "EXECUTION_ID")]
+        execution_id: Uuid,
+        #[arg(long, value_name = "PATH")]
+        workspace: Option<PathBuf>,
+        /// Filter output to a single task ID
+        #[arg(long, value_name = "TASK_ID")]
+        task: Option<String>,
+        /// Expand single-task output for debugging (only effective with --task)
+        #[arg(short, long)]
+        verbose: bool,
+        /// Emit machine-readable JSON (stable keys per spec §4.2)
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Args, Clone)]
 pub struct RunArgs {
     /// Path to the workflow YAML file
     #[arg(value_name = "WORKFLOW", index = 1)]

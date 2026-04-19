@@ -243,6 +243,45 @@ You can tune logging with:
 
 OpenTelemetry export runs only when a valid endpoint is set in config or via `OTEL_EXPORTER_OTLP_ENDPOINT`. `RUST_LOG` overrides the default level when set.
 
+### Changing the log location
+
+By default Newton writes the tracing log to `<workspace>/.newton/logs/newton.log`. To redirect it to a different directory for a single invocation, pass `--log-dir`:
+
+```bash
+newton --log-dir /tmp/newton-logs run my-workflow.yaml
+newton --log-dir /var/log/newton batch --once
+```
+
+The path is normalized relative to the current directory when it is not absolute. You can also set `logging.log_dir` in `.newton/config/logging.toml` to change the default permanently for a workspace.
+
+### Reviewing execution history
+
+Newton records each workflow run to `.newton/state/workflows/<execution-id>/`. Use `newton log` subcommands to inspect past runs:
+
+```bash
+# List recent runs in the current workspace (newest first)
+newton log list
+
+# Limit output to the last 5 runs
+newton log list --last 5
+
+# Show task-by-task replay for a specific run
+newton log show <execution-id>
+
+# Filter to a single task and show resolved parameters
+newton log show <execution-id> --task my-task-id --verbose
+
+# Output as JSON (for scripting)
+newton log list --json
+newton log show <execution-id> --json
+```
+
+When a task fails, Newton prints a hint to stdout:
+
+```
+newton: task failed execution_id=<UUID> task_id=<TASK_ID> inspect: newton log show <UUID> --task <TASK_ID>
+```
+
 ### Troubleshooting TUI/logging conflicts
 
 - If `newton monitor` shows garbled output when you run `RUST_LOG=debug`, confirm no console sink is configured (`console_output` defaults to `none` in the TUI context) and inspect `<workspace>/.newton/logs/newton.log` for the emitted events.
