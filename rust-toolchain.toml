@@ -1,5 +1,5 @@
 [toolchain]
 # Pin minor series so local rustup, git hooks, and CI agree on Clippy behavior. Unpinned
 # `stable` can lag until `rustup update`, while CI often installs the newest stable first.
-channel = "1.94"
+channel = "1.93.1"
 components = ["rust-src", "rustfmt", "clippy"]
