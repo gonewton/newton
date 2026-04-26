@@ -22,6 +22,7 @@ use tokio::io::AsyncBufReadExt;
 use tokio::process::Command;
 
 const OUTPUT_CAPTURE_LIMIT_BYTES: usize = 1_048_576;
+const QUOTA_EXCERPT_MAX_CHARS: usize = 240;
 
 pub struct AgentOperator {
     workspace_root: PathBuf,
@@ -601,6 +602,190 @@ struct SdkExecResult {
     token_usage: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum QuotaCategory {
+    Hourly,
+    Daily,
+    Weekly,
+    Tokens,
+    Requests,
+    Unknown,
+}
+
+impl QuotaCategory {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Hourly => "hourly",
+            Self::Daily => "daily",
+            Self::Weekly => "weekly",
+            Self::Tokens => "tokens",
+            Self::Requests => "requests",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct QuotaSignal {
+    provider: String,
+    category: QuotaCategory,
+    raw_excerpt: String,
+    events_artifact: Option<String>,
+    stderr_artifact: Option<String>,
+}
+
+fn bounded_excerpt(text: &str) -> String {
+    text.chars().take(QUOTA_EXCERPT_MAX_CHARS).collect()
+}
+
+fn infer_quota_category(text: &str) -> QuotaCategory {
+    let lower = text.to_ascii_lowercase();
+    let ordered: &[(QuotaCategory, &[&str])] = &[
+        (QuotaCategory::Hourly, &["hourly", "per hour", "hour"]),
+        (QuotaCategory::Daily, &["daily", "per day", "day"]),
+        (QuotaCategory::Weekly, &["weekly", "per week", "week"]),
+        (
+            QuotaCategory::Tokens,
+            &["token", "tokens", "context length", "max tokens"],
+        ),
+        (
+            QuotaCategory::Requests,
+            &["request", "requests", "rate limit", "rpm", "rps"],
+        ),
+    ];
+    for (category, patterns) in ordered {
+        if patterns.iter().any(|p| lower.contains(p)) {
+            return category.clone();
+        }
+    }
+    QuotaCategory::Unknown
+}
+
+fn json_has_numeric_429(value: &serde_json::Value) -> bool {
+    match value {
+        Value::Number(n) => n.as_i64() == Some(429),
+        Value::Array(items) => items.iter().any(json_has_numeric_429),
+        Value::Object(map) => map.iter().any(|(_, v)| json_has_numeric_429(v)),
+        _ => false,
+    }
+}
+
+fn json_has_quota_markers(value: &serde_json::Value) -> bool {
+    match value {
+        Value::String(s) => {
+            let lower = s.to_ascii_lowercase();
+            lower.contains("quota")
+                || lower.contains("usage limit")
+                || lower.contains("rate limit")
+                || lower.contains("out of usage")
+                || lower.contains("exhaust")
+        }
+        Value::Array(items) => items.iter().any(json_has_quota_markers),
+        Value::Object(map) => map.iter().any(|(k, v)| {
+            let key = k.to_ascii_lowercase();
+            key.contains("quota")
+                || key.contains("usage")
+                || key.contains("rate_limit")
+                || key.contains("rate")
+                || key.contains("limit")
+                || json_has_quota_markers(v)
+        }),
+        _ => false,
+    }
+}
+
+fn text_looks_like_quota(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("out of usage")
+        || lower.contains("usage exhausted")
+        || lower.contains("quota exceeded")
+        || lower.contains("rate limit")
+        || lower.contains("too many requests")
+        || lower.contains("resource exhausted")
+        || (lower.contains("429") && (lower.contains("usage") || lower.contains("quota")))
+}
+
+fn detect_quota_signal_from_events(
+    engine_name: &str,
+    events: &[aikit_sdk::AgentEvent],
+    events_artifact: Option<String>,
+    stderr_artifact: Option<String>,
+) -> Option<QuotaSignal> {
+    for event in events {
+        if let aikit_sdk::AgentEventPayload::JsonLine(payload) = &event.payload {
+            let payload_text = payload.to_string();
+            let has_quota = json_has_quota_markers(payload) || text_looks_like_quota(&payload_text);
+            if json_has_numeric_429(payload) && has_quota {
+                return Some(QuotaSignal {
+                    provider: engine_name.to_string(),
+                    category: infer_quota_category(&payload_text),
+                    raw_excerpt: bounded_excerpt(&payload_text),
+                    events_artifact,
+                    stderr_artifact,
+                });
+            }
+        }
+
+        if let Some(text) = extract_text_from_sdk_event(event) {
+            if text_looks_like_quota(&text) {
+                return Some(QuotaSignal {
+                    provider: engine_name.to_string(),
+                    category: infer_quota_category(&text),
+                    raw_excerpt: bounded_excerpt(&text),
+                    events_artifact,
+                    stderr_artifact,
+                });
+            }
+        }
+    }
+    None
+}
+
+fn detect_quota_signal_from_stderr_artifact(
+    engine_name: &str,
+    stderr_path: &std::path::Path,
+    stderr_rel: &str,
+    events_artifact: Option<String>,
+) -> Option<QuotaSignal> {
+    let stderr = std::fs::read_to_string(stderr_path).ok()?;
+    let line = stderr
+        .lines()
+        .find(|l| text_looks_like_quota(l))
+        .map_or_else(|| stderr.clone(), std::string::ToString::to_string);
+    if !text_looks_like_quota(&line) {
+        return None;
+    }
+    Some(QuotaSignal {
+        provider: engine_name.to_string(),
+        category: infer_quota_category(&line),
+        raw_excerpt: bounded_excerpt(&line),
+        events_artifact,
+        stderr_artifact: Some(stderr_rel.to_string()),
+    })
+}
+
+fn quota_signal_to_error(signal: QuotaSignal) -> AppError {
+    let mut error = AppError::new(
+        ErrorCategory::ResourceError,
+        format!(
+            "agent provider quota exhausted for '{}' ({})",
+            signal.provider,
+            signal.category.as_str()
+        ),
+    )
+    .with_code("WFG-AGENT-008");
+    error.add_context("provider", &signal.provider);
+    error.add_context("quota_category", signal.category.as_str());
+    error.add_context("raw_excerpt", &signal.raw_excerpt);
+    if let Some(events_artifact) = signal.events_artifact {
+        error.add_context("events_artifact", &events_artifact);
+    }
+    if let Some(stderr_artifact) = signal.stderr_artifact {
+        error.add_context("stderr_artifact", &stderr_artifact);
+    }
+    error
+}
+
 /// Execute an AI engine via aikit-sdk, handling loop mode and signal matching.
 /// Writes a NDJSON events artifact using SDK AgentEvent JSON serialization.
 #[allow(clippy::too_many_arguments)]
@@ -634,6 +819,14 @@ async fn execute_sdk_engine(
     let mut fallback_token_usage: Option<serde_json::Value> = None;
     // Primary token usage from the most recent RunResult.token_usage (precedence over fallback).
     let mut primary_token_usage: Option<serde_json::Value> = None;
+    let events_artifact_rel = events_ndjson_path.strip_prefix(workspace_root).map_or_else(
+        |_| events_ndjson_path.to_string_lossy().to_string(),
+        |p| p.to_string_lossy().to_string(),
+    );
+    let stderr_rel = stderr_path.strip_prefix(workspace_root).map_or_else(
+        |_| stderr_path.to_string_lossy().to_string(),
+        |p| p.to_string_lossy().to_string(),
+    );
 
     // NDJSON events artifact writer (opened once, appended across iterations)
     let mut events_ndjson_file = std::fs::OpenOptions::new()
@@ -794,6 +987,28 @@ async fn execute_sdk_engine(
             }
         }
 
+        if let Some(signal) = detect_quota_signal_from_events(
+            engine_name,
+            &events,
+            Some(events_artifact_rel.clone()),
+            if stderr_path.exists() {
+                Some(stderr_rel.clone())
+            } else {
+                None
+            },
+        ) {
+            return Err(quota_signal_to_error(signal));
+        }
+
+        if let Some(signal) = detect_quota_signal_from_stderr_artifact(
+            engine_name,
+            stderr_path,
+            &stderr_rel,
+            Some(events_artifact_rel.clone()),
+        ) {
+            return Err(quota_signal_to_error(signal));
+        }
+
         // Update primary token usage from this iteration's RunResult (precedence over stream events).
         if let Some(ref usage) = iter_run_result.token_usage {
             primary_token_usage = serde_json::to_value(usage).ok();
@@ -811,10 +1026,7 @@ async fn execute_sdk_engine(
     }
 
     // Compute relative path to events artifact
-    let events_artifact_path = events_ndjson_path.strip_prefix(workspace_root).map_or_else(
-        |_| events_ndjson_path.to_string_lossy().to_string(),
-        |p| p.to_string_lossy().to_string(),
-    );
+    let events_artifact_path = events_artifact_rel;
 
     // Token usage precedence: RunResult.token_usage when Some, else latest TokenUsageLine fallback.
     let token_usage = primary_token_usage.or(fallback_token_usage);
@@ -1159,6 +1371,7 @@ mod tests {
     use crate::workflow::schema::WorkflowSettings;
     use serde_json::json;
     use std::collections::HashMap;
+    use tempfile::NamedTempFile;
     use tempfile::TempDir;
 
     fn make_ctx(workspace: &TempDir) -> ExecutionContext {
@@ -1494,5 +1707,73 @@ fi"#,
         let result = op.execute(params, ctx).await.unwrap();
         // "aaa_complete" is alphabetically first and matches → it wins
         assert_eq!(result["signal"], json!("aaa_complete"));
+    }
+
+    #[test]
+    fn detects_quota_signal_from_structured_events() {
+        let events: Vec<aikit_sdk::AgentEvent> = vec![serde_json::from_value(json!({
+            "agent_key": "claude",
+            "seq": 1,
+            "stream": "stderr",
+            "payload": {
+                "json_line": {
+                    "error": {
+                        "status": 429,
+                        "message": "hourly quota exceeded for requests"
+                    }
+                }
+            }
+        }))
+        .expect("event JSON must deserialize")];
+
+        let signal = detect_quota_signal_from_events(
+            "claude",
+            &events,
+            Some("artifacts/events.ndjson".to_string()),
+            Some("artifacts/stderr.txt".to_string()),
+        )
+        .expect("quota signal expected");
+
+        assert_eq!(signal.provider, "claude");
+        assert_eq!(signal.category, QuotaCategory::Hourly);
+    }
+
+    #[test]
+    fn detects_quota_signal_from_stderr_text() {
+        let stderr = NamedTempFile::new().expect("create temp stderr");
+        std::fs::write(
+            stderr.path(),
+            "provider says: out of usage for tokens this billing window",
+        )
+        .expect("write temp stderr");
+
+        let signal = detect_quota_signal_from_stderr_artifact(
+            "codex",
+            stderr.path(),
+            "stderr.txt",
+            Some("events.ndjson".to_string()),
+        )
+        .expect("quota signal expected");
+
+        assert_eq!(signal.provider, "codex");
+        assert_eq!(signal.category, QuotaCategory::Tokens);
+    }
+
+    #[test]
+    fn quota_signal_maps_to_agent_008() {
+        let err = quota_signal_to_error(QuotaSignal {
+            provider: "gemini".to_string(),
+            category: QuotaCategory::Requests,
+            raw_excerpt: "429 too many requests".to_string(),
+            events_artifact: Some("events.ndjson".to_string()),
+            stderr_artifact: Some("stderr.txt".to_string()),
+        });
+        assert_eq!(err.code, "WFG-AGENT-008");
+        assert_eq!(err.category, ErrorCategory::ResourceError);
+        assert_eq!(err.context.get("provider"), Some(&"gemini".to_string()));
+        assert_eq!(
+            err.context.get("quota_category"),
+            Some(&"requests".to_string())
+        );
     }
 }

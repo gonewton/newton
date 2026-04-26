@@ -1648,3 +1648,65 @@ async fn test_scenario_45_nested_non_object_context_fails() {
         .expect("call_child run entry");
     assert_eq!(task_run["error_code"].as_str(), Some("WFG-NEST-005"));
 }
+
+// -----------------------------------------------------------------------------
+// Scenario 46: Planner-like short-circuit after enrichment failure
+// -----------------------------------------------------------------------------
+#[tokio::test]
+async fn test_scenario_46_planner_short_circuit_on_enrich_failure() {
+    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    let state_root = harness.temp_dir.path().join(".newton/state/workflows");
+    let err = harness
+        .run_fixture("46_planner_quota_short_circuit.yaml", None)
+        .await
+        .expect_err("workflow must fail at enrich_spec");
+    assert!(
+        !err.message.is_empty(),
+        "error message should be present for enrich_spec failure"
+    );
+
+    let entries: Vec<_> = std::fs::read_dir(&state_root)
+        .expect("state_root must exist after a run")
+        .flatten()
+        .collect();
+    assert_eq!(entries.len(), 1, "exactly one execution directory expected");
+    let exec_id = Uuid::parse_str(
+        entries[0]
+            .file_name()
+            .to_str()
+            .expect("valid utf8 dir name"),
+    )
+    .expect("execution dir must be a UUID");
+    let execution = read_execution_json(&state_root, exec_id);
+    let ids = task_run_ids(&execution);
+    assert!(ids.contains("enrich_spec"));
+    let update_run = execution["task_runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["task_id"].as_str() == Some("update_board_body"));
+    let move_run = execution["task_runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["task_id"].as_str() == Some("move_to_backlog"));
+    assert!(
+        update_run.is_none_or(|r| r["status"].as_str() != Some("success")),
+        "update_board_body must not execute successfully after enrich failure"
+    );
+    assert!(
+        move_run.is_none_or(|r| r["status"].as_str() != Some("success")),
+        "move_to_backlog must not execute successfully after enrich failure"
+    );
+
+    let enrich_run = execution["task_runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["task_id"].as_str() == Some("enrich_spec"))
+        .expect("enrich_spec run entry");
+    assert_eq!(enrich_run["status"].as_str(), Some("failed"));
+    assert!(enrich_run["error_code"]
+        .as_str()
+        .is_some_and(|code| !code.is_empty()));
+}

@@ -20,6 +20,10 @@ Newton includes a production workflow runner with YAML-defined tasks and determi
 - Authoring support: macros, `include_if` filtering, `{{ ... }}` interpolation, and `$expr` evaluation
 - **Sub-workflows**: a task can run another workflow file in-process (`WorkflowOperator`), with optional merged context and trigger payload, workspace-relative path sandboxing, and a configurable nesting depth limit
 
+### Agent quota failure behavior
+
+For SDK-backed `AgentOperator` engines (`claude`, `agent`, `codex`, `gemini`, `opencode`), Newton now fails the task with `WFG-AGENT-008` when provider quota or usage exhaustion is detected from structured SDK events (for example HTTP `429` with usage markers) or stderr text (for example `out of usage`). The task error summary keeps the existing schema and includes context like provider, quota category, and artifact links when available.
+
 ### Built-in Workflow Operators
 
 | Operator | Purpose |
