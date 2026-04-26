@@ -714,8 +714,10 @@ fn detect_quota_signal_from_events(
     for event in events {
         if let aikit_sdk::AgentEventPayload::JsonLine(payload) = &event.payload {
             let payload_text = payload.to_string();
-            let has_quota = json_has_quota_markers(payload) || text_looks_like_quota(&payload_text);
-            if json_has_numeric_429(payload) && has_quota {
+            let has_structured_quota =
+                json_has_numeric_429(payload) || json_has_quota_markers(payload);
+            let has_quota = has_structured_quota || text_looks_like_quota(&payload_text);
+            if has_quota {
                 return Some(QuotaSignal {
                     provider: engine_name.to_string(),
                     category: infer_quota_category(&payload_text),
@@ -1736,6 +1738,36 @@ fi"#,
 
         assert_eq!(signal.provider, "claude");
         assert_eq!(signal.category, QuotaCategory::Hourly);
+    }
+
+    #[test]
+    fn detects_quota_signal_from_structured_usage_without_429() {
+        let events: Vec<aikit_sdk::AgentEvent> = vec![serde_json::from_value(json!({
+            "agent_key": "claude",
+            "seq": 1,
+            "stream": "stderr",
+            "payload": {
+                "json_line": {
+                    "usage": {
+                        "requests_used": 1000,
+                        "requests_limit": 1000
+                    },
+                    "message": "usage limit reached for requests"
+                }
+            }
+        }))
+        .expect("event JSON must deserialize")];
+
+        let signal = detect_quota_signal_from_events(
+            "claude",
+            &events,
+            Some("artifacts/events.ndjson".to_string()),
+            Some("artifacts/stderr.txt".to_string()),
+        )
+        .expect("quota signal expected");
+
+        assert_eq!(signal.provider, "claude");
+        assert_eq!(signal.category, QuotaCategory::Requests);
     }
 
     #[test]

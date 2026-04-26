@@ -469,7 +469,12 @@ async fn sdk_quota_structured_event_returns_agent_008() {
     let workspace = TempDir::new().expect("create temp workspace");
     write_agent_stub(
         &workspace,
-        "echo '{\"error\":{\"status\":429,\"message\":\"hourly quota exceeded\"}}'\nexit 0\n",
+        &[
+            "echo '{\"usage\":{\"requests_used\":1000,\"requests_limit\":1000},\"message\":\"usage limit reached for requests\"}'",
+            "exit 0",
+            "",
+        ]
+        .join("\n"),
     );
     let _path = PathGuard::prepend(workspace.path());
 
