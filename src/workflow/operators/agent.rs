@@ -670,26 +670,86 @@ fn json_has_numeric_429(value: &serde_json::Value) -> bool {
     }
 }
 
-fn json_has_quota_markers(value: &serde_json::Value) -> bool {
-    match value {
-        Value::String(s) => {
-            let lower = s.to_ascii_lowercase();
-            lower.contains("quota")
-                || lower.contains("usage limit")
-                || lower.contains("rate limit")
-                || lower.contains("out of usage")
-                || lower.contains("exhaust")
+fn key_has_token(key: &str, candidates: &[&str]) -> bool {
+    let key_lower = key.to_ascii_lowercase();
+    candidates.iter().any(|token| key_lower.contains(token))
+}
+
+fn metric_name_from_used_key(key: &str) -> Option<String> {
+    let key_lower = key.to_ascii_lowercase();
+    for suffix in ["_used", "_consumed", "_current"] {
+        if let Some(stripped) = key_lower.strip_suffix(suffix) {
+            return Some(stripped.to_string());
         }
-        Value::Array(items) => items.iter().any(json_has_quota_markers),
-        Value::Object(map) => map.iter().any(|(k, v)| {
-            let key = k.to_ascii_lowercase();
-            key.contains("quota")
-                || key.contains("usage")
-                || key.contains("rate_limit")
-                || key.contains("rate")
-                || key.contains("limit")
-                || json_has_quota_markers(v)
-        }),
+    }
+    None
+}
+
+fn metric_name_from_limit_key(key: &str) -> Option<String> {
+    let key_lower = key.to_ascii_lowercase();
+    for suffix in ["_limit", "_quota", "_max", "_allowed"] {
+        if let Some(stripped) = key_lower.strip_suffix(suffix) {
+            return Some(stripped.to_string());
+        }
+    }
+    None
+}
+
+fn extract_numeric(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(num) => num.as_f64(),
+        Value::String(text) => text.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+fn object_has_used_limit_exhaustion(map: &Map<String, Value>) -> bool {
+    let mut used_values: HashMap<String, f64> = HashMap::new();
+    let mut limit_values: HashMap<String, f64> = HashMap::new();
+
+    for (key, value) in map {
+        if let Some(metric) = metric_name_from_used_key(key) {
+            if let Some(number) = extract_numeric(value) {
+                used_values.insert(metric, number);
+            }
+            continue;
+        }
+
+        if let Some(metric) = metric_name_from_limit_key(key) {
+            if let Some(number) = extract_numeric(value) {
+                limit_values.insert(metric, number);
+            }
+            continue;
+        }
+
+        if key_has_token(key, &["used", "consumed", "current"]) {
+            if let Some(number) = extract_numeric(value) {
+                used_values.insert(key.to_ascii_lowercase(), number);
+            }
+        }
+        if key_has_token(key, &["limit", "quota", "max", "allowed"]) {
+            if let Some(number) = extract_numeric(value) {
+                limit_values.insert(key.to_ascii_lowercase(), number);
+            }
+        }
+    }
+
+    used_values
+        .iter()
+        .any(|(metric, used)| limit_values.get(metric).is_some_and(|limit| used >= limit))
+}
+
+fn json_has_quota_exhaustion_evidence(value: &serde_json::Value) -> bool {
+    match value {
+        Value::String(s) => text_looks_like_quota(s),
+        Value::Array(items) => items.iter().any(json_has_quota_exhaustion_evidence),
+        Value::Object(map) => {
+            if object_has_used_limit_exhaustion(map) {
+                return true;
+            }
+            map.iter()
+                .any(|(_, v)| json_has_quota_exhaustion_evidence(v))
+        }
         _ => false,
     }
 }
@@ -715,7 +775,7 @@ fn detect_quota_signal_from_events(
         if let aikit_sdk::AgentEventPayload::JsonLine(payload) = &event.payload {
             let payload_text = payload.to_string();
             let has_structured_quota =
-                json_has_numeric_429(payload) || json_has_quota_markers(payload);
+                json_has_numeric_429(payload) || json_has_quota_exhaustion_evidence(payload);
             let has_quota = has_structured_quota || text_looks_like_quota(&payload_text);
             if has_quota {
                 return Some(QuotaSignal {
@@ -1768,6 +1828,52 @@ fi"#,
 
         assert_eq!(signal.provider, "claude");
         assert_eq!(signal.category, QuotaCategory::Requests);
+    }
+
+    #[test]
+    fn detects_quota_signal_from_structured_used_gte_limit_without_message() {
+        let events: Vec<aikit_sdk::AgentEvent> = vec![serde_json::from_value(json!({
+            "agent_key": "claude",
+            "seq": 1,
+            "stream": "stderr",
+            "payload": {
+                "json_line": {
+                    "usage": {
+                        "requests_used": 1000,
+                        "requests_limit": 1000
+                    }
+                }
+            }
+        }))
+        .expect("event JSON must deserialize")];
+
+        let signal = detect_quota_signal_from_events("claude", &events, None, None)
+            .expect("quota signal expected");
+        assert_eq!(signal.category, QuotaCategory::Requests);
+    }
+
+    #[test]
+    fn does_not_detect_quota_for_normal_usage_metadata() {
+        let events: Vec<aikit_sdk::AgentEvent> = vec![serde_json::from_value(json!({
+            "agent_key": "claude",
+            "seq": 1,
+            "stream": "stdout",
+            "payload": {
+                "json_line": {
+                    "usage": {
+                        "requests_used": 120,
+                        "requests_limit": 1000,
+                        "tokens_used": 2048,
+                        "tokens_limit": 200000
+                    },
+                    "message": "normal usage telemetry"
+                }
+            }
+        }))
+        .expect("event JSON must deserialize")];
+
+        let signal = detect_quota_signal_from_events("claude", &events, None, None);
+        assert!(signal.is_none(), "normal usage telemetry must not fail");
     }
 
     #[test]
