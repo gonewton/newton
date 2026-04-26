@@ -6,13 +6,15 @@ workflow:
     max_time_seconds: 60
     parallel_limit: 1
     continue_on_error: false
+    default_engine: agent
     max_task_iterations: 3
     max_workflow_iterations: 10
   tasks:
     - id: enrich_spec
-      operator: AssertCompletedOperator
+      operator: AgentOperator
       params:
-        require: ["missing_dependency"]
+        engine: agent
+        prompt: "planner enrichment request"
       transitions:
         - to: update_board_body
 

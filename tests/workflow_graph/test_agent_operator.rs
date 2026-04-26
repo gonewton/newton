@@ -1,10 +1,19 @@
 /// Integration tests for AgentOperator and engine drivers (017-h spec).
 use newton::workflow::{
+    executor::{self, ExecutionOverrides},
     lint::{LintRegistry, LintSeverity},
+    operator::OperatorRegistry,
+    operators,
     schema::{self, ContextFidelity, ModelStylesheet, WorkflowSettings},
 };
+use serial_test::serial;
 use std::fs;
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use tempfile::NamedTempFile;
+use tempfile::TempDir;
 
 // ── H3: Engine resolved from settings.default_engine ────────────────────────
 
@@ -348,4 +357,179 @@ workflow:
         lint_113.is_empty(),
         "should not have WFG-LINT-113 when max_iterations is set"
     );
+}
+
+#[cfg(unix)]
+struct PathGuard {
+    original_path: String,
+}
+
+#[cfg(unix)]
+impl PathGuard {
+    fn prepend(dir: &std::path::Path) -> Self {
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", dir.display(), original_path);
+        std::env::set_var("PATH", new_path);
+        Self { original_path }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PathGuard {
+    fn drop(&mut self) {
+        std::env::set_var("PATH", &self.original_path);
+    }
+}
+
+#[cfg(unix)]
+fn write_agent_stub(workspace: &TempDir, script_body: &str) -> PathBuf {
+    let script_path = workspace.path().join("agent");
+    let mut file = fs::File::create(&script_path).expect("create agent stub");
+    writeln!(file, "#!/bin/sh").expect("write shebang");
+    writeln!(
+        file,
+        "if [ \"$1\" = \"--version\" ]; then echo 'agent 0.0.0'; exit 0; fi"
+    )
+    .expect("write --version handler");
+    write!(file, "{script_body}").expect("write stub body");
+    drop(file);
+    let mut perms = fs::metadata(&script_path)
+        .expect("read stub metadata")
+        .permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms).expect("set executable permission");
+    script_path
+}
+
+#[cfg(unix)]
+fn build_registry(
+    workspace: PathBuf,
+    settings: newton::workflow::state::GraphSettings,
+) -> OperatorRegistry {
+    let mut builder = OperatorRegistry::builder();
+    operators::register_builtins(&mut builder, workspace, settings);
+    builder.build()
+}
+
+#[cfg(unix)]
+async fn run_workflow_yaml(
+    workspace: &TempDir,
+    yaml: &str,
+) -> Result<executor::ExecutionSummary, newton::core::error::AppError> {
+    let workflow_file = workspace.path().join("workflow.yaml");
+    fs::write(&workflow_file, yaml).expect("write workflow file");
+    let document = schema::parse_workflow(&workflow_file)?;
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+    executor::execute_workflow(
+        document,
+        workflow_file,
+        registry,
+        workspace.path().to_path_buf(),
+        ExecutionOverrides {
+            parallel_limit: None,
+            max_time_seconds: None,
+            checkpoint_base_path: Some(workspace.path().join(".newton/state/workflows")),
+            artifact_base_path: Some(workspace.path().join(".newton/artifacts")),
+            max_nesting_depth: None,
+            verbose: false,
+            server_notifier: None,
+            pre_seed_nodes: true,
+        },
+    )
+    .await
+}
+
+#[cfg(unix)]
+fn read_enrich_error_code(workspace: &TempDir) -> String {
+    let state_root = workspace.path().join(".newton/state/workflows");
+    let entries: Vec<_> = fs::read_dir(&state_root)
+        .expect("state dir exists")
+        .filter_map(Result::ok)
+        .collect();
+    assert_eq!(entries.len(), 1, "expected one execution directory");
+    let execution_path = entries[0].path().join("execution.json");
+    let execution: serde_json::Value =
+        serde_json::from_slice(&fs::read(&execution_path).expect("read execution.json"))
+            .expect("parse execution.json");
+    execution["task_runs"]
+        .as_array()
+        .expect("task_runs array")
+        .iter()
+        .find(|run| run["task_id"].as_str() == Some("enrich_spec"))
+        .and_then(|run| run["error_code"].as_str())
+        .expect("enrich_spec error_code")
+        .to_string()
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[serial(path_env_agent)]
+async fn sdk_quota_structured_event_returns_agent_008() {
+    let workspace = TempDir::new().expect("create temp workspace");
+    write_agent_stub(
+        &workspace,
+        "echo '{\"error\":{\"status\":429,\"message\":\"hourly quota exceeded\"}}'\nexit 0\n",
+    );
+    let _path = PathGuard::prepend(workspace.path());
+
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: enrich_spec
+    max_time_seconds: 30
+    continue_on_error: false
+    default_engine: agent
+  tasks:
+    - id: enrich_spec
+      operator: "AgentOperator"
+      params:
+        engine: agent
+        prompt: "quota-check"
+      terminal: success
+"#;
+
+    let err = run_workflow_yaml(&workspace, workflow)
+        .await
+        .expect_err("workflow must fail on structured quota");
+    assert_eq!(err.code, "WFG-EXEC-001");
+    assert_eq!(read_enrich_error_code(&workspace), "WFG-AGENT-008");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[serial(path_env_agent)]
+async fn sdk_quota_stderr_event_returns_agent_008() {
+    let workspace = TempDir::new().expect("create temp workspace");
+    write_agent_stub(
+        &workspace,
+        "echo 'provider says out of usage for tokens' >&2\nexit 0\n",
+    );
+    let _path = PathGuard::prepend(workspace.path());
+
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: enrich_spec
+    max_time_seconds: 30
+    continue_on_error: false
+    default_engine: agent
+  tasks:
+    - id: enrich_spec
+      operator: "AgentOperator"
+      params:
+        engine: agent
+        prompt: "quota-check"
+      terminal: success
+"#;
+
+    let err = run_workflow_yaml(&workspace, workflow)
+        .await
+        .expect_err("workflow must fail on stderr quota text");
+    assert_eq!(err.code, "WFG-EXEC-001");
+    assert_eq!(read_enrich_error_code(&workspace), "WFG-AGENT-008");
 }

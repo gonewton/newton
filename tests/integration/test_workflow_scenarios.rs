@@ -13,12 +13,57 @@ use newton::workflow::operators::{self, BuiltinOperatorDeps};
 use newton::workflow::schema::{self, TriggerType, WorkflowTrigger};
 use newton::workflow::state::GraphSettings;
 use serde_json::{json, Value};
+use serial_test::serial;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
+
+#[cfg(unix)]
+struct PathGuard {
+    original_path: String,
+}
+
+#[cfg(unix)]
+impl PathGuard {
+    fn prepend(dir: &Path) -> Self {
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", dir.display(), original_path);
+        std::env::set_var("PATH", new_path);
+        Self { original_path }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PathGuard {
+    fn drop(&mut self) {
+        std::env::set_var("PATH", &self.original_path);
+    }
+}
+
+#[cfg(unix)]
+fn write_agent_stub(workspace: &Path, script_body: &str) {
+    let script_path = workspace.join("agent");
+    let mut file = std::fs::File::create(&script_path).expect("create agent stub");
+    writeln!(file, "#!/bin/sh").expect("write shebang");
+    writeln!(
+        file,
+        "if [ \"$1\" = \"--version\" ]; then echo 'agent 0.0.0'; exit 0; fi"
+    )
+    .expect("write --version handler");
+    write!(file, "{script_body}").expect("write stub body");
+    drop(file);
+    let mut perms = std::fs::metadata(&script_path)
+        .expect("read stub metadata")
+        .permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script_path, perms).expect("set executable permission");
+}
 
 #[derive(Clone)]
 pub enum MockCommandStep {
@@ -1653,17 +1698,23 @@ async fn test_scenario_45_nested_non_object_context_fails() {
 // Scenario 46: Planner-like short-circuit after enrichment failure
 // -----------------------------------------------------------------------------
 #[tokio::test]
+#[cfg(unix)]
+#[serial(path_env_agent)]
 async fn test_scenario_46_planner_short_circuit_on_enrich_failure() {
     let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    write_agent_stub(
+        harness.temp_dir.path(),
+        "echo '{\"error\":{\"status\":429,\"message\":\"hourly quota exceeded\"}}'\nexit 0\n",
+    );
+    let _path = PathGuard::prepend(harness.temp_dir.path());
+
     let state_root = harness.temp_dir.path().join(".newton/state/workflows");
     let err = harness
         .run_fixture("46_planner_quota_short_circuit.yaml", None)
         .await
         .expect_err("workflow must fail at enrich_spec");
-    assert!(
-        !err.message.is_empty(),
-        "error message should be present for enrich_spec failure"
-    );
+    assert_eq!(err.code, "WFG-EXEC-001");
+    assert!(err.message.contains("enrich_spec"));
 
     let entries: Vec<_> = std::fs::read_dir(&state_root)
         .expect("state_root must exist after a run")
@@ -1706,7 +1757,22 @@ async fn test_scenario_46_planner_short_circuit_on_enrich_failure() {
         .find(|r| r["task_id"].as_str() == Some("enrich_spec"))
         .expect("enrich_spec run entry");
     assert_eq!(enrich_run["status"].as_str(), Some("failed"));
-    assert!(enrich_run["error_code"]
-        .as_str()
-        .is_some_and(|code| !code.is_empty()));
+    assert_eq!(enrich_run["error_code"].as_str(), Some("WFG-AGENT-008"));
+
+    let checkpoint_path = state_root.join(exec_id.to_string()).join("checkpoint.json");
+    let checkpoint_value: Value =
+        serde_json::from_slice(&std::fs::read(&checkpoint_path).expect("read checkpoint.json"))
+            .expect("parse checkpoint.json");
+    let checkpoint_enrich = checkpoint_value["completed"]["enrich_spec"].clone();
+    assert_eq!(checkpoint_enrich["status"].as_str(), Some("failed"));
+    assert_eq!(
+        checkpoint_enrich["error"]["code"].as_str(),
+        Some("WFG-AGENT-008")
+    );
+    assert!(
+        checkpoint_enrich["error"]["message"]
+            .as_str()
+            .is_some_and(|msg| !msg.is_empty()),
+        "checkpoint should persist non-empty error summary message"
+    );
 }
