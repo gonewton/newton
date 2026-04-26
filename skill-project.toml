@@ -1,0 +1,99 @@
+[metadata]
+id = "newton"
+version = "1.0.0"
+description = "Collection of skills and tools for newton workspace"
+author = "gonewton"
+name = "Newton dev skills"
+
+[dependencies.tools-cli-framework]
+source = "git"
+url = "https://github.com/aroff/cli-framework/tree/main/skill"
+branch = "main"
+
+[dependencies.product-cli]
+source = "local"
+path = "/home/sysuser/ws001/aroff/product-cli/skill"
+
+[dependencies.homebrew-project]
+source = "git"
+url = "https://github.com/aroff/skills/tree/main/swe/devops/homebrew-project"
+branch = "main"
+
+[dependencies.codescene]
+source = "git"
+url = "https://github.com/aroff/skills/tree/main/tools/codescene"
+branch = "main"
+
+[dependencies.constraint-cli]
+source = "git"
+url = "https://github.com/aroff/skills/tree/main/tools/constraint-cli"
+branch = "main"
+
+[dependencies.dot_project]
+source = "git"
+url = "https://github.com/aroff/skills/tree/main/project-management/dot_project"
+branch = "main"
+
+[dependencies.text-compression]
+source = "git"
+url = "https://github.com/aroff/skills/tree/main/science/text-compression"
+branch = "main"
+
+[dependencies.method_intent]
+source = "git"
+url = "https://github.com/aroff/skills/tree/main/science/method_intent"
+branch = "main"
+
+[dependencies.scoop-bucket-project]
+source = "git"
+url = "https://github.com/aroff/skills/tree/main/swe/devops/scoop-bucket-project"
+branch = "main"
+
+[dependencies.prod-report]
+source = "git"
+url = "https://github.com/aroff/skills/tree/main/product-management/reporting/prod_report"
+branch = "main"
+
+[dependencies.newton-workspace-projects]
+source = "git"
+url = "https://github.com/aroff/.newton/tree/main/skills"
+branch = "main"
+
+[dependencies.skillspec]
+source = "git"
+url = "https://github.com/aroff/skills/tree/main/swe/skillspec"
+branch = "main"
+
+[dependencies.ailoop]
+source = "git"
+url = "https://github.com/goailoop/skill/tree/main/ailoop"
+branch = "main"
+
+[dependencies.newton]
+source = "git"
+url = "https://github.com/gonewton/skill"
+
+[dependencies.rust-project-template]
+source = "git"
+url = "https://github.com/aroff/skills/tree/main/swe/rust-project-template"
+branch = "main"
+
+[dependencies.cli-rust-dev]
+source = "git"
+url = "https://github.com/aroff/skills/tree/main/workspace/cli-rust-dev"
+branch = "main"
+
+[dependencies.aikit]
+source = "git"
+url = "https://github.com/goaikit/skill/tree/main/aikit"
+branch = "main"
+
+[tool.fastskill]
+skills_directory = ".agents/skills"
+repositories = []
+install_depth = 5
+skip_transitive = false
+
+[tool.fastskill.embedding]
+openai_base_url = "https://api.openai.com/v1"
+embedding_model = "text-embedding-3-small"

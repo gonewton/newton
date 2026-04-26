@@ -17,8 +17,9 @@ tarpaulin-report.html.gitignore
 # Auto-release workflow trigger file
 auto_release_trigger.txt
 
-# Opencode
+# Agents
 .opencode
+.agents
 
 # Newton planner scratch (planner.sh ./tmp)
 /tmp/
