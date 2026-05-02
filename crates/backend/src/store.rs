@@ -18,7 +18,12 @@ impl SqliteBackendStore {
     pub async fn new(database_url: &str) -> Result<Self, ApiError> {
         let options = SqliteConnectOptions::from_str(database_url)
             .map_err(|e| err_internal(&format!("invalid database URL: {e}")))?
-            .create_if_missing(true);
+            .create_if_missing(true)
+            // Enforce FK declarations on every connection. SQLite defaults
+            // foreign_keys=OFF per connection, so the migration's PRAGMA
+            // doesn't propagate — without this, ON DELETE CASCADE and FK
+            // constraints across the schema are silently inert.
+            .foreign_keys(true);
 
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
@@ -1092,11 +1097,17 @@ impl BackendStore for SqliteBackendStore {
     }
 
     async fn reject_plan(&self, id: &str) -> Result<PlanItem, ApiError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+
         let plan: Option<PlanRow> = sqlx::query_as::<_, PlanRow>(
             "SELECT id, title, componentId as component_id, repoId as repo_id, status, linkedRequestId as linked_request_id, confidence, risk, expectedValue as expected_value, agentGenerated as agent_generated, waitingSince as waiting_since, createdAt as created_at FROM Plan WHERE id = ?"
         )
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| err_internal(&format!("query error: {e}")))?;
 
@@ -1110,9 +1121,13 @@ impl BackendStore for SqliteBackendStore {
         sqlx::query("UPDATE Plan SET status = 'rejected', updatedAt = ? WHERE id = ?")
             .bind(&now)
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| err_internal(&format!("update error: {e}")))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| err_internal(&format!("commit error: {e}")))?;
 
         self.fetch_plan_item(id).await
     }

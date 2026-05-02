@@ -565,3 +565,72 @@ async fn test_delete_persistence_idempotent() {
     let ok: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(ok["ok"], true);
 }
+
+#[tokio::test]
+async fn test_approve_plan_emits_canonical_execution_update() {
+    let state = create_parity_test_state().await;
+    let mut rx = state.events_tx.subscribe();
+    let app = newton::api::create_router(state, None);
+
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/plans/plan-1/approve")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Drain the channel and verify both broadcast events are well-formed.
+    let mut got_plan_update = false;
+    let mut got_execution_update = false;
+    while let Ok(ev) = rx.try_recv() {
+        match ev {
+            newton_types::BroadcastEvent::PlanUpdate { plan_id } => {
+                assert_eq!(plan_id, "plan-1");
+                got_plan_update = true;
+            }
+            newton_types::BroadcastEvent::ExecutionUpdate {
+                execution_id,
+                plan_id,
+                status,
+                created_at,
+            } => {
+                assert!(
+                    !execution_id.is_empty(),
+                    "execution_id must be the new ExecutionRecord.id, never empty"
+                );
+                // Regression guard for the laundered-NULL-instanceId bug:
+                // execution_id MUST NOT equal the plan id.
+                assert_ne!(execution_id, "plan-1");
+                assert_eq!(plan_id.as_deref(), Some("plan-1"));
+                assert_eq!(status, "running");
+                assert!(!created_at.is_empty());
+                got_execution_update = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(got_plan_update, "expected PlanUpdate broadcast");
+    assert!(
+        got_execution_update,
+        "expected ExecutionUpdate broadcast with valid execution_id"
+    );
+}
+
+#[tokio::test]
+async fn test_foreign_key_enforcement_active() {
+    // Defense-in-depth: confirm SQLite FK enforcement is on at runtime.
+    // Inserting a child row with a non-existent FK target must fail.
+    let store = SqliteBackendStore::new_in_memory().await.unwrap();
+    let body = newton_backend::CreateModuleDependencyBody {
+        from_module_id: "does-not-exist-1".to_string(),
+        to_module_id: "does-not-exist-2".to_string(),
+        dep_type: "runtime".to_string(),
+        label: "should fail".to_string(),
+    };
+    let result = store.create_module_dependency(body).await;
+    assert!(
+        result.is_err(),
+        "module-dep with missing FK target must be rejected"
+    );
+}
