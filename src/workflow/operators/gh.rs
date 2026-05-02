@@ -3,6 +3,10 @@
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
+use crate::workflow::operators::gh_authorization::{
+    self, default_timeout, parse_authorization_params, AiloopApprover, ApprovalOutcome,
+    AuthorizationParams, AuthorizationRequest, NoopApprover, OnUnavailable,
+};
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -17,17 +21,33 @@ const MAX_RETRY_DELAY_MS: u64 = 300_000;
 
 pub struct GhOperator {
     runner: Arc<dyn GhRunner>,
+    approver: Arc<dyn AiloopApprover>,
 }
 
 impl GhOperator {
     pub fn new() -> Self {
         Self {
             runner: Arc::new(TokioGhRunner),
+            approver: Arc::new(NoopApprover),
         }
     }
 
     pub fn with_runner(runner: Arc<dyn GhRunner>) -> Self {
-        Self { runner }
+        Self {
+            runner,
+            approver: Arc::new(NoopApprover),
+        }
+    }
+
+    pub fn with_runner_and_approver(
+        runner: Arc<dyn GhRunner>,
+        approver: Arc<dyn AiloopApprover>,
+    ) -> Self {
+        Self { runner, approver }
+    }
+
+    pub fn set_approver(&mut self, approver: Arc<dyn AiloopApprover>) {
+        self.approver = approver;
     }
 }
 
@@ -76,10 +96,12 @@ impl Operator for GhOperator {
             }
         }
 
+        parse_authorization_params(map)?;
+
         Ok(())
     }
 
-    async fn execute(&self, params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {
+    async fn execute(&self, params: Value, ctx: ExecutionContext) -> Result<Value, AppError> {
         let map = params.as_object().ok_or_else(|| {
             AppError::new(ErrorCategory::ValidationError, "params must be an object")
         })?;
@@ -88,6 +110,11 @@ impl Operator for GhOperator {
             .get("operation")
             .and_then(Value::as_str)
             .expect("operation validated");
+
+        let auth = parse_authorization_params(map)?;
+        if auth.require {
+            self.gate_authorization(operation, map, &auth, &ctx).await?;
+        }
 
         match operation {
             "project_resolve_board" => self.execute_project_resolve_board(map).await,
@@ -99,6 +126,117 @@ impl Operator for GhOperator {
                 format!("unknown operation: {operation}"),
             )),
         }
+    }
+}
+
+impl GhOperator {
+    async fn gate_authorization(
+        &self,
+        operation: &str,
+        map: &Map<String, Value>,
+        auth: &AuthorizationParams,
+        ctx: &ExecutionContext,
+    ) -> Result<(), AppError> {
+        let prompt = auth
+            .prompt
+            .clone()
+            .unwrap_or_else(|| derive_default_prompt(operation, map));
+        let timeout = Some(auth.timeout.unwrap_or_else(default_timeout));
+        let payload = Value::Object(map.clone());
+        let request_id = format!(
+            "gh:{operation}:{}:{}",
+            ctx.task_id,
+            gh_authorization::short_hash(&payload)
+        );
+        let request = AuthorizationRequest {
+            request_id,
+            prompt,
+            channel: auth.channel.clone(),
+            timeout,
+            operation: operation.to_string(),
+            task_id: Some(ctx.task_id.clone()),
+        };
+
+        let span = tracing::info_span!(
+            "gh_authorization",
+            task_id = %ctx.task_id,
+            operation = operation,
+        );
+        let outcome = {
+            let _enter = span.enter();
+            self.approver.authorize(request).await?
+        };
+
+        match outcome {
+            ApprovalOutcome::Approved => Ok(()),
+            ApprovalOutcome::Denied { reason } => {
+                let msg = match reason {
+                    Some(r) => format!("authorization denied: {r}"),
+                    None => "authorization denied".to_string(),
+                };
+                Err(AppError::new(ErrorCategory::ValidationError, msg).with_code("WFG-GH-AUTH-001"))
+            }
+            ApprovalOutcome::Timeout => Err(AppError::new(
+                ErrorCategory::TimeoutError,
+                "authorization timed out",
+            )
+            .with_code("WFG-GH-AUTH-002")),
+            ApprovalOutcome::Unavailable { cause } => match auth.on_unavailable {
+                OnUnavailable::Fail => Err(AppError::new(
+                    ErrorCategory::ToolExecutionError,
+                    format!("authorization unavailable: {cause}"),
+                )
+                .with_code("WFG-GH-AUTH-003")),
+                OnUnavailable::Skip => {
+                    tracing::warn!(
+                        task_id = %ctx.task_id,
+                        operation = operation,
+                        cause = %cause,
+                        "ailoop authorization unavailable; proceeding due to on_authorization_unavailable=skip"
+                    );
+                    Ok(())
+                }
+            },
+        }
+    }
+}
+
+fn derive_default_prompt(operation: &str, map: &Map<String, Value>) -> String {
+    match operation {
+        "pr_create" => {
+            let title = map.get("title").and_then(Value::as_str).unwrap_or("");
+            let base = map.get("base").and_then(Value::as_str).unwrap_or("main");
+            format!("Authorize gh pr create: title=\"{title}\", base=\"{base}\"")
+        }
+        "pr_view" => {
+            let pr = map
+                .get("pr")
+                .map(|v| match v {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    other => other.to_string(),
+                })
+                .unwrap_or_default();
+            format!("Authorize gh pr view: pr={pr}")
+        }
+        "project_resolve_board" => {
+            let owner = map.get("owner").and_then(Value::as_str).unwrap_or("");
+            let project = map
+                .get("project_number")
+                .map(|v| match v {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    other => other.to_string(),
+                })
+                .unwrap_or_default();
+            format!("Authorize gh project view/field-list: owner={owner}, project={project}")
+        }
+        "project_item_set_status" => {
+            let item = map.get("item_id").and_then(Value::as_str).unwrap_or("");
+            let status = map.get("status").and_then(Value::as_str).unwrap_or("");
+            format!("Authorize gh project item-edit: item={item}, status={status}")
+        }
+        other => format!("Authorize gh {other}"),
     }
 }
 
@@ -699,7 +837,127 @@ impl GhRunner for TokioGhRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workflow::executor::{ExecutionOverrides, GraphHandle};
+    use crate::workflow::operator::{ExecutionContext, OperatorRegistry, StateView};
     use serde_json::json;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    fn test_ctx(task_id: &str) -> ExecutionContext {
+        ExecutionContext {
+            workspace_path: std::path::PathBuf::from("/tmp"),
+            execution_id: "exec-1".to_string(),
+            task_id: task_id.to_string(),
+            iteration: 0,
+            state_view: StateView::new(json!({}), json!({}), json!({})),
+            graph: GraphHandle::new(HashMap::new()),
+            workflow_file: std::path::PathBuf::from("/tmp/wf.yaml"),
+            nesting_depth: 0,
+            execution_overrides: ExecutionOverrides {
+                parallel_limit: None,
+                max_time_seconds: None,
+                checkpoint_base_path: None,
+                artifact_base_path: None,
+                max_nesting_depth: None,
+                verbose: false,
+                server_notifier: None,
+                pre_seed_nodes: true,
+            },
+            operator_registry: OperatorRegistry::new(),
+        }
+    }
+
+    struct CountingRunner {
+        calls: AtomicUsize,
+        responses: Mutex<Vec<Result<GhOutput, AppError>>>,
+    }
+
+    impl CountingRunner {
+        fn ok_once(stdout: &str) -> Arc<Self> {
+            Arc::new(Self {
+                calls: AtomicUsize::new(0),
+                responses: Mutex::new(vec![Ok(GhOutput {
+                    stdout: stdout.to_string(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                })]),
+            })
+        }
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl GhRunner for CountingRunner {
+        async fn run(&self, _args: &[&str]) -> Result<GhOutput, AppError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let mut q = self.responses.lock().unwrap();
+            if q.is_empty() {
+                Ok(GhOutput {
+                    stdout: "https://github.com/o/r/pull/1\n".to_string(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                })
+            } else {
+                q.remove(0)
+            }
+        }
+    }
+
+    struct FailingRunner {
+        calls: AtomicUsize,
+    }
+    impl FailingRunner {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                calls: AtomicUsize::new(0),
+            })
+        }
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+    #[async_trait]
+    impl GhRunner for FailingRunner {
+        async fn run(&self, _args: &[&str]) -> Result<GhOutput, AppError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(AppError::new(ErrorCategory::ToolExecutionError, "boom"))
+        }
+    }
+
+    struct MockApprover {
+        outcome: ApprovalOutcome,
+        calls: AtomicUsize,
+        last_request: Mutex<Option<AuthorizationRequest>>,
+    }
+    impl MockApprover {
+        fn new(outcome: ApprovalOutcome) -> Arc<Self> {
+            Arc::new(Self {
+                outcome,
+                calls: AtomicUsize::new(0),
+                last_request: Mutex::new(None),
+            })
+        }
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+        fn last(&self) -> Option<AuthorizationRequest> {
+            self.last_request.lock().unwrap().clone()
+        }
+    }
+    #[async_trait]
+    impl AiloopApprover for MockApprover {
+        async fn authorize(
+            &self,
+            request: AuthorizationRequest,
+        ) -> Result<ApprovalOutcome, AppError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            *self.last_request.lock().unwrap() = Some(request);
+            Ok(self.outcome.clone())
+        }
+    }
 
     #[test]
     fn test_validate_project_resolve_board() {
@@ -847,5 +1105,188 @@ mod tests {
             .unwrap()
             .clone();
         assert_eq!(get_pr_identifier(&map).unwrap(), "789");
+    }
+
+    fn pr_view_params() -> Value {
+        json!({"operation": "pr_view", "pr": 1})
+    }
+
+    #[tokio::test]
+    async fn auth_default_no_approver_call() {
+        let runner = CountingRunner::ok_once("{\"state\":\"OPEN\"}");
+        let approver = MockApprover::new(ApprovalOutcome::Approved);
+        let op = GhOperator::with_runner_and_approver(runner.clone(), approver.clone());
+        let _ = op.execute(pr_view_params(), test_ctx("t")).await.unwrap();
+        assert_eq!(runner.calls(), 1);
+        assert_eq!(approver.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn auth_approved_runs_gh() {
+        let runner = CountingRunner::ok_once("{\"state\":\"OPEN\"}");
+        let approver = MockApprover::new(ApprovalOutcome::Approved);
+        let op = GhOperator::with_runner_and_approver(runner.clone(), approver.clone());
+        let mut params = pr_view_params();
+        params["require_authorization"] = json!(true);
+        op.execute(params, test_ctx("t")).await.unwrap();
+        assert_eq!(approver.calls(), 1);
+        assert_eq!(runner.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn auth_denied_blocks_gh_with_001() {
+        let runner = FailingRunner::new();
+        let approver = MockApprover::new(ApprovalOutcome::Denied { reason: None });
+        let op = GhOperator::with_runner_and_approver(runner.clone(), approver.clone());
+        let mut params = pr_view_params();
+        params["require_authorization"] = json!(true);
+        let err = op.execute(params, test_ctx("t")).await.unwrap_err();
+        assert_eq!(err.code, "WFG-GH-AUTH-001");
+        assert_eq!(err.category, ErrorCategory::ValidationError);
+        assert_eq!(runner.calls(), 0);
+        assert_eq!(approver.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn auth_timeout_blocks_gh_with_002() {
+        let runner = FailingRunner::new();
+        let approver = MockApprover::new(ApprovalOutcome::Timeout);
+        let op = GhOperator::with_runner_and_approver(runner.clone(), approver.clone());
+        let mut params = pr_view_params();
+        params["require_authorization"] = json!(true);
+        let err = op.execute(params, test_ctx("t")).await.unwrap_err();
+        assert_eq!(err.code, "WFG-GH-AUTH-002");
+        assert_eq!(err.category, ErrorCategory::TimeoutError);
+        assert_eq!(runner.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn auth_unavailable_fail_blocks_gh_with_003() {
+        let runner = FailingRunner::new();
+        let approver = MockApprover::new(ApprovalOutcome::Unavailable {
+            cause: "down".into(),
+        });
+        let op = GhOperator::with_runner_and_approver(runner.clone(), approver.clone());
+        let mut params = pr_view_params();
+        params["require_authorization"] = json!(true);
+        let err = op.execute(params, test_ctx("t")).await.unwrap_err();
+        assert_eq!(err.code, "WFG-GH-AUTH-003");
+        assert_eq!(err.category, ErrorCategory::ToolExecutionError);
+        assert_eq!(runner.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn auth_unavailable_skip_runs_gh() {
+        let runner = CountingRunner::ok_once("{\"state\":\"OPEN\"}");
+        let approver = MockApprover::new(ApprovalOutcome::Unavailable {
+            cause: "down".into(),
+        });
+        let op = GhOperator::with_runner_and_approver(runner.clone(), approver.clone());
+        let mut params = pr_view_params();
+        params["require_authorization"] = json!(true);
+        params["on_authorization_unavailable"] = json!("skip");
+        op.execute(params, test_ctx("t")).await.unwrap();
+        assert_eq!(runner.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn auth_default_noop_yields_003() {
+        // GhOperator::new() uses NoopApprover → Unavailable → fail
+        let op = GhOperator::new();
+        let mut params = pr_view_params();
+        params["require_authorization"] = json!(true);
+        let err = op.execute(params, test_ctx("t")).await.unwrap_err();
+        assert_eq!(err.code, "WFG-GH-AUTH-003");
+    }
+
+    #[test]
+    fn validate_rejects_unknown_on_unavailable() {
+        let mut params = pr_view_params();
+        params["on_authorization_unavailable"] = json!("halt");
+        let err = GhOperator::new().validate_params(&params).unwrap_err();
+        assert_eq!(err.code, "WFG-GH-AUTH-004");
+    }
+
+    #[test]
+    fn validate_rejects_zero_timeout() {
+        let mut params = pr_view_params();
+        params["authorization_timeout_seconds"] = json!(0);
+        let err = GhOperator::new().validate_params(&params).unwrap_err();
+        assert_eq!(err.code, "WFG-GH-AUTH-005");
+    }
+
+    #[test]
+    fn validate_rejects_negative_timeout() {
+        let mut params = pr_view_params();
+        params["authorization_timeout_seconds"] = json!(-5);
+        let err = GhOperator::new().validate_params(&params).unwrap_err();
+        assert_eq!(err.code, "WFG-GH-AUTH-005");
+    }
+
+    #[tokio::test]
+    async fn auth_channel_override_propagates() {
+        let runner = CountingRunner::ok_once("{\"state\":\"OPEN\"}");
+        let approver = MockApprover::new(ApprovalOutcome::Approved);
+        let op = GhOperator::with_runner_and_approver(runner.clone(), approver.clone());
+        let mut params = pr_view_params();
+        params["require_authorization"] = json!(true);
+        params["authorization_channel"] = json!("release-bot");
+        op.execute(params, test_ctx("t")).await.unwrap();
+        let req = approver.last().unwrap();
+        assert_eq!(req.channel.as_deref(), Some("release-bot"));
+    }
+
+    #[test]
+    fn default_prompts() {
+        assert_eq!(
+            derive_default_prompt(
+                "pr_create",
+                json!({"title": "feat: x", "base": "main"})
+                    .as_object()
+                    .unwrap()
+            ),
+            "Authorize gh pr create: title=\"feat: x\", base=\"main\""
+        );
+        assert_eq!(
+            derive_default_prompt("pr_view", json!({"pr": 42}).as_object().unwrap()),
+            "Authorize gh pr view: pr=42"
+        );
+        assert_eq!(
+            derive_default_prompt(
+                "project_resolve_board",
+                json!({"owner": "myorg", "project_number": 7})
+                    .as_object()
+                    .unwrap()
+            ),
+            "Authorize gh project view/field-list: owner=myorg, project=7"
+        );
+        assert_eq!(
+            derive_default_prompt(
+                "project_item_set_status",
+                json!({"item_id": "ITEM_1", "status": "Done"})
+                    .as_object()
+                    .unwrap()
+            ),
+            "Authorize gh project item-edit: item=ITEM_1, status=Done"
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_single_call_across_internal_retries() {
+        // pr_create retries on failure; ensure approver is called exactly once.
+        let runner = FailingRunner::new();
+        let approver = MockApprover::new(ApprovalOutcome::Approved);
+        let op = GhOperator::with_runner_and_approver(runner.clone(), approver.clone());
+        let params = json!({
+            "operation": "pr_create",
+            "title": "x",
+            "base": "main",
+            "retry_count": 3,
+            "retry_delay_ms": 0,
+            "require_authorization": true
+        });
+        let _ = op.execute(params, test_ctx("t")).await;
+        assert_eq!(approver.calls(), 1);
+        assert_eq!(runner.calls(), 3);
     }
 }

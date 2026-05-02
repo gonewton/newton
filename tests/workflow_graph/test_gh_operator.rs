@@ -54,6 +54,7 @@ fn build_registry_with_gh_runner(
         command_runner: None,
         gh_runner: Some(runner),
         child_workflow_runner: None,
+        gh_approver: None,
     };
     operators::register_builtins_with_deps(&mut builder, workspace, Default::default(), deps);
     builder.build()
