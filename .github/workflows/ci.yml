@@ -50,10 +50,17 @@ jobs:
          run: cargo clippy --all-targets --all-features -- -D warnings
 
        - name: Build
-         run: cargo build --release
+         run: cargo build --workspace --release
 
        - name: Run tests
-         run: cargo test --all-features
+         run: cargo test --workspace --all-features
+
+       - name: Verify newton-core has no CLI/TUI deps
+         run: |
+           if cargo tree -p newton-core --prefix none 2>/dev/null | grep -Eq '^(clap|ratatui|crossterm)( |$)'; then
+             echo "newton-core must not depend on clap/ratatui/crossterm"
+             exit 1
+           fi
 
        - name: Upload binary artifact
          uses: actions/upload-artifact@v4

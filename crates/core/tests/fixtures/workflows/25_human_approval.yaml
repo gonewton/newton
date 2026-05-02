@@ -1,0 +1,24 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Scenario 25: Human Approval"
+workflow:
+  settings:
+    entry_task: "request_approval"
+    max_time_seconds: 60
+  tasks:
+    - id: "request_approval"
+      operator: "HumanApprovalOperator"
+      params:
+        prompt: "Approve deployment to production?"
+      transitions:
+        - to: "approved_action"
+          when: { $expr: "tasks.request_approval.output.approved == true" }
+        - to: "denied_action"
+          when: { $expr: "tasks.request_approval.output.approved == false" }
+    - id: "approved_action"
+      operator: "NoOpOperator"
+      terminal: success
+    - id: "denied_action"
+      operator: "NoOpOperator"
+      terminal: success

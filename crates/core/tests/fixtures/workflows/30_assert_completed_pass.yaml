@@ -1,0 +1,18 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Scenario 30: Assert Completed Pass"
+workflow:
+  settings:
+    entry_task: "step1"
+  tasks:
+    - id: "step1"
+      operator: "NoOpOperator"
+      transitions:
+        - to: "checker"
+    - id: "checker"
+      operator: "AssertCompletedOperator"
+      params:
+        require:
+          - "step1"
+      terminal: success

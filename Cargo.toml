@@ -1,22 +1,19 @@
-[package]
-name = "newton"
-version = "0.5.78"
-edition = "2021"
-authors = ["Newton Loop Framework"]
-description = "CLI orchestrator for AI-driven optimization workflows."
-repository = "https://github.com/gonewton/newton.git"
-readme = "README.md"
-categories = ["development-tools", "command-line-utilities"]
-keywords = ["newton", "optimization", "ai", "cli"]
-publish = false
-
 [workspace]
+resolver = "2"
 members = [
+    "crates/core",
+    "crates/cli",
     "crates/types",
     "crates/backend",
 ]
 
-[dependencies]
+[workspace.package]
+version = "0.5.79"
+edition = "2021"
+authors = ["Newton Loop Framework"]
+repository = "https://github.com/gonewton/newton.git"
+
+[workspace.dependencies]
 clap = { version = "4.4", features = ["derive", "cargo"] }
 tokio = { version = "1.49", features = ["full"] }
 anyhow = "1.0"
@@ -62,134 +59,10 @@ subtle = "2"
 dashmap = "6.1"
 async-stream = "0.3"
 tokio-stream = "0.1"
-newton-types = { path = "crates/types" }
-newton-backend = { path = "crates/backend" }
-
-[dev-dependencies]
 assert_cmd = "2.0"
 insta = { version = "1.46.2", features = ["yaml", "redactions"] }
 serial_test = "3.2"
 predicates = "3.1"
 tokio-test = "0.4.5"
-regex = "1.11"
 wiremock = "0.6"
-
-
-[[test]]
-name = "test_error_comprehensive"
-path = "tests/unit/test_error_comprehensive.rs"
-
-[[test]]
-name = "test_logger"
-path = "tests/unit/test_logger.rs"
-
-[[test]]
-name = "test_serialization"
-path = "tests/unit/test_serialization.rs"
-
-[[test]]
-name = "test_main_functionality"
-path = "tests/unit/test_main_functionality.rs"
-
-[[test]]
-name = "test_config_comprehensive"
-path = "tests/unit/test_config_comprehensive.rs"
-
-[[test]]
-name = "test_config_loading"
-path = "tests/integration/test_config_loading.rs"
-
-[[test]]
-name = "test_workflow_parse_and_validate"
-path = "tests/workflow_graph/test_parse_and_validate.rs"
-
-[[test]]
-name = "test_workflow_scheduler"
-path = "tests/workflow_graph/test_scheduler.rs"
-
-[[test]]
-name = "test_workflow_checkpoints"
-path = "tests/workflow_graph/test_checkpoints.rs"
-
-[[test]]
-name = "test_workflow_artifacts"
-path = "tests/workflow_graph/test_artifacts.rs"
-
-[[test]]
-name = "test_workflow_lint"
-path = "tests/workflow_graph/test_lint.rs"
-
-[[test]]
-name = "test_workflow_explain"
-path = "tests/workflow_graph/test_explain.rs"
-
-[[test]]
-name = "test_workflow_human_ops"
-path = "tests/workflow_graph/test_human_ops.rs"
-
-[[test]]
-name = "test_workflow_webhook"
-path = "tests/workflow_graph/test_webhook.rs"
-
-[[test]]
-name = "test_workflow_goal_gates"
-path = "tests/workflow_graph/test_goal_gates.rs"
-
-[[test]]
-name = "test_workflow_transforms"
-path = "tests/workflow_graph/test_transforms.rs"
-
-[[test]]
-name = "test_workflow_read_control_file_operator"
-path = "tests/workflow_graph/test_read_control_file_operator.rs"
-
-[[test]]
-name = "test_workflow_comprehensive_matrix"
-path = "tests/workflow_graph/test_workflow_comprehensive_matrix.rs"
-
-[[test]]
-name = "test_agent_operator"
-path = "tests/workflow_graph/test_agent_operator.rs"
-
-[[test]]
-name = "test_workflow_scenarios"
-path = "tests/integration/test_workflow_scenarios.rs"
-
-[[test]]
-name = "test_batch_workflow_state_paths"
-path = "tests/batch/test_batch_workflow_state_paths.rs"
-
-[[bin]]
-name = "logging_integration_helper"
-path = "tests/bin/logging_integration_helper.rs"
-[[test]]
-name = "test_api_integration"
-path = "tests/integration/test_api.rs"
-
-[[test]]
-name = "test_workflow_resume_settings"
-path = "tests/workflow_graph/test_resume_settings.rs"
-
-[[test]]
-name = "test_gh_operator"
-path = "tests/workflow_graph/test_gh_operator.rs"
-
-[[test]]
-name = "cli_help_test"
-path = "tests/integration/cli_help_test.rs"
-
-[[test]]
-name = "test_logging_framework"
-path = "tests/integration/test_logging_framework.rs"
-
-[[test]]
-name = "test_log_commands"
-path = "tests/integration/test_log_commands.rs"
-
-[[test]]
-name = "test_parity_endpoints"
-path = "tests/integration/test_parity_endpoints.rs"
-
-[[test]]
-name = "test_human_ailoop"
-path = "tests/integration/test_human_ailoop.rs"
+predicates-core = "1"
