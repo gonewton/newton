@@ -3,13 +3,17 @@ mode: workflow_graph
 
 metadata:
   name: "develop-workflow"
-  description: "Run a implementation workflow for a given spec"
+  description: "Implement from repo-local spec. Prefer raw_spec_path + board_issue_number + board_item_title (develop.sh)."
 
 triggers:
   type: manual
   schema_version: "1.0"
   payload:
     prompt: ""
+    raw_spec_path: ""
+    board_item_id: ""
+    board_issue_number: ""
+    board_item_title: ""
 
 workflow:
   settings:
@@ -51,11 +55,11 @@ workflow:
         shell: true
         cmd: |
           set -e
+          git diff --quiet || { echo "Precondition failed: unstaged changes. Commit or stash before develop."; exit 1; }
+          git diff --cached --quiet || { echo "Precondition failed: staged changes. Commit or stash before develop."; exit 1; }
           git fetch origin
           git checkout main
           git pull --rebase origin main
-          git diff --quiet || { echo "Precondition failed: unstaged changes"; exit 1; }
-          git diff --cached --quiet || { echo "Precondition failed: staged changes"; exit 1; }
         capture_stdout: false
       transitions:
         - to: resolve_board_ids
@@ -82,6 +86,56 @@ workflow:
         status: "In progress"
         on_error: warn
       transitions:
+        - to: prepare_spec_paths
+
+    - id: prepare_spec_paths
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: true
+        env:
+          ISSUE:
+            $expr: 'triggers.board_issue_number'
+          TITLE:
+            $expr: 'triggers.board_item_title'
+          RAW_SPEC:
+            $expr: 'triggers.raw_spec_path'
+          LEGACY_PROMPT:
+            $expr: 'triggers.prompt'
+        cmd: |
+          set -eo pipefail
+          mkdir -p .newton/plan tmp
+          slugify() {
+            s=$(printf '%s' "${TITLE:-}" | iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null || printf '%s' "${TITLE:-}")
+            s=$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')
+            [ -z "$s" ] && s="spec"
+            printf '%s' "$s" | cut -c1-60 | sed -E 's/-+$//'
+          }
+          if [ -n "$RAW_SPEC" ] && [ -f "$RAW_SPEC" ]; then
+            slug=$(slugify)
+            OUT="tmp/${ISSUE}-${slug}.md"
+            cp "$RAW_SPEC" "$OUT"
+          else
+            OUT="$LEGACY_PROMPT"
+            if [ -z "$OUT" ] || [ ! -f "$OUT" ]; then
+              echo "prepare_spec_paths: set raw_spec_path to an existing file or pass prompt with a readable path"
+              exit 1
+            fi
+          fi
+          printf '%s\n' "$OUT" > .newton/plan/.develop-prompt-path
+          echo "spec_path=$OUT"
+      transitions:
+        - to: read_develop_spec_path
+
+    - id: read_develop_spec_path
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: true
+        cmd: |
+          set -eo pipefail
+          printf '%s' "$(cat .newton/plan/.develop-prompt-path)"
+      transitions:
         - to: create_branch
 
     - id: create_branch
@@ -93,7 +147,7 @@ workflow:
           git checkout -b "feature/$BRANCH_NAME"
         env:
           PROMPT_PATH:
-            $expr: 'triggers.prompt'
+            $expr: 'tasks.read_develop_spec_path.output.stdout'
         capture_stdout: false
       transitions:
         - to: load_spec
@@ -104,7 +158,7 @@ workflow:
         shell: true
         env:
           SPEC_PATH:
-            $expr: 'triggers.prompt'
+            $expr: 'tasks.read_develop_spec_path.output.stdout'
         cmd: |
           set -e
           cat "$SPEC_PATH"
@@ -120,7 +174,7 @@ workflow:
         engine: claude
         model: sonnet
         prompt:
-          $expr: 'context.preamble + "\n\nSpec path: " + triggers.prompt + "\n\nSpec content:\n" + tasks.load_spec.output.stdout'
+          $expr: 'context.preamble + "\n\nSpec path: " + tasks.read_develop_spec_path.output.stdout + "\n\nSpec content:\n" + tasks.load_spec.output.stdout'
         signals:
           complete: '<status>COMPLETED</status>'
       transitions:
@@ -156,7 +210,7 @@ workflow:
         engine: opencode
         model: zai-coding-plan/glm-5
         prompt:
-          $expr: 'context.preamble + "\n\nSpec path: " + triggers.prompt + "\n\nSpec content:\n" + tasks.load_spec.output.stdout + "\n\nTests failed. Fix the issues and re-run ./scripts/run-tests.sh:\n" + tasks.run_tests.output.stdout'
+          $expr: 'context.preamble + "\n\nSpec path: " + tasks.read_develop_spec_path.output.stdout + "\n\nSpec content:\n" + tasks.load_spec.output.stdout + "\n\nTests failed. Fix the issues and re-run ./scripts/run-tests.sh:\n" + tasks.run_tests.output.stdout'
       transitions:
         - to: run_tests
 
@@ -167,7 +221,7 @@ workflow:
         shell: true
         env:
           SPEC_PATH:
-            $expr: 'triggers.prompt'
+            $expr: 'tasks.read_develop_spec_path.output.stdout'
         cmd: |
           SPEC_BASENAME=$(basename "$SPEC_PATH" | sed 's/\.[^.]*$//')
           git add -A
@@ -217,7 +271,7 @@ workflow:
         engine: claude
         model: sonnet
         prompt:
-          $expr: 'context.validation_preamble + "\n\nSpec path: " + triggers.prompt + "\n\nSpec content:\n" + tasks.load_spec.output.stdout + "\n\nDiff vs main:\n" + tasks.get_diff.output.stdout'
+          $expr: 'context.validation_preamble + "\n\nSpec path: " + tasks.read_develop_spec_path.output.stdout + "\n\nSpec content:\n" + tasks.load_spec.output.stdout + "\n\nDiff vs main:\n" + tasks.get_diff.output.stdout'
         signals:
           valid: '<status>VALID</status>'
           invalid: '<status>INVALID</status>'
@@ -247,7 +301,7 @@ workflow:
         engine: claude
         model: sonnet
         prompt:
-          $expr: 'context.preamble + "\n\nSpec path: " + triggers.prompt + "\n\nSpec content:\n" + tasks.load_spec.output.stdout + "\n\nValidation feedback (address and re-run tests):\n" + tasks.load_validation_feedback.output.stdout'
+          $expr: 'context.preamble + "\n\nSpec path: " + tasks.read_develop_spec_path.output.stdout + "\n\nSpec content:\n" + tasks.load_spec.output.stdout + "\n\nValidation feedback (address and re-run tests):\n" + tasks.load_validation_feedback.output.stdout'
         signals:
           complete: '<status>COMPLETED</status>'
       transitions:
@@ -319,7 +373,7 @@ workflow:
         shell: true
         env:
           PROMPT_PATH:
-            $expr: 'triggers.prompt'
+            $expr: 'tasks.read_develop_spec_path.output.stdout'
         cmd: |
           MSG="feat: implement $(basename "$PROMPT_PATH" .md 2>/dev/null || echo "spec")"
           if git diff --cached --quiet; then
@@ -372,7 +426,7 @@ workflow:
         operation: pr_create
         base: main
         title:
-          $expr: '"feat: implement " + file_stem(triggers.prompt)'
+          $expr: '"feat: implement " + file_stem(tasks.read_develop_spec_path.output.stdout)'
         body: "Implements spec. Merge with squash."
         retry_count: 3
         retry_delay_ms: 5000
@@ -462,6 +516,11 @@ workflow:
         shell: true
         cmd: |
           set -e
+          if [ -f .git/MERGE_HEAD ] || [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ] || [ -f .git/CHERRY_PICK_HEAD ]; then
+            echo "merge_git_cleanup: unfinished merge/rebase/cherry-pick (cannot checkout main). Resolve conflicts or abort, then rerun." >&2
+            git status >&2 || true
+            exit 1
+          fi
           BRANCH=$(git branch --show-current)
           git checkout main
           git pull --rebase origin main

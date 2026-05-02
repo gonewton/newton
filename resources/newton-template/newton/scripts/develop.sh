@@ -46,19 +46,23 @@ item_json=$(gh project item-list "$gh_project_number" \
 
 item_title=$(echo "$item_json" | jq -r '.title')
 item_id=$(echo "$item_json" | jq -r '.id')
+item_issue_number=$(echo "$item_json" | jq -r '.content.number // empty')
 item_body=$(echo "$item_json" | jq -r '.content.body')
 
-spec_path="/tmp/${item_title}.md"
-echo "$item_body" > "$spec_path"
+mkdir -p "$project_root/tmp" "$project_root/.newton/plan"
+raw_spec_path="./tmp/raw-${item_issue_number}.md"
+printf '%s' "$item_body" > "$project_root/tmp/raw-${item_issue_number}.md"
 
 echo "Picked: $item_title (ID: $item_id)"
-echo "Spec:   $spec_path"
+echo "Raw spec: $raw_spec_path"
 
 export GH_PROJECT_OWNER="$gh_project_owner"
 export GH_PROJECT_NUMBER="$gh_project_number"
 export RUST_LOG=debug
 exec newton run "$workflow_path" \
   --workspace "$project_root" \
-  --arg "prompt=$spec_path" \
+  --arg "raw_spec_path=$raw_spec_path" \
+  --arg "board_issue_number=${item_issue_number}" \
+  --arg "board_item_title=$item_title" \
   --arg "board_item_id=$item_id" \
   --verbose
