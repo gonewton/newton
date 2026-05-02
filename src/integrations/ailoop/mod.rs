@@ -1,3 +1,4 @@
+pub mod approver;
 pub mod config;
 pub mod orchestrator_notifier;
 pub mod output_forwarder;

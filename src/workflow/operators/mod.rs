@@ -4,6 +4,7 @@ pub mod barrier;
 pub mod command;
 pub mod engine;
 pub mod gh;
+pub mod gh_authorization;
 pub mod human_approval;
 pub mod human_decision;
 pub mod noop;
@@ -27,6 +28,8 @@ pub struct BuiltinOperatorDeps {
     pub gh_runner: Option<Arc<dyn gh::GhRunner>>,
     /// Child workflow runner for WorkflowOperator. Defaults to in-process execution when None.
     pub child_workflow_runner: Option<Arc<dyn ChildWorkflowRunner>>,
+    /// Ailoop approver for GhOperator. Defaults to NoopApprover when None.
+    pub gh_approver: Option<Arc<dyn gh_authorization::AiloopApprover>>,
 }
 
 /// Register built-in operators into the supplied builder.
@@ -56,9 +59,15 @@ pub fn register_builtins_with_deps(
     let engine_manager = AikitEngineManager::new(workspace.clone())
         .expect("AikitEngineManager::new should not fail");
     let agent_operator = agent::AgentOperator::new(workspace, settings, engine_manager);
-    let gh_operator = match deps.gh_runner {
-        Some(runner) => gh::GhOperator::with_runner(runner),
-        None => gh::GhOperator::new(),
+    let gh_operator = match (deps.gh_runner, deps.gh_approver) {
+        (Some(runner), Some(approver)) => {
+            gh::GhOperator::with_runner_and_approver(runner, approver)
+        }
+        (Some(runner), None) => gh::GhOperator::with_runner(runner),
+        (None, Some(approver)) => {
+            gh::GhOperator::with_runner_and_approver(Arc::new(gh::default_runner()), approver)
+        }
+        (None, None) => gh::GhOperator::new(),
     };
     let child_runner: Arc<dyn ChildWorkflowRunner> =
         deps.child_workflow_runner.unwrap_or_else(|| {
