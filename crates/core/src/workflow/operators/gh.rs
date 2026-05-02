@@ -225,8 +225,19 @@ fn derive_default_prompt(operation: &str, map: &Map<String, Value>) -> String {
         }
         "project_item_set_status" => {
             let item = map.get("item_id").and_then(Value::as_str).unwrap_or("");
-            let status = map.get("status").and_then(Value::as_str).unwrap_or("");
-            format!("Authorize gh project item-edit: item={item}, status={status}")
+            if let Some(oid) = map
+                .get("single_select_option_id")
+                .or_else(|| map.get("option_id"))
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            {
+                format!(
+                    "Authorize gh project item-edit: item={item}, single_select_option_id={oid}"
+                )
+            } else {
+                let status = map.get("status").and_then(Value::as_str).unwrap_or("");
+                format!("Authorize gh project item-edit: item={item}, status={status}")
+            }
         }
         _ => format!("Authorize gh {operation}"),
     }
@@ -305,13 +316,17 @@ fn validate_project_item_set_status(map: &Map<String, Value>) -> Result<(), AppE
             "board is required for project_item_set_status",
         ));
     }
+
+    let has_explicit = map
+        .get("single_select_option_id")
+        .or_else(|| map.get("option_id"))
+        .and_then(Value::as_str)
+        .is_some_and(|s| !s.is_empty());
     let status = map.get("status").and_then(Value::as_str).unwrap_or("");
-    if !["Ready", "In progress", "In review", "Done", "Backlog"].contains(&status) {
+    if !has_explicit && status.is_empty() {
         return Err(AppError::new(
             ErrorCategory::ValidationError,
-            format!(
-                "status must be one of: Ready, In progress, In review, Done, Backlog; got: {status}"
-            ),
+            "project_item_set_status requires status or single_select_option_id (or option_id)",
         ));
     }
     Ok(())
@@ -535,6 +550,12 @@ impl GhOperator {
         if let Some(id) = options_map.get("Backlog") {
             out.insert("backlog_id".to_string(), json!(id));
         }
+        if let Some(id) = options_map.get("Idea") {
+            out.insert("idea_id".to_string(), json!(id));
+        }
+        if let Some(id) = options_map.get("Draft") {
+            out.insert("draft_id".to_string(), json!(id));
+        }
 
         Ok(Value::Object(out))
     }
@@ -545,13 +566,21 @@ impl GhOperator {
     ) -> Result<Value, AppError> {
         let item_id = map.get("item_id").and_then(Value::as_str).unwrap();
         let board = map.get("board").and_then(Value::as_object).unwrap();
-        let status = map.get("status").and_then(Value::as_str).unwrap();
+        let status = map.get("status").and_then(Value::as_str).unwrap_or("");
         let on_error = map
             .get("on_error")
             .and_then(Value::as_str)
             .unwrap_or("warn");
 
-        let option_id = resolve_option_id(board, status)?;
+        let option_id = match map
+            .get("single_select_option_id")
+            .or_else(|| map.get("option_id"))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
+            Some(id) => id.to_string(),
+            None => resolve_option_id(board, status)?,
+        };
 
         let project_id = board["project_id"].as_str().ok_or_else(|| {
             AppError::new(ErrorCategory::ValidationError, "board missing project_id")
@@ -721,29 +750,28 @@ fn resolve_option_id(board: &Map<String, Value>, status: &str) -> Result<String,
     }
 
     let flat_key = match status {
-        "Ready" => "ready_id",
-        "In progress" => "in_progress_id",
-        "In review" => "in_review_id",
-        "Done" => "done_id",
-        "Backlog" => "backlog_id",
-        _ => {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                format!("unknown status: {status}"),
-            ))
-        }
+        "Idea" => Some("idea_id"),
+        "Draft" => Some("draft_id"),
+        "Ready" => Some("ready_id"),
+        "In progress" => Some("in_progress_id"),
+        "In review" => Some("in_review_id"),
+        "Done" => Some("done_id"),
+        "Backlog" => Some("backlog_id"),
+        _ => None,
     };
 
-    board
-        .get(flat_key)
-        .and_then(Value::as_str)
-        .map(std::string::ToString::to_string)
-        .ok_or_else(|| {
-            AppError::new(
-                ErrorCategory::ValidationError,
-                format!("option id for '{status}' not found in board"),
-            )
-        })
+    if let Some(key) = flat_key {
+        if let Some(id) = board.get(key).and_then(Value::as_str) {
+            return Ok(id.to_string());
+        }
+    }
+
+    Err(AppError::new(
+        ErrorCategory::ValidationError,
+        format!(
+            "option id for status '{status}' not found in board (use board.options from project_resolve_board or pass single_select_option_id)",
+        ),
+    ))
 }
 
 fn get_pr_identifier(map: &Map<String, Value>) -> Result<String, AppError> {
@@ -872,15 +900,32 @@ mod tests {
         });
         assert!(GhOperator::new().validate_params(&params).is_ok());
 
-        let params_invalid_status = json!({
+        let params_custom_status_ok = json!({
             "operation": "project_item_set_status",
             "item_id": "ITEM_123",
             "board": {"project_id": "P_123", "field_id": "F_123"},
-            "status": "Invalid"
+            "status": "Custom stage"
         });
         assert!(GhOperator::new()
-            .validate_params(&params_invalid_status)
-            .is_err());
+            .validate_params(&params_custom_status_ok)
+            .is_ok());
+
+        let params_explicit_id = json!({
+            "operation": "project_item_set_status",
+            "item_id": "ITEM_123",
+            "board": {"project_id": "P_123", "field_id": "F_123"},
+            "single_select_option_id": "OPT_x"
+        });
+        assert!(GhOperator::new()
+            .validate_params(&params_explicit_id)
+            .is_ok());
+
+        let params_neither = json!({
+            "operation": "project_item_set_status",
+            "item_id": "ITEM_123",
+            "board": {"project_id": "P_123", "field_id": "F_123"},
+        });
+        assert!(GhOperator::new().validate_params(&params_neither).is_err());
 
         let params_backlog = json!({
             "operation": "project_item_set_status",
@@ -933,7 +978,8 @@ mod tests {
                 "Ready": "OPT_READY",
                 "In progress": "OPT_IN_PROGRESS",
                 "In review": "OPT_IN_REVIEW",
-                "Done": "OPT_DONE"
+                "Done": "OPT_DONE",
+                "Custom stage": "OPT_CUSTOM"
             }
         });
 
@@ -942,6 +988,10 @@ mod tests {
         assert_eq!(
             resolve_option_id(map, "In progress").unwrap(),
             "OPT_IN_PROGRESS"
+        );
+        assert_eq!(
+            resolve_option_id(map, "Custom stage").unwrap(),
+            "OPT_CUSTOM"
         );
     }
 
