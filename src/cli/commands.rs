@@ -139,8 +139,23 @@ fn setup_workflow_execution(
         pre_seed_nodes: true,
     };
 
+    let ailoop_ctx = crate::integrations::ailoop::init_context_for_command_name(workspace, "run")
+        .ok()
+        .flatten();
     let mut builder = OperatorRegistry::builder();
-    workflow_operators::register_builtins(&mut builder, workspace.to_path_buf(), settings.clone());
+    let interviewer = crate::workflow::human::build_interviewer(
+        ailoop_ctx.as_ref(),
+        Duration::from_secs(settings.human.default_timeout_seconds),
+    );
+    workflow_operators::register_builtins_with_deps(
+        &mut builder,
+        workspace.to_path_buf(),
+        settings.clone(),
+        workflow_operators::BuiltinOperatorDeps {
+            interviewer: Some(interviewer),
+            ..Default::default()
+        },
+    );
     let registry = builder.build();
 
     (overrides, registry)
@@ -231,11 +246,23 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
         pre_seed_nodes: true,
     };
 
+    let ailoop_ctx = crate::integrations::ailoop::init_context_for_command_name(&workspace, "run")
+        .ok()
+        .flatten();
     let mut builder = OperatorRegistry::builder();
-    workflow_operators::register_builtins(
+    let settings = document.workflow.settings.clone();
+    let interviewer = crate::workflow::human::build_interviewer(
+        ailoop_ctx.as_ref(),
+        Duration::from_secs(settings.human.default_timeout_seconds),
+    );
+    workflow_operators::register_builtins_with_deps(
         &mut builder,
         workspace.clone(),
-        document.workflow.settings.clone(),
+        settings,
+        workflow_operators::BuiltinOperatorDeps {
+            interviewer: Some(interviewer),
+            ..Default::default()
+        },
     );
     let registry = builder.build();
 
@@ -391,10 +418,19 @@ pub async fn resume(args: ResumeArgs) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(args.workspace)?;
     let execution = checkpoint::load_execution(&workspace, &args.execution_id)?;
     let mut builder = OperatorRegistry::builder();
-    workflow_operators::register_builtins(
+    let settings = execution.settings_effective.clone();
+    let interviewer = crate::workflow::human::build_interviewer(
+        None,
+        Duration::from_secs(settings.human.default_timeout_seconds),
+    );
+    workflow_operators::register_builtins_with_deps(
         &mut builder,
         workspace.clone(),
-        execution.settings_effective.clone(),
+        settings,
+        workflow_operators::BuiltinOperatorDeps {
+            interviewer: Some(interviewer),
+            ..Default::default()
+        },
     );
     let registry = builder.build();
     let summary = workflow_executor::resume_workflow(
@@ -586,10 +622,19 @@ async fn workflow_webhook_serve(args: WebhookServeArgs) -> StdResult<(), AppErro
     document.validate(&ExpressionEngine::default())?;
 
     let mut builder = OperatorRegistry::builder();
-    workflow_operators::register_builtins(
+    let settings = document.workflow.settings.clone();
+    let interviewer = crate::workflow::human::build_interviewer(
+        None,
+        Duration::from_secs(settings.human.default_timeout_seconds),
+    );
+    workflow_operators::register_builtins_with_deps(
         &mut builder,
         workspace.clone(),
-        document.workflow.settings.clone(),
+        settings,
+        workflow_operators::BuiltinOperatorDeps {
+            interviewer: Some(interviewer),
+            ..Default::default()
+        },
     );
     let registry = builder.build();
     let overrides = ExecutionOverrides {
@@ -1496,10 +1541,19 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     info!("Starting Newton API server on {}: {}", args.host, args.port);
 
     let mut builder = OperatorRegistry::builder();
-    operators::register_builtins(
+    let serve_settings: workflow_schema::WorkflowSettings = Default::default();
+    let interviewer = crate::workflow::human::build_interviewer(
+        None,
+        Duration::from_secs(serve_settings.human.default_timeout_seconds),
+    );
+    operators::register_builtins_with_deps(
         &mut builder,
         std::path::PathBuf::from("."),
-        Default::default(),
+        serve_settings,
+        operators::BuiltinOperatorDeps {
+            interviewer: Some(interviewer),
+            ..Default::default()
+        },
     );
     let registry = builder.build();
 
@@ -1708,11 +1762,24 @@ async fn execute_workflow_for_plan(
         pre_seed_nodes: true,
     };
 
+    let ailoop_ctx =
+        crate::integrations::ailoop::init_context_for_command_name(&workspace, "batch")
+            .ok()
+            .flatten();
     let mut builder = OperatorRegistry::builder();
-    workflow_operators::register_builtins(
+    let settings = document.workflow.settings.clone();
+    let interviewer = crate::workflow::human::build_interviewer(
+        ailoop_ctx.as_ref(),
+        Duration::from_secs(settings.human.default_timeout_seconds),
+    );
+    workflow_operators::register_builtins_with_deps(
         &mut builder,
         workspace.clone(),
-        document.workflow.settings.clone(),
+        settings,
+        workflow_operators::BuiltinOperatorDeps {
+            interviewer: Some(interviewer),
+            ..Default::default()
+        },
     );
     let registry = builder.build();
 

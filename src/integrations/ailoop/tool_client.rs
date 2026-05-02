@@ -3,6 +3,15 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Request payload for a multi-choice question.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChoiceQuestionRequest {
+    pub question: String,
+    pub choices: Vec<String>,
+    pub default: Option<String>,
+    pub timeout_ms: u64,
+}
+
 /// Response from an ask question request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuestionResponse {
@@ -93,6 +102,42 @@ impl ToolClient {
             .post(&endpoint)
             .json(&payload)
             .timeout(timeout + Duration::from_secs(5)) // Add buffer to HTTP timeout
+            .send()
+            .await
+            .map_err(|e| ClientError::NetworkError(e.to_string()))?;
+
+        if !response.status().is_success() {
+            return Err(ClientError::ServerError(format!(
+                "Server returned status: {}",
+                response.status()
+            )));
+        }
+
+        let result: QuestionResponse = response
+            .json()
+            .await
+            .map_err(|e| ClientError::DeserializationError(e.to_string()))?;
+
+        Ok(result)
+    }
+
+    /// Ask a multi-choice question and wait for a response with timeout.
+    pub async fn ask_question_with_choices(
+        &self,
+        request: ChoiceQuestionRequest,
+        timeout: Duration,
+    ) -> Result<QuestionResponse, ClientError> {
+        let endpoint = format!(
+            "{}/questions/{}",
+            self.context.http_url(),
+            self.context.channel()
+        );
+
+        let response = self
+            .client
+            .post(&endpoint)
+            .json(&request)
+            .timeout(timeout + Duration::from_secs(5))
             .send()
             .await
             .map_err(|e| ClientError::NetworkError(e.to_string()))?;
@@ -386,6 +431,132 @@ mod tests {
         let response: QuestionResponse = serde_json::from_str(json).unwrap();
         assert_eq!(response.answer, Some("test answer".to_string()));
         assert!(!response.timed_out);
+    }
+
+    #[tokio::test]
+    async fn test_ask_question_with_choices_success() {
+        let mock_server = MockServer::start().await;
+        let channel = "choice-channel";
+        Mock::given(method("POST"))
+            .and(path_regex(format!(r"^/+questions/{channel}$")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "answer": "apple",
+                "timed_out": false
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let context = create_context(&mock_server.uri(), "ws://localhost:8080", channel);
+        let client = ToolClient::new(context);
+        let req = ChoiceQuestionRequest {
+            question: "pick a fruit".to_string(),
+            choices: vec!["apple".to_string(), "cherry".to_string()],
+            default: Some("apple".to_string()),
+            timeout_ms: 1000,
+        };
+        let result = client
+            .ask_question_with_choices(req, Duration::from_secs(1))
+            .await
+            .expect("should succeed");
+        assert_eq!(result.answer.as_deref(), Some("apple"));
+        assert!(!result.timed_out);
+
+        let requests = mock_server.received_requests().await.expect("requests");
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).expect("body json");
+        assert_eq!(body["question"], "pick a fruit");
+        assert_eq!(body["choices"], json!(["apple", "cherry"]));
+        assert_eq!(body["default"], "apple");
+        assert_eq!(body["timeout_ms"], 1000);
+    }
+
+    #[tokio::test]
+    async fn test_ask_question_with_choices_timed_out() {
+        let mock_server = MockServer::start().await;
+        let channel = "choice-channel-2";
+        Mock::given(method("POST"))
+            .and(path_regex(format!(r"^/+questions/{channel}$")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "answer": null,
+                "timed_out": true
+            })))
+            .mount(&mock_server)
+            .await;
+        let context = create_context(&mock_server.uri(), "ws://localhost:8080", channel);
+        let client = ToolClient::new(context);
+        let req = ChoiceQuestionRequest {
+            question: "pick".to_string(),
+            choices: vec!["a".to_string(), "b".to_string()],
+            default: None,
+            timeout_ms: 100,
+        };
+        let result = client
+            .ask_question_with_choices(req, Duration::from_millis(100))
+            .await
+            .expect("ok");
+        assert!(result.timed_out);
+        assert!(result.answer.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_ask_question_with_choices_network_error() {
+        let context = create_context("http://127.0.0.1:1", "ws://localhost:8080", "x");
+        let client = ToolClient::new(context);
+        let req = ChoiceQuestionRequest {
+            question: "q".to_string(),
+            choices: vec!["a".to_string(), "b".to_string()],
+            default: None,
+            timeout_ms: 100,
+        };
+        let result = client
+            .ask_question_with_choices(req, Duration::from_millis(100))
+            .await;
+        assert!(matches!(result, Err(ClientError::NetworkError(_))));
+    }
+
+    #[tokio::test]
+    async fn test_ask_question_with_choices_server_error() {
+        let mock_server = MockServer::start().await;
+        let channel = "err-channel";
+        Mock::given(method("POST"))
+            .and(path_regex(format!(r"^/+questions/{channel}$")))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+        let context = create_context(&mock_server.uri(), "ws://localhost:8080", channel);
+        let client = ToolClient::new(context);
+        let req = ChoiceQuestionRequest {
+            question: "q".to_string(),
+            choices: vec!["a".to_string(), "b".to_string()],
+            default: None,
+            timeout_ms: 100,
+        };
+        let result = client
+            .ask_question_with_choices(req, Duration::from_millis(500))
+            .await;
+        assert!(matches!(result, Err(ClientError::ServerError(_))));
+    }
+
+    #[tokio::test]
+    async fn test_ask_question_with_choices_malformed_body() {
+        let mock_server = MockServer::start().await;
+        let channel = "malformed-channel";
+        Mock::given(method("POST"))
+            .and(path_regex(format!(r"^/+questions/{channel}$")))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not json"))
+            .mount(&mock_server)
+            .await;
+        let context = create_context(&mock_server.uri(), "ws://localhost:8080", channel);
+        let client = ToolClient::new(context);
+        let req = ChoiceQuestionRequest {
+            question: "q".to_string(),
+            choices: vec!["a".to_string(), "b".to_string()],
+            default: None,
+            timeout_ms: 100,
+        };
+        let result = client
+            .ask_question_with_choices(req, Duration::from_millis(500))
+            .await;
+        assert!(matches!(result, Err(ClientError::DeserializationError(_))));
     }
 
     #[test]

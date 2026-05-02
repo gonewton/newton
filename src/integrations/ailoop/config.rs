@@ -116,6 +116,40 @@ pub fn init_context(workspace_root: &Path, command: &Command) -> Result<Option<A
     }
 }
 
+/// Initialize ailoop context using a command name directly.
+/// This is a low-level helper for callers that don't have a `Command` enum
+/// available (e.g. `setup_workflow_execution` helpers in `cli::commands`).
+/// Returns None if integration is explicitly disabled or unconfigured.
+pub fn init_context_for_command_name(
+    workspace_root: &Path,
+    command_name: &str,
+) -> Result<Option<AiloopContext>> {
+    if let Ok(val) = env::var("NEWTON_AILOOP_INTEGRATION") {
+        if val == "0" || val.to_lowercase() == "false" || val.to_lowercase() == "disabled" {
+            return Ok(None);
+        }
+    }
+    match load_ailoop_config(workspace_root) {
+        Ok(config) => {
+            if !config.enabled {
+                return Ok(None);
+            }
+            Ok(Some(AiloopContext::new(
+                config,
+                workspace_root.to_path_buf(),
+                command_name.to_string(),
+            )))
+        }
+        Err(e) => {
+            if env::var("NEWTON_AILOOP_INTEGRATION").is_ok() {
+                Err(e)
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
 /// Load ailoop configuration with precedence handling.
 fn load_ailoop_config(workspace_root: &Path) -> Result<AiloopConfig> {
     // Check for explicit enable/disable

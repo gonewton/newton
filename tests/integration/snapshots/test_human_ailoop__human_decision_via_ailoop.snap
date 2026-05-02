@@ -1,0 +1,19 @@
+---
+source: tests/integration/test_human_ailoop.rs
+expression: entry
+---
+approved: ~
+choice: fix
+choices:
+  - fix
+  - skip
+  - abort
+default_used: false
+execution_id: "[execution_id]"
+interviewer_type: ailoop
+prompt: Which path forward?
+responder: ~
+response_text: fix
+task_id: decision
+timeout_applied: false
+timestamp: "[timestamp]"
