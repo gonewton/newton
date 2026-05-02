@@ -81,10 +81,10 @@ async fn get_workflow(Path(id): Path<String>, State(state): State<Arc<AppState>>
         Ok(_) => {}
         Err(_) => {
             return (
-                StatusCode::BAD_REQUEST,
+                StatusCode::UNPROCESSABLE_ENTITY,
                 Json(ApiError {
-                    code: "API-WORKFLOW-001".to_string(),
-                    category: "ValidationError".to_string(),
+                    code: "ERR_VALIDATION".to_string(),
+                    category: "validation".to_string(),
                     message: "Invalid workflow instance ID format".to_string(),
                     details: None,
                 }),
@@ -98,8 +98,8 @@ async fn get_workflow(Path(id): Path<String>, State(state): State<Arc<AppState>>
         None => (
             StatusCode::NOT_FOUND,
             Json(ApiError {
-                code: "API-WORKFLOW-002".to_string(),
-                category: "ValidationError".to_string(),
+                code: "ERR_NOT_FOUND".to_string(),
+                category: "resource".to_string(),
                 message: "Workflow instance not found".to_string(),
                 details: None,
             }),
@@ -114,10 +114,10 @@ async fn create_workflow(
 ) -> Response {
     if Uuid::parse_str(&instance.instance_id).is_err() {
         return (
-            StatusCode::BAD_REQUEST,
+            StatusCode::UNPROCESSABLE_ENTITY,
             Json(ApiError {
-                code: "API-WORKFLOW-001".to_string(),
-                category: "ValidationError".to_string(),
+                code: "ERR_VALIDATION".to_string(),
+                category: "validation".to_string(),
                 message: "Invalid workflow instance ID format".to_string(),
                 details: None,
             }),
@@ -129,8 +129,8 @@ async fn create_workflow(
         return (
             StatusCode::CONFLICT,
             Json(ApiError {
-                code: "API-WORKFLOW-003".to_string(),
-                category: "ValidationError".to_string(),
+                code: "ERR_CONFLICT".to_string(),
+                category: "state".to_string(),
                 message: "Workflow instance already exists".to_string(),
                 details: None,
             }),
@@ -151,10 +151,10 @@ async fn update_workflow(
 ) -> Response {
     if Uuid::parse_str(&id).is_err() {
         return (
-            StatusCode::BAD_REQUEST,
+            StatusCode::UNPROCESSABLE_ENTITY,
             Json(ApiError {
-                code: "API-WORKFLOW-001".to_string(),
-                category: "ValidationError".to_string(),
+                code: "ERR_VALIDATION".to_string(),
+                category: "validation".to_string(),
                 message: "Invalid workflow instance ID format".to_string(),
                 details: None,
             }),
@@ -177,8 +177,8 @@ async fn update_workflow(
         (
             StatusCode::NOT_FOUND,
             Json(ApiError {
-                code: "API-WORKFLOW-002".to_string(),
-                category: "ValidationError".to_string(),
+                code: "ERR_NOT_FOUND".to_string(),
+                category: "resource".to_string(),
                 message: "Workflow instance not found".to_string(),
                 details: None,
             }),
@@ -194,10 +194,10 @@ async fn update_node(
 ) -> Response {
     if Uuid::parse_str(&id).is_err() {
         return (
-            StatusCode::BAD_REQUEST,
+            StatusCode::UNPROCESSABLE_ENTITY,
             Json(ApiError {
-                code: "API-WORKFLOW-001".to_string(),
-                category: "ValidationError".to_string(),
+                code: "ERR_VALIDATION".to_string(),
+                category: "validation".to_string(),
                 message: "Invalid workflow instance ID format".to_string(),
                 details: None,
             }),
@@ -207,10 +207,10 @@ async fn update_node(
 
     if node_id.trim().is_empty() {
         return (
-            StatusCode::BAD_REQUEST,
+            StatusCode::UNPROCESSABLE_ENTITY,
             Json(ApiError {
-                code: "API-NODE-001".to_string(),
-                category: "ValidationError".to_string(),
+                code: "ERR_VALIDATION".to_string(),
+                category: "validation".to_string(),
                 message: "Invalid node ID format".to_string(),
                 details: None,
             }),
@@ -250,8 +250,8 @@ async fn update_node(
         None => (
             StatusCode::NOT_FOUND,
             Json(ApiError {
-                code: "API-WORKFLOW-002".to_string(),
-                category: "ValidationError".to_string(),
+                code: "ERR_NOT_FOUND".to_string(),
+                category: "resource".to_string(),
                 message: "Workflow instance not found".to_string(),
                 details: None,
             }),

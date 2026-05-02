@@ -1,0 +1,24 @@
+{
+  "products": [
+    { "id": "prod-1", "name": "Platform Services", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "components": [
+    { "id": "comp-1", "name": "Auth Service", "domain": "platform", "repos": 1, "modules": 2, "health": 85, "trend": 1, "owner": "Alice", "criticality": "high", "autonomy": "semi", "openPlans": 0, "openRequests": 0, "lastEval": "2026-01-01T00:00:00Z", "productId": "prod-1", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "repos": [
+    { "id": "repo-1", "name": "auth-api", "componentId": "comp-1", "owner": "Alice", "criticality": "high", "autonomy": "semi", "qualityScore": 92, "regressions": 0, "openPlans": 0, "execStatus": "idle", "lastEval": "2026-01-01T00:00:00Z", "coverage": 88, "secScore": 95, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "modules": [
+    { "id": "mod-1", "name": "auth-core", "kind": "library", "repoId": "repo-1" },
+    { "id": "mod-2", "name": "auth-utils", "kind": "library", "repoId": "repo-1" }
+  ],
+  "moduleDependencies": [
+    { "id": "dep-1", "fromModuleId": "mod-2", "toModuleId": "mod-1", "type": "runtime", "label": "uses" }
+  ],
+  "indicators": [
+    { "id": "ind-1", "name": "Test Coverage", "description": "Code coverage percentage", "scope": "repo", "weight": 1.0, "threshold": 80.0, "current": 88.0, "trend": 1.0, "reports": 5, "mode": "auto", "lastRun": "2026-01-01T00:00:00Z", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "operators": [
+    { "id": "op-1", "operatorType": "noop", "description": "No-operation operator", "paramsSchema": "{}", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ]
+}

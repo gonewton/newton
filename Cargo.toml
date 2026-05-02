@@ -13,6 +13,7 @@ publish = false
 [workspace]
 members = [
     "crates/types",
+    "crates/backend",
 ]
 
 [dependencies]
@@ -61,6 +62,7 @@ dashmap = "6.1"
 async-stream = "0.3"
 tokio-stream = "0.1"
 newton-types = { path = "crates/types" }
+newton-backend = { path = "crates/backend" }
 
 [dev-dependencies]
 assert_cmd = "2.0"
@@ -182,3 +184,7 @@ path = "tests/integration/test_logging_framework.rs"
 [[test]]
 name = "test_log_commands"
 path = "tests/integration/test_log_commands.rs"
+
+[[test]]
+name = "test_parity_endpoints"
+path = "tests/integration/test_parity_endpoints.rs"

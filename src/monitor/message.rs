@@ -62,8 +62,9 @@ impl From<HilEvent> for MonitorMessage {
             response_type: None,
         };
         let summary = build_summary(&summary_params);
+        let id = Uuid::parse_str(&event.event_id).unwrap_or_else(|_| Uuid::new_v4());
         MonitorMessage {
-            id: event.event_id,
+            id,
             instance_id: event.instance_id,
             channel: event.channel,
             kind,

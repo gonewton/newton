@@ -50,10 +50,10 @@ async fn workflow_stream(
 ) -> Response {
     if Uuid::parse_str(&id).is_err() {
         return (
-            StatusCode::BAD_REQUEST,
+            StatusCode::UNPROCESSABLE_ENTITY,
             Json(ApiError {
-                code: "API-STREAM-001".to_string(),
-                category: "ValidationError".to_string(),
+                code: "ERR_VALIDATION".to_string(),
+                category: "validation".to_string(),
                 message: "Invalid workflow instance ID format".to_string(),
                 details: None,
             }),
@@ -91,10 +91,10 @@ async fn logs_stream(
 ) -> Response {
     if Uuid::parse_str(&instance_id).is_err() {
         return (
-            StatusCode::BAD_REQUEST,
+            StatusCode::UNPROCESSABLE_ENTITY,
             Json(ApiError {
-                code: "API-STREAM-001".to_string(),
-                category: "ValidationError".to_string(),
+                code: "ERR_VALIDATION".to_string(),
+                category: "validation".to_string(),
                 message: "Invalid workflow instance ID format".to_string(),
                 details: None,
             }),
@@ -141,10 +141,10 @@ async fn workflow_sse(
 ) -> Response {
     if Uuid::parse_str(&id).is_err() {
         return (
-            StatusCode::BAD_REQUEST,
+            StatusCode::UNPROCESSABLE_ENTITY,
             Json(ApiError {
-                code: "API-STREAM-001".to_string(),
-                category: "ValidationError".to_string(),
+                code: "ERR_VALIDATION".to_string(),
+                category: "validation".to_string(),
                 message: "Invalid workflow instance ID format".to_string(),
                 details: None,
             }),
@@ -190,6 +190,8 @@ fn should_send_event(event: &BroadcastEvent, instance_id: &str, filters: &Stream
             BroadcastEvent::NodeStateChanged { .. } => "nodeStateChanged",
             BroadcastEvent::LogMessage { .. } => "logMessage",
             BroadcastEvent::HilEvent { .. } => "hilEvent",
+            BroadcastEvent::PlanUpdate { .. } => "plan_update",
+            BroadcastEvent::ExecutionUpdate { .. } => "execution_update",
         };
 
         if filter_type != event_type {
@@ -232,5 +234,6 @@ fn should_send_event(event: &BroadcastEvent, instance_id: &str, filters: &Stream
             instance_id: ref evt_id,
             ..
         } => evt_id == instance_id,
+        BroadcastEvent::PlanUpdate { .. } | BroadcastEvent::ExecutionUpdate { .. } => true,
     }
 }

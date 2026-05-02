@@ -35,6 +35,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     result::Result as StdResult,
+    sync::Arc,
     time::Duration,
 };
 use tokio::time::sleep;
@@ -1512,7 +1513,28 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         })
         .collect();
 
-    let state = AppState::new(operator_descriptors);
+    let mut state = AppState::new(operator_descriptors);
+
+    let db_path = std::path::PathBuf::from(".newton")
+        .join("state")
+        .join("backend.sqlite");
+    let db_dir = db_path.parent();
+    if let Some(dir) = db_dir {
+        let _ = fs::create_dir_all(dir);
+    }
+    let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
+
+    match newton_backend::SqliteBackendStore::new(&db_url).await {
+        Ok(store) => {
+            let store_arc: Arc<dyn newton_backend::BackendStore> = Arc::new(store);
+            state = state.with_backend(store_arc);
+            info!("Backend store initialized at {}", db_path.display());
+        }
+        Err(e) => {
+            info!("Backend store initialization skipped: {}", e.message);
+        }
+    }
+
     let app = api::create_router(state, args.ui_dir.clone());
 
     let addr = format!("{}:{}", args.host, args.port);

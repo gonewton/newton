@@ -1,0 +1,1260 @@
+openapi: 3.1.0
+info:
+  title: Newton Backend Parity API
+  version: 0.1.0
+  description: >
+    Contract for Rust `newton serve` parity endpoints sourced from newton-ui/backend.
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: https://api.example.com
+    description: Example production URL
+security: []
+tags:
+  - name: health
+    description: Service health and liveness endpoints
+  - name: dashboard
+    description: Product, component, indicator, and activity aggregate endpoints
+  - name: portfolio
+    description: Repository, module graph, and saved view endpoints
+  - name: opportunities
+    description: Opportunity listing and state transition endpoints
+  - name: requests
+    description: Change request intake endpoints
+  - name: plans
+    description: Plan listing, detail, and approval workflow endpoints
+  - name: executions
+    description: Execution record listing endpoints
+  - name: workflows
+    description: Workflow instance listing and detail endpoints
+  - name: hil
+    description: Human-in-the-loop event retrieval and action endpoints
+  - name: operators
+    description: Operator catalog endpoint
+  - name: persistence
+    description: Key-value persistence endpoints
+  - name: testing
+    description: Test-only maintenance endpoints
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Service health
+      operationId: getHealth
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/products:
+    get:
+      tags: [dashboard]
+      summary: List products
+      operationId: listProducts
+      responses:
+        "200":
+          description: Product list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProductItem"
+
+  /api/components:
+    get:
+      tags: [dashboard]
+      summary: List components
+      operationId: listComponents
+      responses:
+        "200":
+          description: Component list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ComponentItem"
+
+  /api/pending-approvals:
+    get:
+      tags: [dashboard]
+      summary: List pending approvals
+      operationId: listPendingApprovals
+      responses:
+        "200":
+          description: Pending approvals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PendingApprovalItem"
+
+  /api/regressions:
+    get:
+      tags: [dashboard]
+      summary: List regressions
+      operationId: listRegressions
+      responses:
+        "200":
+          description: Regressions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RegressionItem"
+
+  /api/indicators:
+    get:
+      tags: [dashboard]
+      summary: List indicators
+      operationId: listIndicators
+      responses:
+        "200":
+          description: Indicators
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IndicatorItem"
+
+  /api/recent-actions:
+    get:
+      tags: [dashboard]
+      summary: List recent actions
+      operationId: listRecentActions
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Recent actions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RecentActionItem"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/repos:
+    get:
+      tags: [portfolio]
+      summary: List repos
+      operationId: listRepos
+      responses:
+        "200":
+          description: Repos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RepoItem"
+
+  /api/repo-dependencies:
+    get:
+      tags: [portfolio]
+      summary: List repo-level dependencies
+      operationId: listRepoDependencies
+      responses:
+        "200":
+          description: Repo dependencies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RepoDependencyItem"
+
+  /api/module-dependencies:
+    get:
+      tags: [portfolio]
+      summary: List module dependencies
+      operationId: listModuleDependencies
+      responses:
+        "200":
+          description: Module dependencies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ModuleDependencyItem"
+    post:
+      tags: [portfolio]
+      summary: Create module dependency
+      operationId: createModuleDependency
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateModuleDependencyBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleDependencyItem"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "409":
+          $ref: "#/components/responses/ConflictError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/saved-views:
+    get:
+      tags: [portfolio]
+      summary: List saved views
+      operationId: listSavedViews
+      parameters:
+        - in: query
+          name: kind
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Saved views array when kind is provided, grouped map otherwise
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/SavedViewItem"
+                  - type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/SavedViewItem"
+
+  /api/opportunities:
+    get:
+      tags: [opportunities]
+      summary: List opportunities
+      operationId: listOpportunities
+      parameters:
+        - in: query
+          name: status
+          required: false
+          schema:
+            $ref: "#/components/schemas/OpportunityStatus"
+      responses:
+        "200":
+          description: Opportunities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OpportunityItem"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/opportunities/{id}:
+    patch:
+      tags: [opportunities]
+      summary: Update opportunity status
+      operationId: patchOpportunity
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchOpportunityBody"
+      responses:
+        "200":
+          description: Updated opportunity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpportunityItem"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/requests:
+    get:
+      tags: [requests]
+      summary: List requests
+      operationId: listRequests
+      responses:
+        "200":
+          description: Requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RequestItem"
+    post:
+      tags: [requests]
+      summary: Create request
+      operationId: createRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRequestBody"
+      responses:
+        "201":
+          description: Created request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestItem"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/plans:
+    get:
+      tags: [plans]
+      summary: List plans
+      operationId: listPlans
+      responses:
+        "200":
+          description: Plans
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PlanItem"
+
+  /api/plans/{id}:
+    get:
+      tags: [plans]
+      summary: Get plan detail
+      operationId: getPlan
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Plan detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanDetail"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /api/plans/{id}/approve:
+    post:
+      tags: [plans]
+      summary: Approve plan
+      operationId: approvePlan
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanItem"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "409":
+          $ref: "#/components/responses/ConflictError"
+
+  /api/plans/{id}/reject:
+    post:
+      tags: [plans]
+      summary: Reject plan
+      operationId: rejectPlan
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanItem"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "409":
+          $ref: "#/components/responses/ConflictError"
+
+  /api/executions:
+    get:
+      tags: [executions]
+      summary: List executions
+      operationId: listExecutions
+      parameters:
+        - in: query
+          name: planId
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Executions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ExecutionItem"
+
+  /api/workflows:
+    get:
+      tags: [workflows]
+      summary: List workflows
+      operationId: listWorkflows
+      responses:
+        "200":
+          description: Workflows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WorkflowItem"
+
+  /api/workflows/{id}:
+    get:
+      tags: [workflows]
+      summary: Get workflow
+      operationId: getWorkflow
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Workflow
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowItem"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /api/hil/workflows/{id}:
+    get:
+      tags: [hil]
+      summary: List HIL events by workflow
+      operationId: listHilByWorkflow
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: HIL events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HilEventItem"
+
+  /api/hil/workflows/{id}/{eventId}/action:
+    post:
+      tags: [hil]
+      summary: Submit HIL action
+      operationId: submitHilAction
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: eventId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HilActionBody"
+      responses:
+        "200":
+          description: Updated HIL event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HilEventItem"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/operators:
+    get:
+      tags: [operators]
+      summary: List operators
+      operationId: listOperators
+      responses:
+        "200":
+          description: Operators
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OperatorItem"
+
+  /api/persistence/{key}:
+    get:
+      tags: [persistence]
+      summary: Get persistence value
+      operationId: getPersistence
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Raw JSON value
+          content:
+            application/json:
+              schema: {}
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    put:
+      tags: [persistence]
+      summary: Upsert persistence value
+      operationId: putPersistence
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {}
+      responses:
+        "200":
+          description: Upsert acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      tags: [persistence]
+      summary: Delete persistence value
+      operationId: deletePersistence
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Delete acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/testing/reset:
+    post:
+      tags: [testing]
+      summary: Reset and reseed data (non-production only)
+      operationId: resetTestingData
+      responses:
+        "200":
+          description: Reset acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  responses:
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            invalidPayload:
+              value:
+                code: ERR_VALIDATION
+                category: validation
+                message: Invalid payload
+                details: null
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            notFound:
+              value:
+                code: ERR_NOT_FOUND
+                category: resource
+                message: Resource not found
+                details: null
+    ConflictError:
+      description: Conflict or invalid state transition
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            conflict:
+              value:
+                code: ERR_CONFLICT
+                category: state
+                message: Conflict
+                details: null
+    ForbiddenError:
+      description: Operation forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            forbidden:
+              value:
+                code: ERR_FORBIDDEN_IN_PROD
+                category: authorization
+                message: Testing reset is not available in production
+                details: null
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          examples:
+            internal:
+              value:
+                code: ERR_INTERNAL
+                category: internal
+                message: Internal server error
+                details: null
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [code, category, message, details]
+      properties:
+        code:
+          type: string
+        category:
+          type: string
+        message:
+          type: string
+        details:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: "null"
+
+    OkResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          const: true
+
+    HealthResponse:
+      type: object
+      required: [status, version]
+      properties:
+        status:
+          type: string
+          const: ok
+        version:
+          type: string
+
+    ProductItem:
+      type: object
+      required: [id, name, componentCount]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        componentCount: { type: integer }
+
+    ComponentItem:
+      type: object
+      required:
+        [
+          id,
+          name,
+          productId,
+          productName,
+          domain,
+          repos,
+          modules,
+          health,
+          trend,
+          owner,
+          criticality,
+          autonomy,
+          openPlans,
+          openRequests,
+          lastEval
+        ]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        productId: { type: string }
+        productName: { type: string }
+        domain: { type: string }
+        repos: { type: integer }
+        modules: { type: integer }
+        health: { type: integer }
+        trend: { type: integer }
+        owner: { type: string }
+        criticality: { type: string }
+        autonomy: { type: string }
+        openPlans: { type: integer }
+        openRequests: { type: integer }
+        lastEval: { type: string }
+
+    PendingApprovalItem:
+      type: object
+      required:
+        [id, title, type, product, repo, risk, expectedValue, waitingSince, reviewer, status, confidence, agentGenerated]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        type: { type: string }
+        product: { type: string }
+        repo: { type: string }
+        risk: { type: string }
+        expectedValue: { type: string }
+        waitingSince: { type: string }
+        reviewer: { type: string }
+        status: { type: string }
+        confidence: { type: integer }
+        agentGenerated: { type: boolean }
+
+    RegressionItem:
+      type: object
+      required: [repo, indicator, delta, severity, since, trend]
+      properties:
+        repo: { type: string }
+        indicator: { type: string }
+        delta: { type: number }
+        severity: { type: string }
+        since: { type: string }
+        trend: { type: string }
+
+    IndicatorItem:
+      type: object
+      required: [id, name, description, scope, weight, threshold, current, trend, reports, mode, lastRun]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        scope: { type: string }
+        weight: { type: number }
+        threshold: { type: number }
+        current: { type: number }
+        trend: { type: number }
+        reports: { type: integer }
+        mode: { type: string }
+        lastRun: { type: string }
+
+    RecentActionItem:
+      type: object
+      required: [time, action, subject, type]
+      properties:
+        time: { type: string }
+        action: { type: string }
+        subject: { type: string }
+        type: { type: string }
+
+    RepoItem:
+      type: object
+      required:
+        [id, name, component, owner, criticality, autonomy, qualityScore, regressions, openPlans, execStatus, lastEval, coverage, secScore, dependsOn, dependedOnBy]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        component: { type: string }
+        owner: { type: string }
+        criticality: { type: string }
+        autonomy: { type: string }
+        qualityScore: { type: integer }
+        regressions: { type: integer }
+        openPlans: { type: integer }
+        execStatus: { type: string }
+        lastEval: { type: string }
+        coverage: { type: integer }
+        secScore: { type: integer }
+        dependsOn:
+          type: array
+          items: { type: string }
+        dependedOnBy:
+          type: array
+          items: { type: string }
+
+    RepoDependencyItem:
+      type: object
+      required: [from, to, type, label]
+      properties:
+        from: { type: string }
+        to: { type: string }
+        type: { type: string }
+        label: { type: string }
+
+    ModuleRef:
+      type: object
+      required: [module, kind, repo, component]
+      properties:
+        module: { type: string }
+        kind: { type: string }
+        repo: { type: string }
+        component: { type: string }
+
+    ModuleDependencyItem:
+      type: object
+      required: [id, from, to, type, label]
+      properties:
+        id: { type: string }
+        from:
+          $ref: "#/components/schemas/ModuleRef"
+        to:
+          $ref: "#/components/schemas/ModuleRef"
+        type: { type: string }
+        label: { type: string }
+
+    CreateModuleDependencyBody:
+      type: object
+      required: [fromModuleId, toModuleId, type, label]
+      properties:
+        fromModuleId:
+          type: string
+          minLength: 1
+        toModuleId:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          enum: [runtime, dev, interface, data]
+        label:
+          type: string
+          minLength: 1
+
+    SavedViewItem:
+      type: object
+      required: [id, label]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        filters:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: "null"
+        sort:
+          oneOf:
+            - type: string
+            - type: "null"
+        sortDir:
+          oneOf:
+            - type: string
+              enum: [asc, desc]
+            - type: "null"
+
+    OpportunityStatus:
+      type: string
+      enum: [awaiting_triage, triaged, approved_for_planning, structured, deferred, rejected]
+
+    OpportunityItem:
+      type: object
+      required: [id, title, origin, component, repo, confidence, risk, expectedValue, status, dependsOn, blocks]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        origin: { type: string }
+        component: { type: string }
+        module:
+          oneOf:
+            - type: string
+            - type: "null"
+        repo: { type: string }
+        indicator:
+          oneOf:
+            - type: string
+            - type: "null"
+        confidence:
+          oneOf:
+            - type: number
+            - type: "null"
+        risk: { type: string }
+        expectedValue: { type: number }
+        effort:
+          oneOf:
+            - type: string
+            - type: "null"
+        status:
+          $ref: "#/components/schemas/OpportunityStatus"
+        age:
+          oneOf:
+            - type: string
+            - type: "null"
+        rationale:
+          oneOf:
+            - type: string
+            - type: "null"
+        dependsOn:
+          type: array
+          items: { type: string }
+        blocks:
+          type: array
+          items: { type: string }
+
+    PatchOpportunityBody:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/OpportunityStatus"
+
+    RequestItem:
+      type: object
+      required: [id, title, component, repo, requestedBy, status, createdAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        description:
+          oneOf:
+            - type: string
+            - type: "null"
+        component: { type: string }
+        repo: { type: string }
+        requestedBy: { type: string }
+        status: { type: string }
+        linkedOpportunityId:
+          oneOf:
+            - type: string
+            - type: "null"
+        createdAt: { type: string }
+
+    CreateRequestBody:
+      type: object
+      required: [title, requestedBy]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        component:
+          type: string
+        repo:
+          type: string
+        requestedBy:
+          type: string
+          minLength: 1
+        linkedOpportunityId:
+          type: string
+
+    PlanItem:
+      type: object
+      required: [id, title, component, repo, status, linkedRequestId, executionIds, confidence, risk, agentGenerated, createdAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        component: { type: string }
+        repo: { type: string }
+        status: { type: string }
+        linkedRequestId:
+          oneOf:
+            - type: string
+            - type: "null"
+        executionIds:
+          type: array
+          items: { type: string }
+        confidence: { type: integer }
+        risk: { type: string }
+        expectedValue:
+          oneOf:
+            - type: string
+            - type: "null"
+        agentGenerated: { type: boolean }
+        waitingSince:
+          oneOf:
+            - type: string
+            - type: "null"
+        createdAt: { type: string }
+
+    PlanSectionItem:
+      type: object
+      required: [id, label, content]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        content: { type: string }
+
+    PlanPolicyCheckItem:
+      type: object
+      required: [rule, status, met]
+      properties:
+        rule: { type: string }
+        status: { type: string }
+        met: { type: boolean }
+
+    PlanApproverItem:
+      type: object
+      required: [role, name, status]
+      properties:
+        role: { type: string }
+        name: { type: string }
+        status: { type: string }
+
+    PlanDetail:
+      allOf:
+        - $ref: "#/components/schemas/PlanItem"
+        - type: object
+          required: [sections, policyChecks, approvers]
+          properties:
+            expectedDelta:
+              oneOf:
+                - type: string
+                - type: "null"
+            sections:
+              type: array
+              items:
+                $ref: "#/components/schemas/PlanSectionItem"
+            policyChecks:
+              type: array
+              items:
+                $ref: "#/components/schemas/PlanPolicyCheckItem"
+            approvers:
+              type: array
+              items:
+                $ref: "#/components/schemas/PlanApproverItem"
+
+    ExecutionItem:
+      type: object
+      required: [instance_id, linkedPlanId, status, waitingOn, testResult, prStatus, prLink, deployStatus, created_at]
+      properties:
+        instance_id: { type: string }
+        planId:
+          oneOf:
+            - type: string
+            - type: "null"
+        linkedPlanId:
+          oneOf:
+            - type: string
+            - type: "null"
+        workflow_id:
+          oneOf:
+            - type: string
+            - type: "null"
+        planTitle:
+          oneOf:
+            - type: string
+            - type: "null"
+        repo:
+          oneOf:
+            - type: string
+            - type: "null"
+        component:
+          oneOf:
+            - type: string
+            - type: "null"
+        stage:
+          oneOf:
+            - type: string
+            - type: "null"
+        status: { type: string }
+        policyLevel:
+          oneOf:
+            - type: string
+            - type: "null"
+        startedBy:
+          oneOf:
+            - type: string
+            - type: "null"
+        waitingOn:
+          oneOf:
+            - type: string
+            - type: "null"
+        testResult:
+          oneOf:
+            - type: string
+            - type: "null"
+        prStatus:
+          oneOf:
+            - type: string
+            - type: "null"
+        prLink:
+          oneOf:
+            - type: string
+            - type: "null"
+        deployStatus:
+          oneOf:
+            - type: string
+            - type: "null"
+        created_at: { type: string }
+        started:
+          oneOf:
+            - type: string
+            - type: "null"
+
+    NodeItem:
+      type: object
+      required: [node_id, status, started_at, ended_at]
+      properties:
+        node_id: { type: string }
+        status: { type: string }
+        started_at:
+          oneOf:
+            - type: string
+            - type: "null"
+        ended_at:
+          oneOf:
+            - type: string
+            - type: "null"
+
+    WorkflowItem:
+      type: object
+      required: [instance_id, workflow_id, status, started_at, ended_at, nodes]
+      properties:
+        instance_id: { type: string }
+        workflow_id: { type: string }
+        status: { type: string }
+        started_at: { type: string }
+        ended_at:
+          oneOf:
+            - type: string
+            - type: "null"
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeItem"
+        definition:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: array
+            - type: string
+            - type: number
+            - type: boolean
+            - type: "null"
+
+    HilEventItem:
+      type: object
+      required: [event_id, instance_id, node_id, channel, event_type, question, choices, timeout_seconds, correlation_id, status, timestamp]
+      properties:
+        event_id: { type: string }
+        instance_id: { type: string }
+        node_id:
+          oneOf:
+            - type: string
+            - type: "null"
+        channel: { type: string }
+        event_type: { type: string }
+        question: { type: string }
+        choices:
+          type: array
+          items:
+            type: string
+        timeout_seconds:
+          oneOf:
+            - type: integer
+            - type: "null"
+        correlation_id:
+          oneOf:
+            - type: string
+            - type: "null"
+        status: { type: string }
+        timestamp: { type: string }
+
+    HilActionBody:
+      type: object
+      required: [response_type]
+      properties:
+        response_type:
+          type: string
+          enum: [text, authorization_approved, authorization_denied, timeout, cancelled]
+        answer:
+          type: string
+
+    OperatorItem:
+      type: object
+      required: [operator_type, description, params_schema]
+      properties:
+        operator_type: { type: string }
+        description: { type: string }
+        params_schema:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: array
+            - type: string
+            - type: number
+            - type: boolean
+            - type: "null"
+        paletteLabel:
+          oneOf:
+            - type: string
+            - type: "null"
+        paletteIcon:
+          oneOf:
+            - type: string
+            - type: "null"

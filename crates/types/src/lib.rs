@@ -11,6 +11,8 @@ pub struct WorkflowInstance {
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub linked_plan_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub definition: Option<serde_json::Value>,
 }
 
@@ -47,7 +49,7 @@ pub enum NodeStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HilEvent {
-    pub event_id: Uuid,
+    pub event_id: String,
     pub instance_id: String,
     pub node_id: Option<String>,
     pub channel: String,
@@ -109,7 +111,19 @@ pub enum BroadcastEvent {
         message: String,
     },
     #[serde(rename = "hilEvent")]
-    HilEvent { instance_id: String, event_id: Uuid },
+    HilEvent {
+        instance_id: String,
+        event_id: String,
+    },
+    #[serde(rename = "plan_update")]
+    PlanUpdate { plan_id: String },
+    #[serde(rename = "execution_update")]
+    ExecutionUpdate {
+        execution_id: String,
+        plan_id: Option<String>,
+        status: String,
+        created_at: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

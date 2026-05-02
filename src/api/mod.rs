@@ -1,7 +1,14 @@
+pub mod dashboard;
 pub mod hil;
 pub mod operators;
+pub mod opportunities;
+pub mod persistence;
+pub mod plans;
+pub mod portfolio;
+pub mod requests;
 pub mod state;
 pub mod streaming;
+pub mod testing_reset;
 pub mod workflows;
 
 use crate::api::state::AppState;
@@ -12,10 +19,6 @@ use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
-/// Build the Axum router for Newton's HTTP API.
-///
-/// This is a pure composition function that merges per-resource routers, applies
-/// shared middleware (CORS), and optionally serves static UI assets.
 pub fn create_router(state: AppState, ui_dir: Option<PathBuf>) -> Router {
     let arc_state = Arc::new(state);
 
@@ -24,6 +27,13 @@ pub fn create_router(state: AppState, ui_dir: Option<PathBuf>) -> Router {
         .merge(hil::routes(arc_state.clone()))
         .merge(streaming::routes(arc_state.clone()))
         .merge(operators::routes(arc_state.clone()))
+        .merge(dashboard::routes(arc_state.clone()))
+        .merge(portfolio::routes(arc_state.clone()))
+        .merge(opportunities::routes(arc_state.clone()))
+        .merge(requests::routes(arc_state.clone()))
+        .merge(plans::routes(arc_state.clone()))
+        .merge(persistence::routes(arc_state.clone()))
+        .merge(testing_reset::routes(arc_state.clone()))
         .route("/health", get(health_check))
         .layer(CorsLayer::permissive());
 
@@ -40,7 +50,7 @@ pub fn create_router(state: AppState, ui_dir: Option<PathBuf>) -> Router {
 
 async fn health_check() -> axum::response::Json<serde_json::Value> {
     axum::response::Json(json!({
-        "status": "healthy",
+        "status": "ok",
         "version": env!("CARGO_PKG_VERSION")
     }))
 }
