@@ -496,6 +496,7 @@ impl WorkflowRuntime {
                 nodes: self.build_preseed_nodes(),
                 started_at: self.workflow_execution.started_at,
                 ended_at: None,
+                linked_plan_id: None,
                 definition: self.workflow_definition_json.clone(),
             };
             notifier.notify_workflow_started(instance);

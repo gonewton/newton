@@ -41,6 +41,11 @@ jobs:
        - name: Check formatting
          run: cargo fmt --all -- --check
 
+       - name: Verify OpenAPI parity contract
+         run: |
+           ./scripts/generate-openapi.sh
+           git diff --exit-code openapi/newton-backend-parity.yaml
+
        - name: Run clippy
          run: cargo clippy --all-targets --all-features -- -D warnings
 

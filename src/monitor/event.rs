@@ -69,7 +69,19 @@ pub enum WorkflowEvent {
         message: String,
     },
     /// HIL event occurred.
-    HilEvent { instance_id: String, event_id: Uuid },
+    HilEvent {
+        instance_id: String,
+        event_id: String,
+    },
+    /// Product-facing plan record changed.
+    PlanUpdate { plan_id: String },
+    /// Product-facing execution record changed.
+    ExecutionUpdate {
+        execution_id: String,
+        plan_id: Option<String>,
+        status: String,
+        created_at: String,
+    },
 }
 
 impl From<BroadcastEvent> for WorkflowEvent {
@@ -100,6 +112,18 @@ impl From<BroadcastEvent> for WorkflowEvent {
             } => WorkflowEvent::HilEvent {
                 instance_id,
                 event_id,
+            },
+            BroadcastEvent::PlanUpdate { plan_id } => WorkflowEvent::PlanUpdate { plan_id },
+            BroadcastEvent::ExecutionUpdate {
+                execution_id,
+                plan_id,
+                status,
+                created_at,
+            } => WorkflowEvent::ExecutionUpdate {
+                execution_id,
+                plan_id,
+                status,
+                created_at,
             },
         }
     }

@@ -35,6 +35,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     result::Result as StdResult,
+    sync::Arc,
     time::Duration,
 };
 use tokio::time::sleep;
@@ -1512,7 +1513,32 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         })
         .collect();
 
-    let state = AppState::new(operator_descriptors);
+    let db_path = std::path::PathBuf::from(".newton")
+        .join("state")
+        .join("backend.sqlite");
+    if let Some(dir) = db_path.parent() {
+        fs::create_dir_all(dir).map_err(|e| {
+            AppError::new(
+                crate::core::types::ErrorCategory::IoError,
+                format!("failed to create backend state dir: {e}"),
+            )
+        })?;
+    }
+    let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
+
+    let store = newton_backend::SqliteBackendStore::new(&db_url)
+        .await
+        .map_err(|e| {
+            AppError::new(
+                crate::core::types::ErrorCategory::IoError,
+                format!("backend store init failed: {}", e.message),
+            )
+        })?;
+    info!("Backend store initialized at {}", db_path.display());
+    let backend: Arc<dyn newton_backend::BackendStore> = Arc::new(store);
+
+    let state = AppState::new(operator_descriptors, backend);
+
     let app = api::create_router(state, args.ui_dir.clone());
 
     let addr = format!("{}:{}", args.host, args.port);

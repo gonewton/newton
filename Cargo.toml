@@ -13,6 +13,7 @@ publish = false
 [workspace]
 members = [
     "crates/types",
+    "crates/backend",
 ]
 
 [dependencies]
@@ -45,6 +46,7 @@ opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
 opentelemetry_sdk = "0.31"
 futures = "0.3"
 serde_yaml = "0.9"
+utoipa = { version = "5.4", features = ["chrono", "uuid"] }
 rhai = { version = "1.11", features = ["sync"] }
 petgraph = "0.7"
 async-trait = "0.1"
@@ -61,6 +63,7 @@ dashmap = "6.1"
 async-stream = "0.3"
 tokio-stream = "0.1"
 newton-types = { path = "crates/types" }
+newton-backend = { path = "crates/backend" }
 
 [dev-dependencies]
 assert_cmd = "2.0"
@@ -182,3 +185,7 @@ path = "tests/integration/test_logging_framework.rs"
 [[test]]
 name = "test_log_commands"
 path = "tests/integration/test_log_commands.rs"
+
+[[test]]
+name = "test_parity_endpoints"
+path = "tests/integration/test_parity_endpoints.rs"

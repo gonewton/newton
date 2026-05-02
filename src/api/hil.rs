@@ -9,7 +9,6 @@ use axum::{
 };
 use newton_types::{ApiError, BroadcastEvent, HilAction, HilEvent, HilStatus};
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// Routes for the human-in-the-loop (HIL) API resource.
 pub fn routes(state: Arc<AppState>) -> Router {
@@ -24,7 +23,13 @@ pub fn routes(state: Arc<AppState>) -> Router {
 }
 
 /// List distinct workflow instance IDs that currently have HIL events.
-async fn list_hil_instances(State(state): State<Arc<AppState>>) -> Json<Vec<String>> {
+#[utoipa::path(
+    get,
+    path = "/api/hil/instances",
+    tag = "hil",
+    responses((status = 200, description = "HIL workflow instance ids", body = [String]))
+)]
+pub(crate) async fn list_hil_instances(State(state): State<Arc<AppState>>) -> Json<Vec<String>> {
     let mut instance_ids: Vec<String> = state
         .hil_events
         .iter()
@@ -36,7 +41,17 @@ async fn list_hil_instances(State(state): State<Arc<AppState>>) -> Json<Vec<Stri
     Json(instance_ids)
 }
 
-async fn list_hil_events(Path(id): Path<String>, State(state): State<Arc<AppState>>) -> Response {
+#[utoipa::path(
+    get,
+    path = "/api/hil/workflows/{id}",
+    tag = "hil",
+    params(("id" = String, Path, description = "Workflow instance id")),
+    responses((status = 200, description = "HIL event list", body = [HilEvent]))
+)]
+pub(crate) async fn list_hil_events(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
     let events: Vec<HilEvent> = state
         .hil_events
         .iter()
@@ -46,8 +61,23 @@ async fn list_hil_events(Path(id): Path<String>, State(state): State<Arc<AppStat
     (StatusCode::OK, Json(events)).into_response()
 }
 
-async fn submit_hil_action(
-    Path((instance_id, event_id)): Path<(String, Uuid)>,
+#[utoipa::path(
+    post,
+    path = "/api/hil/workflows/{id}/{event_id}/action",
+    tag = "hil",
+    params(
+        ("id" = String, Path, description = "Workflow instance id"),
+        ("event_id" = String, Path, description = "HIL event id")
+    ),
+    request_body = HilAction,
+    responses(
+        (status = 200, description = "Resolved HIL event", body = HilEvent),
+        (status = 404, description = "HIL event not found", body = ApiError),
+        (status = 422, description = "Validation error", body = ApiError)
+    )
+)]
+pub(crate) async fn submit_hil_action(
+    Path((instance_id, event_id)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
     Json(action): Json<HilAction>,
 ) -> Response {
@@ -57,22 +87,9 @@ async fn submit_hil_action(
                 return (
                     StatusCode::NOT_FOUND,
                     Json(ApiError {
-                        code: "API-HIL-001".to_string(),
-                        category: "ValidationError".to_string(),
+                        code: "ERR_NOT_FOUND".to_string(),
+                        category: "resource".to_string(),
                         message: "HIL event not found for this workflow".to_string(),
-                        details: None,
-                    }),
-                )
-                    .into_response();
-            }
-
-            if hil_event.status != newton_types::HilStatus::Pending {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(ApiError {
-                        code: "API-HIL-001".to_string(),
-                        category: "ValidationError".to_string(),
-                        message: "HIL event already resolved".to_string(),
                         details: None,
                     }),
                 )
@@ -84,15 +101,15 @@ async fn submit_hil_action(
             }
             let _ = state.events_tx.send(BroadcastEvent::HilEvent {
                 instance_id: hil_event.instance_id.clone(),
-                event_id,
+                event_id: event_id.clone(),
             });
             (StatusCode::OK, Json(hil_event.clone())).into_response()
         }
         None => (
             StatusCode::NOT_FOUND,
             Json(ApiError {
-                code: "API-HIL-001".to_string(),
-                category: "ValidationError".to_string(),
+                code: "ERR_NOT_FOUND".to_string(),
+                category: "resource".to_string(),
                 message: "HIL event not found".to_string(),
                 details: None,
             }),
@@ -109,10 +126,10 @@ pub(crate) fn apply_hil_action(
         "text" | "authorization_approved" | "authorization_denied" | "timeout" | "cancelled" => {}
         _ => {
             return Err((
-                StatusCode::BAD_REQUEST,
+                StatusCode::UNPROCESSABLE_ENTITY,
                 ApiError {
-                    code: "API-HIL-002".to_string(),
-                    category: "ValidationError".to_string(),
+                    code: "ERR_VALIDATION".to_string(),
+                    category: "validation".to_string(),
                     message: "Invalid response type for HIL event kind".to_string(),
                     details: None,
                 },
@@ -122,10 +139,10 @@ pub(crate) fn apply_hil_action(
 
     if action.response_type == "text" && action.answer.is_none() {
         return Err((
-            StatusCode::BAD_REQUEST,
+            StatusCode::UNPROCESSABLE_ENTITY,
             ApiError {
-                code: "API-HIL-003".to_string(),
-                category: "ValidationError".to_string(),
+                code: "ERR_VALIDATION".to_string(),
+                category: "validation".to_string(),
                 message: "Missing answer field for text response type".to_string(),
                 details: None,
             },

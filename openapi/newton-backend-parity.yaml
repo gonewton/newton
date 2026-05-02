@@ -1,0 +1,1848 @@
+openapi: 3.1.0
+info:
+  title: Newton Backend Parity API
+  description: Contract for Rust `newton serve` parity endpoints sourced from Rust DTOs and handlers.
+  contact:
+    name: Newton Loop Framework
+  license:
+    name: ''
+  version: 0.5.78
+paths:
+  /api/components:
+    get:
+      tags:
+      - dashboard
+      operationId: list_components
+      responses:
+        '200':
+          description: Component list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ComponentItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/executions:
+    get:
+      tags:
+      - executions
+      operationId: list_executions
+      parameters:
+      - name: planId
+        in: query
+        description: Optional plan id filter
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Execution list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExecutionItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/hil/instances:
+    get:
+      tags:
+      - hil
+      summary: List distinct workflow instance IDs that currently have HIL events.
+      operationId: list_hil_instances
+      responses:
+        '200':
+          description: HIL workflow instance ids
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+  /api/hil/workflows/{id}:
+    get:
+      tags:
+      - hil
+      operationId: list_hil_events
+      parameters:
+      - name: id
+        in: path
+        description: Workflow instance id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: HIL event list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HilEvent'
+  /api/hil/workflows/{id}/{event_id}/action:
+    post:
+      tags:
+      - hil
+      operationId: submit_hil_action
+      parameters:
+      - name: id
+        in: path
+        description: Workflow instance id
+        required: true
+        schema:
+          type: string
+      - name: event_id
+        in: path
+        description: HIL event id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HilAction'
+        required: true
+      responses:
+        '200':
+          description: Resolved HIL event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HilEvent'
+        '404':
+          description: HIL event not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/indicators:
+    get:
+      tags:
+      - dashboard
+      operationId: list_indicators
+      responses:
+        '200':
+          description: Indicator list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IndicatorItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/module-dependencies:
+    get:
+      tags:
+      - portfolio
+      operationId: list_module_dependencies
+      responses:
+        '200':
+          description: Module dependency list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModuleDependencyItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+      - portfolio
+      operationId: create_module_dependency
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateModuleDependencyBody'
+        required: true
+      responses:
+        '201':
+          description: Created module dependency
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleDependencyItem'
+        '404':
+          description: Module not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Dependency conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/operators:
+    get:
+      tags:
+      - operators
+      summary: Return the configured operator descriptors as a typed JSON array.
+      operationId: list_operators
+      responses:
+        '200':
+          description: Operator descriptor list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OperatorDescriptor'
+  /api/opportunities:
+    get:
+      tags:
+      - opportunities
+      operationId: list_opportunities
+      parameters:
+      - name: status
+        in: query
+        description: Optional opportunity status filter
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Opportunity list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OpportunityItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/opportunities/{id}:
+    patch:
+      tags:
+      - opportunities
+      operationId: patch_opportunity
+      parameters:
+      - name: id
+        in: path
+        description: Opportunity id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchOpportunityBody'
+        required: true
+      responses:
+        '200':
+          description: Updated opportunity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpportunityItem'
+        '404':
+          description: Opportunity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/pending-approvals:
+    get:
+      tags:
+      - dashboard
+      operationId: list_pending_approvals
+      responses:
+        '200':
+          description: Pending approval list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingApprovalItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/persistence/{key}:
+    get:
+      tags:
+      - persistence
+      operationId: get_persistence
+      parameters:
+      - name: key
+        in: path
+        description: Persistence key
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Persisted JSON value
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: Key not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    put:
+      tags:
+      - persistence
+      operationId: put_persistence
+      parameters:
+      - name: key
+        in: path
+        description: Persistence key
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema: {}
+        required: true
+      responses:
+        '200':
+          description: Persistence upsert result
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      tags:
+      - persistence
+      operationId: delete_persistence
+      parameters:
+      - name: key
+        in: path
+        description: Persistence key
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Persistence delete result
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/plans:
+    get:
+      tags:
+      - plans
+      operationId: list_plans
+      responses:
+        '200':
+          description: Plan list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlanItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/plans/{id}:
+    get:
+      tags:
+      - plans
+      operationId: get_plan
+      parameters:
+      - name: id
+        in: path
+        description: Plan id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Plan detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanDetail'
+        '404':
+          description: Plan not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/plans/{id}/approve:
+    post:
+      tags:
+      - plans
+      operationId: approve_plan
+      parameters:
+      - name: id
+        in: path
+        description: Plan id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Approved plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanItem'
+        '404':
+          description: Plan not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Plan state conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/plans/{id}/reject:
+    post:
+      tags:
+      - plans
+      operationId: reject_plan
+      parameters:
+      - name: id
+        in: path
+        description: Plan id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Rejected plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanItem'
+        '404':
+          description: Plan not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Plan state conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/products:
+    get:
+      tags:
+      - dashboard
+      operationId: list_products
+      responses:
+        '200':
+          description: Product list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProductItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/recent-actions:
+    get:
+      tags:
+      - dashboard
+      operationId: list_recent_actions
+      parameters:
+      - name: limit
+        in: query
+        description: Maximum number of recent actions
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      responses:
+        '200':
+          description: Recent action list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RecentActionItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/regressions:
+    get:
+      tags:
+      - dashboard
+      operationId: list_regressions
+      responses:
+        '200':
+          description: Regression list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RegressionItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/repo-dependencies:
+    get:
+      tags:
+      - portfolio
+      operationId: list_repo_dependencies
+      responses:
+        '200':
+          description: Repository dependency list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RepoDependencyItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/repos:
+    get:
+      tags:
+      - portfolio
+      operationId: list_repos
+      responses:
+        '200':
+          description: Repository list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RepoItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/requests:
+    get:
+      tags:
+      - requests
+      operationId: list_requests
+      responses:
+        '200':
+          description: Request list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RequestItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+      - requests
+      operationId: create_request
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRequestBody'
+        required: true
+      responses:
+        '201':
+          description: Created request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/saved-views:
+    get:
+      tags:
+      - portfolio
+      operationId: list_saved_views
+      parameters:
+      - name: kind
+        in: query
+        description: Optional saved-view kind filter
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Saved views
+          content:
+            application/json:
+              schema: {}
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/testing/reset:
+    post:
+      tags:
+      - testing
+      operationId: reset_testing
+      responses:
+        '200':
+          description: Reset result
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: Forbidden in production
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/workflows:
+    get:
+      tags:
+      - workflows
+      operationId: list_workflows
+      parameters:
+      - name: status
+        in: query
+        description: Optional workflow status filter
+        required: false
+        schema:
+          $ref: '#/components/schemas/WorkflowStatus'
+      - name: limit
+        in: query
+        description: Maximum number of workflow instances
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+      - name: offset
+        in: query
+        description: Number of workflow instances to skip
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+      responses:
+        '200':
+          description: Workflow instance list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkflowInstance'
+    post:
+      tags:
+      - workflows
+      operationId: create_workflow
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowInstance'
+        required: true
+      responses:
+        '201':
+          description: Created workflow instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowInstance'
+        '409':
+          description: Workflow instance already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/workflows/{id}:
+    get:
+      tags:
+      - workflows
+      operationId: get_workflow
+      parameters:
+      - name: id
+        in: path
+        description: Workflow instance id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Workflow instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowInstance'
+        '404':
+          description: Workflow instance not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    put:
+      tags:
+      - workflows
+      operationId: update_workflow
+      parameters:
+      - name: id
+        in: path
+        description: Workflow instance id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowUpdateBody'
+        required: true
+      responses:
+        '200':
+          description: Updated workflow instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowInstance'
+        '404':
+          description: Workflow instance not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/workflows/{id}/nodes/{node_id}:
+    patch:
+      tags:
+      - workflows
+      operationId: update_node
+      parameters:
+      - name: id
+        in: path
+        description: Workflow instance id
+        required: true
+        schema:
+          type: string
+      - name: node_id
+        in: path
+        description: Workflow node id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodeUpdate'
+        required: true
+      responses:
+        '200':
+          description: Updated workflow instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowInstance'
+        '404':
+          description: Workflow instance not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /health:
+    get:
+      tags:
+      - health
+      operationId: health_check
+      responses:
+        '200':
+          description: Service health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+components:
+  schemas:
+    ApiError:
+      type: object
+      required:
+      - code
+      - category
+      - message
+      properties:
+        category:
+          type: string
+        code:
+          type: string
+        details: {}
+        message:
+          type: string
+    ComponentItem:
+      type: object
+      required:
+      - id
+      - name
+      - productId
+      - productName
+      - domain
+      - repos
+      - modules
+      - health
+      - trend
+      - owner
+      - criticality
+      - autonomy
+      - openPlans
+      - openRequests
+      - lastEval
+      properties:
+        autonomy:
+          type: string
+        criticality:
+          type: string
+        domain:
+          type: string
+        health:
+          type: integer
+          format: int64
+        id:
+          type: string
+        lastEval:
+          type: string
+        modules:
+          type: integer
+          format: int64
+        name:
+          type: string
+        openPlans:
+          type: integer
+          format: int64
+        openRequests:
+          type: integer
+          format: int64
+        owner:
+          type: string
+        productId:
+          type: string
+        productName:
+          type: string
+        repos:
+          type: integer
+          format: int64
+        trend:
+          type: integer
+          format: int64
+    CreateModuleDependencyBody:
+      type: object
+      required:
+      - fromModuleId
+      - toModuleId
+      - type
+      - label
+      properties:
+        fromModuleId:
+          type: string
+        label:
+          type: string
+        toModuleId:
+          type: string
+        type:
+          type: string
+    CreateRequestBody:
+      type: object
+      required:
+      - title
+      - requestedBy
+      properties:
+        component:
+          type:
+          - string
+          - 'null'
+        description:
+          type:
+          - string
+          - 'null'
+        linkedOpportunityId:
+          type:
+          - string
+          - 'null'
+        repo:
+          type:
+          - string
+          - 'null'
+        requestedBy:
+          type: string
+        title:
+          type: string
+    ExecutionItem:
+      type: object
+      required:
+      - instance_id
+      - status
+      - created_at
+      properties:
+        component:
+          type:
+          - string
+          - 'null'
+        created_at:
+          type: string
+        deployStatus:
+          type:
+          - string
+          - 'null'
+        instance_id:
+          type: string
+        linkedPlanId:
+          type:
+          - string
+          - 'null'
+        planId:
+          type:
+          - string
+          - 'null'
+        planTitle:
+          type:
+          - string
+          - 'null'
+        policyLevel:
+          type:
+          - string
+          - 'null'
+        prLink:
+          type:
+          - string
+          - 'null'
+        prStatus:
+          type:
+          - string
+          - 'null'
+        repo:
+          type:
+          - string
+          - 'null'
+        stage:
+          type:
+          - string
+          - 'null'
+        started:
+          type:
+          - string
+          - 'null'
+        startedBy:
+          type:
+          - string
+          - 'null'
+        status:
+          type: string
+        testResult:
+          type:
+          - string
+          - 'null'
+        waitingOn:
+          type:
+          - string
+          - 'null'
+        workflow_id:
+          type:
+          - string
+          - 'null'
+    HealthResponse:
+      type: object
+      required:
+      - status
+      - version
+      properties:
+        status:
+          type: string
+        version:
+          type: string
+    HilAction:
+      type: object
+      required:
+      - response_type
+      properties:
+        answer:
+          type:
+          - string
+          - 'null'
+        response_type:
+          type: string
+    HilEvent:
+      type: object
+      required:
+      - event_id
+      - instance_id
+      - channel
+      - event_type
+      - question
+      - choices
+      - status
+      - timestamp
+      properties:
+        channel:
+          type: string
+        choices:
+          type: array
+          items:
+            type: string
+        correlation_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        event_id:
+          type: string
+        event_type:
+          $ref: '#/components/schemas/HilEventType'
+        instance_id:
+          type: string
+        node_id:
+          type:
+          - string
+          - 'null'
+        question:
+          type: string
+        status:
+          $ref: '#/components/schemas/HilStatus'
+        timeout_seconds:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        timestamp:
+          type: string
+          format: date-time
+    HilEventType:
+      type: string
+      enum:
+      - question
+      - authorization
+    HilStatus:
+      type: string
+      enum:
+      - pending
+      - resolved
+      - timedout
+      - cancelled
+    IndicatorItem:
+      type: object
+      required:
+      - id
+      - name
+      - description
+      - scope
+      - weight
+      - threshold
+      - current
+      - trend
+      - reports
+      - mode
+      - lastRun
+      properties:
+        current:
+          type: number
+          format: double
+        description:
+          type: string
+        id:
+          type: string
+        lastRun:
+          type: string
+        mode:
+          type: string
+        name:
+          type: string
+        reports:
+          type: integer
+          format: int64
+        scope:
+          type: string
+        threshold:
+          type: number
+          format: double
+        trend:
+          type: number
+          format: double
+        weight:
+          type: number
+          format: double
+    ModuleDependencyItem:
+      type: object
+      required:
+      - id
+      - from
+      - to
+      - type
+      - label
+      properties:
+        from:
+          $ref: '#/components/schemas/ModuleRef'
+        id:
+          type: string
+        label:
+          type: string
+        to:
+          $ref: '#/components/schemas/ModuleRef'
+        type:
+          type: string
+    ModuleRef:
+      type: object
+      required:
+      - module
+      - kind
+      - repo
+      - component
+      properties:
+        component:
+          type: string
+        kind:
+          type: string
+        module:
+          type: string
+        repo:
+          type: string
+    NodeState:
+      type: object
+      required:
+      - node_id
+      - status
+      properties:
+        ended_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        node_id:
+          type: string
+        operator_type:
+          type:
+          - string
+          - 'null'
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        status:
+          $ref: '#/components/schemas/NodeStatus'
+    NodeStatus:
+      type: string
+      enum:
+      - pending
+      - running
+      - succeeded
+      - failed
+      - timeout
+      - cancelled
+    NodeUpdate:
+      type: object
+      required:
+      - status
+      properties:
+        ended_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        operator_type:
+          type:
+          - string
+          - 'null'
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        status:
+          $ref: '#/components/schemas/NodeStatus'
+    OperatorDescriptor:
+      type: object
+      required:
+      - operator_type
+      - description
+      - params_schema
+      properties:
+        description:
+          type: string
+        operator_type:
+          type: string
+        params_schema: {}
+    OperatorItem:
+      type: object
+      required:
+      - operator_type
+      - description
+      - params_schema
+      properties:
+        description:
+          type: string
+        operator_type:
+          type: string
+        paletteIcon:
+          type:
+          - string
+          - 'null'
+        paletteLabel:
+          type:
+          - string
+          - 'null'
+        params_schema: {}
+    OpportunityItem:
+      type: object
+      required:
+      - id
+      - title
+      - origin
+      - component
+      - repo
+      - risk
+      - expectedValue
+      - status
+      - dependsOn
+      - blocks
+      properties:
+        age:
+          type:
+          - string
+          - 'null'
+        blocks:
+          type: array
+          items:
+            type: string
+        component:
+          type: string
+        confidence:
+          type:
+          - number
+          - 'null'
+          format: double
+        dependsOn:
+          type: array
+          items:
+            type: string
+        effort:
+          type:
+          - string
+          - 'null'
+        expectedValue:
+          type: number
+          format: double
+        id:
+          type: string
+        indicator:
+          type:
+          - string
+          - 'null'
+        module:
+          type:
+          - string
+          - 'null'
+        origin:
+          type: string
+        rationale:
+          type:
+          - string
+          - 'null'
+        repo:
+          type: string
+        risk:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+    PatchOpportunityBody:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+    PendingApprovalItem:
+      type: object
+      required:
+      - id
+      - title
+      - type
+      - product
+      - repo
+      - risk
+      - expectedValue
+      - waitingSince
+      - reviewer
+      - status
+      - confidence
+      - agentGenerated
+      properties:
+        agentGenerated:
+          type: boolean
+        confidence:
+          type: integer
+          format: int64
+        expectedValue:
+          type: string
+        id:
+          type: string
+        product:
+          type: string
+        repo:
+          type: string
+        reviewer:
+          type: string
+        risk:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+        waitingSince:
+          type: string
+    PlanApproverItem:
+      type: object
+      required:
+      - role
+      - name
+      - status
+      properties:
+        name:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+    PlanDetail:
+      allOf:
+      - $ref: '#/components/schemas/PlanItem'
+      - type: object
+        required:
+        - sections
+        - policyChecks
+        - approvers
+        properties:
+          approvers:
+            type: array
+            items:
+              $ref: '#/components/schemas/PlanApproverItem'
+          expectedDelta:
+            type:
+            - string
+            - 'null'
+          policyChecks:
+            type: array
+            items:
+              $ref: '#/components/schemas/PlanPolicyCheckItem'
+          sections:
+            type: array
+            items:
+              $ref: '#/components/schemas/PlanSectionItem'
+    PlanItem:
+      type: object
+      required:
+      - id
+      - title
+      - component
+      - repo
+      - status
+      - executionIds
+      - confidence
+      - risk
+      - agentGenerated
+      - createdAt
+      properties:
+        agentGenerated:
+          type: boolean
+        component:
+          type: string
+        confidence:
+          type: integer
+          format: int64
+        createdAt:
+          type: string
+        executionIds:
+          type: array
+          items:
+            type: string
+        expectedValue:
+          type:
+          - string
+          - 'null'
+        id:
+          type: string
+        linkedRequestId:
+          type:
+          - string
+          - 'null'
+        repo:
+          type: string
+        risk:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        waitingSince:
+          type:
+          - string
+          - 'null'
+    PlanPolicyCheckItem:
+      type: object
+      required:
+      - rule
+      - status
+      - met
+      properties:
+        met:
+          type: boolean
+        rule:
+          type: string
+        status:
+          type: string
+    PlanSectionItem:
+      type: object
+      required:
+      - id
+      - label
+      - content
+      properties:
+        content:
+          type: string
+        id:
+          type: string
+        label:
+          type: string
+    ProductItem:
+      type: object
+      required:
+      - id
+      - name
+      - componentCount
+      properties:
+        componentCount:
+          type: integer
+          format: int64
+        id:
+          type: string
+        name:
+          type: string
+    RecentActionItem:
+      type: object
+      required:
+      - time
+      - action
+      - subject
+      - type
+      properties:
+        action:
+          type: string
+        subject:
+          type: string
+        time:
+          type: string
+        type:
+          type: string
+    RegressionItem:
+      type: object
+      required:
+      - repo
+      - indicator
+      - delta
+      - severity
+      - since
+      - trend
+      properties:
+        delta:
+          type: number
+          format: double
+        indicator:
+          type: string
+        repo:
+          type: string
+        severity:
+          type: string
+        since:
+          type: string
+        trend:
+          type: string
+    RepoDependencyItem:
+      type: object
+      required:
+      - from
+      - to
+      - type
+      - label
+      properties:
+        from:
+          type: string
+        label:
+          type: string
+        to:
+          type: string
+        type:
+          type: string
+    RepoItem:
+      type: object
+      required:
+      - id
+      - name
+      - component
+      - owner
+      - criticality
+      - autonomy
+      - qualityScore
+      - regressions
+      - openPlans
+      - execStatus
+      - lastEval
+      - coverage
+      - secScore
+      - dependsOn
+      - dependedOnBy
+      properties:
+        autonomy:
+          type: string
+        component:
+          type: string
+        coverage:
+          type: integer
+          format: int64
+        criticality:
+          type: string
+        dependedOnBy:
+          type: array
+          items:
+            type: string
+        dependsOn:
+          type: array
+          items:
+            type: string
+        execStatus:
+          type: string
+        id:
+          type: string
+        lastEval:
+          type: string
+        name:
+          type: string
+        openPlans:
+          type: integer
+          format: int64
+        owner:
+          type: string
+        qualityScore:
+          type: integer
+          format: int64
+        regressions:
+          type: integer
+          format: int64
+        secScore:
+          type: integer
+          format: int64
+    RequestItem:
+      type: object
+      required:
+      - id
+      - title
+      - component
+      - repo
+      - requestedBy
+      - status
+      - createdAt
+      properties:
+        component:
+          type: string
+        createdAt:
+          type: string
+        description:
+          type:
+          - string
+          - 'null'
+        id:
+          type: string
+        linkedOpportunityId:
+          type:
+          - string
+          - 'null'
+        repo:
+          type: string
+        requestedBy:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+    SavedViewItem:
+      type: object
+      required:
+      - id
+      - label
+      properties:
+        filters: {}
+        id:
+          type: string
+        label:
+          type: string
+        sort:
+          type:
+          - string
+          - 'null'
+        sortDir:
+          type:
+          - string
+          - 'null'
+    WorkflowInstance:
+      type: object
+      required:
+      - instance_id
+      - workflow_id
+      - status
+      - nodes
+      - started_at
+      properties:
+        definition: {}
+        ended_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        instance_id:
+          type: string
+        linked_plan_id:
+          type:
+          - string
+          - 'null'
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeState'
+        started_at:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/WorkflowStatus'
+        workflow_id:
+          type: string
+    WorkflowStatus:
+      type: string
+      enum:
+      - running
+      - succeeded
+      - failed
+      - paused
+      - cancelled
+    WorkflowUpdateBody:
+      type: object
+      description: |-
+        Flexible update body: supports both legacy WorkflowDefinition format
+        and new status/ended_at update format.
+      properties:
+        definition: {}
+        ended_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        status:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/WorkflowStatus'
+        workflow_id:
+          type:
+          - string
+          - 'null'
+tags:
+- name: health
+  description: Service health and liveness endpoints
+- name: dashboard
+  description: Product, component, indicator, and activity aggregate endpoints
+- name: portfolio
+  description: Repository, module graph, and saved view endpoints
+- name: opportunities
+  description: Opportunity listing and state transition endpoints
+- name: requests
+  description: Change request intake endpoints
+- name: plans
+  description: Plan listing, detail, and approval workflow endpoints
+- name: executions
+  description: Execution record listing endpoints
+- name: workflows
+  description: Workflow runtime endpoints
+- name: hil
+  description: Human-in-the-loop event retrieval and action endpoints
+- name: operators
+  description: Operator catalog endpoint
+- name: persistence
+  description: Key-value persistence endpoints
+- name: testing
+  description: Test-only maintenance endpoints

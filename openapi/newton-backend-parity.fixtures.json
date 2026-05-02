@@ -1,0 +1,65 @@
+{
+  "_meta": {
+    "purpose": "Test-only fixtures. Loaded by integration tests and POST /api/testing/reset. Production deployments do not load fixtures.",
+    "timestamp": "2026-01-01T00:00:00Z"
+  },
+  "Product": [
+    { "id": "prod-1", "name": "Platform Services", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "Component": [
+    { "id": "comp-1", "name": "Auth Service", "domain": "platform", "repos": 1, "modules": 2, "health": 85, "trend": 1, "owner": "Alice", "criticality": "high", "autonomy": "semi", "openPlans": 0, "openRequests": 0, "lastEval": "2026-01-01T00:00:00Z", "productId": "prod-1", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "Repo": [
+    { "id": "repo-1", "name": "auth-api", "componentId": "comp-1", "owner": "Alice", "criticality": "high", "autonomy": "semi", "qualityScore": 92, "regressions": 0, "openPlans": 0, "execStatus": "idle", "lastEval": "2026-01-01T00:00:00Z", "coverage": 88, "secScore": 95, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "Module": [
+    { "id": "mod-1", "name": "auth-core", "kind": "library", "repoId": "repo-1" },
+    { "id": "mod-2", "name": "auth-utils", "kind": "library", "repoId": "repo-1" }
+  ],
+  "ModuleDependency": [
+    { "id": "dep-1", "fromModuleId": "mod-2", "toModuleId": "mod-1", "type": "runtime", "label": "uses" }
+  ],
+  "PendingApproval": [
+    { "id": "pa-1", "title": "Approve auth-api hotfix", "type": "plan", "componentId": "comp-1", "repoName": "auth-api", "risk": "medium", "expectedValue": "$10k", "waitingSince": "2026-01-01T00:00:00Z", "reviewer": "Bob", "status": "awaiting", "confidence": 80, "agentGenerated": 0, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "Indicator": [
+    { "id": "ind-1", "name": "Test Coverage", "description": "Code coverage percentage", "scope": "repo", "weight": 1.0, "threshold": 80.0, "current": 88.0, "trend": 1.0, "reports": 5, "mode": "auto", "lastRun": "2026-01-01T00:00:00Z", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "Regression": [
+    { "id": "reg-1", "repoName": "auth-api", "indicator": "Test Coverage", "delta": -2.5, "severity": "low", "since": "2026-01-01T00:00:00Z", "trend": "improving", "createdAt": "2026-01-01T00:00:00Z" }
+  ],
+  "Opportunity": [
+    { "id": "opp-1", "title": "Refactor session module", "origin": "agent", "componentId": "comp-1", "module": "auth-core", "repoId": "repo-1", "indicator": "Test Coverage", "confidence": 0.75, "risk": "low", "expectedValue": 5000.0, "effort": "M", "status": "awaiting_triage", "age": "3d", "rationale": "Coverage gap detected", "dependsOn": "[]", "blocks": "[]", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "Request": [
+    { "id": "req-1", "title": "Add MFA support", "description": "Multi-factor authentication", "componentId": "comp-1", "repoId": "repo-1", "requestedBy": "alice@example.com", "status": "draft", "linkedOpportunityId": null, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "Plan": [
+    { "id": "plan-1", "title": "Migrate to JWT v2", "componentId": "comp-1", "repoId": "repo-1", "status": "awaiting_approval", "linkedRequestId": "req-1", "confidence": 85, "risk": "medium", "expectedValue": "$25k", "agentGenerated": 1, "waitingSince": "2026-01-01T00:00:00Z", "expectedDelta": "+10% coverage", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "PlanSection": [
+    { "id": "ps-1", "planId": "plan-1", "label": "Overview", "content": "Migrate the auth flow to JWT v2.", "sortOrder": 0 },
+    { "id": "ps-2", "planId": "plan-1", "label": "Risks", "content": "Token rotation may break existing clients.", "sortOrder": 1 }
+  ],
+  "PlanPolicyCheck": [
+    { "id": "pc-1", "planId": "plan-1", "rule": "coverage>=80", "status": "passed", "met": 1 }
+  ],
+  "PlanApprover": [
+    { "id": "pap-1", "planId": "plan-1", "role": "engineering", "name": "Alice", "approverStatus": "pending" }
+  ],
+  "ExecutionRecord": [
+    { "id": "exec-1", "instanceId": null, "planId": "plan-1", "workflowId": null, "planTitle": "Migrate to JWT v2", "repoId": "repo-1", "componentId": "comp-1", "stage": "planning", "status": "running", "policyLevel": "standard", "startedBy": "Newton Agent", "waitingOn": null, "testResult": null, "prStatus": null, "prLink": null, "deployStatus": null, "createdAt": "2026-01-01T00:00:00Z", "startedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "RecentAction": [
+    { "id": "ra-1", "time": "2026-01-01T00:00:00Z", "action": "approved", "subject": "plan-1", "type": "plan", "createdAt": "2026-01-01T00:00:00Z" }
+  ],
+  "SavedView": [
+    { "id": "sv-1", "kind": "plans", "label": "My pending plans", "filters": "{\"status\":\"awaiting_approval\"}", "sort": "createdAt", "sortDir": "desc", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "Operator": [
+    { "id": "op-1", "operatorType": "noop", "description": "No-operation operator", "paramsSchema": "{}", "paletteLabel": null, "paletteIcon": null, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ],
+  "Persistence": [
+    { "key": "ui.theme", "value": "\"dark\"", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+  ]
+}
