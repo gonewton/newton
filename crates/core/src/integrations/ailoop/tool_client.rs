@@ -2,6 +2,20 @@ use crate::integrations::ailoop::AiloopContext;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
+use url::Url;
+
+/// Build `http(s)://host/{resource}/{channel}` without a double-slash when `http_base` has a trailing `/`.
+fn ailoop_http_endpoint(
+    http_base: &Url,
+    resource: &str,
+    channel: &str,
+) -> Result<String, ClientError> {
+    let rel = format!("{resource}/{channel}");
+    http_base
+        .join(&rel)
+        .map(|u| u.to_string())
+        .map_err(|e| ClientError::ServerError(format!("ailoop HTTP URL join failed ({rel}): {e}")))
+}
 
 /// Request payload for a multi-choice question.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,11 +100,8 @@ impl ToolClient {
         question: String,
         timeout: Duration,
     ) -> Result<QuestionResponse, ClientError> {
-        let endpoint = format!(
-            "{}/questions/{}",
-            self.context.http_url(),
-            self.context.channel()
-        );
+        let endpoint =
+            ailoop_http_endpoint(self.context.http_url(), "questions", self.context.channel())?;
 
         let payload = serde_json::json!({
             "question": question,
@@ -99,7 +110,7 @@ impl ToolClient {
 
         let response = self
             .client
-            .post(&endpoint)
+            .post(endpoint)
             .json(&payload)
             .timeout(timeout + Duration::from_secs(5)) // Add buffer to HTTP timeout
             .send()
@@ -127,15 +138,12 @@ impl ToolClient {
         request: ChoiceQuestionRequest,
         timeout: Duration,
     ) -> Result<QuestionResponse, ClientError> {
-        let endpoint = format!(
-            "{}/questions/{}",
-            self.context.http_url(),
-            self.context.channel()
-        );
+        let endpoint =
+            ailoop_http_endpoint(self.context.http_url(), "questions", self.context.channel())?;
 
         let response = self
             .client
-            .post(&endpoint)
+            .post(endpoint)
             .json(&request)
             .timeout(timeout + Duration::from_secs(5))
             .send()
@@ -165,11 +173,11 @@ impl ToolClient {
         details: String,
         timeout: Duration,
     ) -> Result<AuthorizationResponse, ClientError> {
-        let endpoint = format!(
-            "{}/authorization/{}",
+        let endpoint = ailoop_http_endpoint(
             self.context.http_url(),
-            self.context.channel()
-        );
+            "authorization",
+            self.context.channel(),
+        )?;
 
         let payload = serde_json::json!({
             "action": action,
@@ -179,7 +187,7 @@ impl ToolClient {
 
         let response = self
             .client
-            .post(&endpoint)
+            .post(endpoint)
             .json(&payload)
             .timeout(timeout + Duration::from_secs(5)) // Add buffer to HTTP timeout
             .send()
@@ -207,11 +215,11 @@ impl ToolClient {
         message: String,
         level: NotificationLevel,
     ) -> Result<(), ClientError> {
-        let endpoint = format!(
-            "{}/notifications/{}",
+        let endpoint = ailoop_http_endpoint(
             self.context.http_url(),
-            self.context.channel()
-        );
+            "notifications",
+            self.context.channel(),
+        )?;
 
         let payload = serde_json::json!({
             "message": message,
@@ -221,7 +229,7 @@ impl ToolClient {
 
         let response = self
             .client
-            .post(&endpoint)
+            .post(endpoint)
             .json(&payload)
             .timeout(Duration::from_secs(5))
             .send()
@@ -290,6 +298,17 @@ mod tests {
     fn test_client_creation() {
         let context = create_context("http://localhost:8080", "ws://localhost:8080", "test");
         let _client = ToolClient::new(context);
+    }
+
+    #[test]
+    fn ailoop_http_endpoint_join_avoids_double_slash_when_base_has_trailing_slash() {
+        let base = Url::parse("http://127.0.0.1:8080/").unwrap();
+        let s = ailoop_http_endpoint(&base, "authorization", "public").unwrap();
+        assert_eq!(s, "http://127.0.0.1:8080/authorization/public");
+        assert!(
+            !s.contains("//authorization"),
+            "must not produce //authorization segment: {s}"
+        );
     }
 
     #[test]
