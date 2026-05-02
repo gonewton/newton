@@ -182,52 +182,6 @@ CREATE TABLE IF NOT EXISTS PlanApprover (
 );
 CREATE INDEX IF NOT EXISTS idx_planapprover_planId ON PlanApprover(planId);
 
-CREATE TABLE IF NOT EXISTS WorkflowInstance (
-  instanceId TEXT PRIMARY KEY,
-  workflowId TEXT NOT NULL,
-  status TEXT NOT NULL,
-  linkedPlanId TEXT NULL,
-  startedAt TEXT NOT NULL,
-  endedAt TEXT NULL,
-  definition TEXT NULL,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_workflowinstance_status ON WorkflowInstance(status);
-CREATE INDEX IF NOT EXISTS idx_workflowinstance_linkedPlanId ON WorkflowInstance(linkedPlanId);
-
-CREATE TABLE IF NOT EXISTS NodeState (
-  id TEXT PRIMARY KEY,
-  instanceId TEXT NOT NULL,
-  nodeId TEXT NOT NULL,
-  status TEXT NOT NULL,
-  startedAt TEXT NULL,
-  endedAt TEXT NULL,
-  FOREIGN KEY(instanceId) REFERENCES WorkflowInstance(instanceId) ON DELETE CASCADE,
-  UNIQUE(instanceId, nodeId)
-);
-CREATE INDEX IF NOT EXISTS idx_nodestate_instanceId ON NodeState(instanceId);
-
-CREATE TABLE IF NOT EXISTS HilEvent (
-  id TEXT PRIMARY KEY,
-  eventId TEXT NOT NULL UNIQUE,
-  instanceId TEXT NOT NULL,
-  nodeId TEXT NULL,
-  channel TEXT NOT NULL,
-  eventType TEXT NOT NULL,
-  question TEXT NOT NULL,
-  choices TEXT NOT NULL DEFAULT '[]',
-  timeoutSeconds INTEGER NULL,
-  correlationId TEXT NULL,
-  status TEXT NOT NULL,
-  timestamp TEXT NOT NULL,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  FOREIGN KEY(instanceId) REFERENCES WorkflowInstance(instanceId) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_hilevent_instanceId ON HilEvent(instanceId);
-CREATE INDEX IF NOT EXISTS idx_hilevent_status ON HilEvent(status);
-
 CREATE TABLE IF NOT EXISTS ExecutionRecord (
   id TEXT PRIMARY KEY,
   instanceId TEXT NULL,

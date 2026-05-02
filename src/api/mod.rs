@@ -1,5 +1,6 @@
 pub mod dashboard;
 pub mod hil;
+pub mod openapi;
 pub mod operators;
 pub mod opportunities;
 pub mod persistence;
@@ -13,11 +14,12 @@ pub mod workflows;
 
 use crate::api::state::AppState;
 use axum::{routing::get, Router};
-use serde_json::json;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
+use utoipa::ToSchema;
 
 pub fn create_router(state: AppState, ui_dir: Option<PathBuf>) -> Router {
     let arc_state = Arc::new(state);
@@ -48,9 +50,21 @@ pub fn create_router(state: AppState, ui_dir: Option<PathBuf>) -> Router {
     router
 }
 
-async fn health_check() -> axum::response::Json<serde_json::Value> {
-    axum::response::Json(json!({
-        "status": "ok",
-        "version": env!("CARGO_PKG_VERSION")
-    }))
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct HealthResponse {
+    pub status: String,
+    pub version: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "health",
+    responses((status = 200, description = "Service health", body = HealthResponse))
+)]
+pub(crate) async fn health_check() -> axum::response::Json<HealthResponse> {
+    axum::response::Json(HealthResponse {
+        status: "ok".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    })
 }

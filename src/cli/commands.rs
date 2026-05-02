@@ -1513,27 +1513,31 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         })
         .collect();
 
-    let mut state = AppState::new(operator_descriptors);
-
     let db_path = std::path::PathBuf::from(".newton")
         .join("state")
         .join("backend.sqlite");
-    let db_dir = db_path.parent();
-    if let Some(dir) = db_dir {
-        let _ = fs::create_dir_all(dir);
+    if let Some(dir) = db_path.parent() {
+        fs::create_dir_all(dir).map_err(|e| {
+            AppError::new(
+                crate::core::types::ErrorCategory::IoError,
+                format!("failed to create backend state dir: {e}"),
+            )
+        })?;
     }
     let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
 
-    match newton_backend::SqliteBackendStore::new(&db_url).await {
-        Ok(store) => {
-            let store_arc: Arc<dyn newton_backend::BackendStore> = Arc::new(store);
-            state = state.with_backend(store_arc);
-            info!("Backend store initialized at {}", db_path.display());
-        }
-        Err(e) => {
-            info!("Backend store initialization skipped: {}", e.message);
-        }
-    }
+    let store = newton_backend::SqliteBackendStore::new(&db_url)
+        .await
+        .map_err(|e| {
+            AppError::new(
+                crate::core::types::ErrorCategory::IoError,
+                format!("backend store init failed: {}", e.message),
+            )
+        })?;
+    info!("Backend store initialized at {}", db_path.display());
+    let backend: Arc<dyn newton_backend::BackendStore> = Arc::new(store);
+
+    let state = AppState::new(operator_descriptors, backend);
 
     let app = api::create_router(state, args.ui_dir.clone());
 

@@ -20,30 +20,38 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-fn no_backend() -> (StatusCode, Json<ApiError>) {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(newton_backend::err_internal("Backend store not configured")),
+#[utoipa::path(
+    get,
+    path = "/api/plans",
+    tag = "plans",
+    responses(
+        (status = 200, description = "Plan list", body = [newton_backend::PlanItem]),
+        (status = 500, description = "Internal error", body = ApiError)
     )
-}
-
-async fn list_plans(State(state): State<Arc<AppState>>) -> Response {
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
-    match store.list_plans().await {
+)]
+pub(crate) async fn list_plans(State(state): State<Arc<AppState>>) -> Response {
+    match state.backend.list_plans().await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }
 }
 
-async fn get_plan(Path(id): Path<String>, State(state): State<Arc<AppState>>) -> Response {
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
-    match store.get_plan(&id).await {
+#[utoipa::path(
+    get,
+    path = "/api/plans/{id}",
+    tag = "plans",
+    params(("id" = String, Path, description = "Plan id")),
+    responses(
+        (status = 200, description = "Plan detail", body = newton_backend::PlanDetail),
+        (status = 404, description = "Plan not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn get_plan(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.get_plan(&id).await {
         Ok(detail) => (StatusCode::OK, Json(detail)).into_response(),
         Err(e) => {
             let status = match e.code.as_str() {
@@ -55,32 +63,38 @@ async fn get_plan(Path(id): Path<String>, State(state): State<Arc<AppState>>) ->
     }
 }
 
-async fn approve_plan(Path(id): Path<String>, State(state): State<Arc<AppState>>) -> Response {
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
-    match store.approve_plan(&id).await {
-        Ok(plan) => {
+#[utoipa::path(
+    post,
+    path = "/api/plans/{id}/approve",
+    tag = "plans",
+    params(("id" = String, Path, description = "Plan id")),
+    responses(
+        (status = 200, description = "Approved plan", body = newton_backend::PlanItem),
+        (status = 404, description = "Plan not found", body = ApiError),
+        (status = 409, description = "Plan state conflict", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn approve_plan(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.approve_plan(&id).await {
+        Ok(approved) => {
             let _ = state
                 .events_tx
                 .send(newton_types::BroadcastEvent::PlanUpdate {
                     plan_id: id.clone(),
                 });
-            if let Ok(mut executions) = store.list_executions(Some(id.clone())).await {
-                executions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-                if let Some(execution) = executions.into_iter().next() {
-                    let _ = state
-                        .events_tx
-                        .send(newton_types::BroadcastEvent::ExecutionUpdate {
-                            execution_id: execution.instance_id,
-                            plan_id: execution.plan_id,
-                            status: execution.status,
-                            created_at: execution.created_at,
-                        });
-                }
-            }
-            (StatusCode::OK, Json(plan)).into_response()
+            let _ = state
+                .events_tx
+                .send(newton_types::BroadcastEvent::ExecutionUpdate {
+                    execution_id: approved.execution_id.clone(),
+                    plan_id: Some(id.clone()),
+                    status: "running".to_string(),
+                    created_at: approved.created_at.clone(),
+                });
+            (StatusCode::OK, Json(approved.plan)).into_response()
         }
         Err(e) => {
             let status = match e.code.as_str() {
@@ -93,12 +107,23 @@ async fn approve_plan(Path(id): Path<String>, State(state): State<Arc<AppState>>
     }
 }
 
-async fn reject_plan(Path(id): Path<String>, State(state): State<Arc<AppState>>) -> Response {
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
-    match store.reject_plan(&id).await {
+#[utoipa::path(
+    post,
+    path = "/api/plans/{id}/reject",
+    tag = "plans",
+    params(("id" = String, Path, description = "Plan id")),
+    responses(
+        (status = 200, description = "Rejected plan", body = newton_backend::PlanItem),
+        (status = 404, description = "Plan not found", body = ApiError),
+        (status = 409, description = "Plan state conflict", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn reject_plan(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.reject_plan(&id).await {
         Ok(plan) => {
             let _ = state
                 .events_tx
@@ -120,19 +145,25 @@ async fn reject_plan(Path(id): Path<String>, State(state): State<Arc<AppState>>)
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ExecutionsQuery {
+pub(crate) struct ExecutionsQuery {
     plan_id: Option<String>,
 }
 
-async fn list_executions(
+#[utoipa::path(
+    get,
+    path = "/api/executions",
+    tag = "executions",
+    params(("planId" = Option<String>, Query, description = "Optional plan id filter")),
+    responses(
+        (status = 200, description = "Execution list", body = [newton_backend::ExecutionItem]),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_executions(
     Query(query): Query<ExecutionsQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
-    match store.list_executions(query.plan_id).await {
+    match state.backend.list_executions(query.plan_id).await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }

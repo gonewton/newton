@@ -46,6 +46,7 @@ opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
 opentelemetry_sdk = "0.31"
 futures = "0.3"
 serde_yaml = "0.9"
+utoipa = { version = "5.4", features = ["chrono", "uuid"] }
 rhai = { version = "1.11", features = ["sync"] }
 petgraph = "0.7"
 async-trait = "0.1"

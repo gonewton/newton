@@ -18,14 +18,22 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-fn no_backend() -> (StatusCode, Json<ApiError>) {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(newton_backend::err_internal("Backend store not configured")),
+#[utoipa::path(
+    get,
+    path = "/api/persistence/{key}",
+    tag = "persistence",
+    params(("key" = String, Path, description = "Persistence key")),
+    responses(
+        (status = 200, description = "Persisted JSON value", body = serde_json::Value),
+        (status = 404, description = "Key not found", body = ApiError),
+        (status = 422, description = "Validation error", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
     )
-}
-
-async fn get_persistence(Path(key): Path<String>, State(state): State<Arc<AppState>>) -> Response {
+)]
+pub(crate) async fn get_persistence(
+    Path(key): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
     if key.is_empty() {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -33,11 +41,7 @@ async fn get_persistence(Path(key): Path<String>, State(state): State<Arc<AppSta
         )
             .into_response();
     }
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
-    match store.get_persistence(&key).await {
+    match state.backend.get_persistence(&key).await {
         Ok(value) => (StatusCode::OK, Json(value)).into_response(),
         Err(e) => {
             let status = match e.code.as_str() {
@@ -49,7 +53,19 @@ async fn get_persistence(Path(key): Path<String>, State(state): State<Arc<AppSta
     }
 }
 
-async fn put_persistence(
+#[utoipa::path(
+    put,
+    path = "/api/persistence/{key}",
+    tag = "persistence",
+    params(("key" = String, Path, description = "Persistence key")),
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "Persistence upsert result", body = serde_json::Value),
+        (status = 422, description = "Validation error", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn put_persistence(
     Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<serde_json::Value>,
@@ -61,17 +77,24 @@ async fn put_persistence(
         )
             .into_response();
     }
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
-    match store.put_persistence(&key, body).await {
+    match state.backend.put_persistence(&key, body).await {
         Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }
 }
 
-async fn delete_persistence(
+#[utoipa::path(
+    delete,
+    path = "/api/persistence/{key}",
+    tag = "persistence",
+    params(("key" = String, Path, description = "Persistence key")),
+    responses(
+        (status = 200, description = "Persistence delete result", body = serde_json::Value),
+        (status = 422, description = "Validation error", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn delete_persistence(
     Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
@@ -82,11 +105,7 @@ async fn delete_persistence(
         )
             .into_response();
     }
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
-    match store.delete_persistence(&key).await {
+    match state.backend.delete_persistence(&key).await {
         Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }

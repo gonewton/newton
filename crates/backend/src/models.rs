@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductItem {
     pub id: String,
@@ -8,7 +9,7 @@ pub struct ProductItem {
     pub component_count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ComponentItem {
     pub id: String,
@@ -28,7 +29,7 @@ pub struct ComponentItem {
     pub last_eval: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingApprovalItem {
     pub id: String,
@@ -46,7 +47,7 @@ pub struct PendingApprovalItem {
     pub agent_generated: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RegressionItem {
     pub repo: String,
     pub indicator: String,
@@ -56,7 +57,7 @@ pub struct RegressionItem {
     pub trend: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct IndicatorItem {
     pub id: String,
@@ -72,7 +73,7 @@ pub struct IndicatorItem {
     pub last_run: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RecentActionItem {
     pub time: String,
     pub action: String,
@@ -81,7 +82,7 @@ pub struct RecentActionItem {
     pub item_type: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoItem {
     pub id: String,
@@ -101,7 +102,7 @@ pub struct RepoItem {
     pub depended_on_by: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RepoDependencyItem {
     pub from: String,
     pub to: String,
@@ -110,7 +111,7 @@ pub struct RepoDependencyItem {
     pub label: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ModuleRef {
     pub module: String,
     pub kind: String,
@@ -118,7 +119,7 @@ pub struct ModuleRef {
     pub component: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ModuleDependencyItem {
     pub id: String,
     pub from: ModuleRef,
@@ -128,7 +129,7 @@ pub struct ModuleDependencyItem {
     pub label: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateModuleDependencyBody {
     pub from_module_id: String,
@@ -138,7 +139,7 @@ pub struct CreateModuleDependencyBody {
     pub label: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedViewItem {
     pub id: String,
@@ -148,7 +149,7 @@ pub struct SavedViewItem {
     pub sort_dir: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OpportunityItem {
     pub id: String,
@@ -174,12 +175,12 @@ pub struct OpportunityItem {
     pub blocks: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PatchOpportunityBody {
     pub status: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestItem {
     pub id: String,
@@ -194,7 +195,7 @@ pub struct RequestItem {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRequestBody {
     pub title: String,
@@ -209,7 +210,7 @@ pub struct CreateRequestBody {
     pub linked_opportunity_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanItem {
     pub id: String,
@@ -230,28 +231,38 @@ pub struct PlanItem {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PlanSectionItem {
     pub id: String,
     pub label: String,
     pub content: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PlanPolicyCheckItem {
     pub rule: String,
     pub status: String,
     pub met: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PlanApproverItem {
     pub role: String,
     pub name: String,
     pub status: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Internal result of approving a plan: PlanItem plus the freshly-inserted
+/// ExecutionRecord identity needed to publish the canonical `execution_update`
+/// broadcast event. Not serialized over the wire.
+#[derive(Debug, Clone)]
+pub struct ApprovedPlan {
+    pub plan: PlanItem,
+    pub execution_id: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanDetail {
     #[serde(flatten)]
@@ -263,7 +274,7 @@ pub struct PlanDetail {
     pub approvers: Vec<PlanApproverItem>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ExecutionItem {
     pub instance_id: String,
     #[serde(rename = "planId")]
@@ -299,7 +310,7 @@ pub struct ExecutionItem {
     pub started: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OperatorItem {
     pub operator_type: String,
     pub description: String,

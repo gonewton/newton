@@ -11,6 +11,12 @@ pub fn routes(state: Arc<AppState>) -> Router {
 }
 
 /// Return the configured operator descriptors as a typed JSON array.
+#[utoipa::path(
+    get,
+    path = "/api/operators",
+    tag = "operators",
+    responses((status = 200, description = "Operator descriptor list", body = [OperatorDescriptor]))
+)]
 pub async fn list_operators(State(state): State<Arc<AppState>>) -> Json<Vec<OperatorDescriptor>> {
     Json(state.operators.as_ref().clone())
 }

@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use newton_types::{ApiError, BroadcastEvent, NodeStatus, WorkflowInstance, WorkflowStatus};
 use serde::Deserialize;
 use std::sync::Arc;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 /// Routes for the workflows API resource.
@@ -36,8 +37,8 @@ pub struct WorkflowListQuery {
     pub offset: Option<usize>,
 }
 
-#[derive(Debug, Deserialize)]
-struct NodeUpdate {
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct NodeUpdate {
     status: NodeStatus,
     started_at: Option<DateTime<Utc>>,
     ended_at: Option<DateTime<Utc>>,
@@ -46,8 +47,8 @@ struct NodeUpdate {
 
 /// Flexible update body: supports both legacy WorkflowDefinition format
 /// and new status/ended_at update format.
-#[derive(Debug, Deserialize)]
-struct WorkflowUpdateBody {
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct WorkflowUpdateBody {
     workflow_id: Option<String>,
     #[allow(dead_code)]
     definition: Option<serde_json::Value>,
@@ -55,7 +56,20 @@ struct WorkflowUpdateBody {
     ended_at: Option<DateTime<Utc>>,
 }
 
-async fn list_workflows(
+#[utoipa::path(
+    get,
+    path = "/api/workflows",
+    tag = "workflows",
+    params(
+        ("status" = Option<WorkflowStatus>, Query, description = "Optional workflow status filter"),
+        ("limit" = Option<usize>, Query, description = "Maximum number of workflow instances"),
+        ("offset" = Option<usize>, Query, description = "Number of workflow instances to skip")
+    ),
+    responses(
+        (status = 200, description = "Workflow instance list", body = [WorkflowInstance])
+    )
+)]
+pub(crate) async fn list_workflows(
     Query(query): Query<WorkflowListQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Json<Vec<WorkflowInstance>> {
@@ -76,7 +90,21 @@ async fn list_workflows(
     Json(instances)
 }
 
-async fn get_workflow(Path(id): Path<String>, State(state): State<Arc<AppState>>) -> Response {
+#[utoipa::path(
+    get,
+    path = "/api/workflows/{id}",
+    tag = "workflows",
+    params(("id" = String, Path, description = "Workflow instance id")),
+    responses(
+        (status = 200, description = "Workflow instance", body = WorkflowInstance),
+        (status = 404, description = "Workflow instance not found", body = ApiError),
+        (status = 422, description = "Validation error", body = ApiError)
+    )
+)]
+pub(crate) async fn get_workflow(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
     match Uuid::parse_str(&id) {
         Ok(_) => {}
         Err(_) => {
@@ -108,7 +136,18 @@ async fn get_workflow(Path(id): Path<String>, State(state): State<Arc<AppState>>
     }
 }
 
-async fn create_workflow(
+#[utoipa::path(
+    post,
+    path = "/api/workflows",
+    tag = "workflows",
+    request_body = WorkflowInstance,
+    responses(
+        (status = 201, description = "Created workflow instance", body = WorkflowInstance),
+        (status = 409, description = "Workflow instance already exists", body = ApiError),
+        (status = 422, description = "Validation error", body = ApiError)
+    )
+)]
+pub(crate) async fn create_workflow(
     State(state): State<Arc<AppState>>,
     Json(instance): Json<WorkflowInstance>,
 ) -> Response {
@@ -144,7 +183,19 @@ async fn create_workflow(
     (StatusCode::CREATED, Json(instance)).into_response()
 }
 
-async fn update_workflow(
+#[utoipa::path(
+    put,
+    path = "/api/workflows/{id}",
+    tag = "workflows",
+    params(("id" = String, Path, description = "Workflow instance id")),
+    request_body = WorkflowUpdateBody,
+    responses(
+        (status = 200, description = "Updated workflow instance", body = WorkflowInstance),
+        (status = 404, description = "Workflow instance not found", body = ApiError),
+        (status = 422, description = "Validation error", body = ApiError)
+    )
+)]
+pub(crate) async fn update_workflow(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<WorkflowUpdateBody>,
@@ -187,7 +238,22 @@ async fn update_workflow(
     }
 }
 
-async fn update_node(
+#[utoipa::path(
+    patch,
+    path = "/api/workflows/{id}/nodes/{node_id}",
+    tag = "workflows",
+    params(
+        ("id" = String, Path, description = "Workflow instance id"),
+        ("node_id" = String, Path, description = "Workflow node id")
+    ),
+    request_body = NodeUpdate,
+    responses(
+        (status = 200, description = "Updated workflow instance", body = WorkflowInstance),
+        (status = 404, description = "Workflow instance not found", body = ApiError),
+        (status = 422, description = "Validation error", body = ApiError)
+    )
+)]
+pub(crate) async fn update_node(
     Path((id, node_id)): Path<(String, String)>,
     State(state): State<Arc<AppState>>,
     Json(node_update): Json<NodeUpdate>,

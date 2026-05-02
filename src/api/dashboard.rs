@@ -21,83 +21,107 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-fn no_backend() -> (StatusCode, Json<ApiError>) {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(newton_backend::err_internal("Backend store not configured")),
+#[utoipa::path(
+    get,
+    path = "/api/products",
+    tag = "dashboard",
+    responses(
+        (status = 200, description = "Product list", body = [newton_backend::ProductItem]),
+        (status = 500, description = "Internal error", body = ApiError)
     )
-}
-
-async fn list_products(State(state): State<Arc<AppState>>) -> Response {
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
-    match store.list_products().await {
+)]
+pub(crate) async fn list_products(State(state): State<Arc<AppState>>) -> Response {
+    match state.backend.list_products().await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }
 }
 
-async fn list_components(State(state): State<Arc<AppState>>) -> Response {
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
-    match store.list_components().await {
+#[utoipa::path(
+    get,
+    path = "/api/components",
+    tag = "dashboard",
+    responses(
+        (status = 200, description = "Component list", body = [newton_backend::ComponentItem]),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_components(State(state): State<Arc<AppState>>) -> Response {
+    match state.backend.list_components().await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }
 }
 
-async fn list_pending_approvals(State(state): State<Arc<AppState>>) -> Response {
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
-    match store.list_pending_approvals().await {
+#[utoipa::path(
+    get,
+    path = "/api/pending-approvals",
+    tag = "dashboard",
+    responses(
+        (status = 200, description = "Pending approval list", body = [newton_backend::PendingApprovalItem]),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_pending_approvals(State(state): State<Arc<AppState>>) -> Response {
+    match state.backend.list_pending_approvals().await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }
 }
 
-async fn list_regressions(State(state): State<Arc<AppState>>) -> Response {
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
-    match store.list_regressions().await {
+#[utoipa::path(
+    get,
+    path = "/api/regressions",
+    tag = "dashboard",
+    responses(
+        (status = 200, description = "Regression list", body = [newton_backend::RegressionItem]),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_regressions(State(state): State<Arc<AppState>>) -> Response {
+    match state.backend.list_regressions().await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }
 }
 
-async fn list_indicators(State(state): State<Arc<AppState>>) -> Response {
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
-    match store.list_indicators().await {
+#[utoipa::path(
+    get,
+    path = "/api/indicators",
+    tag = "dashboard",
+    responses(
+        (status = 200, description = "Indicator list", body = [newton_backend::IndicatorItem]),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_indicators(State(state): State<Arc<AppState>>) -> Response {
+    match state.backend.list_indicators().await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }
 }
 
 #[derive(Debug, Deserialize)]
-struct RecentActionsQuery {
+pub(crate) struct RecentActionsQuery {
     limit: Option<u32>,
 }
 
-async fn list_recent_actions(
+#[utoipa::path(
+    get,
+    path = "/api/recent-actions",
+    tag = "dashboard",
+    params(("limit" = Option<u32>, Query, description = "Maximum number of recent actions")),
+    responses(
+        (status = 200, description = "Recent action list", body = [newton_backend::RecentActionItem]),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_recent_actions(
     Query(query): Query<RecentActionsQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => return no_backend().into_response(),
-    };
     let limit = query.limit.unwrap_or(20).max(1);
-    match store.list_recent_actions(limit).await {
+    match state.backend.list_recent_actions(limit).await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }

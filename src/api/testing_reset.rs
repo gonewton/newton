@@ -6,6 +6,7 @@ use axum::{
     routing::post,
     Router,
 };
+use newton_types::ApiError;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -15,7 +16,17 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-async fn reset_testing(State(state): State<Arc<AppState>>) -> Response {
+#[utoipa::path(
+    post,
+    path = "/api/testing/reset",
+    tag = "testing",
+    responses(
+        (status = 200, description = "Reset result", body = serde_json::Value),
+        (status = 403, description = "Forbidden in production", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn reset_testing(State(state): State<Arc<AppState>>) -> Response {
     if std::env::var("NEWTON_ENV").as_deref() == Ok("production") {
         return (
             StatusCode::FORBIDDEN,
@@ -26,17 +37,7 @@ async fn reset_testing(State(state): State<Arc<AppState>>) -> Response {
             .into_response();
     }
 
-    let store = match state.backend {
-        Some(ref s) => s,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(newton_backend::err_internal("Backend store not configured")),
-            )
-                .into_response()
-        }
-    };
-    match store.reset().await {
+    match state.backend.reset().await {
         Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }

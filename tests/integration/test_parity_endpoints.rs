@@ -19,7 +19,7 @@ async fn create_parity_test_state() -> AppState {
         description: "No-operation operator".to_string(),
         params_schema: json!({}),
     }];
-    AppState::new(operators).with_backend(store_arc)
+    AppState::new(operators, store_arc)
 }
 
 macro_rules! parity_test {

@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 #[tokio::test]
 async fn test_health_endpoint() {
-    let state = create_test_state();
+    let state = create_test_state().await;
     let app = newton::api::create_router(state, None);
 
     let request = Request::builder()
@@ -36,7 +36,7 @@ async fn test_health_endpoint() {
 
 #[tokio::test]
 async fn test_list_workflows_empty() {
-    let state = create_test_state();
+    let state = create_test_state().await;
     let app = newton::api::create_router(state, None);
 
     let request = Request::builder()
@@ -58,7 +58,7 @@ async fn test_list_workflows_empty() {
 
 #[tokio::test]
 async fn test_list_workflows_with_instances() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let instance = WorkflowInstance {
@@ -97,7 +97,7 @@ async fn test_list_workflows_with_instances() {
 
 #[tokio::test]
 async fn test_get_workflow_not_found() {
-    let state = create_test_state();
+    let state = create_test_state().await;
     let app = newton::api::create_router(state, None);
 
     let instance_id = Uuid::new_v4();
@@ -122,7 +122,7 @@ async fn test_get_workflow_not_found() {
 
 #[tokio::test]
 async fn test_get_workflow_invalid_id() {
-    let state = create_test_state();
+    let state = create_test_state().await;
     let app = newton::api::create_router(state, None);
 
     let request = Request::builder()
@@ -145,7 +145,7 @@ async fn test_get_workflow_invalid_id() {
 
 #[tokio::test]
 async fn test_get_workflow_success() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let instance = WorkflowInstance {
@@ -191,7 +191,7 @@ async fn test_get_workflow_success() {
 
 #[tokio::test]
 async fn test_update_workflow_success() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let instance = WorkflowInstance {
@@ -235,7 +235,7 @@ async fn test_update_workflow_success() {
 
 #[tokio::test]
 async fn test_list_operators() {
-    let state = create_test_state();
+    let state = create_test_state().await;
     let app = newton::api::create_router(state, None);
 
     let request = Request::builder()
@@ -258,7 +258,7 @@ async fn test_list_operators() {
 
 #[tokio::test]
 async fn test_list_hil_events_empty() {
-    let state = create_test_state();
+    let state = create_test_state().await;
     let app = newton::api::create_router(state, None);
 
     let instance_id = Uuid::new_v4();
@@ -281,7 +281,7 @@ async fn test_list_hil_events_empty() {
 
 #[tokio::test]
 async fn test_list_hil_events_with_events() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let event_id = Uuid::new_v4().to_string();
@@ -325,7 +325,7 @@ async fn test_list_hil_events_with_events() {
 
 #[tokio::test]
 async fn test_submit_hil_action_success() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let event_id = Uuid::new_v4().to_string();
@@ -370,7 +370,7 @@ async fn test_submit_hil_action_success() {
 
 #[tokio::test]
 async fn test_submit_hil_action_not_found() {
-    let state = create_test_state();
+    let state = create_test_state().await;
     let app = newton::api::create_router(state, None);
 
     let instance_id = Uuid::new_v4().to_string();
@@ -398,7 +398,7 @@ async fn test_submit_hil_action_not_found() {
 
 #[tokio::test]
 async fn test_submit_hil_action_already_resolved() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let event_id = Uuid::new_v4().to_string();
@@ -443,7 +443,7 @@ async fn test_submit_hil_action_already_resolved() {
 
 #[tokio::test]
 async fn test_submit_hil_action_accepts_opaque_event_id() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let event_id = "opaque-event-id".to_string();
@@ -488,7 +488,7 @@ async fn test_submit_hil_action_accepts_opaque_event_id() {
 
 #[tokio::test]
 async fn test_submit_hil_action_invalid_response_type() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let event_id = Uuid::new_v4().to_string();
@@ -533,7 +533,7 @@ async fn test_submit_hil_action_invalid_response_type() {
 
 #[tokio::test]
 async fn test_submit_hil_action_missing_answer() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let event_id = Uuid::new_v4().to_string();
@@ -578,7 +578,7 @@ async fn test_submit_hil_action_missing_answer() {
 
 #[tokio::test]
 async fn test_event_broadcasting() {
-    let state = create_test_state();
+    let state = create_test_state().await;
     let _ = newton::api::create_router(state.clone(), None);
 
     let instance_id = Uuid::new_v4().to_string();
@@ -594,7 +594,7 @@ async fn test_event_broadcasting() {
 
 #[tokio::test]
 async fn test_create_workflow_success() {
-    let state = create_test_state();
+    let state = create_test_state().await;
     let app = newton::api::create_router(state, None);
 
     let instance_id = Uuid::new_v4().to_string();
@@ -631,7 +631,7 @@ async fn test_create_workflow_success() {
 
 #[tokio::test]
 async fn test_create_workflow_duplicate_returns_409() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let instance = WorkflowInstance {
@@ -672,7 +672,7 @@ async fn test_create_workflow_duplicate_returns_409() {
 
 #[tokio::test]
 async fn test_create_workflow_invalid_uuid_returns_422() {
-    let state = create_test_state();
+    let state = create_test_state().await;
     let app = newton::api::create_router(state, None);
 
     let instance = json!({
@@ -705,7 +705,7 @@ async fn test_create_workflow_invalid_uuid_returns_422() {
 
 #[tokio::test]
 async fn test_update_node_success() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let instance = WorkflowInstance {
@@ -758,7 +758,7 @@ async fn test_update_node_success() {
 
 #[tokio::test]
 async fn test_update_node_workflow_not_found_returns_404() {
-    let state = create_test_state();
+    let state = create_test_state().await;
     let app = newton::api::create_router(state, None);
 
     let instance_id = Uuid::new_v4().to_string();
@@ -789,7 +789,7 @@ async fn test_update_node_workflow_not_found_returns_404() {
 
 #[tokio::test]
 async fn test_list_workflows_filter_by_status() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let id1 = Uuid::new_v4().to_string();
     let id2 = Uuid::new_v4().to_string();
@@ -843,7 +843,7 @@ async fn test_list_workflows_filter_by_status() {
 
 #[tokio::test]
 async fn test_list_workflows_pagination() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     for i in 0..5 {
         let id = Uuid::new_v4().to_string();
@@ -883,7 +883,7 @@ async fn test_list_workflows_pagination() {
 
 #[tokio::test]
 async fn test_update_workflow_status() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let instance = WorkflowInstance {
@@ -926,7 +926,7 @@ async fn test_update_workflow_status() {
     assert!(workflow.ended_at.is_some());
 }
 
-fn create_test_state() -> AppState {
+async fn create_test_state() -> AppState {
     let operators = vec![
         OperatorDescriptor {
             operator_type: "noop".to_string(),
@@ -940,12 +940,16 @@ fn create_test_state() -> AppState {
         },
     ];
 
-    AppState::new(operators)
+    let store = newton_backend::SqliteBackendStore::new_in_memory()
+        .await
+        .expect("in-memory backend init");
+    let backend: std::sync::Arc<dyn newton_backend::BackendStore> = std::sync::Arc::new(store);
+    AppState::new(operators, backend)
 }
 
 #[tokio::test]
 async fn test_update_node_upsert_creates_missing_node() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let instance = WorkflowInstance {
@@ -1004,7 +1008,7 @@ async fn test_update_node_upsert_creates_missing_node() {
 
 #[tokio::test]
 async fn test_workflow_definition_exposure() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let definition = json!({
@@ -1081,7 +1085,7 @@ async fn test_workflow_definition_exposure() {
 
 #[tokio::test]
 async fn test_node_upsert_broadcasts_event() {
-    let state = create_test_state();
+    let state = create_test_state().await;
 
     let instance_id = Uuid::new_v4().to_string();
     let instance = WorkflowInstance {

@@ -1,7 +1,7 @@
 use crate::models::*;
 use crate::{err_conflict, err_internal, err_not_found, err_validation, BackendStore};
 use chrono::Utc;
-use newton_types::{ApiError, HilEvent, WorkflowInstance};
+use newton_types::ApiError;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::FromRow;
 use sqlx::SqlitePool;
@@ -1041,7 +1041,7 @@ impl BackendStore for SqliteBackendStore {
         })
     }
 
-    async fn approve_plan(&self, id: &str) -> Result<PlanItem, ApiError> {
+    async fn approve_plan(&self, id: &str) -> Result<ApprovedPlan, ApiError> {
         let mut tx = self
             .pool
             .begin()
@@ -1083,11 +1083,12 @@ impl BackendStore for SqliteBackendStore {
             .await
             .map_err(|e| err_internal(&format!("commit error: {e}")))?;
 
-        self.list_plans()
-            .await?
-            .into_iter()
-            .find(|p| p.id == id)
-            .ok_or_else(|| err_internal("Failed to read back approved plan"))
+        let plan_item = self.fetch_plan_item(id).await?;
+        Ok(ApprovedPlan {
+            plan: plan_item,
+            execution_id: exec_id,
+            created_at: now,
+        })
     }
 
     async fn reject_plan(&self, id: &str) -> Result<PlanItem, ApiError> {
@@ -1113,11 +1114,7 @@ impl BackendStore for SqliteBackendStore {
             .await
             .map_err(|e| err_internal(&format!("update error: {e}")))?;
 
-        self.list_plans()
-            .await?
-            .into_iter()
-            .find(|p| p.id == id)
-            .ok_or_else(|| err_internal("Failed to read back rejected plan"))
+        self.fetch_plan_item(id).await
     }
 
     async fn list_executions(
@@ -1188,35 +1185,6 @@ impl BackendStore for SqliteBackendStore {
         Ok(result)
     }
 
-    async fn list_workflow_instances(&self) -> Result<Vec<WorkflowInstance>, ApiError> {
-        Err(err_internal("Not implemented for parity routes"))
-    }
-
-    async fn get_workflow_instance(&self, _id: &str) -> Result<WorkflowInstance, ApiError> {
-        Err(err_internal("Not implemented for parity routes"))
-    }
-
-    async fn upsert_workflow_instance(&self, _instance: &WorkflowInstance) -> Result<(), ApiError> {
-        Ok(())
-    }
-
-    async fn list_hil_events(&self, _instance_id: &str) -> Result<Vec<HilEvent>, ApiError> {
-        Err(err_internal("Not implemented for parity routes"))
-    }
-
-    async fn resolve_hil_event(
-        &self,
-        _instance_id: &str,
-        _event_id: &str,
-        _action: &str,
-    ) -> Result<HilEvent, ApiError> {
-        Err(err_internal("Not implemented for parity routes"))
-    }
-
-    async fn upsert_hil_event(&self, _event: &HilEvent) -> Result<(), ApiError> {
-        Ok(())
-    }
-
     async fn list_operators(&self) -> Result<Vec<OperatorItem>, ApiError> {
         let rows = sqlx::query_as::<_, OperatorRow>(
             "SELECT operatorType as operator_type, description, paramsSchema as params_schema, paletteLabel as palette_label, paletteIcon as palette_icon FROM Operator ORDER BY id ASC"
@@ -1284,9 +1252,6 @@ impl BackendStore for SqliteBackendStore {
         use sqlx::Executor;
         let tables = [
             "ExecutionRecord",
-            "HilEvent",
-            "NodeState",
-            "WorkflowInstance",
             "PlanApprover",
             "PlanPolicyCheck",
             "PlanSection",
@@ -1319,7 +1284,7 @@ impl BackendStore for SqliteBackendStore {
                 .map_err(|e| err_internal(&format!("truncate {table} error: {e}")))?;
         }
 
-        seed_data(&mut tx).await?;
+        crate::fixtures::load_fixtures(&mut tx).await?;
 
         tx.commit()
             .await
@@ -1330,6 +1295,62 @@ impl BackendStore for SqliteBackendStore {
 }
 
 impl SqliteBackendStore {
+    async fn fetch_plan_item(&self, id: &str) -> Result<PlanItem, ApiError> {
+        let row: Option<PlanRow> = sqlx::query_as::<_, PlanRow>(
+            "SELECT id, title, componentId as component_id, repoId as repo_id, status, linkedRequestId as linked_request_id, confidence, risk, expectedValue as expected_value, agentGenerated as agent_generated, waitingSince as waiting_since, createdAt as created_at FROM Plan WHERE id = ?"
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        let row = row.ok_or_else(|| err_not_found("Plan not found"))?;
+
+        let component = match row.component_id.as_deref() {
+            Some(cid) => sqlx::query_as::<_, NameRow>("SELECT name FROM Component WHERE id = ?")
+                .bind(cid)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?
+                .map(|c| c.name)
+                .unwrap_or_default(),
+            None => String::new(),
+        };
+        let repo = match row.repo_id.as_deref() {
+            Some(rid) => sqlx::query_as::<_, NameRow>("SELECT name FROM Repo WHERE id = ?")
+                .bind(rid)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?
+                .map(|r| r.name)
+                .unwrap_or_default(),
+            None => String::new(),
+        };
+        let exec_ids: Vec<IdRow> = sqlx::query_as::<_, IdRow>(
+            "SELECT id FROM ExecutionRecord WHERE planId = ? ORDER BY id ASC",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        Ok(PlanItem {
+            id: row.id,
+            title: row.title,
+            component,
+            repo,
+            status: row.status,
+            linked_request_id: row.linked_request_id,
+            execution_ids: exec_ids.into_iter().map(|e| e.id).collect(),
+            confidence: row.confidence,
+            risk: row.risk,
+            expected_value: row.expected_value,
+            agent_generated: row.agent_generated != 0,
+            waiting_since: row.waiting_since,
+            created_at: row.created_at,
+        })
+    }
+
     async fn check_cycle(&self, from: &str, to: &str) -> Result<bool, ApiError> {
         let all_deps: Vec<DepEdge> = sqlx::query_as::<_, DepEdge>(
             "SELECT fromModuleId as from_id, toModuleId as to_id FROM ModuleDependency",
@@ -1348,24 +1369,26 @@ impl SqliteBackendStore {
             .or_default()
             .push(to.to_string());
 
+        const MAX_VISITED: usize = 10_000;
         let mut visited = HashSet::new();
         let mut queue = VecDeque::new();
         queue.push_back(to.to_string());
 
         while let Some(node) = queue.pop_front() {
-            if visited.len() > 10_000 {
+            if node == from {
+                return Ok(true);
+            }
+            if !visited.insert(node.clone()) {
+                continue;
+            }
+            if visited.len() >= MAX_VISITED {
                 return Err(err_internal(
                     "Module dependency graph traversal limit exceeded",
                 ));
             }
-            if node == from {
-                return Ok(true);
-            }
-            if visited.insert(node.clone()) {
-                if let Some(neighbors) = adj.get(&node) {
-                    for n in neighbors {
-                        queue.push_back(n.clone());
-                    }
+            if let Some(neighbors) = adj.get(&node) {
+                for n in neighbors {
+                    queue.push_back(n.clone());
                 }
             }
         }
@@ -1444,40 +1467,4 @@ async fn compute_repo_depended_on_by(
     .map_err(|e| err_internal(&format!("query error: {e}")))?;
 
     Ok(rows.into_iter().map(|r| r.target_repo).collect())
-}
-
-async fn seed_data(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<(), ApiError> {
-    use sqlx::Executor;
-    let now = Utc::now().to_rfc3339();
-
-    tx.execute(sqlx::query("INSERT INTO Product (id, name, createdAt, updatedAt) VALUES ('prod-1', 'Platform Services', ?, ?)")
-        .bind(&now).bind(&now))
-        .await.map_err(|e| err_internal(&format!("seed error: {e}")))?;
-
-    tx.execute(sqlx::query("INSERT INTO Component (id, name, domain, repos, modules, health, trend, owner, criticality, autonomy, openPlans, openRequests, lastEval, productId, createdAt, updatedAt) VALUES ('comp-1', 'Auth Service', 'platform', 1, 2, 85, 1, 'Alice', 'high', 'semi', 0, 0, ?, 'prod-1', ?, ?)")
-        .bind(&now).bind(&now).bind(&now))
-        .await.map_err(|e| err_internal(&format!("seed error: {e}")))?;
-
-    tx.execute(sqlx::query("INSERT INTO Repo (id, name, componentId, owner, criticality, autonomy, qualityScore, regressions, openPlans, execStatus, lastEval, coverage, secScore, createdAt, updatedAt) VALUES ('repo-1', 'auth-api', 'comp-1', 'Alice', 'high', 'semi', 92, 0, 0, 'idle', ?, 88, 95, ?, ?)")
-        .bind(&now).bind(&now).bind(&now))
-        .await.map_err(|e| err_internal(&format!("seed error: {e}")))?;
-
-    tx.execute(sqlx::query("INSERT INTO Module (id, name, kind, repoId) VALUES ('mod-1', 'auth-core', 'library', 'repo-1')"))
-        .await.map_err(|e| err_internal(&format!("seed error: {e}")))?;
-
-    tx.execute(sqlx::query("INSERT INTO Module (id, name, kind, repoId) VALUES ('mod-2', 'auth-utils', 'library', 'repo-1')"))
-        .await.map_err(|e| err_internal(&format!("seed error: {e}")))?;
-
-    tx.execute(sqlx::query("INSERT INTO ModuleDependency (id, fromModuleId, toModuleId, type, label) VALUES ('dep-1', 'mod-2', 'mod-1', 'runtime', 'uses')"))
-        .await.map_err(|e| err_internal(&format!("seed error: {e}")))?;
-
-    tx.execute(sqlx::query("INSERT INTO Indicator (id, name, description, scope, weight, threshold, current, trend, reports, mode, lastRun, createdAt, updatedAt) VALUES ('ind-1', 'Test Coverage', 'Code coverage percentage', 'repo', 1.0, 80.0, 88.0, 1.0, 5, 'auto', ?, ?, ?)")
-        .bind(&now).bind(&now).bind(&now))
-        .await.map_err(|e| err_internal(&format!("seed error: {e}")))?;
-
-    tx.execute(sqlx::query("INSERT INTO Operator (id, operatorType, description, paramsSchema, createdAt, updatedAt) VALUES ('op-1', 'noop', 'No-operation operator', '{}', ?, ?)")
-        .bind(&now).bind(&now))
-        .await.map_err(|e| err_internal(&format!("seed error: {e}")))?;
-
-    Ok(())
 }

@@ -12,11 +12,14 @@ pub struct AppState {
     pub operators: Arc<Vec<OperatorDescriptor>>,
     pub events_tx: broadcast::Sender<BroadcastEvent>,
     pub logs: Arc<DashMap<(String, String), Vec<LogLine>>>,
-    pub backend: Option<Arc<dyn newton_backend::BackendStore>>,
+    pub backend: Arc<dyn newton_backend::BackendStore>,
 }
 
 impl AppState {
-    pub fn new(operators: Vec<OperatorDescriptor>) -> Self {
+    pub fn new(
+        operators: Vec<OperatorDescriptor>,
+        backend: Arc<dyn newton_backend::BackendStore>,
+    ) -> Self {
         let (events_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         AppState {
             instances: Arc::new(DashMap::new()),
@@ -24,12 +27,7 @@ impl AppState {
             operators: Arc::new(operators),
             events_tx,
             logs: Arc::new(DashMap::new()),
-            backend: None,
+            backend,
         }
-    }
-
-    pub fn with_backend(mut self, store: Arc<dyn newton_backend::BackendStore>) -> Self {
-        self.backend = Some(store);
-        self
     }
 }

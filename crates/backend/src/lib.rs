@@ -1,3 +1,4 @@
+pub mod fixtures;
 pub mod models;
 pub mod store;
 
@@ -84,37 +85,13 @@ pub trait BackendStore: Send + Sync {
 
     async fn list_plans(&self) -> Result<Vec<PlanItem>, ApiError>;
     async fn get_plan(&self, id: &str) -> Result<PlanDetail, ApiError>;
-    async fn approve_plan(&self, id: &str) -> Result<PlanItem, ApiError>;
+    async fn approve_plan(&self, id: &str) -> Result<ApprovedPlan, ApiError>;
     async fn reject_plan(&self, id: &str) -> Result<PlanItem, ApiError>;
 
     async fn list_executions(
         &self,
         plan_id: Option<String>,
     ) -> Result<Vec<ExecutionItem>, ApiError>;
-
-    async fn list_workflow_instances(
-        &self,
-    ) -> Result<Vec<newton_types::WorkflowInstance>, ApiError>;
-    async fn get_workflow_instance(
-        &self,
-        id: &str,
-    ) -> Result<newton_types::WorkflowInstance, ApiError>;
-    async fn upsert_workflow_instance(
-        &self,
-        instance: &newton_types::WorkflowInstance,
-    ) -> Result<(), ApiError>;
-
-    async fn list_hil_events(
-        &self,
-        instance_id: &str,
-    ) -> Result<Vec<newton_types::HilEvent>, ApiError>;
-    async fn resolve_hil_event(
-        &self,
-        instance_id: &str,
-        event_id: &str,
-        action: &str,
-    ) -> Result<newton_types::HilEvent, ApiError>;
-    async fn upsert_hil_event(&self, event: &newton_types::HilEvent) -> Result<(), ApiError>;
 
     async fn list_operators(&self) -> Result<Vec<OperatorItem>, ApiError>;
 
