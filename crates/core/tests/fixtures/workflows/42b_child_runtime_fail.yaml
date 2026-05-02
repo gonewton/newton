@@ -1,0 +1,21 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Scenario 42b: Child Runtime Fail (used as child in 42)"
+workflow:
+  settings:
+    entry_task: "assert_early"
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 100
+  tasks:
+    - id: "assert_early"
+      operator: "AssertCompletedOperator"
+      params:
+        require: ["step_two"]
+      terminal: success
+    - id: "step_two"
+      operator: "NoOpOperator"
+      terminal: success

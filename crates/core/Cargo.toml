@@ -1,0 +1,162 @@
+[package]
+name = "newton-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Newton workflow / batch / serve engine library."
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "generate-openapi"
+path = "src/bin/generate-openapi.rs"
+
+[dependencies]
+newton-types = { path = "../types" }
+newton-backend = { path = "../backend" }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+aikit-sdk = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+toml = { workspace = true }
+tempfile = { workspace = true }
+rand = { workspace = true }
+percent-encoding = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tungstenite = { workspace = true }
+reqwest = { workspace = true }
+url = { workspace = true }
+dirs-next = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+futures = { workspace = true }
+serde_yaml = { workspace = true }
+utoipa = { workspace = true }
+rhai = { workspace = true }
+petgraph = { workspace = true }
+async-trait = { workspace = true }
+regex = { workspace = true }
+indexmap = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+humantime = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+subtle = { workspace = true }
+dashmap = { workspace = true }
+async-stream = { workspace = true }
+tokio-stream = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+insta = { workspace = true }
+serial_test = { workspace = true }
+predicates = { workspace = true }
+tokio-test = { workspace = true }
+regex = { workspace = true }
+wiremock = { workspace = true }
+tempfile = { workspace = true }
+
+[[test]]
+name = "test_error_comprehensive"
+path = "tests/unit/test_error_comprehensive.rs"
+
+[[test]]
+name = "test_logger"
+path = "tests/unit/test_logger.rs"
+
+[[test]]
+name = "test_serialization"
+path = "tests/unit/test_serialization.rs"
+
+[[test]]
+name = "test_config_comprehensive"
+path = "tests/unit/test_config_comprehensive.rs"
+
+[[test]]
+name = "test_config_loading"
+path = "tests/integration/test_config_loading.rs"
+
+[[test]]
+name = "test_workflow_parse_and_validate"
+path = "tests/workflow_graph/test_parse_and_validate.rs"
+
+[[test]]
+name = "test_workflow_scheduler"
+path = "tests/workflow_graph/test_scheduler.rs"
+
+[[test]]
+name = "test_workflow_checkpoints"
+path = "tests/workflow_graph/test_checkpoints.rs"
+
+[[test]]
+name = "test_workflow_artifacts"
+path = "tests/workflow_graph/test_artifacts.rs"
+
+[[test]]
+name = "test_workflow_lint"
+path = "tests/workflow_graph/test_lint.rs"
+
+[[test]]
+name = "test_workflow_explain"
+path = "tests/workflow_graph/test_explain.rs"
+
+[[test]]
+name = "test_workflow_human_ops"
+path = "tests/workflow_graph/test_human_ops.rs"
+
+[[test]]
+name = "test_workflow_webhook"
+path = "tests/workflow_graph/test_webhook.rs"
+
+[[test]]
+name = "test_workflow_goal_gates"
+path = "tests/workflow_graph/test_goal_gates.rs"
+
+[[test]]
+name = "test_workflow_transforms"
+path = "tests/workflow_graph/test_transforms.rs"
+
+[[test]]
+name = "test_workflow_read_control_file_operator"
+path = "tests/workflow_graph/test_read_control_file_operator.rs"
+
+[[test]]
+name = "test_workflow_comprehensive_matrix"
+path = "tests/workflow_graph/test_workflow_comprehensive_matrix.rs"
+
+[[test]]
+name = "test_agent_operator"
+path = "tests/workflow_graph/test_agent_operator.rs"
+
+[[test]]
+name = "test_api_integration"
+path = "tests/integration/test_api.rs"
+
+[[test]]
+name = "test_workflow_resume_settings"
+path = "tests/workflow_graph/test_resume_settings.rs"
+
+[[test]]
+name = "test_gh_operator"
+path = "tests/workflow_graph/test_gh_operator.rs"
+
+[[test]]
+name = "test_parity_endpoints"
+path = "tests/integration/test_parity_endpoints.rs"
+
+[[test]]
+name = "test_human_ailoop"
+path = "tests/integration/test_human_ailoop.rs"

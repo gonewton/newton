@@ -1,0 +1,25 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Scenario 11: Complex Cyclic Path"
+workflow:
+  settings:
+    entry_task: "a"
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 15
+  tasks:
+    - id: "a"
+      operator: "NoOpOperator"
+      transitions:
+        - to: "b"
+    - id: "b"
+      operator: "NoOpOperator"
+      transitions:
+        - to: "c"
+    - id: "c"
+      operator: "NoOpOperator"
+      transitions:
+        - to: "a"

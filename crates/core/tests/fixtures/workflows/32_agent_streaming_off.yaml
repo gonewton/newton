@@ -1,0 +1,16 @@
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: agent_task
+    max_time_seconds: 60
+    stream_agent_stdout: false
+  tasks:
+    - id: agent_task
+      operator: "AgentOperator"
+      params:
+        engine: command
+        engine_command: ["sh", "-c", "echo 'SHOULD_NOT_APPEAR_ON_STDOUT'; echo '<status>DONE</status>'"]
+        signals:
+          done: "<status>DONE</status>"
+      terminal: success

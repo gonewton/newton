@@ -1,0 +1,89 @@
+[package]
+name = "newton-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Newton CLI binary."
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "newton"
+path = "src/main.rs"
+
+[[bin]]
+name = "logging_integration_helper"
+path = "tests/bin/logging_integration_helper.rs"
+
+[dependencies]
+newton-core = { path = "../core" }
+newton-types = { path = "../types" }
+newton-backend = { path = "../backend" }
+clap = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+reqwest = { workspace = true }
+url = { workspace = true }
+futures = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tungstenite = { workspace = true }
+async-stream = { workspace = true }
+async-trait = { workspace = true }
+tempfile = { workspace = true }
+indexmap = { workspace = true }
+dirs-next = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+aikit-sdk = { workspace = true }
+percent-encoding = { workspace = true }
+humantime = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+regex = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+insta = { workspace = true }
+serial_test = { workspace = true }
+predicates = { workspace = true }
+tokio-test = { workspace = true }
+regex = { workspace = true }
+tempfile = { workspace = true }
+wiremock = { workspace = true }
+
+[[test]]
+name = "test_main_functionality"
+path = "tests/unit_test_main_functionality.rs"
+
+[[test]]
+name = "cli_help_test"
+path = "tests/integration/cli_help_test.rs"
+
+[[test]]
+name = "test_logging_framework"
+path = "tests/integration/test_logging_framework.rs"
+
+[[test]]
+name = "test_log_commands"
+path = "tests/integration/test_log_commands.rs"
+
+[[test]]
+name = "test_batch_workflow_state_paths"
+path = "tests/batch/test_batch_workflow_state_paths.rs"
+
+[[test]]
+name = "test_workflow_scenarios"
+path = "tests/integration/test_workflow_scenarios.rs"

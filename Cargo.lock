@@ -1812,8 +1812,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "newton"
-version = "0.5.78"
+name = "newton-backend"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "indexmap",
+ "newton-types",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "newton-cli"
+version = "0.5.79"
 dependencies = [
  "aikit-sdk",
  "anyhow",
@@ -1824,6 +1841,51 @@ dependencies = [
  "chrono",
  "clap",
  "crossterm 0.28.1",
+ "dirs-next",
+ "futures",
+ "humantime",
+ "indexmap",
+ "insta",
+ "newton-backend",
+ "newton-core",
+ "newton-types",
+ "percent-encoding",
+ "predicates",
+ "ratatui",
+ "regex",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "serial_test",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tokio-test",
+ "tokio-tungstenite 0.20.1",
+ "toml",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "tungstenite 0.20.1",
+ "url",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
+name = "newton-core"
+version = "0.5.79"
+dependencies = [
+ "aikit-sdk",
+ "anyhow",
+ "assert_cmd",
+ "async-stream",
+ "async-trait",
+ "axum",
+ "chrono",
  "dashmap",
  "dirs-next",
  "futures",
@@ -1840,7 +1902,6 @@ dependencies = [
  "petgraph",
  "predicates",
  "rand 0.8.5",
- "ratatui",
  "regex",
  "reqwest 0.11.27",
  "rhai",
@@ -1868,23 +1929,6 @@ dependencies = [
  "utoipa",
  "uuid",
  "wiremock",
-]
-
-[[package]]
-name = "newton-backend"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "indexmap",
- "newton-types",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
- "tracing",
- "utoipa",
- "uuid",
 ]
 
 [[package]]

@@ -1,0 +1,19 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Scenario 23: Data Redaction"
+workflow:
+  settings:
+    entry_task: "set_secret"
+    redaction:
+      redact_keys: ["api_key", "password", "secret*"]
+  tasks:
+    - id: "set_secret"
+      operator: "SetContextOperator"
+      params:
+        patch:
+          api_key: "my-secret-key"
+          password: "my-password"
+          secret_token_123: "masked"
+          other: "visible"
+      terminal: success

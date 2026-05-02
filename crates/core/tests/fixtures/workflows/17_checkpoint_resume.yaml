@@ -1,0 +1,31 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Scenario 17: Checkpoint Resume"
+workflow:
+  settings:
+    entry_task: "step1"
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 100
+    checkpoint:
+      checkpoint_enabled: true
+      checkpoint_interval_seconds: 30
+      checkpoint_on_task_complete: true
+      checkpoint_keep_history: false
+  tasks:
+    - id: "step1"
+      operator: "NoOpOperator"
+      transitions:
+        - to: "step2"
+    - id: "step2"
+      operator: "CommandOperator"
+      params:
+        cmd: "fail_then_succeed"
+      transitions:
+        - to: "step3"
+    - id: "step3"
+      operator: "NoOpOperator"
+      terminal: success
