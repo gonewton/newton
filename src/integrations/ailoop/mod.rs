@@ -20,3 +20,11 @@ pub use workflow_emitter::WorkflowEmitter;
 pub fn init_context(workspace_root: &Path, command: &Command) -> Result<Option<AiloopContext>> {
     config::init_context(workspace_root, command)
 }
+
+/// Initialize ailoop integration context using a command name directly.
+pub fn init_context_for_command_name(
+    workspace_root: &Path,
+    command_name: &str,
+) -> Result<Option<AiloopContext>> {
+    config::init_context_for_command_name(workspace_root, command_name)
+}

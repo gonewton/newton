@@ -1,0 +1,16 @@
+---
+source: tests/integration/test_human_ailoop.rs
+expression: entry
+---
+approved: true
+choice: ~
+choices: ~
+default_used: true
+execution_id: "[execution_id]"
+interviewer_type: ailoop
+prompt: Approve release?
+responder: ~
+response_text: ~
+task_id: approval
+timeout_applied: true
+timestamp: "[timestamp]"

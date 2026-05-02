@@ -189,3 +189,7 @@ path = "tests/integration/test_log_commands.rs"
 [[test]]
 name = "test_parity_endpoints"
 path = "tests/integration/test_parity_endpoints.rs"
+
+[[test]]
+name = "test_human_ailoop"
+path = "tests/integration/test_human_ailoop.rs"

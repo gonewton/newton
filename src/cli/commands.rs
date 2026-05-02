@@ -139,9 +139,12 @@ fn setup_workflow_execution(
         pre_seed_nodes: true,
     };
 
+    let ailoop_ctx = crate::integrations::ailoop::init_context_for_command_name(workspace, "run")
+        .ok()
+        .flatten();
     let mut builder = OperatorRegistry::builder();
     let interviewer = crate::workflow::human::build_interviewer(
-        None,
+        ailoop_ctx.as_ref(),
         Duration::from_secs(settings.human.default_timeout_seconds),
     );
     workflow_operators::register_builtins_with_deps(
@@ -243,10 +246,13 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
         pre_seed_nodes: true,
     };
 
+    let ailoop_ctx = crate::integrations::ailoop::init_context_for_command_name(&workspace, "run")
+        .ok()
+        .flatten();
     let mut builder = OperatorRegistry::builder();
     let settings = document.workflow.settings.clone();
     let interviewer = crate::workflow::human::build_interviewer(
-        None,
+        ailoop_ctx.as_ref(),
         Duration::from_secs(settings.human.default_timeout_seconds),
     );
     workflow_operators::register_builtins_with_deps(
@@ -1756,10 +1762,14 @@ async fn execute_workflow_for_plan(
         pre_seed_nodes: true,
     };
 
+    let ailoop_ctx =
+        crate::integrations::ailoop::init_context_for_command_name(&workspace, "batch")
+            .ok()
+            .flatten();
     let mut builder = OperatorRegistry::builder();
     let settings = document.workflow.settings.clone();
     let interviewer = crate::workflow::human::build_interviewer(
-        None,
+        ailoop_ctx.as_ref(),
         Duration::from_secs(settings.human.default_timeout_seconds),
     );
     workflow_operators::register_builtins_with_deps(
