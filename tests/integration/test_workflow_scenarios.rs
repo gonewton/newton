@@ -330,6 +330,7 @@ impl WorkflowTestHarness {
             interviewer: Some(Arc::new(self.interviewer.clone())),
             gh_runner: None,
             child_workflow_runner: None,
+            gh_approver: None,
         };
 
         let settings = document.workflow.settings.clone();
@@ -902,6 +903,7 @@ async fn test_scenario_17_checkpoint_resume() {
                 interviewer: Some(Arc::new(harness.interviewer.clone())),
                 gh_runner: None,
                 child_workflow_runner: None,
+                gh_approver: None,
             },
         );
         builder.build()

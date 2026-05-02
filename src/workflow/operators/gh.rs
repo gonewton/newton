@@ -3,8 +3,13 @@
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
+use crate::workflow::operators::gh_authorization::{
+    parse_authorization_params, AiloopApprover, ApprovalOutcome, AuthorizationParams,
+    AuthorizationRequest, NoopApprover, OnUnavailable,
+};
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -14,20 +19,33 @@ use tokio::time::sleep;
 use tracing;
 
 const MAX_RETRY_DELAY_MS: u64 = 300_000;
+const DEFAULT_AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub struct GhOperator {
     runner: Arc<dyn GhRunner>,
+    approver: Arc<dyn AiloopApprover>,
 }
 
 impl GhOperator {
     pub fn new() -> Self {
         Self {
             runner: Arc::new(TokioGhRunner),
+            approver: Arc::new(NoopApprover),
         }
     }
 
     pub fn with_runner(runner: Arc<dyn GhRunner>) -> Self {
-        Self { runner }
+        Self {
+            runner,
+            approver: Arc::new(NoopApprover),
+        }
+    }
+
+    pub fn with_runner_and_approver(
+        runner: Arc<dyn GhRunner>,
+        approver: Arc<dyn AiloopApprover>,
+    ) -> Self {
+        Self { runner, approver }
     }
 }
 
@@ -76,10 +94,13 @@ impl Operator for GhOperator {
             }
         }
 
+        // Validate optional authorization parameters (side-effect-free).
+        parse_authorization_params(map)?;
+
         Ok(())
     }
 
-    async fn execute(&self, params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {
+    async fn execute(&self, params: Value, ctx: ExecutionContext) -> Result<Value, AppError> {
         let map = params.as_object().ok_or_else(|| {
             AppError::new(ErrorCategory::ValidationError, "params must be an object")
         })?;
@@ -88,6 +109,11 @@ impl Operator for GhOperator {
             .get("operation")
             .and_then(Value::as_str)
             .expect("operation validated");
+
+        let auth = parse_authorization_params(map)?;
+        if auth.require {
+            self.gate_authorization(&auth, operation, map, &ctx).await?;
+        }
 
         match operation {
             "project_resolve_board" => self.execute_project_resolve_board(map).await,
@@ -100,6 +126,119 @@ impl Operator for GhOperator {
             )),
         }
     }
+}
+
+impl GhOperator {
+    async fn gate_authorization(
+        &self,
+        auth: &AuthorizationParams,
+        operation: &str,
+        map: &Map<String, Value>,
+        ctx: &ExecutionContext,
+    ) -> Result<(), AppError> {
+        let prompt = auth
+            .prompt
+            .clone()
+            .unwrap_or_else(|| derive_default_prompt(operation, map));
+        let timeout = auth.timeout.or(Some(DEFAULT_AUTH_TIMEOUT));
+        let request_id = build_request_id(operation, &ctx.task_id, map);
+        let request = AuthorizationRequest {
+            request_id,
+            prompt,
+            channel: auth.channel.clone(),
+            timeout,
+            operation: operation.to_string(),
+            task_id: Some(ctx.task_id.clone()),
+        };
+
+        let span = tracing::info_span!(
+            "gh_authorization",
+            task_id = %ctx.task_id,
+            operation = operation
+        );
+        let _enter = span.enter();
+
+        let outcome = self.approver.authorize(request).await?;
+        match outcome {
+            ApprovalOutcome::Approved => Ok(()),
+            ApprovalOutcome::Denied { reason } => {
+                let msg = match reason {
+                    Some(r) => format!("authorization denied: {r}"),
+                    None => "authorization denied".to_string(),
+                };
+                Err(AppError::new(ErrorCategory::ValidationError, msg).with_code("WFG-GH-AUTH-001"))
+            }
+            ApprovalOutcome::Timeout => Err(AppError::new(
+                ErrorCategory::TimeoutError,
+                "authorization request timed out",
+            )
+            .with_code("WFG-GH-AUTH-002")),
+            ApprovalOutcome::Unavailable { cause } => match auth.on_unavailable {
+                OnUnavailable::Skip => {
+                    tracing::warn!(
+                        task_id = %ctx.task_id,
+                        operation = operation,
+                        cause = %cause,
+                        "ailoop approver unavailable; skipping authorization (on_authorization_unavailable=skip)"
+                    );
+                    Ok(())
+                }
+                OnUnavailable::Fail => Err(AppError::new(
+                    ErrorCategory::ToolExecutionError,
+                    format!("authorization unavailable: {cause}"),
+                )
+                .with_code("WFG-GH-AUTH-003")),
+            },
+        }
+    }
+}
+
+fn derive_default_prompt(operation: &str, map: &Map<String, Value>) -> String {
+    match operation {
+        "pr_create" => {
+            let title = map.get("title").and_then(Value::as_str).unwrap_or("");
+            let base = map.get("base").and_then(Value::as_str).unwrap_or("main");
+            format!("Authorize gh pr create: title=\"{title}\", base=\"{base}\"")
+        }
+        "pr_view" => {
+            let pr = map
+                .get("pr")
+                .map(|v| match v {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    _ => String::new(),
+                })
+                .unwrap_or_default();
+            format!("Authorize gh pr view: pr={pr}")
+        }
+        "project_resolve_board" => {
+            let owner = map.get("owner").and_then(Value::as_str).unwrap_or("");
+            let project = map
+                .get("project_number")
+                .map(|v| match v {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    _ => String::new(),
+                })
+                .unwrap_or_default();
+            format!("Authorize gh project view/field-list: owner={owner}, project={project}")
+        }
+        "project_item_set_status" => {
+            let item = map.get("item_id").and_then(Value::as_str).unwrap_or("");
+            let status = map.get("status").and_then(Value::as_str).unwrap_or("");
+            format!("Authorize gh project item-edit: item={item}, status={status}")
+        }
+        _ => format!("Authorize gh {operation}"),
+    }
+}
+
+fn build_request_id(operation: &str, task_id: &str, map: &Map<String, Value>) -> String {
+    let payload = serde_json::to_string(map).unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(payload.as_bytes());
+    let digest = hasher.finalize();
+    let short: String = digest.iter().take(6).map(|b| format!("{b:02x}")).collect();
+    format!("gh:{operation}:{task_id}:{short}")
 }
 
 fn validate_project_resolve_board(map: &Map<String, Value>) -> Result<(), AppError> {
@@ -655,7 +794,11 @@ pub trait GhRunner: Send + Sync + 'static {
     async fn run(&self, args: &[&str]) -> Result<GhOutput, AppError>;
 }
 
-struct TokioGhRunner;
+pub struct TokioGhRunner;
+
+pub fn default_runner() -> TokioGhRunner {
+    TokioGhRunner
+}
 
 #[async_trait]
 impl GhRunner for TokioGhRunner {
