@@ -49,21 +49,6 @@ Use **`WorkflowOperator`** when you want to reuse a workflow graph or split a la
 
 Child runs are tracked separately; the task output includes identifiers such as `child_execution_id` so you can correlate parent and child in logs and checkpoints. Nesting is limited by a maximum depth (default allows typical reuse without unbounded recursion).
 
-## Crate Layout
-
-The repository is a Cargo workspace with four member crates:
-
-| Crate | Package | Role |
-|---|---|---|
-| `crates/core` | `newton-core` | Library: workflow engine, batch runner, HTTP API, integrations, logging, utils. No CLI/TUI deps. |
-| `crates/cli` | `newton-cli` | Binary `newton`: argument parsing, logging bootstrap, TUI monitor. Depends on `newton-core`. |
-| `crates/types` | `newton-types` | Shared types (leaf crate). |
-| `crates/backend` | `newton-backend` | Persistence/store models. Depends on `newton-types`. |
-
-Dependency direction: `newton-cli` → `newton-core` → `{ newton-types, newton-backend }`. `newton-core` MUST NOT depend on `clap`, `ratatui`, or `crossterm`; this invariant is verified in CI via `cargo tree`.
-
-To build the binary: `cargo build -p newton-cli`. To use the engine as a library: add `newton-core = { path = "crates/core" }` to your `Cargo.toml`.
-
 ## Installation
 
 ### macOS / Linux (Homebrew)
