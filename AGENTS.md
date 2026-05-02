@@ -25,8 +25,6 @@ NEWTON-0024 - You SHOULD NOT adopt an extremely defensive coding style with exce
 NEWTON-0025 - Each command and subcommand MUST have a proper descriptive help message (about/long_about as needed) including at least one example (e.g. in after_help)
 
 ## Active Technologies
-- Rust 1.93.0 Stable + clap 4.5 (CLI parsing), tokio 1.49 (async runtime), anyhow/thiserror 1.0 (error handling), tracing 0.1 (logging), serde 1.0.228/serde_json 1.0 (serialization), chrono 0.4 (time), uuid 1.0 (execution IDs) (002-rust-newton-code)
-- Files (artifact management, workspace state) (002-rust-newton-code)
+- check Cargo.toml for dependencies and versions
+- Files (artifact management, workspace state)
 
-## Recent Changes
-- 002-rust-newton-code: Added Rust 1.93.0 Stable + clap 4.5 (CLI parsing), tokio 1.49 (async runtime), anyhow/thiserror 1.0 (error handling), tracing 0.1 (logging), serde 1.0.228/serde_json 1.0 (serialization), chrono 0.4 (time), uuid 1.0 (execution IDs)
