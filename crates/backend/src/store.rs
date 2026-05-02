@@ -1483,3 +1483,41 @@ async fn compute_repo_depended_on_by(
 
     Ok(rows.into_iter().map(|r| r.target_repo).collect())
 }
+
+#[cfg(test)]
+mod fk_tests {
+    use super::*;
+
+    /// Verify that SQLite foreign-key enforcement is actually ON at the
+    /// connection level. SQLite defaults foreign_keys=OFF per connection,
+    /// so a missing `.foreign_keys(true)` on SqliteConnectOptions silently
+    /// turns every FK declaration and ON DELETE CASCADE clause into a
+    /// no-op. This test exercises the connection directly to defend
+    /// against that regression — handler-level "not found" checks would
+    /// mask it.
+    #[tokio::test]
+    async fn pragma_foreign_keys_is_on() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let row: (i64,) = sqlx::query_as("PRAGMA foreign_keys")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(row.0, 1, "foreign_keys must be ON for every connection");
+    }
+
+    #[tokio::test]
+    async fn raw_insert_with_missing_fk_target_is_rejected() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        // Bypass app-level validation entirely — go straight to SQL.
+        // Module references Repo(id), so a non-existent repoId must fail.
+        let result = sqlx::query(
+            "INSERT INTO Module (id, name, kind, repoId) VALUES ('m-x', 'x', 'lib', 'no-such-repo')",
+        )
+        .execute(&store.pool)
+        .await;
+        assert!(
+            result.is_err(),
+            "raw insert with missing FK target must fail; FK enforcement is off"
+        );
+    }
+}

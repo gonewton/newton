@@ -616,21 +616,3 @@ async fn test_approve_plan_emits_canonical_execution_update() {
         "expected ExecutionUpdate broadcast with valid execution_id"
     );
 }
-
-#[tokio::test]
-async fn test_foreign_key_enforcement_active() {
-    // Defense-in-depth: confirm SQLite FK enforcement is on at runtime.
-    // Inserting a child row with a non-existent FK target must fail.
-    let store = SqliteBackendStore::new_in_memory().await.unwrap();
-    let body = newton_backend::CreateModuleDependencyBody {
-        from_module_id: "does-not-exist-1".to_string(),
-        to_module_id: "does-not-exist-2".to_string(),
-        dep_type: "runtime".to_string(),
-        label: "should fail".to_string(),
-    };
-    let result = store.create_module_dependency(body).await;
-    assert!(
-        result.is_err(),
-        "module-dep with missing FK target must be rejected"
-    );
-}
