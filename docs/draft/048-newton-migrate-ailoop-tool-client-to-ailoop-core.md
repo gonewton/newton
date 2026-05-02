@@ -125,6 +125,7 @@ Commit **`Cargo.lock`** with the pinned **`rev`**.
 5. Update **`integrations/ailoop/config.rs`** docs: **`NEWTON_AILOOP_WS_URL`** required for WS client; **`NEWTON_AILOOP_HTTP_URL`** optional or deprecated where superseded.
 6. **Tests:** adapt **`integrations/ailoop` wiremock suite** where HTTP is removed; keep or extend **`tests/integration/test_human_ailoop.rs`**.
 7. Remove dead HTTP paths once unused; rewrite **`approver.rs`** outdated **`ailoop-sdk`** comment into **`ailoop-core`**.
+8. **Final cleanup (MUST):** When the migration is complete, **remove dead code** under **`crates/core/src/integrations/ailoop/`** (unused modules, helpers, `ToolClient` surface and types that no longer have callers, obsolete env/config branches, and tests that only covered removed HTTP paths). Drop **`reqwest`** from **`newton-core`** if nothing else in the crate needs it. Goal: no leftover HTTP tool-client implementation or orphan exports in that tree.
 
 ## Non-goals (this spec)
 
@@ -137,6 +138,7 @@ Commit **`Cargo.lock`** with the pinned **`rev`**.
 - [ ] **`HumanApprovalOperator`** / **`HumanDecisionOperator`** (via **`AiloopInterviewer`**) call **`ailoop_core::client`**, not **`reqwest`** tool HTTP paths listed above.
 - [ ] **`AiloopSdkApprover`** uses same stack or documents a narrow HTTP exception.
 - [ ] **`cargo test`** passes; **`Cargo.lock`** updated.
+- [ ] **`integrations/ailoop`** contains **no dead code** left from the superseded HTTP path (removed modules/helpers/tests/orphans per migration step **8**).
 - [ ] Operator/integration docs describe clone URL, dependency snippets, **`WS`** URL expectation.
 
 ## References
