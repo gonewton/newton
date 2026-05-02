@@ -6,7 +6,7 @@ info:
     name: Newton Loop Framework
   license:
     name: ''
-  version: 0.5.80
+  version: 0.5.81
 paths:
   /api/components:
     get:
