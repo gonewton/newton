@@ -114,7 +114,9 @@ workflow:
           if [ -n "$RAW_SPEC" ] && [ -f "$RAW_SPEC" ]; then
             slug=$(slugify)
             OUT="tmp/${ISSUE}-${slug}.md"
-            cp "$RAW_SPEC" "$OUT"
+            if [ "$RAW_SPEC" != "$OUT" ]; then
+              cp "$RAW_SPEC" "$OUT"
+            fi
           else
             OUT="$LEGACY_PROMPT"
             if [ -z "$OUT" ] || [ ! -f "$OUT" ]; then
