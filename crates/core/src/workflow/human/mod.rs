@@ -122,11 +122,9 @@ pub fn build_interviewer(
         Some("console") => Arc::new(ConsoleInterviewer::new()),
         Some("ailoop") => {
             if let Some(ctx) = ailoop {
-                let client = Arc::new(crate::integrations::ailoop::tool_client::ToolClient::new(
-                    Arc::new(ctx.clone()),
-                ));
                 Arc::new(AiloopInterviewer::new(
-                    client,
+                    ctx.ws_url().to_string(),
+                    ctx.channel().to_string(),
                     ctx.config.fail_fast,
                     default_timeout,
                 ))
@@ -140,12 +138,9 @@ pub fn build_interviewer(
         _ => {
             if let Some(ctx) = ailoop {
                 if ctx.is_enabled() {
-                    let client =
-                        Arc::new(crate::integrations::ailoop::tool_client::ToolClient::new(
-                            Arc::new(ctx.clone()),
-                        ));
                     return Arc::new(AiloopInterviewer::new(
-                        client,
+                        ctx.ws_url().to_string(),
+                        ctx.channel().to_string(),
                         ctx.config.fail_fast,
                         default_timeout,
                     ));
@@ -167,7 +162,6 @@ mod tests {
 
     fn make_ctx(enabled: bool) -> AiloopContext {
         let config = AiloopConfig {
-            http_url: Url::parse("http://127.0.0.1:9999").unwrap(),
             ws_url: Url::parse("ws://127.0.0.1:9999").unwrap(),
             channel: "test".to_string(),
             enabled,

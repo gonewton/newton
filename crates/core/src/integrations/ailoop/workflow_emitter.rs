@@ -41,8 +41,6 @@ impl WorkflowEvent {
 /// Emitter for workflow progress events.
 #[derive(Clone)]
 pub struct WorkflowEmitter {
-    #[allow(dead_code)]
-    context: Arc<AiloopContext>,
     event_tx: mpsc::UnboundedSender<WorkflowEvent>,
 }
 
@@ -52,12 +50,11 @@ impl WorkflowEmitter {
     pub fn new(context: Arc<AiloopContext>) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
-        let sender_context = context.clone();
         tokio::spawn(async move {
-            Self::emitter_loop(sender_context, event_rx).await;
+            Self::emitter_loop(context, event_rx).await;
         });
 
-        Self { context, event_tx }
+        Self { event_tx }
     }
 
     /// Emit a workflow event.
@@ -152,33 +149,30 @@ impl WorkflowEmitter {
         }
     }
 
-    /// Emit a single event to ailoop HTTP endpoint.
+    /// Emit a single event to ailoop via WebSocket.
     async fn emit_event_once(
         context: &AiloopContext,
         event: &WorkflowEvent,
     ) -> Result<(), EmitError> {
-        let client = reqwest::Client::new();
-        let endpoint = format!("{}/workflow/{}", context.http_url(), context.channel());
+        use ailoop_core::models::{Message, MessageContent, SenderType};
 
-        let payload = serde_json::to_value(event)
-            .map_err(|e| EmitError::SerializationError(e.to_string()))?;
+        let content = MessageContent::WorkflowProgress {
+            execution_id: event.execution_id.to_string(),
+            workflow_name: event.phase.clone(),
+            current_state: event.status.clone(),
+            status: event.status.clone(),
+            progress_percentage: event.progress,
+        };
 
-        let response = client
-            .post(&endpoint)
-            .json(&payload)
-            .timeout(std::time::Duration::from_secs(5))
-            .send()
-            .await
-            .map_err(|e| EmitError::NetworkError(e.to_string()))?;
+        let ws_message = Message::new(context.channel().to_string(), SenderType::Agent, content);
 
-        if !response.status().is_success() {
-            return Err(EmitError::ServerError(format!(
-                "Server returned status: {}",
-                response.status()
-            )));
-        }
-
-        Ok(())
+        ailoop_core::transport::websocket::send_message_no_response(
+            context.ws_url().to_string(),
+            context.channel().to_string(),
+            ws_message,
+        )
+        .await
+        .map_err(|e| EmitError::NetworkError(e.to_string()))
     }
 }
 
@@ -212,7 +206,6 @@ mod tests {
 
     fn create_test_context() -> Arc<AiloopContext> {
         let config = AiloopConfig {
-            http_url: Url::parse("http://localhost:8080").unwrap(),
             ws_url: Url::parse("ws://localhost:8080").unwrap(),
             channel: "test-channel".to_string(),
             enabled: true,

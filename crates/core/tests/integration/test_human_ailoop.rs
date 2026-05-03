@@ -1,15 +1,12 @@
 //! End-to-end tests for `HumanDecisionOperator` and `HumanApprovalOperator`
-//! routed through the ailoop HTTP transport via `AiloopInterviewer`.
+//! routed through the ailoop WebSocket transport via `AiloopInterviewer`.
 //!
-//! These tests exercise the new transport with a `wiremock` server stub and
-//! assert that the operator output JSON shapes and audit log entries remain
-//! identical to the console backend (audit `interviewer_type` is the only
-//! differing field).
+//! A minimal in-process WS server responds with the expected `MessageContent`
+//! variant. This exercises the full operator→interviewer→ailoop-core path.
 
+use ailoop_core::models::{Message, MessageContent, ResponseType};
+use futures::{SinkExt, StreamExt};
 use insta::assert_yaml_snapshot;
-use newton_core::integrations::ailoop::config::AiloopConfig;
-use newton_core::integrations::ailoop::tool_client::ToolClient;
-use newton_core::integrations::ailoop::AiloopContext;
 use newton_core::workflow::executor::{ExecutionOverrides, GraphHandle};
 use newton_core::workflow::human::AiloopInterviewer;
 use newton_core::workflow::operator::{ExecutionContext, Operator, OperatorRegistry, StateView};
@@ -19,31 +16,45 @@ use newton_core::workflow::operators::{
 use newton_core::workflow::schema::HumanSettings;
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
-use url::Url;
+use tokio::net::TcpListener;
+use tokio_tungstenite::tungstenite::Message as WsMessage;
 use uuid::Uuid;
-use wiremock::matchers::{method, path_regex};
-use wiremock::{Mock, MockServer, ResponseTemplate};
 
-fn build_ailoop_interviewer(server_uri: &str, channel: &str) -> Arc<AiloopInterviewer> {
-    let config = AiloopConfig {
-        http_url: Url::parse(server_uri).unwrap(),
-        ws_url: Url::parse("ws://127.0.0.1:1").unwrap(),
-        channel: channel.to_string(),
-        enabled: true,
-        fail_fast: false,
-    };
-    let ctx = Arc::new(AiloopContext::new(
-        config,
-        PathBuf::from("/tmp"),
-        "test".to_string(),
-    ));
-    let client = Arc::new(ToolClient::new(ctx));
+/// Start a minimal WS server that responds once with `response_content`.
+/// Returns the ws:// URL and a JoinHandle.
+async fn start_ws_responder(
+    response_content: MessageContent,
+) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("ws://127.0.0.1:{port}");
+
+    let handle = tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let ws: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream> =
+                tokio_tungstenite::accept_async(stream).await.unwrap();
+            let (mut sender, mut receiver) = ws.split();
+
+            if let Some(Ok(WsMessage::Text(text))) = receiver.next().await {
+                let msg: Message = serde_json::from_str(&text).unwrap();
+                let reply = Message::response(msg.channel.clone(), response_content, msg.id);
+                let reply_json = serde_json::to_string(&reply).unwrap();
+                let _ = sender.send(WsMessage::Text(reply_json)).await;
+            }
+        }
+    });
+
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    (url, handle)
+}
+
+fn build_ailoop_interviewer(ws_url: &str, channel: &str) -> Arc<AiloopInterviewer> {
     Arc::new(AiloopInterviewer::new(
-        client,
+        ws_url.to_string(),
+        channel.to_string(),
         false,
         Duration::from_secs(60),
     ))
@@ -91,17 +102,13 @@ async fn human_decision_via_ailoop_happy_path() {
     let execution_id = Uuid::new_v4().to_string();
     let channel = "decision-test";
 
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path_regex(format!(r"^/+questions/{channel}$")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "answer": "fix",
-            "timed_out": false,
-        })))
-        .mount(&server)
-        .await;
+    let (ws_url, _handle) = start_ws_responder(MessageContent::Response {
+        response_type: ResponseType::Text,
+        answer: Some("fix".to_string()),
+    })
+    .await;
 
-    let interviewer = build_ailoop_interviewer(&server.uri(), channel);
+    let interviewer = build_ailoop_interviewer(&ws_url, channel);
     let operator =
         HumanDecisionOperator::new(interviewer, HumanSettings::default(), Arc::new(Vec::new()));
     let mut ctx = build_execution_context(&workspace, execution_id.clone());
@@ -149,18 +156,13 @@ async fn human_approval_via_ailoop_timeout_default() {
     let execution_id = Uuid::new_v4().to_string();
     let channel = "approval-test";
 
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path_regex(format!(r"^/+authorization/{channel}$")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "authorized": false,
-            "timed_out": true,
-            "reason": null,
-        })))
-        .mount(&server)
-        .await;
+    let (ws_url, _handle) = start_ws_responder(MessageContent::Response {
+        response_type: ResponseType::Timeout,
+        answer: None,
+    })
+    .await;
 
-    let interviewer = build_ailoop_interviewer(&server.uri(), channel);
+    let interviewer = build_ailoop_interviewer(&ws_url, channel);
     let operator =
         HumanApprovalOperator::new(interviewer, HumanSettings::default(), Arc::new(Vec::new()));
     let mut ctx = build_execution_context(&workspace, execution_id.clone());

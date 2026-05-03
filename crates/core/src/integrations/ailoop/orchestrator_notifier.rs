@@ -206,34 +206,32 @@ impl OrchestratorNotifier {
         Err(SendError::MaxRetriesExceeded)
     }
 
-    /// Send an event once to ailoop HTTP endpoint.
+    /// Send an event once to ailoop via WebSocket.
     async fn send_event_once(
         context: &AiloopContext,
         event: &OrchestratorEvent,
     ) -> Result<(), SendError> {
-        let client = reqwest::Client::new();
-        let endpoint = format!("{}/events/{}", context.http_url(), context.channel());
+        use ailoop_core::models::{Message, MessageContent, NotificationPriority, SenderType};
 
-        let payload = serde_json::to_value(event).map_err(|e| {
+        let text = serde_json::to_string(event).map_err(|e| {
             SendError::SerializationError(format!("Failed to serialize event: {e}"))
         })?;
 
-        let response = client
-            .post(&endpoint)
-            .json(&payload)
-            .timeout(std::time::Duration::from_secs(5))
-            .send()
-            .await
-            .map_err(|e| SendError::NetworkError(e.to_string()))?;
+        let priority = match event {
+            OrchestratorEvent::ExecutionFailed { .. } => NotificationPriority::High,
+            _ => NotificationPriority::Normal,
+        };
 
-        if !response.status().is_success() {
-            return Err(SendError::ServerError(format!(
-                "Server returned status: {}",
-                response.status()
-            )));
-        }
+        let content = MessageContent::Notification { text, priority };
+        let ws_message = Message::new(context.channel().to_string(), SenderType::Agent, content);
 
-        Ok(())
+        ailoop_core::transport::websocket::send_message_no_response(
+            context.ws_url().to_string(),
+            context.channel().to_string(),
+            ws_message,
+        )
+        .await
+        .map_err(|e| SendError::NetworkError(e.to_string()))
     }
 }
 
@@ -261,7 +259,6 @@ mod tests {
 
     fn create_test_context() -> Arc<AiloopContext> {
         let config = AiloopConfig {
-            http_url: Url::parse("http://localhost:8080").unwrap(),
             ws_url: Url::parse("ws://localhost:8080").unwrap(),
             channel: "test-channel".to_string(),
             enabled: true,

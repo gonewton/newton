@@ -34,8 +34,6 @@ pub struct OutputMessage {
 /// Forwarder for streaming tool output to ailoop.
 #[derive(Clone)]
 pub struct OutputForwarder {
-    #[allow(dead_code)]
-    context: Arc<AiloopContext>,
     message_tx: mpsc::Sender<OutputMessage>,
 }
 
@@ -45,27 +43,20 @@ impl OutputForwarder {
     pub fn new(context: Arc<AiloopContext>) -> Self {
         let (message_tx, message_rx) = mpsc::channel(FORWARDER_QUEUE_SIZE);
 
-        let sender_context = context.clone();
         tokio::spawn(async move {
-            Self::forwarder_loop(sender_context, message_rx).await;
+            Self::forwarder_loop(context, message_rx).await;
         });
 
-        Self {
-            context,
-            message_tx,
-        }
+        Self { message_tx }
     }
 
     #[cfg(test)]
     /// Construct a forwarder with a provided sender for testing queue behavior.
     pub fn new_with_sender(
-        context: Arc<AiloopContext>,
+        _context: Arc<AiloopContext>,
         sender: mpsc::Sender<OutputMessage>,
     ) -> Self {
-        Self {
-            context,
-            message_tx: sender,
-        }
+        Self { message_tx: sender }
     }
 
     /// Forward a stdout line.
@@ -133,38 +124,42 @@ impl OutputForwarder {
         }
     }
 
-    /// Forward a single message to ailoop HTTP endpoint.
+    /// Forward a single message to ailoop via WebSocket.
     async fn forward_message_once(
         context: &AiloopContext,
         message: &OutputMessage,
     ) -> Result<(), ForwardError> {
-        let client = reqwest::Client::new();
-        let endpoint = format!("{}/messages/{}", context.http_url(), context.channel());
+        use ailoop_core::models::{Message, MessageContent, SenderType};
 
-        let payload = serde_json::json!({
-            "content": message.content,
-            "priority": message.priority,
-            "source": message.source,
-            "execution_id": message.execution_id,
-            "timestamp": chrono::Utc::now(),
-        });
+        let execution_id = message
+            .execution_id
+            .map(|id| id.to_string())
+            .unwrap_or_default();
 
-        let response = client
-            .post(&endpoint)
-            .json(&payload)
-            .timeout(std::time::Duration::from_secs(3))
-            .send()
-            .await
-            .map_err(|e| ForwardError::NetworkError(e.to_string()))?;
+        let content = match message.priority {
+            MessagePriority::Normal => MessageContent::Stdout {
+                execution_id,
+                state_name: message.source.clone(),
+                content: message.content.clone(),
+                sequence: 0,
+            },
+            MessagePriority::High => MessageContent::Stderr {
+                execution_id,
+                state_name: message.source.clone(),
+                content: message.content.clone(),
+                sequence: 0,
+            },
+        };
 
-        if !response.status().is_success() {
-            return Err(ForwardError::ServerError(format!(
-                "Server returned status: {}",
-                response.status()
-            )));
-        }
+        let ws_message = Message::new(context.channel().to_string(), SenderType::Agent, content);
 
-        Ok(())
+        ailoop_core::transport::websocket::send_message_no_response(
+            context.ws_url().to_string(),
+            context.channel().to_string(),
+            ws_message,
+        )
+        .await
+        .map_err(|e| ForwardError::NetworkError(e.to_string()))
     }
 }
 
@@ -188,7 +183,6 @@ mod tests {
 
     fn create_test_context() -> Arc<AiloopContext> {
         let config = AiloopConfig {
-            http_url: Url::parse("http://localhost:8080").unwrap(),
             ws_url: Url::parse("ws://localhost:8080").unwrap(),
             channel: "test-channel".to_string(),
             enabled: true,
