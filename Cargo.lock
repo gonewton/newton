@@ -1958,7 +1958,7 @@ dependencies = [
 
 [[package]]
 name = "newton-cli"
-version = "0.5.82"
+version = "0.5.83"
 dependencies = [
  "aikit-sdk",
  "anyhow",
@@ -2005,7 +2005,7 @@ dependencies = [
 
 [[package]]
 name = "newton-core"
-version = "0.5.82"
+version = "0.5.83"
 dependencies = [
  "aikit-sdk",
  "ailoop-core",
