@@ -23,6 +23,8 @@ NEWTON-0022 - Release builds MUST compile successfully on all target platforms
 NEWTON-0023 - You MUST assume git is installed on the user machine and MUST NOT check for git presence
 NEWTON-0024 - You SHOULD NOT adopt an extremely defensive coding style with excessive validation
 NEWTON-0025 - Each command and subcommand MUST have a proper descriptive help message (about/long_about as needed) including at least one example (e.g. in after_help)
+NEWTON-0026 - README.md MUST contain only information relevant to end users (for example product overview, installation, basic usage, and quick start)
+NEWTON-0027 - Information intended for Newton's development team MUST NOT be placed in README.md; that material MUST appear in CONTRIBUTING.md
 
 ## Active Technologies
 - check Cargo.toml for dependencies and versions
