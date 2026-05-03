@@ -1706,9 +1706,11 @@ async fn test_scenario_45_nested_non_object_context_fails() {
 #[serial(path_env_agent)]
 async fn test_scenario_46_planner_short_circuit_on_enrich_failure() {
     let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
+    // Tests SDK-normalized quota detection: emit a structured error line that
+    // aikit-sdk's extract_agent_quota_signal recognizes (type=="error" with quota exceeded message).
     write_agent_stub(
         harness.temp_dir.path(),
-        "echo '{\"error\":{\"status\":429,\"message\":\"hourly quota exceeded\"}}'\nexit 0\n",
+        "echo '{\"type\":\"error\",\"message\":\"hourly quota exceeded\"}'\nexit 0\n",
     );
     let _path = PathGuard::prepend(harness.temp_dir.path());
 

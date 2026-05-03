@@ -820,6 +820,28 @@ async fn execute_sdk_engine(
             }
         }
 
+        // Check RunResult.quota_exceeded: SDK detected quota exhaustion.
+        // This is the primary path for quota errors — the SDK owns all quota detection.
+        if let Some(ref info) = iter_run_result.quota_exceeded {
+            let category = format!("{:?}", info.category).to_lowercase();
+            let mut error = AppError::new(
+                ErrorCategory::ResourceError,
+                format!(
+                    "agent '{}' quota exceeded ({}): {}",
+                    info.agent_key, category, info.raw_message
+                ),
+            )
+            .with_code("WFG-AGENT-008");
+            error.add_context("provider", &info.agent_key);
+            error.add_context("quota_category", &category);
+            error.add_context("raw_excerpt", &info.raw_message);
+            error.add_context("events_artifact", &events_artifact_rel);
+            if stderr_path.exists() {
+                error.add_context("stderr_artifact", &stderr_rel);
+            }
+            return Err(error);
+        }
+
         // Update primary token usage from this iteration's RunResult (precedence over stream events).
         if let Some(ref usage) = iter_run_result.token_usage {
             primary_token_usage = serde_json::to_value(usage).ok();
