@@ -17,7 +17,7 @@ repository = "https://github.com/gonewton/newton.git"
 clap = { version = "4.4", features = ["derive", "cargo"] }
 tokio = { version = "1.49", features = ["full"] }
 anyhow = "1.0"
-aikit-sdk = "0.1.50"
+aikit-sdk = { version = "0.2.1", git = "https://github.com/goaikit/aikit.git", branch = "main" }
 thiserror = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"] }
@@ -25,7 +25,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
-toml = "0.8"
+toml = "1.1"
 tempfile = "3.10"
 rand = "0.8"
 percent-encoding = "2.1"
@@ -33,7 +33,7 @@ ratatui = { version = "0.23" }
 crossterm = "0.28"
 tokio-tungstenite = { version = "0.20", features = ["__rustls-tls"] }
 tungstenite = { version = "0.20", features = ["__rustls-tls"] }
-reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 url = "2"
 dirs-next = "2"
 tracing-appender = "0.2.4"

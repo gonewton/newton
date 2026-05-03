@@ -467,10 +467,12 @@ fn read_enrich_error_code(workspace: &TempDir) -> String {
 #[serial(path_env_agent)]
 async fn sdk_quota_structured_event_returns_agent_008() {
     let workspace = TempDir::new().expect("create temp workspace");
+    // Tests SDK-normalized quota detection: agent emits a structured error line that
+    // aikit-sdk's extract_agent_quota_signal recognizes (type=="error" with usage limit message).
     write_agent_stub(
         &workspace,
         &[
-            "echo '{\"usage\":{\"requests_used\":1000,\"requests_limit\":1000},\"message\":\"usage limit reached for requests\"}'",
+            r#"echo '{"type":"error","message":"usage limit exceeded for requests"}'"#,
             "exit 0",
             "",
         ]
@@ -508,9 +510,11 @@ workflow:
 #[serial(path_env_agent)]
 async fn sdk_quota_stderr_event_returns_agent_008() {
     let workspace = TempDir::new().expect("create temp workspace");
+    // Tests SDK-normalized quota detection via stderr: agent emits a line that
+    // aikit-sdk's extract_agent_quota_signal recognizes via the "usage limit for" pattern.
     write_agent_stub(
         &workspace,
-        "echo 'provider says out of usage for tokens' >&2\nexit 0\n",
+        "printf 'usage limit for tokens reached\\n' >&2\nexit 0\n",
     );
     let _path = PathGuard::prepend(workspace.path());
 

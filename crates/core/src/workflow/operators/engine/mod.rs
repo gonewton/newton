@@ -186,6 +186,21 @@ pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
             format!("aikit-sdk agent timed out after {timeout:?}"),
         )
         .with_code("WFG-SDK-001"),
+        aikit_sdk::RunError::QuotaExceeded(info) => {
+            let category = format!("{:?}", info.category).to_lowercase();
+            let mut error = AppError::new(
+                ErrorCategory::ResourceError,
+                format!(
+                    "agent '{}' quota exceeded ({}): {}",
+                    info.agent_key, category, info.raw_message
+                ),
+            )
+            .with_code("WFG-AGENT-008");
+            error.add_context("provider", &info.agent_key);
+            error.add_context("quota_category", &category);
+            error.add_context("raw_excerpt", &info.raw_message);
+            error
+        }
         _ => AppError::new(ErrorCategory::IoError, format!("aikit-sdk error: {err}"))
             .with_code("WFG-SDK-001"),
     }
@@ -196,15 +211,15 @@ pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
 /// Follows the deterministic rule order from spec section 4:
 /// 1. `RawLine` → use raw string as-is
 /// 2. `JsonLine` → ordered field extraction: `.content` → `.result.result` → `.result` → `.part.text`
-/// 3. `RawBytes` → None (MUST NOT participate in signal matching)
-/// 4. `TokenUsageLine` → None (MUST NOT participate in signal matching)
+/// 3. All other variants (RawBytes, TokenUsageLine, QuotaExceeded, StreamMessage,
+///    RawTransportLine, Aikit* built-ins) → None (MUST NOT participate in signal matching).
+///    The wildcard arm provides forward-compatibility with new SDK 0.2.x variants.
 pub fn extract_text_from_sdk_event(event: &aikit_sdk::AgentEvent) -> Option<String> {
     match &event.payload {
         aikit_sdk::AgentEventPayload::RawLine(s) => Some(s.clone()),
         aikit_sdk::AgentEventPayload::JsonLine(json) => extract_text_from_json(json),
-        // RawBytes and TokenUsageLine MUST NOT participate in signal matching
-        aikit_sdk::AgentEventPayload::RawBytes(_) => None,
-        aikit_sdk::AgentEventPayload::TokenUsageLine { .. } => None,
+        // All other variants (telemetry, quota, transport, aikit built-in) MUST NOT participate in signal matching
+        _ => None,
     }
 }
 

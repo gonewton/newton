@@ -22,7 +22,9 @@ Newton includes a production workflow runner with YAML-defined tasks and determi
 
 ### Agent quota failure behavior
 
-For SDK-backed `AgentOperator` engines (`claude`, `agent`, `codex`, `gemini`, `opencode`), Newton now fails the task with `WFG-AGENT-008` when provider quota or usage exhaustion is detected from structured SDK events (for example HTTP `429` with usage markers) or stderr text (for example `out of usage`). The task error summary keeps the existing schema and includes context like provider, quota category, and artifact links when available.
+For SDK-backed `AgentOperator` engines (`claude`, `agent`, `codex`, `gemini`, `opencode`), Newton fails the task with `WFG-AGENT-008` when quota exhaustion is detected. Newton is completely agnostic to provider-specific message formats — all quota detection logic lives in aikit-sdk.
+
+When aikit-sdk detects quota exhaustion, it sets `RunResult.quota_exceeded` and raises `RunError::QuotaExceeded`; Newton maps this directly to workflow error `WFG-AGENT-008`, enriched with artifact paths (events NDJSON and stderr). Consumers of Newton workflows should not attempt to parse provider-specific agent output for quota signals — rely on the `WFG-AGENT-008` error code and its `provider`, `quota_category`, and `raw_excerpt` context fields.
 
 ### Built-in Workflow Operators
 
