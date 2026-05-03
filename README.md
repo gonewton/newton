@@ -39,7 +39,7 @@ When aikit-sdk detects quota exhaustion, it sets `RunResult.quota_exceeded` and 
 | `HumanApprovalOperator` | Pause for a boolean approve/reject decision from a human operator |
 | `HumanDecisionOperator` | Pause for a multiple-choice selection from a human operator |
 
-Newton also ships additional operators (for example agent and GitHub integrations); run `newton explain <workflow.yaml>` for the exact graph your file uses.
+Newton also bundles agent, GitHub, and MCP operator integrations. Their availability depends on the workflow you load — run `newton explain <workflow.yaml>` for the exact operator list resolved by your file, and consult `docs/operators/` for the per-operator reference.
 
 #### Sub-workflows
 
@@ -83,9 +83,9 @@ scoop install newton
 
 ## Prerequisites
 
-- **Required**: The Newton CLI itself, installed via the package instructions above. Once the CLI is available, `newton init .` installs the workspace template for you.
+- **Required**: The Newton CLI itself, installed via the package instructions above. Once the CLI is available, `newton init .` installs the Newton workspace template via the bundled `aikit-sdk` (a statically linked workspace dependency — you do **not** need `aikit` on your `PATH`).
 - **Optional**: Git for working with version control, hooks, and batch workflows.
-- If `newton init .` cannot complete (missing template, network issues, or template source errors), check your connectivity and that the configured template source is reachable.
+- If `newton init .` cannot complete (missing template, network issues, or template source errors), check your connectivity and that the configured template source is reachable. The default template source is `gonewton/newton-templates`; override with `--template-source <SOURCE>` to use a different locator or a local path.
 
 ## Quick Start
 
@@ -118,10 +118,10 @@ For an existing repository, run `newton init .` at the repo root instead of crea
 
 ```bash
 newton --version
-newton 0.5.78
+newton 0.5.82
 
 $ newton --help
-newton 0.5.78
+newton 0.5.82
 Newton CLI for optimization and workflow automation
 
 Usage: newton <COMMAND>
@@ -184,6 +184,86 @@ Process queued plan files for a project. `newton batch` discovers the workspace 
 Plan files move from `todo` to `completed` when the workflow succeeds, or to `failed` when it errors.
 
 Other keys in `.conf` files are ignored by `newton batch` unless documented for another command.
+
+### `serve`
+
+Serve starts the HTTP/WebSocket API server that provides real-time access to workflow execution state. It powers web UIs, monitoring dashboards, and other backend integrations against a running Newton workspace. CORS is enabled for local development by default.
+
+**Options** (from `crates/cli/src/cli/args.rs`):
+- `--host <HOST>`: Host address to bind to (default: `127.0.0.1`).
+- `--port <PORT>`: Port to listen on (default: `8080`).
+- `--ui-dir <PATH>`: Optional path to a built Newton UI dist directory; when present the UI is served alongside the API.
+
+**Example:**
+```bash
+newton serve --host 0.0.0.0 --port 9000
+```
+
+**Endpoint groups:**
+
+| Group | Sample paths | Notes |
+|---|---|---|
+| Health | `GET /health` | liveness probe |
+| Dashboard | `GET /api/components`, `GET /api/indicators`, `GET /api/recent-actions` | dashboard widgets |
+| Executions | `GET /api/executions` | filterable by `planId` |
+| HIL | `GET /api/hil/instances`, `GET /api/hil/workflows/{id}`, `POST /api/hil/workflows/{id}/{event_id}/action` | human-in-the-loop |
+| Operators | `GET /api/operators` | registered operator metadata |
+| Opportunities | `GET /api/opportunities`, `GET /api/opportunities/{id}` | portfolio surface |
+| Pending approvals | `GET /api/pending-approvals` | gate queue |
+| Persistence | `GET/PUT /api/persistence/{key}` | KV store |
+| Plans | `GET /api/plans`, `GET /api/plans/{id}`, `POST /api/plans/{id}/approve`, `POST /api/plans/{id}/reject` | plan queue |
+| Products | `GET /api/products` | product registry |
+| Regressions | `GET /api/regressions` | regression view |
+| Repos | `GET /api/repos`, `GET /api/repo-dependencies`, `GET /api/module-dependencies` | repo graph |
+| Requests | `GET /api/requests` | request log |
+| Saved views | `GET /api/saved-views` | UI presets |
+| Testing | `POST /api/testing/reset` | test-only reset |
+| Workflows | `GET /api/workflows`, `GET /api/workflows/{id}`, `GET /api/workflows/{id}/nodes/{node_id}` | workflow CRUD |
+| Streams | `WS /api/stream/workflow/:id/ws`, `WS /api/stream/logs/:id/:node_id/ws`, `SSE /api/stream/workflow/:id/sse` | from `after_help` block |
+
+**Storage:** `newton serve` reads from the parity backend store (default SQLite) defined in [`crates/backend/src/store.rs`](crates/backend/src/store.rs); the schema lives in [`openapi/newton-backend-parity.sqlite.sql`](openapi/newton-backend-parity.sqlite.sql).
+
+**Authoritative contract:** The HTTP/WebSocket/SSE surface is specified in [`openapi/newton-backend-parity.yaml`](openapi/newton-backend-parity.yaml). Note: `newton serve --help` is currently incomplete (tracked in gonewton/newton#247); this README section is the interim summary.
+
+### `monitor`
+
+Monitor listens to every project/branch channel from the workspace using a WebSocket/HTTP mix and lets you answer questions or approve authorizations from a queue. See **Logging → `monitor`** below for the full configuration and usage walkthrough.
+
+### `validate <workflow.yaml>`
+
+Validate checks your workflow YAML for syntax errors, schema compliance, and logical issues before execution (YAML structure, schema, task dependencies, and resource configuration). Returns 0 on success and 1 with errors on stderr.
+
+### `dot <workflow.yaml>`
+
+Dot creates a Graphviz DOT file from your workflow definition that can be rendered into visual diagrams of task dependencies, parallel execution opportunities, the critical path, and data flow. Use `--out graph.dot` and render with `dot -Tpng graph.dot -o workflow.png`.
+
+### `lint <workflow.yaml>`
+
+Lint analyzes your workflow against Newton's best-practice rules — performance anti-patterns, resource usage, security and maintainability issues, and common workflow design mistakes. Lint warnings are advisory and do not block execution. Use `--format json` for CI integration.
+
+### `explain <workflow.yaml>`
+
+Explain produces detailed, human-readable documentation about what your workflow does and how it will execute, covering step-by-step flow, dependencies, configuration effects, resource constraints, and expected inputs/outputs. Output formats: `text` (default), `prose`, and `json`.
+
+### `resume`
+
+Resume restarts a workflow execution from its last saved checkpoint, useful after interruptions, parameter changes, or maintenance windows. Requires `--execution-id <UUID>`; pass `--allow-workflow-change` to override the default safety check that the workflow definition is unchanged since the checkpoint.
+
+### `checkpoints`
+
+Checkpoints provides tools to manage saved workflow states that allow resumption after interruption — list executions, clean old checkpoint data with `--older-than 7d`, and inspect storage usage. Checkpoints are stored under `.newton/checkpoints/` in the workspace.
+
+### `artifacts`
+
+Artifacts manages the files, logs, and output data generated during workflow execution. Use `newton artifacts clean --workspace ./workspace --older-than 7d` to reclaim disk space; retention strings accept days (`7d`), weeks (`1w`), or hours (`24h`). Artifacts live under `.newton/artifacts/`.
+
+### `webhook`
+
+Webhook exposes HTTP endpoints that trigger workflow executions in response to external events (Git hosting services, CI/CD platforms, monitoring/alerting systems, and custom integrations). Use `newton webhook serve <workflow.yaml>` to start the server and `newton webhook status <workflow.yaml>` to inspect configuration.
+
+### `log`
+
+Log provides access to per-task execution history stored in `.newton/state/workflows/`. Use `newton log list` to enumerate runs and `newton log show <execution-id>` to display resolved inputs, operators, and outputs for every task. See **Logging → Reviewing execution history** for examples.
 
 ### Plans and the batch queue
 
