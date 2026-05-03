@@ -22,7 +22,10 @@ pub struct LogArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum LogCommand {
-    #[command(about = "List workflow execution history for a workspace")]
+    #[command(
+        about = "List workflow execution history for a workspace",
+        after_help = "EXAMPLES:\n  List recent runs for a workspace:\n    newton log list --workspace ./workspace\n\n  Last 10 runs as JSON:\n    newton log list --last 10 --json"
+    )]
     List {
         #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
@@ -33,7 +36,10 @@ pub enum LogCommand {
         #[arg(long)]
         json: bool,
     },
-    #[command(about = "Replay task-by-task execution detail for a specific run")]
+    #[command(
+        about = "Replay task-by-task execution detail for a specific run",
+        after_help = "EXAMPLES:\n  Show full execution detail:\n    newton log show <execution-id> --workspace ./workspace\n\n  Filter to a single task with verbose output:\n    newton log show <execution-id> --task my-task --verbose"
+    )]
     Show {
         #[arg(value_name = "EXECUTION_ID")]
         execution_id: Uuid,
@@ -115,9 +121,15 @@ pub struct WebhookArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum WebhookCommand {
-    #[command(about = "Start an HTTP server to receive webhook events and trigger workflows")]
+    #[command(
+        about = "Start an HTTP server to receive webhook events and trigger workflows",
+        after_help = "EXAMPLES:\n  Serve a workflow with positional argument:\n    newton webhook serve workflow.yaml --workspace ./workspace\n\n  Serve a workflow specified via --file:\n    newton webhook serve --file ./workflows/deploy.yaml --workspace ./project"
+    )]
     Serve(WebhookServeArgs),
-    #[command(about = "Display webhook endpoint configuration and server status")]
+    #[command(
+        about = "Display webhook endpoint configuration and server status",
+        after_help = "EXAMPLES:\n  Show webhook status for a workflow:\n    newton webhook status workflow.yaml --workspace ./workspace"
+    )]
     Status(WebhookStatusArgs),
 }
 
@@ -298,7 +310,10 @@ pub struct CheckpointsArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum CheckpointCommand {
-    #[command(about = "Display available workflow executions and their checkpoint details")]
+    #[command(
+        about = "Display available workflow executions and their checkpoint details",
+        after_help = "EXAMPLES:\n  List checkpoints in a workspace:\n    newton checkpoints list --workspace ./workspace\n\n  List checkpoints as JSON:\n    newton checkpoints list --workspace ./workspace --format-json"
+    )]
     List {
         #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
@@ -306,7 +321,10 @@ pub enum CheckpointCommand {
         #[arg(long)]
         format_json: bool,
     },
-    #[command(about = "Remove old checkpoint files to free up disk space")]
+    #[command(
+        about = "Remove old checkpoint files to free up disk space",
+        after_help = "EXAMPLES:\n  Remove checkpoints older than 7 days:\n    newton checkpoints clean --workspace ./workspace --older-than 7d"
+    )]
     Clean {
         #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
@@ -324,7 +342,10 @@ pub struct ArtifactsArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum ArtifactCommand {
-    #[command(about = "Remove old workflow output files and execution artifacts")]
+    #[command(
+        about = "Remove old workflow output files and execution artifacts",
+        after_help = "EXAMPLES:\n  Remove artifacts older than 30 days:\n    newton artifacts clean --workspace ./workspace --older-than 30d"
+    )]
     Clean {
         #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,

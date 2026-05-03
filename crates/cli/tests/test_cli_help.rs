@@ -514,6 +514,56 @@ fn test_artifacts_clean_help_is_descriptive() {
     assert!(stdout.contains("execution artifacts"));
 }
 
+#[test]
+fn test_log_list_help_has_examples() {
+    let stdout = get_help_output(&["log", "list"]);
+    assert!(stdout.contains("EXAMPLES"));
+    assert!(stdout.contains("newton log list"));
+}
+
+#[test]
+fn test_log_show_help_has_examples() {
+    let stdout = get_help_output(&["log", "show"]);
+    assert!(stdout.contains("EXAMPLES"));
+    assert!(stdout.contains("newton log show"));
+}
+
+#[test]
+fn test_checkpoints_list_help_has_examples() {
+    let stdout = get_help_output(&["checkpoints", "list"]);
+    assert!(stdout.contains("EXAMPLES"));
+    assert!(stdout.contains("newton checkpoints list"));
+}
+
+#[test]
+fn test_checkpoints_clean_help_has_examples() {
+    let stdout = get_help_output(&["checkpoints", "clean"]);
+    assert!(stdout.contains("EXAMPLES"));
+    assert!(stdout.contains("newton checkpoints clean"));
+    assert!(stdout.contains("--older-than"));
+}
+
+#[test]
+fn test_artifacts_clean_help_has_examples() {
+    let stdout = get_help_output(&["artifacts", "clean"]);
+    assert!(stdout.contains("EXAMPLES"));
+    assert!(stdout.contains("newton artifacts clean"));
+}
+
+#[test]
+fn test_webhook_serve_help_has_examples() {
+    let stdout = get_help_output(&["webhook", "serve"]);
+    assert!(stdout.contains("EXAMPLES"));
+    assert!(stdout.contains("newton webhook serve"));
+}
+
+#[test]
+fn test_webhook_status_help_has_examples() {
+    let stdout = get_help_output(&["webhook", "status"]);
+    assert!(stdout.contains("EXAMPLES"));
+    assert!(stdout.contains("newton webhook status"));
+}
+
 // Test that help text avoids overly technical jargon
 
 #[test]
