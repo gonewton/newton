@@ -19,6 +19,7 @@ newton-backend = { path = "../backend" }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 aikit-sdk = { workspace = true }
+ailoop-core = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

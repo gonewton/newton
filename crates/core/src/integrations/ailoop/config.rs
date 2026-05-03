@@ -10,8 +10,6 @@ use url::Url;
 /// Ailoop endpoint configuration with validated URLs.
 #[derive(Debug, Clone)]
 pub struct AiloopConfig {
-    /// HTTP base URL for the ailoop server.
-    pub http_url: Url,
     /// WebSocket URL for the ailoop server.
     pub ws_url: Url,
     /// Channel identifier for messages.
@@ -51,11 +49,6 @@ impl AiloopContext {
     /// Get the channel identifier.
     pub fn channel(&self) -> &str {
         &self.config.channel
-    }
-
-    /// Get the HTTP URL.
-    pub fn http_url(&self) -> &Url {
-        &self.config.http_url
     }
 
     /// Get the WebSocket URL.
@@ -161,19 +154,18 @@ fn load_ailoop_config(workspace_root: &Path) -> Result<AiloopConfig> {
         Err(_) => false, // Default to disabled unless explicitly enabled or configured
     };
 
-    // Try environment variables first (highest precedence)
-    let http_url_str = env::var("NEWTON_AILOOP_HTTP_URL").ok();
+    // Try environment variables first (highest precedence).
+    // NEWTON_AILOOP_HTTP_URL is accepted but ignored (transport is WebSocket-only).
+    let _ = env::var("NEWTON_AILOOP_HTTP_URL").ok();
     let ws_url_str = env::var("NEWTON_AILOOP_WS_URL").ok();
     let channel = env::var("NEWTON_AILOOP_CHANNEL").ok();
 
     // If env vars provide complete config, use them
-    if let (Some(http), Some(ws), Some(chan)) = (&http_url_str, &ws_url_str, &channel) {
-        let http_url = validate_url(http, "NEWTON_AILOOP_HTTP_URL")?;
+    if let (Some(ws), Some(chan)) = (&ws_url_str, &channel) {
         let ws_url = validate_url(ws, "NEWTON_AILOOP_WS_URL")?;
         validate_channel(chan)?;
 
         return Ok(AiloopConfig {
-            http_url,
             ws_url,
             channel: chan.clone(),
             enabled: true,
@@ -197,7 +189,6 @@ fn load_ailoop_config(workspace_root: &Path) -> Result<AiloopConfig> {
     }
 
     let mut config_pair = ConfigPair {
-        http_url: http_url_str,
         ws_url: ws_url_str,
         channel,
     };
@@ -232,17 +223,13 @@ fn load_ailoop_config(workspace_root: &Path) -> Result<AiloopConfig> {
     if !config_pair.is_complete() {
         if enabled {
             return Err(anyhow!(
-                "Ailoop integration enabled but configuration incomplete. Need: ailoop_server_http_url, ailoop_server_ws_url"
+                "Ailoop integration enabled but configuration incomplete. Need: ailoop_server_ws_url"
             ));
         } else {
             return Err(anyhow!("Incomplete ailoop configuration"));
         }
     }
 
-    let http_url = validate_url(
-        config_pair.http_url.as_ref().unwrap(),
-        "ailoop_server_http_url",
-    )?;
     let ws_url = validate_url(config_pair.ws_url.as_ref().unwrap(), "ailoop_server_ws_url")?;
 
     // Default channel if not specified
@@ -256,12 +243,9 @@ fn load_ailoop_config(workspace_root: &Path) -> Result<AiloopConfig> {
     validate_channel(&channel)?;
 
     Ok(AiloopConfig {
-        http_url,
         ws_url,
         channel,
         enabled,
-        // Known limitation: the file-based configuration path always sets `fail_fast` to false,
-        // so `NEWTON_AILOOP_FAIL_FAST` only applies when all endpoints plus channel come from env vars.
         fail_fast: false,
     })
 }
@@ -284,16 +268,12 @@ fn validate_channel(channel: &str) -> Result<()> {
 
 /// Internal helper for accumulating config from multiple sources.
 struct ConfigPair {
-    http_url: Option<String>,
     ws_url: Option<String>,
     channel: Option<String>,
 }
 
 impl ConfigPair {
     fn merge(&mut self, other: ConfigPair) {
-        if self.http_url.is_none() {
-            self.http_url = other.http_url;
-        }
         if self.ws_url.is_none() {
             self.ws_url = other.ws_url;
         }
@@ -303,18 +283,13 @@ impl ConfigPair {
     }
 
     fn is_complete(&self) -> bool {
-        self.http_url.is_some() && self.ws_url.is_some()
+        self.ws_url.is_some()
     }
 }
 
 /// Parse ailoop configuration from a .conf file.
 fn parse_config_file(path: &Path) -> Result<Option<ConfigPair>> {
     let settings = parse_conf(path)?;
-
-    let http_url = settings
-        .get("ailoop_server_http_url")
-        .map(|v| v.trim().to_string())
-        .filter(|s| !s.is_empty());
 
     let ws_url = settings
         .get("ailoop_server_ws_url")
@@ -326,15 +301,11 @@ fn parse_config_file(path: &Path) -> Result<Option<ConfigPair>> {
         .map(|v| v.trim().to_string())
         .filter(|s| !s.is_empty());
 
-    if http_url.is_none() && ws_url.is_none() && channel.is_none() {
+    if ws_url.is_none() && channel.is_none() {
         return Ok(None);
     }
 
-    Ok(Some(ConfigPair {
-        http_url,
-        ws_url,
-        channel,
-    }))
+    Ok(Some(ConfigPair { ws_url, channel }))
 }
 
 #[cfg(test)]
@@ -389,7 +360,7 @@ mod tests {
         create_test_config(
             workspace,
             "monitor.conf",
-            "ailoop_server_http_url=http://localhost:8080\nailoop_server_ws_url=ws://localhost:8080\nailoop_channel=test-channel\n",
+            "ailoop_server_ws_url=ws://localhost:8080\nailoop_channel=test-channel\n",
         )?;
 
         // Clear any env vars that might interfere
@@ -402,7 +373,6 @@ mod tests {
         let config = load_ailoop_config(workspace)?;
         env::remove_var("NEWTON_AILOOP_INTEGRATION");
 
-        assert_eq!(config.http_url.as_str(), "http://localhost:8080/");
         assert_eq!(config.ws_url.as_str(), "ws://localhost:8080/");
         assert_eq!(config.channel, "test-channel");
 
@@ -418,23 +388,20 @@ mod tests {
         create_test_config(
             workspace,
             "monitor.conf",
-            "ailoop_server_http_url=http://localhost:8080\nailoop_server_ws_url=ws://localhost:8080\n",
+            "ailoop_server_ws_url=ws://localhost:8080\n",
         )?;
 
         // Env vars should override file config
         env::set_var("NEWTON_AILOOP_INTEGRATION", "1");
-        env::set_var("NEWTON_AILOOP_HTTP_URL", "http://override:9090");
         env::set_var("NEWTON_AILOOP_WS_URL", "ws://override:9090");
         env::set_var("NEWTON_AILOOP_CHANNEL", "env-channel");
 
         let config = load_ailoop_config(workspace)?;
 
         env::remove_var("NEWTON_AILOOP_INTEGRATION");
-        env::remove_var("NEWTON_AILOOP_HTTP_URL");
         env::remove_var("NEWTON_AILOOP_WS_URL");
         env::remove_var("NEWTON_AILOOP_CHANNEL");
 
-        assert_eq!(config.http_url.as_str(), "http://override:9090/");
         assert_eq!(config.ws_url.as_str(), "ws://override:9090/");
         assert_eq!(config.channel, "env-channel");
 
@@ -444,13 +411,11 @@ mod tests {
     #[test]
     fn test_config_pair_merge() {
         let mut pair1 = ConfigPair {
-            http_url: Some("http://first".to_string()),
-            ws_url: None,
+            ws_url: Some("ws://first".to_string()),
             channel: None,
         };
 
         let pair2 = ConfigPair {
-            http_url: Some("http://second".to_string()),
             ws_url: Some("ws://second".to_string()),
             channel: Some("channel2".to_string()),
         };
@@ -458,23 +423,20 @@ mod tests {
         pair1.merge(pair2);
 
         // First value should be kept
-        assert_eq!(pair1.http_url.unwrap(), "http://first");
+        assert_eq!(pair1.ws_url.unwrap(), "ws://first");
         // Second value should fill in missing
-        assert_eq!(pair1.ws_url.unwrap(), "ws://second");
         assert_eq!(pair1.channel.unwrap(), "channel2");
     }
 
     #[test]
     fn test_config_pair_is_complete() {
         let complete = ConfigPair {
-            http_url: Some("http://test".to_string()),
             ws_url: Some("ws://test".to_string()),
             channel: Some("test".to_string()),
         };
         assert!(complete.is_complete());
 
         let incomplete = ConfigPair {
-            http_url: Some("http://test".to_string()),
             ws_url: None,
             channel: None,
         };
