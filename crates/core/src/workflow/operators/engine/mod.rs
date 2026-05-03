@@ -211,14 +211,22 @@ pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
 /// Follows the deterministic rule order from spec section 4:
 /// 1. `RawLine` → use raw string as-is
 /// 2. `JsonLine` → ordered field extraction: `.content` → `.result.result` → `.result` → `.part.text`
-/// 3. All other variants (RawBytes, TokenUsageLine, QuotaExceeded, StreamMessage,
-///    RawTransportLine, Aikit* built-ins) → None (MUST NOT participate in signal matching).
+/// 3. `StreamMessage` with phase=Final and role=Assistant → use `text` field directly.
+///    This covers aikit-sdk ≥0.2 (046-agent-stream) where Claude's final assistant turn
+///    arrives as StreamMessage rather than JsonLine.
+/// 4. All other variants (RawBytes, TokenUsageLine, QuotaExceeded, StreamMessage[Delta],
+///    RawTransportLine, Aikit* built-ins) → None.
 ///    The wildcard arm provides forward-compatibility with new SDK 0.2.x variants.
 pub fn extract_text_from_sdk_event(event: &aikit_sdk::AgentEvent) -> Option<String> {
     match &event.payload {
         aikit_sdk::AgentEventPayload::RawLine(s) => Some(s.clone()),
         aikit_sdk::AgentEventPayload::JsonLine(json) => extract_text_from_json(json),
-        // All other variants (telemetry, quota, transport, aikit built-in) MUST NOT participate in signal matching
+        aikit_sdk::AgentEventPayload::StreamMessage(msg)
+            if msg.phase == aikit_sdk::MessagePhase::Final
+                && msg.role == aikit_sdk::MessageRole::Assistant =>
+        {
+            Some(msg.text.clone())
+        }
         _ => None,
     }
 }
@@ -282,4 +290,86 @@ pub fn extract_text_from_stream_json(line: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_event(payload: aikit_sdk::AgentEventPayload) -> aikit_sdk::AgentEvent {
+        aikit_sdk::AgentEvent {
+            agent_key: "claude".to_string(),
+            payload,
+            stream: aikit_sdk::AgentEventStream::Stdout,
+            seq: 0,
+        }
+    }
+
+    fn make_stream_message(
+        text: &str,
+        phase: aikit_sdk::MessagePhase,
+        role: aikit_sdk::MessageRole,
+    ) -> aikit_sdk::AgentEventPayload {
+        aikit_sdk::AgentEventPayload::StreamMessage(aikit_sdk::StreamMessage {
+            text: text.to_string(),
+            phase,
+            role,
+            kind: aikit_sdk::MessageKind::Message,
+            source: aikit_sdk::AgentEventStream::Stdout,
+            raw_line_seq: 0,
+            turn_id: None,
+        })
+    }
+
+    #[test]
+    fn raw_line_extracted() {
+        let event = make_event(aikit_sdk::AgentEventPayload::RawLine(
+            "<status>COMPLETED</status>".to_string(),
+        ));
+        assert_eq!(
+            extract_text_from_sdk_event(&event).as_deref(),
+            Some("<status>COMPLETED</status>")
+        );
+    }
+
+    #[test]
+    fn stream_message_final_assistant_extracted() {
+        // Regression: aikit-sdk >=0.2 emits final assistant text as StreamMessage(Final/Assistant).
+        // This must participate in signal matching so <status>COMPLETED</status> is observable.
+        let event = make_event(make_stream_message(
+            "<status>COMPLETED</status>",
+            aikit_sdk::MessagePhase::Final,
+            aikit_sdk::MessageRole::Assistant,
+        ));
+        assert_eq!(
+            extract_text_from_sdk_event(&event).as_deref(),
+            Some("<status>COMPLETED</status>")
+        );
+    }
+
+    #[test]
+    fn stream_message_delta_skipped() {
+        let event = make_event(make_stream_message(
+            "partial text",
+            aikit_sdk::MessagePhase::Delta,
+            aikit_sdk::MessageRole::Assistant,
+        ));
+        assert_eq!(extract_text_from_sdk_event(&event), None);
+    }
+
+    #[test]
+    fn stream_message_final_non_assistant_skipped() {
+        let event = make_event(make_stream_message(
+            "tool output",
+            aikit_sdk::MessagePhase::Final,
+            aikit_sdk::MessageRole::Tool,
+        ));
+        assert_eq!(extract_text_from_sdk_event(&event), None);
+    }
+
+    #[test]
+    fn raw_bytes_skipped() {
+        let event = make_event(aikit_sdk::AgentEventPayload::RawBytes(b"binary".to_vec()));
+        assert_eq!(extract_text_from_sdk_event(&event), None);
+    }
 }
