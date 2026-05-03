@@ -751,10 +751,16 @@ async fn execute_sdk_engine(
                 aikit_sdk::AgentEventPayload::QuotaExceeded { .. } => {
                     continue;
                 }
-                // RawLine and JsonLine: write to stdout artifact and attempt signal matching
+                // RawLine, JsonLine, and final assistant StreamMessage: write to stdout artifact and signal-match.
+                // StreamMessage(Final/Assistant) is added here because aikit-sdk ≥0.2 (046-agent-stream)
+                // emits the agent's closing text exclusively as StreamMessage; without this arm the
+                // <status>COMPLETED</status> signal is never observed and WFG-ITER-002 fires.
                 aikit_sdk::AgentEventPayload::RawLine(_)
                 | aikit_sdk::AgentEventPayload::JsonLine(_) => {}
-                // Forward-compat wildcard: all other SDK variants (StreamMessage, RawTransportLine, Aikit*) skip signal matching
+                aikit_sdk::AgentEventPayload::StreamMessage(msg)
+                    if msg.phase == aikit_sdk::MessagePhase::Final
+                        && msg.role == aikit_sdk::MessageRole::Assistant => {}
+                // Forward-compat wildcard: all other SDK variants (StreamMessage[Delta], RawTransportLine, Aikit*) skip signal matching
                 _ => {
                     continue;
                 }
