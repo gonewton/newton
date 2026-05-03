@@ -17,7 +17,7 @@ repository = "https://github.com/gonewton/newton.git"
 clap = { version = "4.4", features = ["derive", "cargo"] }
 tokio = { version = "1.49", features = ["full"] }
 anyhow = "1.0"
-aikit-sdk = { version = "0.2.1", path = "/home/sysuser/ws001/goaikit/aikit/aikit-sdk" }
+aikit-sdk = { version = "0.2.1", git = "https://github.com/goaikit/aikit.git", branch = "main" }
 thiserror = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"] }
