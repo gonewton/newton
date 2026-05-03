@@ -41,8 +41,6 @@ impl WorkflowEvent {
 /// Emitter for workflow progress events.
 #[derive(Clone)]
 pub struct WorkflowEmitter {
-    #[allow(dead_code)]
-    context: Arc<AiloopContext>,
     event_tx: mpsc::UnboundedSender<WorkflowEvent>,
 }
 
@@ -52,12 +50,11 @@ impl WorkflowEmitter {
     pub fn new(context: Arc<AiloopContext>) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
-        let sender_context = context.clone();
         tokio::spawn(async move {
-            Self::emitter_loop(sender_context, event_rx).await;
+            Self::emitter_loop(context, event_rx).await;
         });
 
-        Self { context, event_tx }
+        Self { event_tx }
     }
 
     /// Emit a workflow event.

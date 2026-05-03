@@ -34,8 +34,6 @@ pub struct OutputMessage {
 /// Forwarder for streaming tool output to ailoop.
 #[derive(Clone)]
 pub struct OutputForwarder {
-    #[allow(dead_code)]
-    context: Arc<AiloopContext>,
     message_tx: mpsc::Sender<OutputMessage>,
 }
 
@@ -45,27 +43,20 @@ impl OutputForwarder {
     pub fn new(context: Arc<AiloopContext>) -> Self {
         let (message_tx, message_rx) = mpsc::channel(FORWARDER_QUEUE_SIZE);
 
-        let sender_context = context.clone();
         tokio::spawn(async move {
-            Self::forwarder_loop(sender_context, message_rx).await;
+            Self::forwarder_loop(context, message_rx).await;
         });
 
-        Self {
-            context,
-            message_tx,
-        }
+        Self { message_tx }
     }
 
     #[cfg(test)]
     /// Construct a forwarder with a provided sender for testing queue behavior.
     pub fn new_with_sender(
-        context: Arc<AiloopContext>,
+        _context: Arc<AiloopContext>,
         sender: mpsc::Sender<OutputMessage>,
     ) -> Self {
-        Self {
-            context,
-            message_tx: sender,
-        }
+        Self { message_tx: sender }
     }
 
     /// Forward a stdout line.
