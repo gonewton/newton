@@ -629,6 +629,191 @@ workflow:
     );
 }
 
+// --- Integration test: failing task emits stderr diagnosis (issue 278, Stage 2) ---
+
+#[test]
+fn newton_run_failing_task_prints_diagnosis_to_stderr() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().to_path_buf();
+    fs::create_dir_all(workspace.join(".newton/state/workflows")).unwrap();
+
+    // Use sh -c to emit a recognizable substring on stderr and exit 1.
+    let workflow_yaml = r#"version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Diagnosis stderr test"
+workflow:
+  settings:
+    entry_task: "fail_task"
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 1
+    max_workflow_iterations: 10
+    command_operator:
+      allow_shell: true
+  tasks:
+    - id: "fail_task"
+      operator: "CommandOperator"
+      params:
+        cmd: "printf 'failure-msg-stderr\n' 1>&2; exit 1"
+        shell: true
+"#;
+    let workflow_path = workspace.join("fail_workflow.yaml");
+    fs::write(&workflow_path, workflow_yaml).unwrap();
+
+    let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
+    cmd.arg("run")
+        .arg(&workflow_path)
+        .arg("--workspace")
+        .arg(&workspace);
+
+    let output = cmd.output().expect("failed to run newton");
+    assert!(!output.status.success(), "expected non-zero exit");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Stage 2 acceptance: stderr contains diagnosis markers + exit_code=1 + content substring.
+    assert!(
+        stderr.contains("--- task failed: fail_task ---"),
+        "stderr must contain task-failed marker; got stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("exit_code=1"),
+        "stderr must contain exit_code=1; got stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("failure-msg-stderr"),
+        "stderr must include captured stderr substring; got stderr:\n{stderr}"
+    );
+    // Goal 9: marker MUST NOT appear on stdout.
+    assert!(
+        !stdout.contains("--- task failed:"),
+        "stdout must not contain diagnosis markers; got stdout:\n{stdout}"
+    );
+    // Goal 7: hint regex still matches.
+    let hint_re = regex::Regex::new(
+        r"(?m)^newton: task failed execution_id=[0-9a-f-]{36} task_id=\S+ inspect: newton log show [0-9a-f-]{36} --task \S+$"
+    ).unwrap();
+    assert!(
+        hint_re.is_match(&stdout),
+        "stdout must still contain hint line; got stdout:\n{stdout}"
+    );
+}
+
+// --- Integration test: deferred final-status path emits diagnosis from
+// TaskRunRecord (issue 278, Stage 3). Exercised via continue_on_error=true,
+// which is the same code path used on resume from a checkpoint with a
+// pre-failed record. ---
+
+#[test]
+fn newton_run_continue_on_error_emits_diagnosis_from_final_block() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().to_path_buf();
+    fs::create_dir_all(workspace.join(".newton/state/workflows")).unwrap();
+
+    let workflow_yaml = r#"version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Deferred diagnosis test"
+workflow:
+  settings:
+    entry_task: "fail_task"
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: true
+    max_task_iterations: 1
+    max_workflow_iterations: 10
+    command_operator:
+      allow_shell: true
+  tasks:
+    - id: "fail_task"
+      operator: "CommandOperator"
+      params:
+        cmd: "printf 'deferred-stderr\n' 1>&2; exit 1"
+        shell: true
+"#;
+    let workflow_path = workspace.join("fail_workflow.yaml");
+    fs::write(&workflow_path, workflow_yaml).unwrap();
+
+    let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
+    cmd.arg("run")
+        .arg(&workflow_path)
+        .arg("--workspace")
+        .arg(&workspace);
+    let output = cmd.output().expect("failed to run newton");
+    assert!(!output.status.success());
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--- task failed: fail_task ---"),
+        "deferred path must emit diagnosis; got stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("deferred-stderr"),
+        "deferred path must include captured stderr; got stderr:\n{stderr}"
+    );
+}
+
+// --- Integration test: --verbose does not duplicate stream bodies (Stage 4). ---
+
+#[test]
+fn newton_run_verbose_failing_task_no_duplicate_streams() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().to_path_buf();
+    fs::create_dir_all(workspace.join(".newton/state/workflows")).unwrap();
+
+    let workflow_yaml = r#"version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Verbose dedupe test"
+workflow:
+  settings:
+    entry_task: "fail_task"
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 1
+    max_workflow_iterations: 10
+    command_operator:
+      allow_shell: true
+  tasks:
+    - id: "fail_task"
+      operator: "CommandOperator"
+      params:
+        cmd: "printf 'verbose-marker-XYZ\n' 1>&2; exit 1"
+        shell: true
+"#;
+    let workflow_path = workspace.join("fail_workflow.yaml");
+    fs::write(&workflow_path, workflow_yaml).unwrap();
+
+    let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
+    cmd.arg("run")
+        .arg(&workflow_path)
+        .arg("--workspace")
+        .arg(&workspace)
+        .arg("--verbose");
+    let output = cmd.output().expect("failed to run newton");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // The diagnosis header must still appear.
+    assert!(
+        stderr.contains("--- task failed: fail_task ---"),
+        "diagnosis header missing under --verbose; got stderr:\n{stderr}"
+    );
+    assert!(stderr.contains("exit_code=1"), "got stderr:\n{stderr}");
+
+    // The stream marker text must appear exactly once (verbose printed it once;
+    // diagnosis must NOT re-print the body when verbose has already done so).
+    let occurrences = stderr.matches("verbose-marker-XYZ").count();
+    assert_eq!(
+        occurrences, 1,
+        "stream body must appear exactly once with --verbose; got {occurrences}, stderr:\n{stderr}"
+    );
+}
+
 // --- CLI test: newton log --help ---
 
 #[test]
