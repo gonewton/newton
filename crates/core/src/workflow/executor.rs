@@ -272,6 +272,20 @@ impl ExecutionState {
     }
 }
 
+/// Per-stream byte cap for inline failure-diagnosis output to stderr (16 KiB).
+const FAILURE_DIAGNOSIS_STREAM_CAP_BYTES: usize = 16 * 1024;
+
+/// Input for [`WorkflowRuntime::eprint_task_failure_diagnosis`]. Distinguishes the
+/// in-tick failure path (full `TaskOutcome` available) from the deferred
+/// final-status path (only a `TaskRunRecord` is available, e.g. on resume).
+enum FailureDiagnosisInput<'a> {
+    Outcome(&'a TaskOutcome),
+    Record {
+        task_id: &'a str,
+        record: &'a TaskRunRecord,
+    },
+}
+
 #[derive(Clone)]
 pub struct TaskOutcome {
     pub task_id: String,
@@ -589,28 +603,37 @@ impl WorkflowRuntime {
         let final_state = self.state.read().await;
         let (final_exec_status, maybe_err) =
             self.compute_final_status(&final_state, terminal_stop_triggered);
-        // Collect failed task ids for hint printing (ascending order).
-        let mut final_failed_task_ids: Vec<String> = final_state
+        // Collect failed task ids and their records for hint + diagnosis printing
+        // (ascending order). Records are cloned so we can drop the read lock before
+        // the printing loop below.
+        let mut final_failed_records: Vec<(String, TaskRunRecord)> = final_state
             .completed
             .iter()
             .filter(|(_, r)| r.status == crate::workflow::state::TaskStatus::Failed)
-            .map(|(id, _)| id.clone())
+            .map(|(id, r)| (id.clone(), r.clone()))
             .collect();
-        final_failed_task_ids.sort();
+        final_failed_records.sort_by(|a, b| a.0.cmp(&b.0));
         drop(final_state);
 
         self.workflow_execution.status = final_exec_status;
         self.workflow_execution.completed_at = Some(Utc::now());
         if let Some(err) = maybe_err {
             // Print hint lines for task failures before propagating error.
-            if err.code == "WFG-EXEC-001" && !final_failed_task_ids.is_empty() {
-                for task_id in &final_failed_task_ids {
+            if err.code == "WFG-EXEC-001" && !final_failed_records.is_empty() {
+                for (task_id, record) in &final_failed_records {
                     println!(
                         "newton: task failed execution_id={} task_id={} inspect: newton log show {} --task {}",
                         self.workflow_execution.execution_id,
                         task_id,
                         self.workflow_execution.execution_id,
                         task_id
+                    );
+                    Self::eprint_task_failure_diagnosis(
+                        FailureDiagnosisInput::Record {
+                            task_id: task_id.as_str(),
+                            record,
+                        },
+                        false,
                     );
                 }
             }
@@ -811,6 +834,15 @@ impl WorkflowRuntime {
                     self.workflow_execution.execution_id,
                     task_id
                 );
+                if let Some(outcome) = failed_outcomes
+                    .iter()
+                    .find(|o| o.task_id.as_str() == *task_id)
+                {
+                    Self::eprint_task_failure_diagnosis(
+                        FailureDiagnosisInput::Outcome(outcome),
+                        self.verbose,
+                    );
+                }
             }
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
@@ -1011,6 +1043,118 @@ impl WorkflowRuntime {
         }
 
         Ok(())
+    }
+
+    /// Tail-truncate a string at `cap` bytes, advancing to the nearest preceding char
+    /// boundary so the returned slice is valid UTF-8. Returns (slice, original_byte_len, was_truncated).
+    fn tail_truncate_utf8(s: &str, cap: usize) -> (&str, usize, bool) {
+        let len = s.len();
+        if len <= cap {
+            return (s, len, false);
+        }
+        let mut start = len - cap;
+        while start < len && !s.is_char_boundary(start) {
+            start += 1;
+        }
+        (&s[start..], len, true)
+    }
+
+    /// Print a per-task failure diagnosis block to stderr. Caller must have already
+    /// printed the existing stdout hint line. When `verbose_streams_already_printed`
+    /// is true, the helper omits the `--- stderr ---` and `--- stdout ---` body
+    /// sections (still printing id/code/exit_code/artifact lines).
+    fn eprint_task_failure_diagnosis(
+        input: FailureDiagnosisInput<'_>,
+        verbose_streams_already_printed: bool,
+    ) {
+        let (task_id, record, error_summary): (&str, &TaskRunRecord, Option<&AppErrorSummary>) =
+            match input {
+                FailureDiagnosisInput::Outcome(outcome) => (
+                    outcome.task_id.as_str(),
+                    &outcome.record,
+                    outcome.error_summary.as_ref(),
+                ),
+                FailureDiagnosisInput::Record { task_id, record } => (task_id, record, None),
+            };
+
+        eprintln!("--- task failed: {task_id} ---");
+
+        // Resolve code + message.
+        let (code_str, message_str): (String, String) = if let Some(summary) = error_summary {
+            (summary.code.clone(), summary.message.clone())
+        } else {
+            let code = record
+                .error_code
+                .clone()
+                .unwrap_or_else(|| "<unavailable>".to_string());
+            let message = record
+                .output
+                .as_object()
+                .and_then(|m| m.get("error"))
+                .and_then(|e| e.as_object())
+                .and_then(|m| m.get("message"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "<unavailable>".to_string());
+            (code, message)
+        };
+        eprintln!("code={code_str}");
+        eprintln!("message={message_str}");
+
+        let output_map = match &record.output {
+            Value::Object(m) => Some(m),
+            _ => None,
+        };
+
+        if let Some(output_map) = output_map {
+            // exit_code (CommandOperator-shaped).
+            if let Some(exit_code_val) = output_map.get("exit_code") {
+                if let Some(n) = exit_code_val.as_i64() {
+                    eprintln!("exit_code={n}");
+                } else if let Some(n) = exit_code_val.as_u64() {
+                    eprintln!("exit_code={n}");
+                } else if let Some(n) = exit_code_val.as_f64() {
+                    eprintln!("exit_code={n}");
+                }
+            }
+
+            // CommandOperator stream sections.
+            if !verbose_streams_already_printed {
+                for stream_key in &["stderr", "stdout"] {
+                    if let Some(Value::String(s)) = output_map.get(*stream_key) {
+                        let trimmed = s.trim_end();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+                        let (slice, orig_len, truncated) = Self::tail_truncate_utf8(
+                            s.as_str(),
+                            FAILURE_DIAGNOSIS_STREAM_CAP_BYTES,
+                        );
+                        if truncated {
+                            eprintln!(
+                                "--- {stream_key} ({orig_len} bytes, truncated to {cap} bytes) ---",
+                                cap = FAILURE_DIAGNOSIS_STREAM_CAP_BYTES,
+                            );
+                        } else {
+                            eprintln!("--- {stream_key} ({orig_len} bytes) ---");
+                        }
+                        if slice.as_bytes().last().copied() == Some(b'\n') {
+                            eprint!("{slice}");
+                        } else {
+                            eprintln!("{slice}");
+                        }
+                    }
+                }
+            }
+
+            // AgentOperator artifact paths (always printed when present).
+            if let Some(Value::String(p)) = output_map.get("stderr_artifact") {
+                eprintln!("stderr artifact: {p}");
+            }
+            if let Some(Value::String(p)) = output_map.get("stdout_artifact") {
+                eprintln!("stdout artifact: {p}");
+            }
+        }
     }
 
     /// Print task stdout/stderr for verbose mode
