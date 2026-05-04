@@ -45,6 +45,10 @@ tasks:
 
 ### Added
 
+- Failed workflow tasks now print a concise per-task diagnosis block to stderr
+  (task id, error code/message, `exit_code`, and tail-truncated `stderr`/`stdout`
+  capped at 16 KiB; `AgentOperator` artifact paths instead of stream bodies),
+  in addition to the existing one-line stdout hint.
 - New error codes `HIL-AILOOP-001` (no enabled ailoop context) and
   `HIL-AILOOP-003` (ailoop config load/parse failure, category `IoError`).
 - `MockAiloopInterviewer` test double under

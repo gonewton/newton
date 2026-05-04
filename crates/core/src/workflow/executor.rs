@@ -272,6 +272,20 @@ impl ExecutionState {
     }
 }
 
+/// Per-stream byte cap for inline failure-diagnosis output to stderr (16 KiB).
+const FAILURE_DIAGNOSIS_STREAM_CAP_BYTES: usize = 16 * 1024;
+
+/// Input for [`WorkflowRuntime::eprint_task_failure_diagnosis`]. Distinguishes the
+/// in-tick failure path (full `TaskOutcome` available) from the deferred
+/// final-status path (only a `TaskRunRecord` is available, e.g. on resume).
+enum FailureDiagnosisInput<'a> {
+    Outcome(&'a TaskOutcome),
+    Record {
+        task_id: &'a str,
+        record: &'a TaskRunRecord,
+    },
+}
+
 #[derive(Clone)]
 pub struct TaskOutcome {
     pub task_id: String,
@@ -589,28 +603,37 @@ impl WorkflowRuntime {
         let final_state = self.state.read().await;
         let (final_exec_status, maybe_err) =
             self.compute_final_status(&final_state, terminal_stop_triggered);
-        // Collect failed task ids for hint printing (ascending order).
-        let mut final_failed_task_ids: Vec<String> = final_state
+        // Collect failed task ids and their records for hint + diagnosis printing
+        // (ascending order). Records are cloned so we can drop the read lock before
+        // the printing loop below.
+        let mut final_failed_records: Vec<(String, TaskRunRecord)> = final_state
             .completed
             .iter()
             .filter(|(_, r)| r.status == crate::workflow::state::TaskStatus::Failed)
-            .map(|(id, _)| id.clone())
+            .map(|(id, r)| (id.clone(), r.clone()))
             .collect();
-        final_failed_task_ids.sort();
+        final_failed_records.sort_by(|a, b| a.0.cmp(&b.0));
         drop(final_state);
 
         self.workflow_execution.status = final_exec_status;
         self.workflow_execution.completed_at = Some(Utc::now());
         if let Some(err) = maybe_err {
             // Print hint lines for task failures before propagating error.
-            if err.code == "WFG-EXEC-001" && !final_failed_task_ids.is_empty() {
-                for task_id in &final_failed_task_ids {
+            if err.code == "WFG-EXEC-001" && !final_failed_records.is_empty() {
+                for (task_id, record) in &final_failed_records {
                     println!(
                         "newton: task failed execution_id={} task_id={} inspect: newton log show {} --task {}",
                         self.workflow_execution.execution_id,
                         task_id,
                         self.workflow_execution.execution_id,
                         task_id
+                    );
+                    Self::eprint_task_failure_diagnosis(
+                        FailureDiagnosisInput::Record {
+                            task_id: task_id.as_str(),
+                            record,
+                        },
+                        false,
                     );
                 }
             }
@@ -811,6 +834,15 @@ impl WorkflowRuntime {
                     self.workflow_execution.execution_id,
                     task_id
                 );
+                if let Some(outcome) = failed_outcomes
+                    .iter()
+                    .find(|o| o.task_id.as_str() == *task_id)
+                {
+                    Self::eprint_task_failure_diagnosis(
+                        FailureDiagnosisInput::Outcome(outcome),
+                        self.verbose,
+                    );
+                }
             }
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
@@ -1010,6 +1042,137 @@ impl WorkflowRuntime {
             }
         }
 
+        Ok(())
+    }
+
+    /// Tail-truncate a string at `cap` bytes, advancing to the nearest preceding char
+    /// boundary so the returned slice is valid UTF-8. Returns (slice, original_byte_len, was_truncated).
+    fn tail_truncate_utf8(s: &str, cap: usize) -> (&str, usize, bool) {
+        let len = s.len();
+        if len <= cap {
+            return (s, len, false);
+        }
+        let mut start = len - cap;
+        while start < len && !s.is_char_boundary(start) {
+            start += 1;
+        }
+        (&s[start..], len, true)
+    }
+
+    /// Print a per-task failure diagnosis block to stderr. Caller must have already
+    /// printed the existing stdout hint line. When `verbose_streams_already_printed`
+    /// is true, the helper omits the `--- stderr ---` and `--- stdout ---` body
+    /// sections (still printing id/code/exit_code/artifact lines).
+    fn eprint_task_failure_diagnosis(
+        input: FailureDiagnosisInput<'_>,
+        verbose_streams_already_printed: bool,
+    ) {
+        let mut buf: Vec<u8> = Vec::new();
+        // Writing to a Vec<u8> never errors; ignore the result.
+        let _ =
+            Self::write_task_failure_diagnosis(&mut buf, input, verbose_streams_already_printed);
+        // Single write to stderr to keep the block contiguous.
+        use std::io::Write as _;
+        let _ = std::io::stderr().write_all(&buf);
+    }
+
+    /// Write the per-task failure diagnosis block to `w`. Used by
+    /// `eprint_task_failure_diagnosis` and unit tests. Returns Ok unless the
+    /// underlying writer errors.
+    fn write_task_failure_diagnosis<W: std::io::Write>(
+        w: &mut W,
+        input: FailureDiagnosisInput<'_>,
+        verbose_streams_already_printed: bool,
+    ) -> std::io::Result<()> {
+        let (task_id, record, error_summary): (&str, &TaskRunRecord, Option<&AppErrorSummary>) =
+            match input {
+                FailureDiagnosisInput::Outcome(outcome) => (
+                    outcome.task_id.as_str(),
+                    &outcome.record,
+                    outcome.error_summary.as_ref(),
+                ),
+                FailureDiagnosisInput::Record { task_id, record } => (task_id, record, None),
+            };
+
+        writeln!(w, "--- task failed: {task_id} ---")?;
+
+        // Resolve code + message.
+        let (code_str, message_str): (String, String) = if let Some(summary) = error_summary {
+            (summary.code.clone(), summary.message.clone())
+        } else {
+            let code = record
+                .error_code
+                .clone()
+                .unwrap_or_else(|| "<unavailable>".to_string());
+            let message = record
+                .output
+                .as_object()
+                .and_then(|m| m.get("error"))
+                .and_then(|e| e.as_object())
+                .and_then(|m| m.get("message"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "<unavailable>".to_string());
+            (code, message)
+        };
+        writeln!(w, "code={code_str}")?;
+        writeln!(w, "message={message_str}")?;
+
+        let output_map = match &record.output {
+            Value::Object(m) => Some(m),
+            _ => None,
+        };
+
+        if let Some(output_map) = output_map {
+            // exit_code (CommandOperator-shaped).
+            if let Some(exit_code_val) = output_map.get("exit_code") {
+                if let Some(n) = exit_code_val.as_i64() {
+                    writeln!(w, "exit_code={n}")?;
+                } else if let Some(n) = exit_code_val.as_u64() {
+                    writeln!(w, "exit_code={n}")?;
+                } else if let Some(n) = exit_code_val.as_f64() {
+                    writeln!(w, "exit_code={n}")?;
+                }
+            }
+
+            // CommandOperator stream sections.
+            if !verbose_streams_already_printed {
+                for stream_key in &["stderr", "stdout"] {
+                    if let Some(Value::String(s)) = output_map.get(*stream_key) {
+                        let trimmed = s.trim_end();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+                        let (slice, orig_len, truncated) = Self::tail_truncate_utf8(
+                            s.as_str(),
+                            FAILURE_DIAGNOSIS_STREAM_CAP_BYTES,
+                        );
+                        if truncated {
+                            writeln!(
+                                w,
+                                "--- {stream_key} ({orig_len} bytes, truncated to {cap} bytes) ---",
+                                cap = FAILURE_DIAGNOSIS_STREAM_CAP_BYTES,
+                            )?;
+                        } else {
+                            writeln!(w, "--- {stream_key} ({orig_len} bytes) ---")?;
+                        }
+                        if slice.as_bytes().last().copied() == Some(b'\n') {
+                            write!(w, "{slice}")?;
+                        } else {
+                            writeln!(w, "{slice}")?;
+                        }
+                    }
+                }
+            }
+
+            // AgentOperator artifact paths (always printed when present).
+            if let Some(Value::String(p)) = output_map.get("stderr_artifact") {
+                writeln!(w, "stderr artifact: {p}")?;
+            }
+            if let Some(Value::String(p)) = output_map.get("stdout_artifact") {
+                writeln!(w, "stdout artifact: {p}")?;
+            }
+        }
         Ok(())
     }
 
@@ -1614,7 +1777,8 @@ fn hydrate_completed_records(
 
 #[cfg(test)]
 mod tests {
-    use super::shallow_merge_objects;
+    use super::*;
+    use crate::workflow::state::{AppErrorSummary, TaskRunRecord, TaskStatus};
     use serde_json::json;
 
     #[test]
@@ -1622,5 +1786,256 @@ mod tests {
         let err = shallow_merge_objects(&json!("string"), &json!({}))
             .expect_err("non-object base must error");
         assert_eq!(err.code, "WFG-NEST-005");
+    }
+
+    fn make_failed_record(output: Value, error_code: Option<&str>) -> TaskRunRecord {
+        TaskRunRecord {
+            status: TaskStatus::Failed,
+            output,
+            error_code: error_code.map(str::to_string),
+            duration_ms: 0,
+            run_seq: 1,
+        }
+    }
+
+    fn make_failed_outcome(
+        task_id: &str,
+        record: TaskRunRecord,
+        summary: Option<AppErrorSummary>,
+    ) -> TaskOutcome {
+        let now = Utc::now();
+        TaskOutcome {
+            task_id: task_id.to_string(),
+            record,
+            context_patch: None,
+            failed: true,
+            started_at: now,
+            completed_at: now,
+            error_summary: summary,
+            resolved_params: json!({}),
+        }
+    }
+
+    fn diagnose_to_string(input: FailureDiagnosisInput<'_>, verbose: bool) -> String {
+        let mut buf: Vec<u8> = Vec::new();
+        WorkflowRuntime::write_task_failure_diagnosis(&mut buf, input, verbose).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    // --- Stage 1: tail_truncate_utf8 boundary tests ---
+
+    #[test]
+    fn tail_truncate_utf8_under_cap_is_lossless() {
+        let s = "hello";
+        let (slice, len, trunc) = WorkflowRuntime::tail_truncate_utf8(s, 100);
+        assert_eq!(slice, "hello");
+        assert_eq!(len, 5);
+        assert!(!trunc);
+    }
+
+    #[test]
+    fn tail_truncate_utf8_ascii_returns_tail_at_exact_boundary() {
+        let s = "abcdefghij"; // 10 bytes
+        let (slice, len, trunc) = WorkflowRuntime::tail_truncate_utf8(s, 4);
+        assert_eq!(len, 10);
+        assert!(trunc);
+        assert_eq!(slice, "ghij");
+    }
+
+    #[test]
+    fn tail_truncate_utf8_never_splits_multibyte_codepoint() {
+        // Each "é" is 2 bytes in UTF-8. Build a 20-byte string of "é" repeated 10 times.
+        let s: String = "é".repeat(10);
+        assert_eq!(s.len(), 20);
+        // Cap at 5 bytes — naively start would be at byte 15 (mid-codepoint).
+        let (slice, len, trunc) = WorkflowRuntime::tail_truncate_utf8(&s, 5);
+        assert_eq!(len, 20);
+        assert!(trunc);
+        // Slice must be valid UTF-8 (already enforced by &str), and must consist of
+        // whole "é" chars only (each 2 bytes), so its length is even and <= 5.
+        assert!(slice.len() <= 5);
+        assert!(slice.len() % 2 == 0);
+        // Every char must be 'é'.
+        for ch in slice.chars() {
+            assert_eq!(ch, 'é');
+        }
+    }
+
+    // --- Stage 1: helper output content tests ---
+
+    #[test]
+    fn diagnosis_uses_error_summary_when_present() {
+        let rec = make_failed_record(json!({}), Some("WFG-EXEC-001"));
+        let summary = AppErrorSummary {
+            code: "WFG-EXEC-007".to_string(),
+            category: "ValidationError".to_string(),
+            message: "summary message".to_string(),
+        };
+        let outcome = make_failed_outcome("t1", rec, Some(summary));
+        let out = diagnose_to_string(FailureDiagnosisInput::Outcome(&outcome), false);
+        assert!(out.contains("--- task failed: t1 ---"), "got: {out}");
+        assert!(out.contains("code=WFG-EXEC-007"), "got: {out}");
+        assert!(out.contains("message=summary message"), "got: {out}");
+    }
+
+    #[test]
+    fn diagnosis_falls_back_to_record_error_code_and_output_message() {
+        let rec = make_failed_record(
+            json!({ "error": { "message": "from output" } }),
+            Some("WFG-CMD-001"),
+        );
+        let out = diagnose_to_string(
+            FailureDiagnosisInput::Record {
+                task_id: "tx",
+                record: &rec,
+            },
+            false,
+        );
+        assert!(out.contains("code=WFG-CMD-001"), "got: {out}");
+        assert!(out.contains("message=from output"), "got: {out}");
+    }
+
+    #[test]
+    fn diagnosis_emits_message_unavailable_when_no_source() {
+        let rec = make_failed_record(json!({}), None);
+        let out = diagnose_to_string(
+            FailureDiagnosisInput::Record {
+                task_id: "tx",
+                record: &rec,
+            },
+            false,
+        );
+        assert!(out.contains("code=<unavailable>"), "got: {out}");
+        assert!(out.contains("message=<unavailable>"), "got: {out}");
+    }
+
+    #[test]
+    fn diagnosis_omits_empty_or_whitespace_streams() {
+        let rec = make_failed_record(
+            json!({
+                "exit_code": 2,
+                "stderr": "",
+                "stdout": "   \n\n",
+            }),
+            Some("WFG-CMD-001"),
+        );
+        let out = diagnose_to_string(
+            FailureDiagnosisInput::Record {
+                task_id: "tx",
+                record: &rec,
+            },
+            false,
+        );
+        assert!(out.contains("exit_code=2"), "got: {out}");
+        assert!(!out.contains("--- stderr ("), "got: {out}");
+        assert!(!out.contains("--- stdout ("), "got: {out}");
+    }
+
+    #[test]
+    fn diagnosis_includes_command_streams_with_byte_headers() {
+        let rec = make_failed_record(
+            json!({
+                "exit_code": 1,
+                "stderr": "boom\n",
+                "stdout": "ok-line",
+            }),
+            Some("WFG-CMD-001"),
+        );
+        let out = diagnose_to_string(
+            FailureDiagnosisInput::Record {
+                task_id: "tx",
+                record: &rec,
+            },
+            false,
+        );
+        assert!(out.contains("exit_code=1"), "got: {out}");
+        assert!(out.contains("--- stderr (5 bytes) ---"), "got: {out}");
+        assert!(out.contains("boom"), "got: {out}");
+        assert!(out.contains("--- stdout (7 bytes) ---"), "got: {out}");
+        assert!(out.contains("ok-line"), "got: {out}");
+    }
+
+    #[test]
+    fn diagnosis_truncates_oversized_stream_with_marker() {
+        let big = "x".repeat(FAILURE_DIAGNOSIS_STREAM_CAP_BYTES + 100);
+        let rec = make_failed_record(
+            json!({ "exit_code": 1, "stderr": big.clone() }),
+            Some("WFG-CMD-001"),
+        );
+        let out = diagnose_to_string(
+            FailureDiagnosisInput::Record {
+                task_id: "tx",
+                record: &rec,
+            },
+            false,
+        );
+        assert!(
+            out.contains(&format!(
+                "truncated to {} bytes",
+                FAILURE_DIAGNOSIS_STREAM_CAP_BYTES
+            )),
+            "got: {out}"
+        );
+        assert!(
+            out.contains(&format!("({} bytes,", big.len())),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn diagnosis_for_agent_output_prints_artifact_paths() {
+        let rec = make_failed_record(
+            json!({
+                "stdout_artifact": "/tmp/agent.stdout",
+                "stderr_artifact": "/tmp/agent.stderr",
+            }),
+            Some("WFG-AGENT-005"),
+        );
+        let out = diagnose_to_string(
+            FailureDiagnosisInput::Record {
+                task_id: "agent_t",
+                record: &rec,
+            },
+            false,
+        );
+        assert!(
+            out.contains("stderr artifact: /tmp/agent.stderr"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("stdout artifact: /tmp/agent.stdout"),
+            "got: {out}"
+        );
+        // No stream sections.
+        assert!(!out.contains("--- stderr ("), "got: {out}");
+        assert!(!out.contains("--- stdout ("), "got: {out}");
+    }
+
+    // --- Stage 4: verbose suppression ---
+
+    #[test]
+    fn diagnosis_with_verbose_suppresses_stream_bodies_only() {
+        let rec = make_failed_record(
+            json!({
+                "exit_code": 1,
+                "stderr": "boom\n",
+                "stdout": "ok\n",
+                "stderr_artifact": "/a/err",
+                "stdout_artifact": "/a/out",
+            }),
+            Some("WFG-CMD-001"),
+        );
+        let outcome = make_failed_outcome("tx", rec, None);
+        let out = diagnose_to_string(FailureDiagnosisInput::Outcome(&outcome), true);
+        // Header still present
+        assert!(out.contains("--- task failed: tx ---"), "got: {out}");
+        assert!(out.contains("exit_code=1"), "got: {out}");
+        assert!(out.contains("stderr artifact: /a/err"), "got: {out}");
+        assert!(out.contains("stdout artifact: /a/out"), "got: {out}");
+        // Stream-body section dividers MUST be absent.
+        assert!(!out.contains("--- stderr ("), "got: {out}");
+        assert!(!out.contains("--- stdout ("), "got: {out}");
+        // Bodies must be absent.
+        assert!(!out.contains("boom"), "got: {out}");
     }
 }
