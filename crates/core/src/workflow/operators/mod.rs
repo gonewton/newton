@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 pub mod agent;
 pub mod assert_completed;
 pub mod barrier;
