@@ -62,10 +62,9 @@ present but malformed (bad URL, unreadable file), the helper
 
 ### Upgrade note
 
-Earlier versions of Newton silently fell back to `ConsoleInterviewer` (stdin
-prompts) when ailoop was not configured, and honoured a
-`NEWTON_HITL_TRANSPORT` override. Both behaviours are gone: human-in-the-loop
-workflows now require ailoop unconditionally.
+Earlier versions of Newton silently fell back to a console interviewer (stdin
+prompts) when ailoop was not configured. That behaviour is gone:
+human-in-the-loop workflows now require ailoop unconditionally.
 
 ### `fail_fast` interaction
 

@@ -13,9 +13,10 @@ All notable changes to this project will be documented in this file.
   at the first human task tick with error code `HIL-AILOOP-001` (category
   `ValidationError`). Workflows with no human task continue to run unchanged
   (the interviewer is constructed lazily on first prompt).
-- **`NEWTON_HITL_TRANSPORT` environment variable removed.** This variable is no
-  longer parsed, logged, or honoured. Ailoop owns transport selection (direct vs
-  server mode) via its own `AILOOP_SERVER` / `--server` configuration.
+- **Legacy HIL transport override removed.** The previous environment variable
+  that forced a console interviewer is no longer parsed, logged, or honoured.
+  Ailoop owns transport selection (direct vs server mode) via its own
+  `AILOOP_SERVER` / `--server` configuration.
 - **`build_interviewer` removed.** Replaced by `resolve_interviewer` (eager,
   returns `Result<Arc<dyn Interviewer>, AppError>`) and `lazy_interviewer_provider`
   (deferred resolution for `BuiltinOperatorDeps`). External callers must migrate.
