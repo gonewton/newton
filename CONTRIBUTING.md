@@ -54,12 +54,12 @@ Integration is disabled unless explicitly enabled via `NEWTON_AILOOP_INTEGRATION
 
 ### HITL Interviewer Selection
 
-`workflow::human::build_interviewer()` selects the backend:
+`workflow::human::resolve_interviewer()` returns `Result<Arc<dyn Interviewer>, AppError>`:
 
-1. `NEWTON_HITL_TRANSPORT=console` → always use `ConsoleInterviewer`
-2. `NEWTON_HITL_TRANSPORT=ailoop` + context available → `AiloopInterviewer`
-3. Enabled `AiloopContext` present → `AiloopInterviewer`
-4. Fallback → `ConsoleInterviewer`
+1. Enabled `AiloopContext` provided → `AiloopInterviewer`
+2. Otherwise → `Err(HIL-AILOOP-001)`
+
+There is no console fallback. CLI subcommands wrap this in a lazy `InterviewerProvider` (`workflow::human::lazy_interviewer_provider`) so workflows without human tasks never require an ailoop context.
 
 `AiloopInterviewer` calls `ailoop_core::client::authorize()` (for `HumanApprovalOperator`) and `ailoop_core::client::ask()` (for `HumanDecisionOperator`). Error codes `WFG-HUMAN-101…105` are mapped from transport and response outcomes.
 
