@@ -327,7 +327,10 @@ impl WorkflowTestHarness {
 
         let deps = BuiltinOperatorDeps {
             command_runner: Some(Arc::new(self.cmd_runner.clone())),
-            interviewer: Some(Arc::new(self.interviewer.clone())),
+            interviewer: Some({
+                let fake: Arc<dyn Interviewer> = Arc::new(self.interviewer.clone());
+                Arc::new(move || Ok(fake.clone()))
+            }),
             gh_runner: None,
             child_workflow_runner: None,
             gh_approver: None,
@@ -902,7 +905,10 @@ async fn test_scenario_17_checkpoint_resume() {
             GraphSettings::default(),
             BuiltinOperatorDeps {
                 command_runner: Some(Arc::new(cmd_runner.clone())),
-                interviewer: Some(Arc::new(harness.interviewer.clone())),
+                interviewer: Some({
+                    let fake: Arc<dyn Interviewer> = Arc::new(harness.interviewer.clone());
+                    Arc::new(move || Ok(fake.clone()))
+                }),
                 gh_runner: None,
                 child_workflow_runner: None,
                 gh_approver: None,

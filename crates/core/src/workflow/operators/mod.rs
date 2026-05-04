@@ -13,7 +13,7 @@ pub mod set_context;
 pub mod workflow;
 
 use crate::workflow::child_run::ChildWorkflowRunner;
-use crate::workflow::human::{ConsoleInterviewer, Interviewer};
+use crate::workflow::human::InterviewerProvider;
 use crate::workflow::operator::OperatorRegistryBuilder;
 use crate::workflow::operators::engine::AikitEngineManager;
 use crate::workflow::state::GraphSettings;
@@ -22,7 +22,9 @@ use std::sync::Arc;
 
 #[derive(Default)]
 pub struct BuiltinOperatorDeps {
-    pub interviewer: Option<Arc<dyn Interviewer>>,
+    /// Lazy provider that resolves to an `Interviewer` on first human prompt.
+    /// Workflows with no human task never invoke the provider.
+    pub interviewer: Option<InterviewerProvider>,
     pub command_runner: Option<Arc<dyn command::CommandRunner>>,
     /// GhRunner for GhOperator. Defaults to real gh CLI subprocess when None.
     pub gh_runner: Option<Arc<dyn gh::GhRunner>>,
@@ -47,9 +49,21 @@ pub fn register_builtins_with_deps(
     settings: GraphSettings,
     deps: BuiltinOperatorDeps,
 ) {
-    let interviewer: Arc<dyn Interviewer> = deps
-        .interviewer
-        .unwrap_or_else(|| Arc::new(ConsoleInterviewer::new()));
+    let interviewer_provider: InterviewerProvider = deps.interviewer.unwrap_or_else(|| {
+        // Default provider: every invocation returns HIL-AILOOP-001 because
+        // no ailoop context was wired in. Workflows with no human task
+        // never invoke this provider.
+        Arc::new(|| {
+            Err(crate::core::error::AppError::new(
+                crate::core::types::ErrorCategory::ValidationError,
+                "human-in-the-loop operator requires an enabled ailoop context; \
+                     configure ailoop (.newton/configs/monitor.conf and \
+                     NEWTON_AILOOP_INTEGRATION=1). See \
+                     docs/operators/human_decision.md#configuration",
+            )
+            .with_code("HIL-AILOOP-001"))
+        })
+    });
     let human_settings = settings.human.clone();
     let redact_keys = Arc::new(settings.redaction.redact_keys.clone());
     let command_operator = match deps.command_runner {
@@ -84,12 +98,12 @@ pub fn register_builtins_with_deps(
         .register(agent_operator)
         .register(gh_operator)
         .register(human_approval::HumanApprovalOperator::new(
-            interviewer.clone(),
+            interviewer_provider.clone(),
             human_settings.clone(),
             redact_keys.clone(),
         ))
         .register(human_decision::HumanDecisionOperator::new(
-            interviewer,
+            interviewer_provider,
             human_settings,
             redact_keys,
         ));

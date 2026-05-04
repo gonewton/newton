@@ -146,6 +146,38 @@ pub fn init_context_for_command_name(
     }
 }
 
+/// Return an enabled `AiloopContext` or a typed `AppError`.
+///
+/// - `HIL-AILOOP-001` (`ValidationError`) when the context is unconfigured or
+///   disabled.
+/// - `HIL-AILOOP-003` (`IoError`) when configuration loading itself failed
+///   (file unreadable, malformed URL, bad TOML).
+#[allow(clippy::result_large_err)]
+pub fn require_enabled_ailoop_context(
+    workspace_root: &Path,
+    command_name: &str,
+) -> std::result::Result<AiloopContext, crate::core::error::AppError> {
+    match init_context_for_command_name(workspace_root, command_name) {
+        Ok(Some(ctx)) if ctx.is_enabled() => Ok(ctx),
+        Ok(_) => Err(crate::core::error::AppError::new(
+            crate::core::types::ErrorCategory::ValidationError,
+            "human-in-the-loop operator requires an enabled ailoop context; \
+             configure ailoop (.newton/configs/monitor.conf and \
+             NEWTON_AILOOP_INTEGRATION=1). See \
+             docs/operators/human_decision.md#configuration",
+        )
+        .with_code("HIL-AILOOP-001")),
+        Err(err) => Err(crate::core::error::AppError::new(
+            crate::core::types::ErrorCategory::IoError,
+            format!(
+                "failed to load ailoop configuration: {err}. \
+                 See docs/operators/human_decision.md#configuration"
+            ),
+        )
+        .with_code("HIL-AILOOP-003")),
+    }
+}
+
 /// Load ailoop configuration with precedence handling.
 fn load_ailoop_config(workspace_root: &Path) -> Result<AiloopConfig> {
     // Check for explicit enable/disable

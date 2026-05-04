@@ -6,6 +6,9 @@ authors.workspace = true
 repository.workspace = true
 description = "Newton workflow / batch / serve engine library."
 
+[features]
+test-utils = []
+
 [lib]
 path = "src/lib.rs"
 

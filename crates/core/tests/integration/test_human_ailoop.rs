@@ -8,7 +8,7 @@ use ailoop_core::models::{Message, MessageContent, ResponseType};
 use futures::{SinkExt, StreamExt};
 use insta::assert_yaml_snapshot;
 use newton_core::workflow::executor::{ExecutionOverrides, GraphHandle};
-use newton_core::workflow::human::AiloopInterviewer;
+use newton_core::workflow::human::{AiloopInterviewer, Interviewer, InterviewerProvider};
 use newton_core::workflow::operator::{ExecutionContext, Operator, OperatorRegistry, StateView};
 use newton_core::workflow::operators::{
     human_approval::HumanApprovalOperator, human_decision::HumanDecisionOperator,
@@ -60,6 +60,11 @@ fn build_ailoop_interviewer(ws_url: &str, channel: &str) -> Arc<AiloopInterviewe
     ))
 }
 
+fn provider_for(interviewer: Arc<AiloopInterviewer>) -> InterviewerProvider {
+    let cloned: Arc<dyn Interviewer> = interviewer;
+    Arc::new(move || Ok(cloned.clone()))
+}
+
 fn build_execution_context(workspace: &TempDir, execution_id: String) -> ExecutionContext {
     let empty = Value::Object(Map::new());
     ExecutionContext {
@@ -109,8 +114,11 @@ async fn human_decision_via_ailoop_happy_path() {
     .await;
 
     let interviewer = build_ailoop_interviewer(&ws_url, channel);
-    let operator =
-        HumanDecisionOperator::new(interviewer, HumanSettings::default(), Arc::new(Vec::new()));
+    let operator = HumanDecisionOperator::new(
+        provider_for(interviewer),
+        HumanSettings::default(),
+        Arc::new(Vec::new()),
+    );
     let mut ctx = build_execution_context(&workspace, execution_id.clone());
     ctx.task_id = "decision".to_string();
 
@@ -163,8 +171,11 @@ async fn human_approval_via_ailoop_timeout_default() {
     .await;
 
     let interviewer = build_ailoop_interviewer(&ws_url, channel);
-    let operator =
-        HumanApprovalOperator::new(interviewer, HumanSettings::default(), Arc::new(Vec::new()));
+    let operator = HumanApprovalOperator::new(
+        provider_for(interviewer),
+        HumanSettings::default(),
+        Arc::new(Vec::new()),
+    );
     let mut ctx = build_execution_context(&workspace, execution_id.clone());
     ctx.task_id = "approval".to_string();
 
@@ -203,4 +214,71 @@ async fn human_approval_via_ailoop_timeout_default() {
 
     redact_audit(&mut entry);
     assert_yaml_snapshot!("human_approval_via_ailoop_timeout_default", entry);
+}
+
+#[tokio::test]
+async fn human_decision_without_ailoop_emits_hil_001() {
+    let workspace = TempDir::new().unwrap();
+    let execution_id = Uuid::new_v4().to_string();
+    let provider: InterviewerProvider =
+        newton_core::workflow::human::lazy_interviewer_provider(None, Duration::from_secs(60));
+    let operator =
+        HumanDecisionOperator::new(provider, HumanSettings::default(), Arc::new(Vec::new()));
+    let mut ctx = build_execution_context(&workspace, execution_id);
+    ctx.task_id = "decision".to_string();
+    let err = operator
+        .execute(
+            json!({
+                "prompt": "Pick",
+                "choices": ["a", "b"],
+                "timeout_seconds": 1,
+                "default_choice": "a",
+            }),
+            ctx,
+        )
+        .await
+        .expect_err("expected HIL-AILOOP-001");
+    assert_eq!(err.code, "HIL-AILOOP-001");
+}
+
+#[test]
+fn require_enabled_ailoop_context_malformed_returns_hil_003() {
+    use std::fs;
+    let workspace = TempDir::new().unwrap();
+    let configs = workspace.path().join(".newton").join("configs");
+    fs::create_dir_all(&configs).unwrap();
+    fs::write(
+        configs.join("monitor.conf"),
+        "ailoop_server_ws_url=not a valid url\nailoop_channel=test\n",
+    )
+    .unwrap();
+    std::env::set_var("NEWTON_AILOOP_INTEGRATION", "1");
+    std::env::remove_var("NEWTON_AILOOP_WS_URL");
+    std::env::remove_var("NEWTON_AILOOP_CHANNEL");
+    let result = newton_core::integrations::ailoop::config::require_enabled_ailoop_context(
+        workspace.path(),
+        "run",
+    );
+    std::env::remove_var("NEWTON_AILOOP_INTEGRATION");
+    let err = result.expect_err("malformed config must error");
+    assert_eq!(err.code, "HIL-AILOOP-003");
+}
+
+#[tokio::test]
+async fn lazy_provider_not_invoked_when_no_human_task() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let counter = Arc::new(AtomicUsize::new(0));
+    let counter_clone = counter.clone();
+    let provider: InterviewerProvider = Arc::new(move || {
+        counter_clone.fetch_add(1, Ordering::SeqCst);
+        Err(newton_core::core::error::AppError::new(
+            newton_core::core::types::ErrorCategory::ValidationError,
+            "should not be invoked",
+        )
+        .with_code("HIL-AILOOP-001"))
+    });
+    // Build operator but never call execute — provider must not run.
+    let _operator =
+        HumanDecisionOperator::new(provider, HumanSettings::default(), Arc::new(Vec::new()));
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
 }

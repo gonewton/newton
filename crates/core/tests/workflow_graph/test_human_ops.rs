@@ -1,11 +1,10 @@
 use anyhow::Result;
-use async_trait::async_trait;
 use chrono::Utc;
-use newton_core::core::error::AppError;
-use newton_core::core::types::ErrorCategory;
 use newton_core::workflow::{
     executor::{ExecutionOverrides, GraphHandle},
-    human::{ApprovalDefault, ApprovalResult, DecisionResult, Interviewer},
+    human::{
+        ApprovalResult, DecisionResult, Interviewer, InterviewerProvider, MockAiloopInterviewer,
+    },
     operator::{ExecutionContext, Operator, OperatorRegistry, StateView},
     operators::{human_approval::HumanApprovalOperator, human_decision::HumanDecisionOperator},
     schema::HumanSettings,
@@ -17,65 +16,14 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use uuid::Uuid;
 
-#[derive(Clone)]
-struct FakeInterviewer {
-    approval_result: Option<ApprovalResult>,
-    choice_result: Option<DecisionResult>,
+fn provider_from_mock(mock: Arc<MockAiloopInterviewer>) -> InterviewerProvider {
+    let cloned = mock as Arc<dyn Interviewer>;
+    Arc::new(move || Ok(cloned.clone()))
 }
 
-impl FakeInterviewer {
-    fn new() -> Self {
-        Self {
-            approval_result: None,
-            choice_result: None,
-        }
-    }
-
-    fn with_approval(mut self, value: ApprovalResult) -> Self {
-        self.approval_result = Some(value);
-        self
-    }
-
-    fn with_choice(mut self, value: DecisionResult) -> Self {
-        self.choice_result = Some(value);
-        self
-    }
-}
-
-#[async_trait]
-impl Interviewer for FakeInterviewer {
-    fn interviewer_type(&self) -> &'static str {
-        "fake"
-    }
-
-    async fn ask_approval(
-        &self,
-        _prompt: &str,
-        _timeout: Option<std::time::Duration>,
-        _default_on_timeout: Option<ApprovalDefault>,
-    ) -> Result<ApprovalResult, AppError> {
-        self.approval_result.clone().ok_or_else(|| {
-            AppError::new(
-                ErrorCategory::InternalError,
-                "no approval response configured",
-            )
-        })
-    }
-
-    async fn ask_choice(
-        &self,
-        _prompt: &str,
-        _choices: &[String],
-        _timeout: Option<std::time::Duration>,
-        _default_choice: Option<&str>,
-    ) -> Result<DecisionResult, AppError> {
-        self.choice_result.clone().ok_or_else(|| {
-            AppError::new(
-                ErrorCategory::InternalError,
-                "no decision response configured",
-            )
-        })
-    }
+fn empty_provider() -> InterviewerProvider {
+    let mock = Arc::new(MockAiloopInterviewer::new()) as Arc<dyn Interviewer>;
+    Arc::new(move || Ok(mock.clone()))
 }
 
 fn build_execution_context(workspace: &TempDir, execution_id: String) -> ExecutionContext {
@@ -114,9 +62,13 @@ async fn human_approval_logs_timeout_default() -> Result<()> {
         timeout_applied: true,
         default_used: true,
     };
-    let interviewer = Arc::new(FakeInterviewer::new().with_approval(approval_result.clone()));
-    let operator =
-        HumanApprovalOperator::new(interviewer, HumanSettings::default(), Arc::new(Vec::new()));
+    let mock = Arc::new(MockAiloopInterviewer::new());
+    mock.push_approval(approval_result.clone());
+    let operator = HumanApprovalOperator::new(
+        provider_from_mock(mock),
+        HumanSettings::default(),
+        Arc::new(Vec::new()),
+    );
     let ctx = build_execution_context(&workspace, execution_id.clone());
     let output = operator
         .execute(
@@ -143,7 +95,7 @@ async fn human_approval_logs_timeout_default() -> Result<()> {
     let entry: Value = serde_json::from_str(entry_line)?;
     assert_eq!(entry["execution_id"], json!(execution_id));
     assert_eq!(entry["task_id"], json!("approval"));
-    assert_eq!(entry["interviewer_type"], json!("fake"));
+    assert_eq!(entry["interviewer_type"], json!("mock_ailoop"));
     assert_eq!(entry["prompt"], json!("Approve release?"));
     assert_eq!(entry["approved"], json!(true));
     assert_eq!(entry["default_used"], json!(true));
@@ -155,7 +107,7 @@ async fn human_approval_logs_timeout_default() -> Result<()> {
 #[test]
 fn human_approval_requires_default() -> Result<()> {
     let operator = HumanApprovalOperator::new(
-        Arc::new(FakeInterviewer::new()),
+        empty_provider(),
         HumanSettings::default(),
         Arc::new(Vec::new()),
     );
@@ -172,7 +124,7 @@ fn human_approval_requires_default() -> Result<()> {
 #[test]
 fn human_decision_requires_default_choice() -> Result<()> {
     let operator = HumanDecisionOperator::new(
-        Arc::new(FakeInterviewer::new()),
+        empty_provider(),
         HumanSettings::default(),
         Arc::new(Vec::new()),
     );
@@ -198,9 +150,13 @@ async fn human_decision_logs_choice() -> Result<()> {
         default_used: false,
         response_text: Some("2".to_string()),
     };
-    let interviewer = Arc::new(FakeInterviewer::new().with_choice(decision_result.clone()));
-    let operator =
-        HumanDecisionOperator::new(interviewer, HumanSettings::default(), Arc::new(Vec::new()));
+    let mock = Arc::new(MockAiloopInterviewer::new());
+    mock.push_choice(decision_result.clone());
+    let operator = HumanDecisionOperator::new(
+        provider_from_mock(mock),
+        HumanSettings::default(),
+        Arc::new(Vec::new()),
+    );
     let mut ctx = build_execution_context(&workspace, execution_id.clone());
     ctx.task_id = "decision".to_string();
     let output = operator

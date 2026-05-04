@@ -732,7 +732,10 @@ async fn scenario_human_approval_and_decision_path() -> Result<(), String> {
     const NAME: &str = "human_approval_and_decision_path";
     let workspace = scenario_workspace(NAME)?;
     let deps = BuiltinOperatorDeps {
-        interviewer: Some(Arc::new(FakeInterviewer::approve_and_choose("ship"))),
+        interviewer: Some({
+            let fake: Arc<dyn Interviewer> = Arc::new(FakeInterviewer::approve_and_choose("ship"));
+            Arc::new(move || Ok(fake.clone()))
+        }),
         command_runner: None,
         gh_runner: None,
         child_workflow_runner: None,

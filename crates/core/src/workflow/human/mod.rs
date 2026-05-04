@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use std::str::FromStr;
@@ -96,59 +98,65 @@ pub mod ailoop;
 pub mod audit;
 pub mod console;
 
+#[cfg(any(test, feature = "test-utils"))]
+pub mod mock_ailoop;
+
 pub use ailoop::AiloopInterviewer;
 pub use audit::AuditEntry;
 pub use console::ConsoleInterviewer;
 
+#[cfg(any(test, feature = "test-utils"))]
+pub use mock_ailoop::MockAiloopInterviewer;
+
 use std::sync::Arc;
 
-/// Selects the appropriate `Interviewer` backend based on environment override
-/// (`NEWTON_HITL_TRANSPORT`) and the presence of an `AiloopContext`.
+/// Type alias for a deferred interviewer constructor used by operators.
 ///
-/// Precedence:
-/// 1. `NEWTON_HITL_TRANSPORT=console` → console.
-/// 2. `NEWTON_HITL_TRANSPORT=ailoop` → ailoop if a context is provided, else
-///    log a warning and fall back to console.
-/// 3. If an enabled `AiloopContext` is available → ailoop.
-/// 4. Otherwise → console.
-pub fn build_interviewer(
+/// The closure is invoked at most once per operator instance (on the first
+/// human prompt) and the resulting `Arc<dyn Interviewer>` is cached.
+pub type InterviewerProvider =
+    Arc<dyn Fn() -> Result<Arc<dyn Interviewer>, crate::core::error::AppError> + Send + Sync>;
+
+/// Resolve an `Interviewer` by delegating exclusively to ailoop.
+///
+/// Returns `Ok(AiloopInterviewer)` when an enabled `AiloopContext` is provided.
+/// Otherwise returns `Err(AppError)` with code `HIL-AILOOP-001`.
+///
+/// This function MUST NOT fall back to console or any other transport.
+pub fn resolve_interviewer(
     ailoop: Option<&crate::integrations::ailoop::AiloopContext>,
-    default_timeout: std::time::Duration,
-) -> Arc<dyn Interviewer> {
-    let override_env = std::env::var("NEWTON_HITL_TRANSPORT")
-        .ok()
-        .map(|v| v.to_lowercase());
-    match override_env.as_deref() {
-        Some("console") => Arc::new(ConsoleInterviewer::new()),
-        Some("ailoop") => {
-            if let Some(ctx) = ailoop {
-                Arc::new(AiloopInterviewer::new(
-                    ctx.ws_url().to_string(),
-                    ctx.channel().to_string(),
-                    ctx.config.fail_fast,
-                    default_timeout,
-                ))
-            } else {
-                tracing::warn!(
-                    "NEWTON_HITL_TRANSPORT=ailoop requested but no AiloopContext available; falling back to console"
-                );
-                Arc::new(ConsoleInterviewer::new())
-            }
-        }
-        _ => {
-            if let Some(ctx) = ailoop {
-                if ctx.is_enabled() {
-                    return Arc::new(AiloopInterviewer::new(
-                        ctx.ws_url().to_string(),
-                        ctx.channel().to_string(),
-                        ctx.config.fail_fast,
-                        default_timeout,
-                    ));
-                }
-            }
-            Arc::new(ConsoleInterviewer::new())
-        }
+    default_timeout: Duration,
+) -> Result<Arc<dyn Interviewer>, crate::core::error::AppError> {
+    match ailoop {
+        Some(ctx) if ctx.is_enabled() => Ok(Arc::new(AiloopInterviewer::new(
+            ctx.ws_url().to_string(),
+            ctx.channel().to_string(),
+            ctx.config.fail_fast,
+            default_timeout,
+        ))),
+        _ => Err(missing_ailoop_error()),
     }
+}
+
+fn missing_ailoop_error() -> crate::core::error::AppError {
+    crate::core::error::AppError::new(
+        crate::core::types::ErrorCategory::ValidationError,
+        "human-in-the-loop operator requires an enabled ailoop context; \
+         configure ailoop (.newton/configs/monitor.conf and \
+         NEWTON_AILOOP_INTEGRATION=1). See \
+         docs/operators/human_decision.md#configuration",
+    )
+    .with_code("HIL-AILOOP-001")
+}
+
+/// Build an `InterviewerProvider` that re-evaluates ailoop availability when
+/// first invoked. The provided context is captured by clone so the closure can
+/// outlive the caller's borrow.
+pub fn lazy_interviewer_provider(
+    ailoop: Option<crate::integrations::ailoop::AiloopContext>,
+    default_timeout: Duration,
+) -> InterviewerProvider {
+    Arc::new(move || resolve_interviewer(ailoop.as_ref(), default_timeout))
 }
 
 #[cfg(test)]
@@ -156,7 +164,6 @@ mod tests {
     use super::*;
     use crate::integrations::ailoop::config::AiloopConfig;
     use crate::integrations::ailoop::AiloopContext;
-    use serial_test::serial;
     use std::path::PathBuf;
     use url::Url;
 
@@ -171,38 +178,48 @@ mod tests {
     }
 
     #[test]
-    #[serial]
-    fn test_build_interviewer_no_context_no_override() {
-        std::env::remove_var("NEWTON_HITL_TRANSPORT");
-        let i = build_interviewer(None, std::time::Duration::from_secs(60));
-        assert_eq!(i.interviewer_type(), "console");
-    }
-
-    #[test]
-    #[serial]
-    fn test_build_interviewer_with_context_no_override() {
-        std::env::remove_var("NEWTON_HITL_TRANSPORT");
+    fn resolve_interviewer_with_enabled_context_returns_ailoop() {
         let ctx = make_ctx(true);
-        let i = build_interviewer(Some(&ctx), std::time::Duration::from_secs(60));
+        let i = resolve_interviewer(Some(&ctx), Duration::from_secs(60))
+            .expect("enabled ctx should resolve");
         assert_eq!(i.interviewer_type(), "ailoop");
     }
 
     #[test]
-    #[serial]
-    fn test_build_interviewer_console_override_with_context() {
-        std::env::set_var("NEWTON_HITL_TRANSPORT", "console");
-        let ctx = make_ctx(true);
-        let i = build_interviewer(Some(&ctx), std::time::Duration::from_secs(60));
-        std::env::remove_var("NEWTON_HITL_TRANSPORT");
-        assert_eq!(i.interviewer_type(), "console");
+    fn resolve_interviewer_with_no_context_errors() {
+        let err = match resolve_interviewer(None, Duration::from_secs(60)) {
+            Ok(_) => panic!("missing ctx must error"),
+            Err(e) => e,
+        };
+        assert_eq!(err.code, "HIL-AILOOP-001");
+        assert!(matches!(
+            err.category,
+            crate::core::types::ErrorCategory::ValidationError
+        ));
     }
 
     #[test]
-    #[serial]
-    fn test_build_interviewer_ailoop_override_no_context_warns_and_falls_back() {
-        std::env::set_var("NEWTON_HITL_TRANSPORT", "ailoop");
-        let i = build_interviewer(None, std::time::Duration::from_secs(60));
-        std::env::remove_var("NEWTON_HITL_TRANSPORT");
-        assert_eq!(i.interviewer_type(), "console");
+    fn resolve_interviewer_with_disabled_context_errors() {
+        let ctx = make_ctx(false);
+        let err = match resolve_interviewer(Some(&ctx), Duration::from_secs(60)) {
+            Ok(_) => panic!("disabled ctx must error"),
+            Err(e) => e,
+        };
+        assert_eq!(err.code, "HIL-AILOOP-001");
+    }
+
+    #[test]
+    fn lazy_provider_does_not_construct_eagerly() {
+        let provider = lazy_interviewer_provider(None, Duration::from_secs(60));
+        // Provider is constructed but never invoked — no error yet.
+        let _ = &provider; // keep alive
+    }
+
+    #[test]
+    fn lazy_provider_resolves_on_invocation() {
+        let ctx = make_ctx(true);
+        let provider = lazy_interviewer_provider(Some(ctx), Duration::from_secs(60));
+        let i = provider().unwrap_or_else(|_| panic!("enabled ctx should resolve via provider"));
+        assert_eq!(i.interviewer_type(), "ailoop");
     }
 }

@@ -144,8 +144,8 @@ fn setup_workflow_execution(
             .ok()
             .flatten();
     let mut builder = OperatorRegistry::builder();
-    let interviewer = newton_core::workflow::human::build_interviewer(
-        ailoop_ctx.as_ref(),
+    let interviewer = newton_core::workflow::human::lazy_interviewer_provider(
+        ailoop_ctx,
         Duration::from_secs(settings.human.default_timeout_seconds),
     );
     workflow_operators::register_builtins_with_deps(
@@ -253,8 +253,8 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
             .flatten();
     let mut builder = OperatorRegistry::builder();
     let settings = document.workflow.settings.clone();
-    let interviewer = newton_core::workflow::human::build_interviewer(
-        ailoop_ctx.as_ref(),
+    let interviewer = newton_core::workflow::human::lazy_interviewer_provider(
+        ailoop_ctx,
         Duration::from_secs(settings.human.default_timeout_seconds),
     );
     workflow_operators::register_builtins_with_deps(
@@ -421,7 +421,7 @@ pub async fn resume(args: ResumeArgs) -> StdResult<(), AppError> {
     let execution = checkpoint::load_execution(&workspace, &args.execution_id)?;
     let mut builder = OperatorRegistry::builder();
     let settings = execution.settings_effective.clone();
-    let interviewer = newton_core::workflow::human::build_interviewer(
+    let interviewer = newton_core::workflow::human::lazy_interviewer_provider(
         None,
         Duration::from_secs(settings.human.default_timeout_seconds),
     );
@@ -625,7 +625,7 @@ async fn workflow_webhook_serve(args: WebhookServeArgs) -> StdResult<(), AppErro
 
     let mut builder = OperatorRegistry::builder();
     let settings = document.workflow.settings.clone();
-    let interviewer = newton_core::workflow::human::build_interviewer(
+    let interviewer = newton_core::workflow::human::lazy_interviewer_provider(
         None,
         Duration::from_secs(settings.human.default_timeout_seconds),
     );
@@ -1544,7 +1544,7 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
 
     let mut builder = OperatorRegistry::builder();
     let serve_settings: workflow_schema::WorkflowSettings = Default::default();
-    let interviewer = newton_core::workflow::human::build_interviewer(
+    let interviewer = newton_core::workflow::human::lazy_interviewer_provider(
         None,
         Duration::from_secs(serve_settings.human.default_timeout_seconds),
     );
@@ -1770,8 +1770,8 @@ async fn execute_workflow_for_plan(
             .flatten();
     let mut builder = OperatorRegistry::builder();
     let settings = document.workflow.settings.clone();
-    let interviewer = newton_core::workflow::human::build_interviewer(
-        ailoop_ctx.as_ref(),
+    let interviewer = newton_core::workflow::human::lazy_interviewer_provider(
+        ailoop_ctx,
         Duration::from_secs(settings.human.default_timeout_seconds),
     );
     workflow_operators::register_builtins_with_deps(

@@ -2,13 +2,13 @@
 
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
-use crate::workflow::human::{audit, AuditEntry, Interviewer};
+use crate::workflow::human::{audit, AuditEntry, Interviewer, InterviewerProvider};
 use crate::workflow::operator::{ExecutionContext, Operator};
 use crate::workflow::schema::HumanSettings;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 struct DecisionParams {
@@ -80,7 +80,8 @@ impl DecisionParams {
 }
 
 pub struct HumanDecisionOperator {
-    interviewer: Arc<dyn Interviewer>,
+    provider: InterviewerProvider,
+    cached: Mutex<Option<Arc<dyn Interviewer>>>,
     audit_path: PathBuf,
     default_timeout_seconds: u64,
     redact_keys: Arc<Vec<String>>,
@@ -88,16 +89,27 @@ pub struct HumanDecisionOperator {
 
 impl HumanDecisionOperator {
     pub fn new(
-        interviewer: Arc<dyn Interviewer>,
+        provider: InterviewerProvider,
         human_settings: HumanSettings,
         redact_keys: Arc<Vec<String>>,
     ) -> Self {
         Self {
-            interviewer,
+            provider,
+            cached: Mutex::new(None),
             audit_path: human_settings.audit_path,
             default_timeout_seconds: human_settings.default_timeout_seconds,
             redact_keys,
         }
+    }
+
+    fn interviewer(&self) -> Result<Arc<dyn Interviewer>, AppError> {
+        let mut guard = self.cached.lock().unwrap();
+        if let Some(existing) = guard.as_ref() {
+            return Ok(existing.clone());
+        }
+        let resolved = (self.provider)()?;
+        *guard = Some(resolved.clone());
+        Ok(resolved)
     }
 }
 
@@ -129,8 +141,8 @@ impl Operator for HumanDecisionOperator {
             }
         });
         let default_choice_ref = parsed.default_choice.as_deref();
-        let result = self
-            .interviewer
+        let interviewer = self.interviewer()?;
+        let result = interviewer
             .ask_choice(
                 &parsed.prompt,
                 &parsed.choices,
@@ -142,7 +154,7 @@ impl Operator for HumanDecisionOperator {
             timestamp: result.timestamp.to_rfc3339(),
             execution_id: ctx.execution_id.clone(),
             task_id: ctx.task_id.clone(),
-            interviewer_type: self.interviewer.interviewer_type().to_string(),
+            interviewer_type: interviewer.interviewer_type().to_string(),
             prompt: parsed.prompt.clone(),
             choices: Some(parsed.choices.clone()),
             approved: None,
