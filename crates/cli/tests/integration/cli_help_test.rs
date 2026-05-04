@@ -142,26 +142,21 @@ fn run_help_does_not_reference_nonexistent_flags() {
 }
 
 #[test]
-fn serve_help_omits_endpoint_catalog() {
+fn serve_help_lists_route_groups_and_pointers() {
     let stdout = help_output(&["serve"]);
-    for forbidden in [
-        "API ENDPOINTS",
-        "LEGACY ENDPOINTS",
+    for required in [
+        "EXAMPLES:",
+        "--host",
+        "--port",
+        "--ui-dir",
         "/health",
         "/api/workflows",
         "/api/operators",
         "/api/hil/",
         "/api/stream/",
-        "/api/channels",
+        "openapi/newton-backend-parity.yaml",
+        "skill/newton/references/serve-api.md",
     ] {
-        assert!(
-            !stdout.contains(forbidden),
-            "serve --help should not contain {:?}, got:\n{}",
-            forbidden,
-            stdout
-        );
-    }
-    for required in ["EXAMPLES:", "--host", "--port", "--ui-dir"] {
         assert!(
             stdout.contains(required),
             "serve --help should contain {:?}, got:\n{}",

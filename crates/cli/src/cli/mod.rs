@@ -18,6 +18,41 @@ USAGE:\n    {usage}\n\
 \nOPTIONS:\n{options}\n\
 WORKFLOW COMMANDS:\n{subcommands}\n";
 
+pub(crate) const SERVE_LONG_ABOUT: &str = "\
+Serve runs the Newton HTTP/WebSocket API for UIs, agents, and integrations.
+Full REST contract: openapi/newton-backend-parity.yaml.
+Schemas and query parameters: skill/newton/references/serve-api.md.
+
+Mounted route groups (see OpenAPI for exact methods, params, and bodies):
+  • Workflows       /api/workflows, /api/workflows/{id}, /api/workflows/{id}/nodes/{node_id}
+  • HIL             /api/hil/instances, /api/hil/workflows/{id}
+  • Streaming       /api/stream/workflow/{id}/{ws,sse}, /api/stream/logs/{id}/{node_id}/ws
+  • Operators       /api/operators
+  • Dashboard       /api/products, /api/components, /api/pending-approvals,
+                    /api/regressions, /api/indicators, /api/recent-actions
+  • Portfolio       /api/repos, /api/repo-dependencies, /api/module-dependencies,
+                    /api/saved-views
+  • Opportunities   /api/opportunities, /api/opportunities/{id}
+  • Requests        /api/requests
+  • Plans           /api/plans, /api/plans/{id}/{approve,reject}, /api/executions
+  • Persistence     /api/persistence/{key}
+  • Testing reset   /api/testing/reset
+Always available: GET /health.
+
+CORS is enabled for local development by default.";
+
+pub(crate) const SERVE_AFTER_HELP: &str = "EXAMPLES:
+  Start API server on default port:
+    newton serve
+
+  Start on custom host and port:
+    newton serve --host 0.0.0.0 --port 9000
+
+  Run in background:
+    newton serve --host 0.0.0.0 --port 8080 &
+
+See openapi/newton-backend-parity.yaml for the full HTTP/WebSocket/SSE contract.";
+
 #[derive(Parser)]
 #[command(name = "newton")]
 #[command(version = crate::VERSION)]
@@ -57,18 +92,8 @@ pub enum Command {
     Batch(BatchArgs),
     #[command(
         about = "Start the Newton HTTP API server",
-        long_about = "Serve runs the HTTP/WebSocket API that exposes workflow execution state to UIs and external integrations. CORS is enabled for local development by default. See openapi/newton-backend-parity.yaml for the full HTTP contract.",
-        after_help = "EXAMPLES:
-  Start API server on default port:
-    newton serve
-
-  Start on custom host and port:
-    newton serve --host 0.0.0.0 --port 9000
-
-  Run in background:
-    newton serve --host 0.0.0.0 --port 8080 &
-
-See openapi/newton-backend-parity.yaml for the full HTTP/WebSocket/SSE contract."
+        long_about = SERVE_LONG_ABOUT,
+        after_help = SERVE_AFTER_HELP
     )]
     Serve(ServeArgs),
     #[command(
