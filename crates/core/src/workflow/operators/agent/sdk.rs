@@ -24,7 +24,13 @@ pub(super) struct SdkExecResult {
 
 /// Execute an AI engine via aikit-sdk, handling loop mode and signal matching.
 /// Writes a NDJSON events artifact using SDK AgentEvent JSON serialization.
+///
+/// `deny(non_exhaustive_omitted_patterns)` ensures that any future SDK
+/// `AgentEventPayload` variant becomes a compile error inside this function so
+/// Newton must explicitly classify it (no silent fall-through).
 #[allow(clippy::too_many_arguments)]
+#[allow(unknown_lints)]
+#[deny(non_exhaustive_omitted_patterns)]
 pub(super) async fn execute_sdk_engine(
     manager: &AikitEngineManager,
     engine_name: &str,
@@ -152,9 +158,20 @@ pub(super) async fn execute_sdk_engine(
                 aikit_sdk::AgentEventPayload::StreamMessage(msg)
                     if msg.phase == aikit_sdk::MessagePhase::Final
                         && msg.role == aikit_sdk::MessageRole::Assistant => {}
-                _ => {
-                    continue;
-                }
+                aikit_sdk::AgentEventPayload::StreamMessage(_) => continue,
+                aikit_sdk::AgentEventPayload::RawTransportLine { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitTextDelta { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitTextFinal { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitToolUse { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitToolResult { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitSubagentSpawn { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitSubagentResult { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitContextCompressed { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitStepFinish { .. } => continue,
+                // Required by #[non_exhaustive] across crate boundary; the
+                // `non_exhaustive_omitted_patterns` lint on the enclosing
+                // function turns any new SDK variant into a compile error.
+                _ => continue,
             }
 
             if let Some(text) = extract_text_from_sdk_event(event) {
@@ -208,6 +225,22 @@ pub(super) async fn execute_sdk_engine(
                             stderr_bytes += text.len() + 1;
                         }
                     }
+                    aikit_sdk::AgentEventPayload::RawBytes(_) => {}
+                    aikit_sdk::AgentEventPayload::StreamMessage(_) => {}
+                    aikit_sdk::AgentEventPayload::TokenUsageLine { .. } => {}
+                    aikit_sdk::AgentEventPayload::QuotaExceeded { .. } => {}
+                    aikit_sdk::AgentEventPayload::RawTransportLine { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitTextDelta { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitTextFinal { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitToolUse { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitToolResult { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitSubagentSpawn { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitSubagentResult { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitContextCompressed { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitStepFinish { .. } => {}
+                    // Required by #[non_exhaustive] across crate boundary; the
+                    // `non_exhaustive_omitted_patterns` lint on the enclosing
+                    // function turns any new SDK variant into a compile error.
                     _ => {}
                 }
             }

@@ -4,7 +4,7 @@ mod artifacts;
 mod command;
 mod config;
 mod output;
-mod quota;
+pub(crate) mod quota;
 mod sdk;
 mod signals;
 
