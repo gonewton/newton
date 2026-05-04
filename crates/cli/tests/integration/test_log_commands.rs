@@ -97,6 +97,7 @@ fn make_task_record(
                 code: "WFG-EXEC-001".to_string(),
                 category: "ValidationError".to_string(),
                 message: "task failed".to_string(),
+                context: std::collections::HashMap::new(),
             })
         } else {
             None

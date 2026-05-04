@@ -1870,6 +1870,7 @@ mod tests {
             code: "WFG-EXEC-007".to_string(),
             category: "ValidationError".to_string(),
             message: "summary message".to_string(),
+            context: std::collections::HashMap::new(),
         };
         let outcome = make_failed_outcome("t1", rec, Some(summary));
         let out = diagnose_to_string(FailureDiagnosisInput::Outcome(&outcome), false);

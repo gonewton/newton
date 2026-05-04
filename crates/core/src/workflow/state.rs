@@ -125,6 +125,8 @@ pub struct AppErrorSummary {
     pub code: String,
     pub category: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub context: HashMap<String, String>,
 }
 
 /// Representation of operator output in checkpoints.
@@ -337,6 +339,7 @@ pub fn summarize_error(error: &AppError, redact_keys: &[String]) -> AppErrorSumm
         code: error.code.clone(),
         category: format!("{:?}", error.category),
         message,
+        context: error.context.clone(),
     }
 }
 

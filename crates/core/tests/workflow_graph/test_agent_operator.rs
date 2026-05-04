@@ -463,6 +463,21 @@ fn read_enrich_error_code(workspace: &TempDir) -> String {
 }
 
 #[cfg(unix)]
+fn read_enrich_error(workspace: &TempDir) -> serde_json::Value {
+    let state_root = workspace.path().join(".newton/state/workflows");
+    let entries: Vec<_> = fs::read_dir(&state_root)
+        .expect("state dir exists")
+        .filter_map(Result::ok)
+        .collect();
+    assert_eq!(entries.len(), 1, "expected one execution directory");
+    let checkpoint_path = entries[0].path().join("checkpoint.json");
+    let checkpoint: serde_json::Value =
+        serde_json::from_slice(&fs::read(&checkpoint_path).expect("read checkpoint.json"))
+            .expect("parse checkpoint.json");
+    checkpoint["completed"]["enrich_spec"]["error"].clone()
+}
+
+#[cfg(unix)]
 #[tokio::test]
 #[serial(path_env_agent)]
 async fn sdk_quota_structured_event_returns_agent_008() {
@@ -473,6 +488,7 @@ async fn sdk_quota_structured_event_returns_agent_008() {
         &workspace,
         &[
             r#"echo '{"type":"error","message":"usage limit exceeded for requests"}'"#,
+            r#"printf 'agent stderr\n' >&2"#,
             "exit 0",
             "",
         ]
@@ -503,6 +519,21 @@ workflow:
         .expect_err("workflow must fail on structured quota");
     assert_eq!(err.code, "WFG-EXEC-001");
     assert_eq!(read_enrich_error_code(&workspace), "WFG-AGENT-008");
+    let inner = read_enrich_error(&workspace);
+    assert_eq!(inner["code"].as_str(), Some("WFG-AGENT-008"));
+    let ctx = &inner["context"];
+    for key in [
+        "provider",
+        "quota_category",
+        "raw_excerpt",
+        "events_artifact",
+        "stderr_artifact",
+    ] {
+        let value = ctx[key]
+            .as_str()
+            .unwrap_or_else(|| panic!("context missing key {key}: {ctx}"));
+        assert!(!value.is_empty(), "context[{key}] is empty");
+    }
 }
 
 #[cfg(unix)]
@@ -541,4 +572,19 @@ workflow:
         .expect_err("workflow must fail on stderr quota text");
     assert_eq!(err.code, "WFG-EXEC-001");
     assert_eq!(read_enrich_error_code(&workspace), "WFG-AGENT-008");
+    let inner = read_enrich_error(&workspace);
+    assert_eq!(inner["code"].as_str(), Some("WFG-AGENT-008"));
+    let ctx = &inner["context"];
+    for key in [
+        "provider",
+        "quota_category",
+        "raw_excerpt",
+        "events_artifact",
+        "stderr_artifact",
+    ] {
+        let value = ctx[key]
+            .as_str()
+            .unwrap_or_else(|| panic!("context missing key {key}: {ctx}"));
+        assert!(!value.is_empty(), "context[{key}] is empty");
+    }
 }
