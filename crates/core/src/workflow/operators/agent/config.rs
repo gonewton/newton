@@ -118,6 +118,43 @@ impl AgentOperatorConfig {
                     .collect::<Vec<_>>()
             })
     }
+
+    /// Resolve the engine name from params or the workflow default, emitting WFG-AGENT-001 if
+    /// neither is set.
+    pub(super) fn resolve_engine(&self, default_engine: Option<&str>) -> Result<String, AppError> {
+        self.engine
+            .as_deref()
+            .or(default_engine)
+            .ok_or_else(|| {
+                AppError::new(
+                    ErrorCategory::ValidationError,
+                    "no engine resolved: set params.engine or settings.default_engine",
+                )
+                .with_code("WFG-AGENT-001")
+            })
+            .map(str::to_string)
+    }
+
+    /// Validate that engine:command tasks supply a non-empty engine_command list
+    /// (static check, pre-interpolation). Emits WFG-AGENT-007.
+    pub(super) fn validate_engine_command(&self) -> Result<(), AppError> {
+        if self.engine.as_deref() != Some("command") {
+            return Ok(());
+        }
+        match &self.engine_command {
+            None => Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "engine: command requires engine_command in params",
+            )
+            .with_code("WFG-AGENT-007")),
+            Some(cmds) if cmds.is_empty() => Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "engine_command must not be empty",
+            )
+            .with_code("WFG-AGENT-007")),
+            _ => Ok(()),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -67,47 +67,15 @@ impl Operator for AgentOperator {
 
     fn validate_params(&self, params: &Value) -> Result<(), AppError> {
         let config = AgentOperatorConfig::from_value(params)?;
-
         signals::validate_and_compile_signals(&config.signals)?;
-
-        if config.engine.as_deref() == Some("command") {
-            match &config.engine_command {
-                None => {
-                    return Err(AppError::new(
-                        ErrorCategory::ValidationError,
-                        "engine: command requires engine_command in params",
-                    )
-                    .with_code("WFG-AGENT-007"));
-                }
-                Some(cmds) if cmds.is_empty() => {
-                    return Err(AppError::new(
-                        ErrorCategory::ValidationError,
-                        "engine_command must not be empty",
-                    )
-                    .with_code("WFG-AGENT-007"));
-                }
-                _ => {}
-            }
-        }
-
+        config.validate_engine_command()?;
         Ok(())
     }
 
     async fn execute(&self, params: Value, ctx: ExecutionContext) -> Result<Value, AppError> {
         let config = AgentOperatorConfig::from_value(&params)?;
 
-        let engine_name = config
-            .engine
-            .as_deref()
-            .or(self.settings.default_engine.as_deref())
-            .ok_or_else(|| {
-                AppError::new(
-                    ErrorCategory::ValidationError,
-                    "no engine resolved: set params.engine or settings.default_engine",
-                )
-                .with_code("WFG-AGENT-001")
-            })?
-            .to_string();
+        let engine_name = config.resolve_engine(self.settings.default_engine.as_deref())?;
 
         let model = config
             .model
@@ -132,30 +100,23 @@ impl Operator for AgentOperator {
         let mut sdk_events_token_usage: Option<serde_json::Value> = None;
 
         let (signal, signal_data, exit_code, final_iteration) = if engine_name == "command" {
-            let resolved_engine_command = match &config.engine_command {
-                None => {
+            config.validate_engine_command()?;
+            let resolved_engine_command = {
+                let cmds = config.engine_command.as_deref().unwrap_or(&[]);
+                let expr_engine = ExpressionEngine::default();
+                let mut result = Vec::new();
+                for entry in cmds {
+                    let interpolated = expr_engine.interpolate_string(entry, &eval_ctx)?;
+                    result.push(interpolated);
+                }
+                if result.is_empty() {
                     return Err(AppError::new(
                         ErrorCategory::ValidationError,
-                        "engine: command requires engine_command in params",
+                        "engine_command evaluates to empty list",
                     )
                     .with_code("WFG-AGENT-007"));
                 }
-                Some(cmds) => {
-                    let expr_engine = ExpressionEngine::default();
-                    let mut result = Vec::new();
-                    for entry in cmds {
-                        let interpolated = expr_engine.interpolate_string(entry, &eval_ctx)?;
-                        result.push(interpolated);
-                    }
-                    if result.is_empty() {
-                        return Err(AppError::new(
-                            ErrorCategory::ValidationError,
-                            "engine_command evaluates to empty list",
-                        )
-                        .with_code("WFG-AGENT-007"));
-                    }
-                    result
-                }
+                result
             };
 
             let driver = PassthroughDriver;
