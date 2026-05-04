@@ -57,17 +57,7 @@ pub enum Command {
     Batch(BatchArgs),
     #[command(
         about = "Start the Newton HTTP API server",
-        long_about = "Serve starts the HTTP/WebSocket API server that provides real-time access to workflow execution state.
-
-The API server exposes endpoints for:
-    • Workflow instance management and queries
-    • HIL (Human-in-the-Loop) event handling
-    • Real-time streaming via WebSocket and SSE
-    • Operator metadata and schema information
-
-Use this command to run Newton as a backend service for web UIs, monitoring dashboards, or external integrations.
-
-CORS is enabled for local development by default.",
+        long_about = "Serve runs the HTTP/WebSocket API that exposes workflow execution state to UIs and external integrations. CORS is enabled for local development by default. See openapi/newton-backend-parity.yaml for the full HTTP contract.",
         after_help = "EXAMPLES:
   Start API server on default port:
     newton serve
@@ -78,20 +68,7 @@ CORS is enabled for local development by default.",
   Run in background:
     newton serve --host 0.0.0.0 --port 8080 &
 
-API ENDPOINTS:
-    GET  /health              Health check endpoint
-    GET  /api/workflows       List all workflow instances
-    GET  /api/workflows/:id   Get workflow instance by ID
-    PUT  /api/workflows/:id   Update workflow definition
-    GET  /api/operators       List registered operators
-    GET  /api/hil/workflows/:id            List HIL events for workflow
-    POST /api/hil/workflows/:id/:eventId/action  Submit HIL action
-    WS   /api/stream/workflow/:id/ws        WebSocket stream for workflow
-    WS   /api/stream/logs/:id/:node_id/ws   WebSocket stream for node logs
-    SSE  /api/stream/workflow/:id/sse      SSE stream for workflow events
-
-LEGACY ENDPOINTS:
-    GET  /api/channels        List workflow channels (legacy compatibility)"
+See openapi/newton-backend-parity.yaml for the full HTTP/WebSocket/SSE contract."
     )]
     Serve(ServeArgs),
     #[command(
