@@ -120,6 +120,7 @@ path = "tests/workflow_graph/test_explain.rs"
 [[test]]
 name = "test_workflow_human_ops"
 path = "tests/workflow_graph/test_human_ops.rs"
+required-features = ["test-utils"]
 
 [[test]]
 name = "test_workflow_webhook"
