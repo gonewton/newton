@@ -199,31 +199,11 @@ Serve starts the HTTP/WebSocket API server that provides real-time access to wor
 newton serve --host 0.0.0.0 --port 9000
 ```
 
-**Endpoint groups:**
-
-| Group | Sample paths | Notes |
-|---|---|---|
-| Health | `GET /health` | liveness probe |
-| Dashboard | `GET /api/components`, `GET /api/indicators`, `GET /api/recent-actions` | dashboard widgets |
-| Executions | `GET /api/executions` | filterable by `planId` |
-| HIL | `GET /api/hil/instances`, `GET /api/hil/workflows/{id}`, `POST /api/hil/workflows/{id}/{event_id}/action` | human-in-the-loop |
-| Operators | `GET /api/operators` | registered operator metadata |
-| Opportunities | `GET /api/opportunities`, `GET /api/opportunities/{id}` | portfolio surface |
-| Pending approvals | `GET /api/pending-approvals` | gate queue |
-| Persistence | `GET/PUT /api/persistence/{key}` | KV store |
-| Plans | `GET /api/plans`, `GET /api/plans/{id}`, `POST /api/plans/{id}/approve`, `POST /api/plans/{id}/reject` | plan queue |
-| Products | `GET /api/products` | product registry |
-| Regressions | `GET /api/regressions` | regression view |
-| Repos | `GET /api/repos`, `GET /api/repo-dependencies`, `GET /api/module-dependencies` | repo graph |
-| Requests | `GET /api/requests` | request log |
-| Saved views | `GET /api/saved-views` | UI presets |
-| Testing | `POST /api/testing/reset` | test-only reset |
-| Workflows | `GET /api/workflows`, `GET /api/workflows/{id}`, `GET /api/workflows/{id}/nodes/{node_id}` | workflow CRUD |
-| Streams | `WS /api/stream/workflow/:id/ws`, `WS /api/stream/logs/:id/:node_id/ws`, `SSE /api/stream/workflow/:id/sse` | from `after_help` block |
+**Endpoint groups:** see `newton serve --help` for an enumeration of route groups, or [`openapi/newton-backend-parity.yaml`](openapi/newton-backend-parity.yaml) for the canonical contract (methods, parameters, and response shapes). Schemas and query parameters are also catalogued in [`skill/newton/references/serve-api.md`](skill/newton/references/serve-api.md).
 
 **Storage:** `newton serve` reads from the parity backend store (default SQLite) defined in [`crates/backend/src/store.rs`](crates/backend/src/store.rs); the schema lives in [`openapi/newton-backend-parity.sqlite.sql`](openapi/newton-backend-parity.sqlite.sql).
 
-**Authoritative contract:** The HTTP/WebSocket/SSE surface is specified in [`openapi/newton-backend-parity.yaml`](openapi/newton-backend-parity.yaml). Note: `newton serve --help` is currently incomplete (tracked in gonewton/newton#247); this README section is the interim summary.
+**Authoritative contract:** The HTTP/WebSocket/SSE surface is specified in [`openapi/newton-backend-parity.yaml`](openapi/newton-backend-parity.yaml).
 
 ### `monitor`
 

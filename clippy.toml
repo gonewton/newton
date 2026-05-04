@@ -1,0 +1,4 @@
+# AppError is intentionally 168 bytes. Boxing it would change the error-handling
+# API throughout the codebase. Raise the threshold above AppError's size so
+# closures returning Result<_, AppError> don't trigger result_large_err.
+large-error-threshold = 512

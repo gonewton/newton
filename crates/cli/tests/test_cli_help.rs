@@ -607,3 +607,29 @@ fn test_help_text_quality_meets_spec_requirements() {
         );
     }
 }
+
+#[test]
+fn test_serve_help_lists_all_parity_route_groups() {
+    let stdout = get_help_output(&["serve"]);
+    for group in [
+        "Workflows",
+        "HIL",
+        "Streaming",
+        "Operators",
+        "Dashboard",
+        "Portfolio",
+        "Opportunities",
+        "Requests",
+        "Plans",
+        "Persistence",
+        "Testing reset",
+    ] {
+        assert!(
+            stdout.contains(group),
+            "serve --help missing route group: {group}"
+        );
+    }
+    assert!(stdout.contains("/health"));
+    assert!(stdout.contains("openapi/newton-backend-parity.yaml"));
+    assert!(stdout.contains("skill/newton/references/serve-api.md"));
+}
