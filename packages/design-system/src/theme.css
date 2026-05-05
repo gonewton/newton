@@ -1,0 +1,6 @@
+@import './tokens.css';
+
+[data-theme='light'] {
+  --newton-color-bg: #ffffff;
+  --newton-color-fg: #1a1c1f;
+}

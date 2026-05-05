@@ -1,0 +1,24 @@
+{
+  "name": "newton-ui-monorepo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm --filter @newton/design-system build && pnpm --filter newton-ui build",
+    "test": "pnpm --filter newton-ui test",
+    "test:coverage": "pnpm --filter newton-ui test:coverage",
+    "lint": "pnpm --filter @newton/design-system lint && pnpm --filter newton-ui lint",
+    "typecheck": "pnpm --filter @newton/design-system typecheck && pnpm --filter newton-ui typecheck",
+    "format": "prettier --write \"packages/*/src/**/*.{ts,tsx,css}\"",
+    "format:check": "prettier --check \"packages/*/src/**/*.{ts,tsx,css}\"",
+    "dev:backend": "pnpm --filter newton-backend dev",
+    "dev:console": "pnpm --filter newton-console dev"
+  },
+  "devDependencies": {
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=22"
+  }
+}

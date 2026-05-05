@@ -1,0 +1,11 @@
+:root {
+  --newton-color-bg: #0b0d10;
+  --newton-color-fg: #e6e8eb;
+  --newton-color-accent: #4f8cff;
+  --newton-radius-sm: 4px;
+  --newton-radius-md: 8px;
+  --newton-space-1: 4px;
+  --newton-space-2: 8px;
+  --newton-space-3: 12px;
+  --newton-space-4: 16px;
+}
