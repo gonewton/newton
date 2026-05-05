@@ -88,8 +88,13 @@ impl AikitEngineManager {
     /// Execute an AI engine via aikit-sdk and return SDK event records alongside the run result.
     ///
     /// Delegates to `aikit_sdk::run_agent_events`, collecting each `aikit_sdk::AgentEvent`
-    /// via the event callback. Returns the full event vec and the `RunResult` so callers
-    /// can access exit status and accumulated stdout/stderr bytes.
+    /// via the event callback. Returns the full event vec plus an inner `Result` wrapping
+    /// the `RunResult` or the mapped SDK error.
+    ///
+    /// The outer `Result` only fails for fatal conditions (spawn panic, `is_runnable` check).
+    /// SDK-level errors (including `RunError::QuotaExceeded`) are returned in the inner
+    /// `Result` so that callers can flush the already-collected events to disk before
+    /// deciding how to handle the error.
     ///
     /// Signal matching and token usage extraction are driven by typed enum matching
     /// on `aikit_sdk::AgentEventPayload` in the caller (`execute_sdk_engine`).
@@ -99,7 +104,13 @@ impl AikitEngineManager {
         prompt: &str,
         model: Option<&str>,
         timeout: Option<Duration>,
-    ) -> Result<(Vec<aikit_sdk::AgentEvent>, aikit_sdk::RunResult), AppError> {
+    ) -> Result<
+        (
+            Vec<aikit_sdk::AgentEvent>,
+            Result<aikit_sdk::RunResult, AppError>,
+        ),
+        AppError,
+    > {
         if !aikit_sdk::is_runnable(engine_name) {
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
@@ -132,8 +143,10 @@ impl AikitEngineManager {
                 aikit_sdk::run_agent_events(&engine_name_owned, &prompt_owned, options, |event| {
                     events.push(event);
                 })
-                .map_err(map_run_error)?;
-            Ok::<(Vec<aikit_sdk::AgentEvent>, aikit_sdk::RunResult), AppError>((events, result))
+                .map_err(map_run_error);
+            // Always return the events alongside the result so the caller can flush
+            // them to disk even when the SDK returns an error (e.g. QuotaExceeded).
+            (events, result)
         })
         .await
         .map_err(|e| {
@@ -142,7 +155,7 @@ impl AikitEngineManager {
                 format!("aikit-sdk task panicked: {e}"),
             )
             .with_code("WFG-SDK-001")
-        })??;
+        })?;
 
         Ok((events, run_result))
     }

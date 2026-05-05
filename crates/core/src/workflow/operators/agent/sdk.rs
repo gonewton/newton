@@ -93,7 +93,10 @@ pub(super) async fn execute_sdk_engine(
         }
 
         let remaining = timeout.saturating_sub(start.elapsed());
-        let (events, iter_run_result) = match tokio::time::timeout(
+        // execute_engine_events returns `(events, inner_result)` so we always get the
+        // already-collected events even when the SDK returns an error (e.g. QuotaExceeded).
+        // This ensures the events artifact is populated before we return an error.
+        let (events, iter_inner_result) = match tokio::time::timeout(
             remaining,
             manager.execute_engine_events(engine_name, prompt, model, Some(remaining)),
         )
@@ -106,14 +109,8 @@ pub(super) async fn execute_sdk_engine(
                 )
                 .with_code("WFG-AGENT-005"));
             }
-            Ok(Err(mut err)) if err.code == "WFG-AGENT-008" => {
-                err.add_context("events_artifact", &events_artifact_rel);
-                if stderr_path.exists() {
-                    err.add_context("stderr_artifact", &stderr_rel);
-                }
-                return Err(err);
-            }
-            Ok(result) => result?,
+            Ok(Err(e)) => return Err(e), // fatal: spawn panic / is_runnable failure
+            Ok(Ok(pair)) => pair,
         };
 
         let mut stdout_file = std::fs::OpenOptions::new()
@@ -245,6 +242,21 @@ pub(super) async fn execute_sdk_engine(
                 }
             }
         }
+
+        // All events have been flushed to the artifact files. Now resolve the inner SDK
+        // result. Any WFG-AGENT-008 (RunError::QuotaExceeded) error is handled here so
+        // the artifact paths point at non-empty files containing the quota evidence.
+        let iter_run_result = match iter_inner_result {
+            Ok(run_result) => run_result,
+            Err(mut err) if err.code == "WFG-AGENT-008" => {
+                err.add_context("events_artifact", &events_artifact_rel);
+                if stderr_path.exists() {
+                    err.add_context("stderr_artifact", &stderr_rel);
+                }
+                return Err(err);
+            }
+            Err(e) => return Err(e),
+        };
 
         if let Some(ref info) = iter_run_result.quota_exceeded {
             return Err(quota_signal_to_error(
