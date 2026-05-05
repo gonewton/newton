@@ -6,7 +6,7 @@ pub mod framework_setup;
 pub mod init;
 
 pub use context::NewtonContext;
-pub use framework_setup::{build_app, NewtonApp};
+pub use framework_setup::build_app;
 
 pub use args::{
     ArtifactCommand, ArtifactsArgs, BatchArgs, CheckpointCommand, CheckpointsArgs, DotArgs,
