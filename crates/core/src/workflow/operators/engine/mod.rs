@@ -88,8 +88,13 @@ impl AikitEngineManager {
     /// Execute an AI engine via aikit-sdk and return SDK event records alongside the run result.
     ///
     /// Delegates to `aikit_sdk::run_agent_events`, collecting each `aikit_sdk::AgentEvent`
-    /// via the event callback. Returns the full event vec and the `RunResult` so callers
-    /// can access exit status and accumulated stdout/stderr bytes.
+    /// via the event callback. Returns the full event vec plus an inner `Result` wrapping
+    /// the `RunResult` or the mapped SDK error.
+    ///
+    /// The outer `Result` only fails for fatal conditions (spawn panic, `is_runnable` check).
+    /// SDK-level errors (including `RunError::QuotaExceeded`) are returned in the inner
+    /// `Result` so that callers can flush the already-collected events to disk before
+    /// deciding how to handle the error.
     ///
     /// Signal matching and token usage extraction are driven by typed enum matching
     /// on `aikit_sdk::AgentEventPayload` in the caller (`execute_sdk_engine`).
@@ -99,7 +104,13 @@ impl AikitEngineManager {
         prompt: &str,
         model: Option<&str>,
         timeout: Option<Duration>,
-    ) -> Result<(Vec<aikit_sdk::AgentEvent>, aikit_sdk::RunResult), AppError> {
+    ) -> Result<
+        (
+            Vec<aikit_sdk::AgentEvent>,
+            Result<aikit_sdk::RunResult, AppError>,
+        ),
+        AppError,
+    > {
         if !aikit_sdk::is_runnable(engine_name) {
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
@@ -126,15 +137,23 @@ impl AikitEngineManager {
         let prompt_owned = prompt.to_string();
         let engine_name_owned = engine_name.to_string();
 
-        let (events, run_result) = tokio::task::spawn_blocking(move || {
-            let mut events: Vec<aikit_sdk::AgentEvent> = Vec::new();
-            let result =
-                aikit_sdk::run_agent_events(&engine_name_owned, &prompt_owned, options, |event| {
-                    events.push(event);
-                })
-                .map_err(map_run_error)?;
-            Ok::<(Vec<aikit_sdk::AgentEvent>, aikit_sdk::RunResult), AppError>((events, result))
-        })
+        let (events, run_result) = tokio::task::spawn_blocking(
+            move || -> (Vec<aikit_sdk::AgentEvent>, Result<aikit_sdk::RunResult, AppError>) {
+                let mut events: Vec<aikit_sdk::AgentEvent> = Vec::new();
+                let result = aikit_sdk::run_agent_events(
+                    &engine_name_owned,
+                    &prompt_owned,
+                    options,
+                    |event| {
+                        events.push(event);
+                    },
+                )
+                .map_err(map_run_error);
+                // Always return the events alongside the result so the caller can flush
+                // them to disk even when the SDK returns an error (e.g. QuotaExceeded).
+                (events, result)
+            },
+        )
         .await
         .map_err(|e| {
             AppError::new(
@@ -142,13 +161,19 @@ impl AikitEngineManager {
                 format!("aikit-sdk task panicked: {e}"),
             )
             .with_code("WFG-SDK-001")
-        })??;
+        })?;
 
         Ok((events, run_result))
     }
 }
 
 /// Map aikit_sdk::RunError to Newton AppError with appropriate WFG-SDK codes.
+///
+/// `aikit_sdk::RunError` is `#[non_exhaustive]`; the `deny(non_exhaustive_omitted_patterns)`
+/// attribute below turns any future SDK variant into a compile error here, preventing
+/// silent fall-through.
+#[allow(unknown_lints)]
+#[deny(non_exhaustive_omitted_patterns)]
 pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
     match err {
         aikit_sdk::RunError::AgentNotRunnable(key) => AppError::new(
@@ -187,22 +212,16 @@ pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
         )
         .with_code("WFG-SDK-001"),
         aikit_sdk::RunError::QuotaExceeded(info) => {
-            let category = format!("{:?}", info.category).to_lowercase();
-            let mut error = AppError::new(
-                ErrorCategory::ResourceError,
-                format!(
-                    "agent '{}' quota exceeded ({}): {}",
-                    info.agent_key, category, info.raw_message
-                ),
-            )
-            .with_code("WFG-AGENT-008");
-            error.add_context("provider", &info.agent_key);
-            error.add_context("quota_category", &category);
-            error.add_context("raw_excerpt", &info.raw_message);
-            error
+            crate::workflow::operators::agent::quota::quota_signal_to_error_minimal(&info)
         }
-        _ => AppError::new(ErrorCategory::IoError, format!("aikit-sdk error: {err}"))
-            .with_code("WFG-SDK-001"),
+        // Required by #[non_exhaustive] across a crate boundary; the
+        // `non_exhaustive_omitted_patterns` lint above turns any new variant
+        // into a compile error before we ever reach this arm.
+        _ => AppError::new(
+            ErrorCategory::IoError,
+            format!("aikit-sdk error (unhandled variant): {err}"),
+        )
+        .with_code("WFG-SDK-001"),
     }
 }
 
@@ -214,9 +233,14 @@ pub fn map_run_error(err: aikit_sdk::RunError) -> AppError {
 /// 3. `StreamMessage` with phase=Final and role=Assistant → use `text` field directly.
 ///    This covers aikit-sdk ≥0.2 (046-agent-stream) where Claude's final assistant turn
 ///    arrives as StreamMessage rather than JsonLine.
-/// 4. All other variants (RawBytes, TokenUsageLine, QuotaExceeded, StreamMessage[Delta],
+/// 4. All other variants (RawBytes, TokenUsageLine, QuotaExceeded, StreamMessage[non-Final/Assistant],
 ///    RawTransportLine, Aikit* built-ins) → None.
-///    The wildcard arm provides forward-compatibility with new SDK 0.2.x variants.
+///
+/// `aikit_sdk::AgentEventPayload` is `#[non_exhaustive]`; the
+/// `deny(non_exhaustive_omitted_patterns)` attribute below turns any future SDK
+/// variant into a compile error here so Newton must explicitly classify it.
+#[allow(unknown_lints)]
+#[deny(non_exhaustive_omitted_patterns)]
 pub fn extract_text_from_sdk_event(event: &aikit_sdk::AgentEvent) -> Option<String> {
     match &event.payload {
         aikit_sdk::AgentEventPayload::RawLine(s) => Some(s.clone()),
@@ -227,6 +251,22 @@ pub fn extract_text_from_sdk_event(event: &aikit_sdk::AgentEvent) -> Option<Stri
         {
             Some(msg.text.clone())
         }
+        aikit_sdk::AgentEventPayload::StreamMessage(_) => None,
+        aikit_sdk::AgentEventPayload::RawBytes(_) => None,
+        aikit_sdk::AgentEventPayload::TokenUsageLine { .. } => None,
+        aikit_sdk::AgentEventPayload::QuotaExceeded { .. } => None,
+        aikit_sdk::AgentEventPayload::RawTransportLine { .. } => None,
+        aikit_sdk::AgentEventPayload::AikitTextDelta { .. } => None,
+        aikit_sdk::AgentEventPayload::AikitTextFinal { .. } => None,
+        aikit_sdk::AgentEventPayload::AikitToolUse { .. } => None,
+        aikit_sdk::AgentEventPayload::AikitToolResult { .. } => None,
+        aikit_sdk::AgentEventPayload::AikitSubagentSpawn { .. } => None,
+        aikit_sdk::AgentEventPayload::AikitSubagentResult { .. } => None,
+        aikit_sdk::AgentEventPayload::AikitContextCompressed { .. } => None,
+        aikit_sdk::AgentEventPayload::AikitStepFinish { .. } => None,
+        // Required by #[non_exhaustive] across a crate boundary; the
+        // `non_exhaustive_omitted_patterns` lint above turns any new variant
+        // into a compile error before we ever reach this arm.
         _ => None,
     }
 }

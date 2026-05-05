@@ -24,7 +24,13 @@ pub(super) struct SdkExecResult {
 
 /// Execute an AI engine via aikit-sdk, handling loop mode and signal matching.
 /// Writes a NDJSON events artifact using SDK AgentEvent JSON serialization.
+///
+/// `deny(non_exhaustive_omitted_patterns)` ensures that any future SDK
+/// `AgentEventPayload` variant becomes a compile error inside this function so
+/// Newton must explicitly classify it (no silent fall-through).
 #[allow(clippy::too_many_arguments)]
+#[allow(unknown_lints)]
+#[deny(non_exhaustive_omitted_patterns)]
 pub(super) async fn execute_sdk_engine(
     manager: &AikitEngineManager,
     engine_name: &str,
@@ -87,7 +93,10 @@ pub(super) async fn execute_sdk_engine(
         }
 
         let remaining = timeout.saturating_sub(start.elapsed());
-        let (events, iter_run_result) = match tokio::time::timeout(
+        // execute_engine_events returns `(events, inner_result)` so we always get the
+        // already-collected events even when the SDK returns an error (e.g. QuotaExceeded).
+        // This ensures the events artifact is populated before we return an error.
+        let (events, iter_inner_result) = match tokio::time::timeout(
             remaining,
             manager.execute_engine_events(engine_name, prompt, model, Some(remaining)),
         )
@@ -100,14 +109,8 @@ pub(super) async fn execute_sdk_engine(
                 )
                 .with_code("WFG-AGENT-005"));
             }
-            Ok(Err(mut err)) if err.code == "WFG-AGENT-008" => {
-                err.add_context("events_artifact", &events_artifact_rel);
-                if stderr_path.exists() {
-                    err.add_context("stderr_artifact", &stderr_rel);
-                }
-                return Err(err);
-            }
-            Ok(result) => result?,
+            Ok(Err(e)) => return Err(e), // fatal: spawn panic / is_runnable failure
+            Ok(Ok(pair)) => pair,
         };
 
         let mut stdout_file = std::fs::OpenOptions::new()
@@ -152,9 +155,20 @@ pub(super) async fn execute_sdk_engine(
                 aikit_sdk::AgentEventPayload::StreamMessage(msg)
                     if msg.phase == aikit_sdk::MessagePhase::Final
                         && msg.role == aikit_sdk::MessageRole::Assistant => {}
-                _ => {
-                    continue;
-                }
+                aikit_sdk::AgentEventPayload::StreamMessage(_) => continue,
+                aikit_sdk::AgentEventPayload::RawTransportLine { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitTextDelta { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitTextFinal { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitToolUse { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitToolResult { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitSubagentSpawn { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitSubagentResult { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitContextCompressed { .. } => continue,
+                aikit_sdk::AgentEventPayload::AikitStepFinish { .. } => continue,
+                // Required by #[non_exhaustive] across crate boundary; the
+                // `non_exhaustive_omitted_patterns` lint on the enclosing
+                // function turns any new SDK variant into a compile error.
+                _ => continue,
             }
 
             if let Some(text) = extract_text_from_sdk_event(event) {
@@ -208,11 +222,47 @@ pub(super) async fn execute_sdk_engine(
                             stderr_bytes += text.len() + 1;
                         }
                     }
+                    aikit_sdk::AgentEventPayload::RawBytes(_) => {}
+                    aikit_sdk::AgentEventPayload::StreamMessage(_) => {}
+                    aikit_sdk::AgentEventPayload::TokenUsageLine { .. } => {}
+                    aikit_sdk::AgentEventPayload::QuotaExceeded { .. } => {}
+                    aikit_sdk::AgentEventPayload::RawTransportLine { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitTextDelta { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitTextFinal { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitToolUse { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitToolResult { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitSubagentSpawn { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitSubagentResult { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitContextCompressed { .. } => {}
+                    aikit_sdk::AgentEventPayload::AikitStepFinish { .. } => {}
+                    // Required by #[non_exhaustive] across crate boundary; the
+                    // `non_exhaustive_omitted_patterns` lint on the enclosing
+                    // function turns any new SDK variant into a compile error.
                     _ => {}
                 }
             }
         }
 
+        // All events have been flushed to the artifact files. Now resolve the inner SDK
+        // result. Any WFG-AGENT-008 (RunError::QuotaExceeded) error is handled here so
+        // the artifact paths point at non-empty files containing the quota evidence.
+        let iter_run_result = match iter_inner_result {
+            Ok(run_result) => run_result,
+            Err(mut err) if err.code == "WFG-AGENT-008" => {
+                err.add_context("events_artifact", &events_artifact_rel);
+                if stderr_path.exists() {
+                    err.add_context("stderr_artifact", &stderr_rel);
+                }
+                return Err(err);
+            }
+            Err(e) => return Err(e),
+        };
+
+        // Two distinct quota paths:
+        //  1. RunError::QuotaExceeded → mapped to WFG-AGENT-008 in iter_inner_result (handled
+        //     above, after events are flushed).
+        //  2. RunResult.quota_exceeded → SDK returned Ok(RunResult) but the result carries a
+        //     quota signal; handled here with the same artifact-context enrichment.
         if let Some(ref info) = iter_run_result.quota_exceeded {
             return Err(quota_signal_to_error(
                 info,

@@ -165,3 +165,11 @@ path = "tests/integration/test_parity_endpoints.rs"
 [[test]]
 name = "test_human_ailoop"
 path = "tests/integration/test_human_ailoop.rs"
+
+[[test]]
+name = "test_engine_map_run_error"
+path = "tests/unit/test_engine_map_run_error.rs"
+
+[[test]]
+name = "test_lints_no_wildcard_payload_match"
+path = "tests/lints/no_wildcard_payload_match.rs"
