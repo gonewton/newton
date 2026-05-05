@@ -2,5 +2,6 @@
 pub mod cli;
 pub mod monitor;
 
+pub use cli::{build_app, NewtonApp, NewtonContext};
 pub use newton_core::Result;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
