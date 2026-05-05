@@ -343,9 +343,10 @@ pub fn summarize_error(error: &AppError, redact_keys: &[String]) -> AppErrorSumm
         .iter()
         .filter(|(k, _)| *k != "output")
         .map(|(k, v)| {
+            let v_lower = v.to_lowercase();
             let value_sensitive = redact_keys
                 .iter()
-                .any(|p| v.to_lowercase().contains(&p.to_lowercase()));
+                .any(|p| v_lower.contains(&p.to_lowercase()));
             let value = if should_redact(k, redact_keys) || value_sensitive {
                 "[REDACTED]".to_string()
             } else {
