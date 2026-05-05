@@ -335,11 +335,26 @@ pub fn summarize_error(error: &AppError, redact_keys: &[String]) -> AppErrorSumm
             break;
         }
     }
+    // Exclude "output" — it is large and already persisted via artifact_store.route_output().
+    // Redact remaining context values against the workflow's redact_keys.
+    let context: HashMap<String, String> = error
+        .context
+        .iter()
+        .filter(|(k, _)| *k != "output")
+        .map(|(k, v)| {
+            let value = if should_redact(k, redact_keys) {
+                "[REDACTED]".to_string()
+            } else {
+                v.clone()
+            };
+            (k.clone(), value)
+        })
+        .collect();
     AppErrorSummary {
         code: error.code.clone(),
         category: format!("{:?}", error.category),
         message,
-        context: error.context.clone(),
+        context,
     }
 }
 
