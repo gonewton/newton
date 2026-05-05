@@ -336,13 +336,17 @@ pub fn summarize_error(error: &AppError, redact_keys: &[String]) -> AppErrorSumm
         }
     }
     // Exclude "output" — it is large and already persisted via artifact_store.route_output().
-    // Redact remaining context values against the workflow's redact_keys.
+    // Redact entries whose key name matches a redact pattern OR whose value contains a sensitive
+    // pattern as a substring (consistent with the message-redaction path above).
     let context: HashMap<String, String> = error
         .context
         .iter()
         .filter(|(k, _)| *k != "output")
         .map(|(k, v)| {
-            let value = if should_redact(k, redact_keys) {
+            let value_sensitive = redact_keys
+                .iter()
+                .any(|p| v.to_lowercase().contains(&p.to_lowercase()));
+            let value = if should_redact(k, redact_keys) || value_sensitive {
                 "[REDACTED]".to_string()
             } else {
                 v.clone()
@@ -399,4 +403,64 @@ pub fn canonicalize_workflow_path(path: &Path) -> Result<PathBuf, AppError> {
             ),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_error_with_context(key: &str, value: &str) -> AppError {
+        let mut error = AppError::new(ErrorCategory::InternalError, "test error");
+        error.add_context(key, value);
+        error
+    }
+
+    #[test]
+    fn summarize_error_redacts_context_key_by_name() {
+        let error = make_error_with_context("token", "abc123");
+        let summary = summarize_error(&error, &["token".to_string()]);
+        assert_eq!(
+            summary.context.get("token"),
+            Some(&"[REDACTED]".to_string())
+        );
+    }
+
+    #[test]
+    fn summarize_error_redacts_context_value_containing_sensitive_pattern() {
+        // The key name is harmless, but the value embeds a sensitive word.
+        let error = make_error_with_context("context", "operation failed, token=abc123");
+        let summary = summarize_error(&error, &["token".to_string()]);
+        assert_eq!(
+            summary.context.get("context"),
+            Some(&"[REDACTED]".to_string())
+        );
+    }
+
+    #[test]
+    fn summarize_error_does_not_redact_benign_context_value() {
+        let error = make_error_with_context("context", "quota exhausted for provider openai");
+        let summary = summarize_error(&error, &["token".to_string(), "password".to_string()]);
+        assert_eq!(
+            summary.context.get("context"),
+            Some(&"quota exhausted for provider openai".to_string())
+        );
+    }
+
+    #[test]
+    fn summarize_error_excludes_output_key() {
+        let error = make_error_with_context("output", "large stdout payload");
+        let summary = summarize_error(&error, &[]);
+        assert!(!summary.context.contains_key("output"));
+    }
+
+    #[test]
+    fn summarize_error_redacts_message_when_context_value_contains_pattern() {
+        let error = make_error_with_context("context", "secret=hunter2");
+        let summary = summarize_error(&error, &["secret".to_string()]);
+        assert_eq!(summary.message, "[REDACTED]");
+        assert_eq!(
+            summary.context.get("context"),
+            Some(&"[REDACTED]".to_string())
+        );
+    }
 }
