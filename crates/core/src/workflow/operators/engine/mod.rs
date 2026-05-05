@@ -137,17 +137,23 @@ impl AikitEngineManager {
         let prompt_owned = prompt.to_string();
         let engine_name_owned = engine_name.to_string();
 
-        let (events, run_result) = tokio::task::spawn_blocking(move || {
-            let mut events: Vec<aikit_sdk::AgentEvent> = Vec::new();
-            let result =
-                aikit_sdk::run_agent_events(&engine_name_owned, &prompt_owned, options, |event| {
-                    events.push(event);
-                })
+        let (events, run_result) = tokio::task::spawn_blocking(
+            move || -> (Vec<aikit_sdk::AgentEvent>, Result<aikit_sdk::RunResult, AppError>) {
+                let mut events: Vec<aikit_sdk::AgentEvent> = Vec::new();
+                let result = aikit_sdk::run_agent_events(
+                    &engine_name_owned,
+                    &prompt_owned,
+                    options,
+                    |event| {
+                        events.push(event);
+                    },
+                )
                 .map_err(map_run_error);
-            // Always return the events alongside the result so the caller can flush
-            // them to disk even when the SDK returns an error (e.g. QuotaExceeded).
-            (events, result)
-        })
+                // Always return the events alongside the result so the caller can flush
+                // them to disk even when the SDK returns an error (e.g. QuotaExceeded).
+                (events, result)
+            },
+        )
         .await
         .map_err(|e| {
             AppError::new(

@@ -258,6 +258,11 @@ pub(super) async fn execute_sdk_engine(
             Err(e) => return Err(e),
         };
 
+        // Two distinct quota paths:
+        //  1. RunError::QuotaExceeded → mapped to WFG-AGENT-008 in iter_inner_result (handled
+        //     above, after events are flushed).
+        //  2. RunResult.quota_exceeded → SDK returned Ok(RunResult) but the result carries a
+        //     quota signal; handled here with the same artifact-context enrichment.
         if let Some(ref info) = iter_run_result.quota_exceeded {
             return Err(quota_signal_to_error(
                 info,
