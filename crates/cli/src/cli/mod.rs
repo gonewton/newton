@@ -1,7 +1,12 @@
 //! CLI scaffolding for Newton: argument parsing, command definitions, and command dispatch logic.
 pub mod args;
 pub mod commands;
+pub mod context;
+pub mod framework_setup;
 pub mod init;
+
+pub use context::NewtonContext;
+pub use framework_setup::build_app;
 
 pub use args::{
     ArtifactCommand, ArtifactsArgs, BatchArgs, CheckpointCommand, CheckpointsArgs, DotArgs,
