@@ -54,6 +54,12 @@ humantime = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
 regex = { workspace = true }
+# Optional: OpenSSL with vendored feature for static musl builds
+openssl = { version = "0.10", optional = true, features = ["vendored"] }
+
+[features]
+# Feature flag to enable vendored OpenSSL for static musl builds
+vendored-openssl = ["openssl"]
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

@@ -62,7 +62,7 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.target }}" == "x86_64-unknown-linux-musl" ]; then
-            RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target ${{ matrix.target }} --features openssl/vendored
+            RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target ${{ matrix.target }} --features vendored-openssl
           else
             cargo build --release --target ${{ matrix.target }}
           fi
