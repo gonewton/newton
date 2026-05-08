@@ -23,14 +23,10 @@ fn test_cli_parsing() {
 
 #[test]
 fn test_cli_structure() {
-    use newton_cli::cli::Args;
-
-    // We can't easily test clap parsing without running the binary,
-    // but we can verify the types exist and can be constructed
-    // This mainly tests that the module structure is correct
-
-    // This test just ensures imports work and types are accessible
-    let _: Option<Args> = None;
+    // The legacy clap `Args` enum was removed during the cli-framework
+    // migration (issue #231).  Just verify the framework entry point exists.
+    use newton_cli::cli::framework_setup::REGISTERED_COMMAND_IDS;
+    assert!(!REGISTERED_COMMAND_IDS.is_empty());
 }
 
 #[test]

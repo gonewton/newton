@@ -60,6 +60,8 @@ openssl = { version = "0.10", optional = true, features = ["vendored"] }
 [features]
 # Feature flag to enable vendored OpenSSL for static musl builds
 vendored-openssl = ["openssl"]
+# Enable the natural-language `ask` router (issue #231 D3).
+ask = []
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
@@ -94,3 +96,20 @@ path = "tests/batch/test_batch_workflow_state_paths.rs"
 [[test]]
 name = "test_workflow_scenarios"
 path = "tests/integration/test_workflow_scenarios.rs"
+
+[[test]]
+name = "test_cli_version"
+path = "tests/integration/test_cli_version.rs"
+
+[[test]]
+name = "test_ops_commands"
+path = "tests/integration/test_ops_commands.rs"
+
+[[test]]
+name = "test_command_metadata"
+path = "tests/integration/test_command_metadata.rs"
+
+[[test]]
+name = "test_ask"
+path = "tests/integration/test_ask.rs"
+required-features = ["ask"]

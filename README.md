@@ -581,6 +581,21 @@ If monitor can't find the ailoop URLs, ensure you have either:
   ailoop_server_ws_url=ws://127.0.0.1:8080
   ```
 
+## Development
+
+Newton's CLI is wired through the [`cli-framework`](https://github.com/aroff/cli-framework)
+crate.  All commands are declared once in
+`crates/cli/src/cli/framework_setup.rs` (`build_app`); see
+[`crates/cli/README.md`](crates/cli/README.md) for the per-command
+metadata contract (`summary` / `syntax` / `category`) and the
+operational + `ask` command surface added in issue #231.
+
+When adding or renaming a command, update both `framework_setup.rs` and
+the `REGISTERED_COMMAND_IDS` constant — the integration tests in
+`crates/cli/tests/integration/test_command_metadata.rs` enforce that
+every registered command carries valid metadata.  See the cli-framework
+skill for upstream `CommandSpec` / `ArgSpec` reference.
+
 ## License
 
 See LICENSE file for details.

@@ -27,8 +27,13 @@ use crate::cli::args::{
     RunArgs, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
     WebhookStatusArgs,
 };
+use crate::cli::categories;
 use crate::cli::context::NewtonContext;
+use crate::cli::ops;
 use crate::cli::{commands, init};
+
+#[cfg(feature = "ask")]
+use crate::cli::ask;
 
 /// Stable error codes for the migration adapter layer (spec §6).
 pub mod error_codes {
@@ -428,7 +433,7 @@ fn run_command() -> Command {
         id: "run",
         summary: "Execute a workflow graph",
         syntax: Some("[WORKFLOW] [INPUT_FILE] [OPTIONS]"),
-        category: Some("workflow"),
+        category: Some(categories::WORKFLOW),
         spec: Some(Arc::new(CommandSpec {
             summary: "Execute a workflow graph",
             long_about: Some(RUN_LONG_ABOUT),
@@ -589,7 +594,7 @@ fn init_command() -> Command {
         id: "init",
         summary: "Initialize a Newton workspace with the default template",
         syntax: Some("[PATH] [OPTIONS]"),
-        category: Some("workspace"),
+        category: Some(categories::WORKSPACE),
         spec: Some(Arc::new(CommandSpec {
             summary: "Initialize a Newton workspace with the default template",
             long_about: Some(INIT_LONG_ABOUT),
@@ -642,7 +647,7 @@ fn batch_command() -> Command {
         id: "batch",
         summary: "Process queued work items for a project",
         syntax: Some("<PROJECT_ID> [OPTIONS]"),
-        category: Some("workflow"),
+        category: Some(categories::OPS),
         spec: Some(Arc::new(CommandSpec {
             summary: "Process queued work items for a project",
             long_about: Some(BATCH_LONG_ABOUT),
@@ -719,7 +724,7 @@ fn serve_command() -> Command {
         id: "serve",
         summary: "Start the Newton HTTP API server",
         syntax: Some("[OPTIONS]"),
-        category: Some("server"),
+        category: Some(categories::OPS),
         spec: Some(Arc::new(CommandSpec {
             summary: "Start the Newton HTTP API server",
             long_about: Some(SERVE_LONG_ABOUT),
@@ -783,7 +788,7 @@ fn monitor_command() -> Command {
         id: "monitor",
         summary: "Monitor live ailoop channels via a terminal UI",
         syntax: Some("[OPTIONS]"),
-        category: Some("server"),
+        category: Some(categories::OPS),
         spec: Some(Arc::new(CommandSpec {
             summary: "Monitor live ailoop channels via a terminal UI",
             long_about: Some(MONITOR_LONG_ABOUT),
@@ -847,7 +852,7 @@ fn validate_command() -> Command {
         id: "validate",
         summary: "Validate a workflow graph definition",
         syntax: Some("[WORKFLOW] [OPTIONS]"),
-        category: Some("workflow"),
+        category: Some(categories::WORKFLOW),
         spec: Some(Arc::new(CommandSpec {
             summary: "Validate a workflow graph definition",
             long_about: Some(VALIDATE_LONG_ABOUT),
@@ -898,7 +903,7 @@ fn dot_command() -> Command {
         id: "dot",
         summary: "Generate a visual diagram of the workflow graph",
         syntax: Some("[WORKFLOW] [OPTIONS]"),
-        category: Some("workflow"),
+        category: Some(categories::WORKFLOW),
         spec: Some(Arc::new(CommandSpec {
             summary: "Generate a visual diagram of the workflow graph",
             long_about: Some(DOT_LONG_ABOUT),
@@ -962,7 +967,7 @@ fn lint_command() -> Command {
         id: "lint",
         summary: "Check workflow for best practices and potential issues",
         syntax: Some("[WORKFLOW] [OPTIONS]"),
-        category: Some("workflow"),
+        category: Some(categories::WORKFLOW),
         spec: Some(Arc::new(CommandSpec {
             summary: "Check workflow for best practices and potential issues",
             long_about: Some(LINT_LONG_ABOUT),
@@ -1026,7 +1031,7 @@ fn explain_command() -> Command {
         id: "explain",
         summary: "Generate human-readable explanations of workflow behavior",
         syntax: Some("[WORKFLOW] [OPTIONS]"),
-        category: Some("workflow"),
+        category: Some(categories::WORKFLOW),
         spec: Some(Arc::new(CommandSpec {
             summary: "Generate human-readable explanations of workflow behavior",
             long_about: Some(EXPLAIN_LONG_ABOUT),
@@ -1139,7 +1144,7 @@ fn resume_command() -> Command {
         id: "resume",
         summary: "Continue a workflow that was interrupted or stopped",
         syntax: Some("[OPTIONS]"),
-        category: Some("workflow"),
+        category: Some(categories::WORKFLOW),
         spec: Some(Arc::new(CommandSpec {
             summary: "Continue a workflow that was interrupted or stopped",
             long_about: Some(RESUME_LONG_ABOUT),
@@ -1203,7 +1208,7 @@ fn checkpoints_command() -> Command {
         id: "checkpoints",
         summary: "Manage and inspect workflow execution checkpoints",
         syntax: Some("<list|clean> [OPTIONS]"),
-        category: Some("management"),
+        category: Some(categories::MAINTENANCE),
         spec: Some(Arc::new(CommandSpec {
             summary: "Manage and inspect workflow execution checkpoints",
             long_about: Some(CHECKPOINTS_LONG_ABOUT),
@@ -1315,7 +1320,7 @@ fn artifacts_command() -> Command {
         id: "artifacts",
         summary: "Manage workflow output files and execution artifacts",
         syntax: Some("<clean> [OPTIONS]"),
-        category: Some("management"),
+        category: Some(categories::MAINTENANCE),
         spec: Some(Arc::new(CommandSpec {
             summary: "Manage workflow output files and execution artifacts",
             long_about: Some(ARTIFACTS_LONG_ABOUT),
@@ -1405,7 +1410,7 @@ fn webhook_command() -> Command {
         id: "webhook",
         summary: "Run webhooks to trigger workflows from external events",
         syntax: Some("<serve|status> [WORKFLOW] --workspace <PATH>"),
-        category: Some("integration"),
+        category: Some(categories::OPS),
         spec: Some(Arc::new(CommandSpec {
             summary: "Run webhooks to trigger workflows from external events",
             long_about: Some(WEBHOOK_LONG_ABOUT),
@@ -1519,7 +1524,7 @@ fn log_command() -> Command {
         id: "log",
         summary: "List and replay workflow execution history",
         syntax: Some("<list|show> [OPTIONS]"),
-        category: Some("management"),
+        category: Some(categories::MAINTENANCE),
         spec: Some(Arc::new(CommandSpec {
             summary: "List and replay workflow execution history",
             long_about: Some(LOG_LONG_ABOUT),
@@ -1693,6 +1698,279 @@ fn log_command() -> Command {
     }
 }
 
+// ── operational command builders (issue #231) ────────────────────────────────
+
+fn health_command() -> Command {
+    Command {
+        id: "health",
+        summary: "Print a one-line liveness status",
+        syntax: Some("[OPTIONS]"),
+        category: Some(categories::OPERATIONAL),
+        spec: Some(Arc::new(CommandSpec {
+            summary: "Print a one-line liveness status",
+            long_about: Some(
+                "Health prints `newton OK <version>` and exits 0 if the binary can run.\n\
+                 No workspace, network, or config access — suitable for container probes.",
+            ),
+            examples: vec!["newton health"],
+            args: vec![],
+            ..Default::default()
+        })),
+        validator: None,
+        execute: Arc::new(|_ctx, _args| Box::pin(async move { ops::health::run() })),
+    }
+}
+
+fn doctor_command() -> Command {
+    Command {
+        id: "doctor",
+        summary: "Run local environment diagnostic probes",
+        syntax: Some("[OPTIONS]"),
+        category: Some(categories::OPERATIONAL),
+        spec: Some(Arc::new(CommandSpec {
+            summary: "Run local environment diagnostic probes",
+            long_about: Some(
+                "Doctor runs a small set of probes (workspace, config, ailoop reachability, gh,\n\
+                 logging) and prints one `OK|FAIL|SKIP <name>: <detail>` line per probe.\n\
+                 Exits 0 if all probes pass, 1 if any fail.",
+            ),
+            examples: vec!["newton doctor", "newton doctor --workspace ./workspace"],
+            args: vec![ArgSpec {
+                name: "workspace",
+                kind: ArgKind::Option,
+                short: None,
+                long: Some("workspace"),
+                value_type: ArgValueType::String,
+                cardinality: Cardinality::Optional,
+                default: None,
+                conflicts_with: vec![],
+                requires: vec![],
+                help: "Workspace root to probe (defaults to CWD with .newton/)",
+            }],
+            ..Default::default()
+        })),
+        validator: None,
+        execute: Arc::new(|_ctx, args| {
+            Box::pin(async move {
+                let workspace = get_opt_path(&args, "workspace");
+                let report = ops::doctor::run(ops::doctor::DoctorArgs { workspace })?;
+                report.print();
+                if report.any_failed() {
+                    std::process::exit(1);
+                }
+                Ok(())
+            })
+        }),
+    }
+}
+
+fn config_command() -> Command {
+    Command {
+        id: "config",
+        summary: "Inspect resolved Newton configuration",
+        syntax: Some("show [OPTIONS]"),
+        category: Some(categories::OPERATIONAL),
+        spec: Some(Arc::new(CommandSpec {
+            summary: "Inspect resolved Newton configuration",
+            long_about: Some(
+                "Config currently exposes one subcommand: `show`.\n\
+                 `newton config show` prints the resolved configuration as JSON, with values\n\
+                 whose key looks like a secret (token/secret/password/key) replaced by\n\
+                 `***REDACTED***`.",
+            ),
+            examples: vec![
+                "newton config show",
+                "newton config show --workspace ./workspace",
+            ],
+            args: vec![
+                ArgSpec {
+                    name: "subcommand",
+                    kind: ArgKind::Positional,
+                    short: None,
+                    long: None,
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Subcommand: show (only supported value)",
+                },
+                ArgSpec {
+                    name: "workspace",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("workspace"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Workspace root (optional)",
+                },
+            ],
+            ..Default::default()
+        })),
+        validator: None,
+        execute: Arc::new(|_ctx, args| {
+            Box::pin(async move {
+                let sub = args
+                    .named
+                    .get("subcommand")
+                    .cloned()
+                    .or_else(|| args.positional.first().cloned())
+                    .unwrap_or_else(|| "show".to_string());
+                if sub != "show" {
+                    return Err(anyhow!(
+                        "{}: only `config show` is supported (got `config {}`)",
+                        error_codes::CLI_MIG_001,
+                        sub
+                    ));
+                }
+                let workspace = get_opt_path(&args, "workspace");
+                ops::config_show::run(ops::config_show::ConfigShowArgs { workspace })
+            })
+        }),
+    }
+}
+
+fn completion_command() -> Command {
+    Command {
+        id: "completion",
+        summary: "Emit shell completion script",
+        syntax: Some("<SHELL>"),
+        category: Some(categories::OPERATIONAL),
+        spec: Some(Arc::new(CommandSpec {
+            summary: "Emit shell completion script",
+            long_about: Some(
+                "Completion writes a shell completion stub for the requested shell to stdout.\n\
+                 Supported shells: bash, zsh, fish, powershell.",
+            ),
+            examples: vec![
+                "newton completion bash",
+                "newton completion zsh",
+                "newton completion fish",
+                "newton completion powershell",
+            ],
+            args: vec![ArgSpec {
+                name: "shell",
+                kind: ArgKind::Positional,
+                short: None,
+                long: None,
+                value_type: ArgValueType::String,
+                cardinality: Cardinality::Required,
+                default: None,
+                conflicts_with: vec![],
+                requires: vec![],
+                help: "Target shell: bash | zsh | fish | powershell",
+            }],
+            ..Default::default()
+        })),
+        validator: None,
+        execute: Arc::new(|_ctx, args| {
+            Box::pin(async move {
+                let shell_name = args
+                    .named
+                    .get("shell")
+                    .cloned()
+                    .or_else(|| args.positional.first().cloned())
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "{}: completion requires a shell argument",
+                            error_codes::CLI_MIG_002
+                        )
+                    })?;
+                let shell = ops::completion::Shell::from_str(&shell_name)?;
+                ops::completion::run(shell)
+            })
+        }),
+    }
+}
+
+#[cfg(feature = "ask")]
+fn ask_command() -> Command {
+    Command {
+        id: "ask",
+        summary: "Match a natural-language query to the closest command",
+        syntax: Some("<QUERY>"),
+        category: Some(categories::DIAGNOSTIC),
+        spec: Some(Arc::new(CommandSpec {
+            summary: "Match a natural-language query to the closest command",
+            long_about: Some(
+                "Ask ranks every registered command's summary/syntax/category against your\n\
+                 query and prints the top 3 matches.  Substring + token-overlap scoring; no LLM.",
+            ),
+            examples: vec!["newton ask \"list checkpoints\""],
+            args: vec![ArgSpec {
+                name: "query",
+                kind: ArgKind::Positional,
+                short: None,
+                long: None,
+                value_type: ArgValueType::String,
+                cardinality: Cardinality::Required,
+                default: None,
+                conflicts_with: vec![],
+                requires: vec![],
+                help: "Free-text query (one positional arg)",
+            }],
+            ..Default::default()
+        })),
+        validator: None,
+        execute: Arc::new(|_ctx, args| {
+            Box::pin(async move {
+                let query = args
+                    .named
+                    .get("query")
+                    .cloned()
+                    .unwrap_or_else(|| args.positional.join(" "));
+                let summaries = ask_summaries();
+                ask::run(&query, &summaries)
+            })
+        }),
+    }
+}
+
+#[cfg(feature = "ask")]
+fn ask_summaries() -> Vec<ask::CommandSummary> {
+    fn s(name: &str, summary: &str, syntax: Option<&str>, category: &str) -> ask::CommandSummary {
+        ask::CommandSummary {
+            name: name.to_string(),
+            summary: summary.to_string(),
+            syntax: syntax.unwrap_or("").to_string(),
+            category: category.to_string(),
+        }
+    }
+    let cmds: Vec<Command> = vec![
+        run_command(),
+        init_command(),
+        batch_command(),
+        serve_command(),
+        monitor_command(),
+        validate_command(),
+        dot_command(),
+        lint_command(),
+        explain_command(),
+        resume_command(),
+        checkpoints_command(),
+        artifacts_command(),
+        webhook_command(),
+        log_command(),
+        health_command(),
+        doctor_command(),
+        config_command(),
+        completion_command(),
+    ];
+    cmds.into_iter()
+        .map(|c| {
+            s(
+                c.id,
+                c.summary,
+                c.syntax,
+                c.category.unwrap_or(categories::WORKFLOW),
+            )
+        })
+        .collect()
+}
+
 // ── public entry point ────────────────────────────────────────────────────────
 
 /// Build the Newton CLI application backed by `cli-framework`.
@@ -1701,7 +1979,8 @@ fn log_command() -> Command {
 /// (checkpoints, artifacts, webhook, log) dispatch to their sub-actions
 /// internally via the first positional arg.
 pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
-    AppBuilder::new()
+    #[allow(unused_mut)]
+    let mut builder = AppBuilder::new()
         .with_version("newton", env!("CARGO_PKG_VERSION"))
         .register_command(run_command())?
         .register_command(init_command())?
@@ -1717,8 +1996,72 @@ pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
         .register_command(artifacts_command())?
         .register_command(webhook_command())?
         .register_command(log_command())?
+        .register_command(health_command())?
+        .register_command(doctor_command())?
+        .register_command(config_command())?
+        .register_command(completion_command())?;
+    #[cfg(feature = "ask")]
+    {
+        builder = builder.register_command(ask_command())?;
+    }
+    builder
         .build(ctx)
         .map_err(|e| anyhow!("{}: {}", error_codes::CLI_MIG_001, e))
+}
+
+/// Stable list of command ids registered by [`build_app`].  Drives the
+/// registry-uniqueness assertion (Goal 4.6) and ensures any rename surfaces
+/// as a test failure rather than silent drift.
+pub const REGISTERED_COMMAND_IDS: &[&str] = &[
+    "run",
+    "init",
+    "batch",
+    "serve",
+    "monitor",
+    "validate",
+    "dot",
+    "lint",
+    "explain",
+    "resume",
+    "checkpoints",
+    "artifacts",
+    "webhook",
+    "log",
+    "health",
+    "doctor",
+    "config",
+    "completion",
+];
+
+/// Returns every `Command` registered by `build_app`, in registration order.
+/// Used by the metadata-audit unit test.
+pub fn enumerate_commands() -> Vec<Command> {
+    #[allow(unused_mut)]
+    let mut cmds = vec![
+        run_command(),
+        init_command(),
+        batch_command(),
+        serve_command(),
+        monitor_command(),
+        validate_command(),
+        dot_command(),
+        lint_command(),
+        explain_command(),
+        resume_command(),
+        checkpoints_command(),
+        artifacts_command(),
+        webhook_command(),
+        log_command(),
+        health_command(),
+        doctor_command(),
+        config_command(),
+        completion_command(),
+    ];
+    #[cfg(feature = "ask")]
+    {
+        cmds.push(ask_command());
+    }
+    cmds
 }
 
 // ── TryFrom<CommandArgs> adapters ─────────────────────────────────────────────

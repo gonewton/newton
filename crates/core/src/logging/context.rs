@@ -51,7 +51,8 @@ pub fn detect_context(command: &LogInvocation) -> ExecutionContext {
         | LogInvocationKind::Artifacts
         | LogInvocationKind::Webhook
         | LogInvocationKind::Log
-        | LogInvocationKind::Init => ExecutionContext::LocalDev,
+        | LogInvocationKind::Init
+        | LogInvocationKind::Diagnostic => ExecutionContext::LocalDev,
         LogInvocationKind::Monitor => ExecutionContext::Tui,
         LogInvocationKind::Serve => ExecutionContext::Server,
     }

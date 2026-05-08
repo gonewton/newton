@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `newton health`, `newton doctor`, `newton config show`, `newton completion`
+  operational commands (issue #231).
+- Feature-gated `newton ask "<query>"` substring router (`--features ask`)
+  that ranks registered commands by `summary`/`syntax`/`category`.
+- `LogInvocationKind::Diagnostic` for operational/diagnostic commands.
+
+### Removed
+
+- Legacy clap `Args`/`Command` enum and `pub async fn run` dispatcher in
+  `crates/cli/src/cli/mod.rs`. Help text and argv parsing are now sourced
+  exclusively from the cli-framework registry.
+- `infer_log_invocation` argv scanner in `crates/cli/src/main.rs`,
+  replaced by `cli/log_invocation.rs::kind_for_command`.
+
 ### Breaking changes
 
 - **HIL operators now require ailoop unconditionally.** `HumanDecisionOperator` and
