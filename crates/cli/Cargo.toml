@@ -18,7 +18,7 @@ name = "logging_integration_helper"
 path = "tests/bin/logging_integration_helper.rs"
 
 [dependencies]
-cli-framework = { git = "https://github.com/aroff/cli-framework" }
+cli-framework = { git = "https://github.com/aroff/cli-framework", features = ["mcp-server"] }
 newton-core = { path = "../core" }
 newton-types = { path = "../types" }
 newton-backend = { path = "../backend" }
@@ -113,3 +113,19 @@ path = "tests/integration/test_command_metadata.rs"
 name = "test_ask"
 path = "tests/integration/test_ask.rs"
 required-features = ["ask"]
+
+[[test]]
+name = "mcp_off_serve_unchanged"
+path = "tests/integration/mcp_off_serve_unchanged.rs"
+
+[[test]]
+name = "mcp_on_starts_and_logs"
+path = "tests/integration/mcp_on_starts_and_logs.rs"
+
+[[test]]
+name = "mcp_port_conflict"
+path = "tests/integration/mcp_port_conflict.rs"
+
+[[test]]
+name = "mcp_tool_call_health"
+path = "tests/integration/mcp_tool_call_health.rs"

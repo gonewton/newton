@@ -6,6 +6,7 @@ pub mod context;
 pub mod framework_setup;
 pub mod init;
 pub mod log_invocation;
+pub mod mcp;
 pub mod ops;
 
 #[cfg(feature = "ask")]

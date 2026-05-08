@@ -8,7 +8,7 @@ description: |
   Lines under "Commands:" are sorted alphabetically; cli-framework returns
   them in HashMap order, which is non-deterministic across runs.
 ---
-Usage: newton <COMMAND>
+Usage: newton [OPTIONS] <COMMAND>
 
 Commands:
   artifacts    Manage workflow output files and execution artifacts
@@ -33,5 +33,9 @@ Commands:
   webhook      Run webhooks to trigger workflows from external events
 
 Options:
-  -h, --help     Print help
-  -V, --version  Print version
+      --mcp-host <HOST>  MCP server bind address [default: 127.0.0.1]
+      --mcp-path <PATH>  MCP HTTP path prefix [default: /mcp]
+      --mcp-port <PORT>  MCP server bind port [default: 8080]
+      --mcp-serve        Enable MCP server mode (Streamable HTTP)
+  -V, --version          Print version
+  -h, --help             Print help

@@ -6,11 +6,31 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **MCP server mode** (issue #237): top-level `--mcp-serve`, `--mcp-host`,
+  `--mcp-port`, `--mcp-path` flags expose every registered Newton command
+  (`REGISTERED_COMMAND_IDS`) as an MCP tool via the upstream `cli-framework`
+  `mcp-server` feature. Newton operator defaults: `127.0.0.1:8730/mcp`
+  (distinct from `newton serve`'s `8080`). Successful bind emits a single
+  structured `event="mcp_serve_started"` log line carrying `mcp_enabled`,
+  `bind_address`, `mcp_path`, and `tool_count`.
+- New stable error codes:
+  - `NEWTON-MCP-001` — TCP bind failure on the MCP listener; exits non-zero.
+  - `NEWTON-MCP-002` — non-recoverable cli-framework MCP runtime error
+    surfaced after a successful bind.
 - `newton health`, `newton doctor`, `newton config show`, `newton completion`
   operational commands (issue #231).
 - Feature-gated `newton ask "<query>"` substring router (`--features ask`)
   that ranks registered commands by `summary`/`syntax`/`category`.
 - `LogInvocationKind::Diagnostic` for operational/diagnostic commands.
+
+### Changed
+
+- `cli-framework` git dependency now opts into `features = ["mcp-server"]`.
+  Existing `newton serve` HTTP behaviour is unchanged. Note: upstream clap
+  currently advertises `--mcp-port [default: 8080]` in `--help`; Newton's
+  argv layer rewrites unset values to `8730` before dispatch. Operators
+  should pass `--mcp-port` explicitly until the upstream default is aligned
+  (tracked at cli-framework#29).
 
 ### Removed
 
