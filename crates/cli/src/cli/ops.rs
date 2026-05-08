@@ -24,7 +24,10 @@ pub mod health {
 
     /// Print a single liveness line and exit 0.
     pub fn run() -> Result<()> {
-        let version = crate::VERSION;
+        run_with_version(crate::VERSION)
+    }
+
+    pub fn run_with_version(version: &str) -> Result<()> {
         if version.is_empty() {
             return Err(anyhow!("{}: VERSION is empty", error_codes::CLI_OPS_001));
         }
@@ -306,7 +309,7 @@ pub mod config_show {
                 if let Ok(text) = std::fs::read_to_string(&monitor_conf) {
                     let mut ailoop = Map::new();
                     for (k, v) in parse_kv(&text) {
-                        ailoop.insert(k, json!(redact_if_secret_key(&v)));
+                        ailoop.insert(k.clone(), json!(redact_value(&k, &v)));
                     }
                     if !ailoop.is_empty() {
                         root.insert("ailoop".into(), Value::Object(ailoop));
@@ -348,10 +351,6 @@ pub mod config_show {
             }
         }
         out
-    }
-
-    fn redact_if_secret_key(value: &str) -> String {
-        value.to_string()
     }
 
     fn redact_value(key: &str, value: &str) -> String {

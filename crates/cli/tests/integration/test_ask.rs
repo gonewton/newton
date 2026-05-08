@@ -44,3 +44,13 @@ fn empty_query_returns_cli_ask_001() {
     let err = newton_cli::ask::run("   ", &fixture()).expect_err("empty query must fail");
     assert!(format!("{err}").contains("CLI-ASK-001"));
 }
+
+#[test]
+fn no_matches_returns_cli_ask_002() {
+    let err = newton_cli::ask::run("xyzzy", &fixture())
+        .expect_err("no-match query must surface CLI-ASK-002");
+    assert!(
+        format!("{err}").contains("CLI-ASK-002"),
+        "expected CLI-ASK-002 in: {err}"
+    );
+}

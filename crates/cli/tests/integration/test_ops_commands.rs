@@ -78,6 +78,87 @@ fn completion_bash_first_line_matches_pattern() {
 }
 
 #[test]
+fn health_with_empty_version_returns_cli_ops_001() {
+    let err = newton_cli::ops::health::run_with_version("")
+        .expect_err("empty version must surface CLI-OPS-001");
+    assert!(
+        format!("{err}").contains("CLI-OPS-001"),
+        "expected CLI-OPS-001 in: {err}"
+    );
+}
+
+#[test]
+fn doctor_workspace_probe_failure_surfaces_cli_ops_002() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    // Pass a workspace without `.newton/`; probe_workspace_writable will fail
+    // because writing `<ws>/.newton/.doctor-probe` requires the parent dir.
+    let report = newton_cli::ops::doctor::run(newton_cli::ops::doctor::DoctorArgs {
+        workspace: Some(dir.path().to_path_buf()),
+    })
+    .expect("doctor run returns Ok with FAIL probes inside report");
+    let workspace_probe = report
+        .probes
+        .iter()
+        .find(|p| p.name == "workspace")
+        .expect("workspace probe present");
+    assert_eq!(
+        workspace_probe.status,
+        newton_cli::ops::doctor::ProbeStatus::Fail
+    );
+    assert!(
+        workspace_probe.detail.contains("CLI-OPS-002"),
+        "expected CLI-OPS-002, got: {}",
+        workspace_probe.detail
+    );
+}
+
+#[test]
+fn doctor_ailoop_probe_failure_surfaces_cli_ops_003() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cfg_dir = dir.path().join(".newton/configs");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    // Port 1 is reserved/closed everywhere; the connect_timeout will fail.
+    std::fs::write(
+        cfg_dir.join("monitor.conf"),
+        "ailoop_server_http_url=http://127.0.0.1:1\n",
+    )
+    .unwrap();
+    let report = newton_cli::ops::doctor::run(newton_cli::ops::doctor::DoctorArgs {
+        workspace: Some(dir.path().to_path_buf()),
+    })
+    .expect("doctor run produces a report");
+    let ailoop_probe = report
+        .probes
+        .iter()
+        .find(|p| p.name == "ailoop")
+        .expect("ailoop probe present");
+    assert_eq!(
+        ailoop_probe.status,
+        newton_cli::ops::doctor::ProbeStatus::Fail,
+        "ailoop probe should fail, detail: {}",
+        ailoop_probe.detail
+    );
+    assert!(
+        ailoop_probe.detail.contains("CLI-OPS-003"),
+        "expected CLI-OPS-003, got: {}",
+        ailoop_probe.detail
+    );
+}
+
+#[test]
+fn config_show_missing_workspace_surfaces_cli_ops_004() {
+    let bogus = std::path::PathBuf::from("/definitely/not/a/real/newton/workspace/cli-ops-004");
+    let err = newton_cli::ops::config_show::run(newton_cli::ops::config_show::ConfigShowArgs {
+        workspace: Some(bogus),
+    })
+    .expect_err("nonexistent workspace must error");
+    assert!(
+        format!("{err}").contains("CLI-OPS-004"),
+        "expected CLI-OPS-004 in: {err}"
+    );
+}
+
+#[test]
 fn completion_unknown_shell_errors() {
     let output = Command::cargo_bin(BIN)
         .expect("binary should build")
