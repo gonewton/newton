@@ -42,6 +42,10 @@ pub mod error_codes {
     pub const CLI_MIG_003: &str = "CLI-MIG-003";
     pub const CLI_MIG_004: &str = "CLI-MIG-004";
     pub const CLI_MIG_005: &str = "CLI-MIG-005";
+    /// MCP-mode bind failure (issue #237).
+    pub const NEWTON_MCP_001: &str = "NEWTON-MCP-001";
+    /// MCP-mode upstream runtime error after successful bind (issue #237).
+    pub const NEWTON_MCP_002: &str = "NEWTON-MCP-002";
 }
 
 // ── help-text constants ───────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use newton_cli::cli::context::NewtonContext;
 use newton_cli::cli::framework_setup::build_app;
 use newton_cli::cli::log_invocation::{kind_for_command, peek_command};
+use newton_cli::cli::mcp;
 use newton_cli::Result;
 
 #[tokio::main(flavor = "current_thread")]
@@ -13,6 +14,12 @@ async fn main() -> Result<()> {
     let _log_guard = newton_core::logging::init(&log_inv, log_dir.as_deref())?;
 
     let ctx = NewtonContext::new();
+
+    if mcp::is_mcp_serve(&app_args) {
+        let code = mcp::run(app_args, ctx).await;
+        std::process::exit(code);
+    }
+
     let mut app = build_app(ctx)?;
     app.run_with_args(app_args).await
 }
