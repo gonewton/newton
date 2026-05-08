@@ -81,8 +81,10 @@ fn legacy_misc_flags_rejected() {
 //   --trigger-file base.json --trigger a=1 --trigger b=@extra.txt
 //   yields {"a":"1","b":"hello"} ---
 
-#[tokio::test]
-async fn trigger_payload_merge_precedence() {
+#[test]
+fn trigger_payload_merge_precedence() {
+    use newton_cli::cli::args::KeyValuePair;
+    use newton_cli::cli::commands::build_trigger_payload;
     use serde_json::json;
     use std::fs;
     use tempfile::tempdir;
@@ -93,19 +95,6 @@ async fn trigger_payload_merge_precedence() {
     let extra = dir.path().join("extra.txt");
     fs::write(&extra, "hello").expect("write extra");
 
-    // Use the same internal builder commands::run uses, exposed via build_trigger_payload.
-    // We invoke through a synthetic RunArgs and check the resulting trigger payload by
-    // executing through a fake workflow.  Easier: import the helper directly via the
-    // test of the same file inside commands.rs (it already covers @-load).  Here we
-    // assert end-to-end via the public API: we construct the RunArgs and inspect the
-    // produced trigger payload by reflecting through executor's WorkflowDocument.
-    //
-    // To stay test-light, just call the same merge helper used by `run`.  It is
-    // re-exported through commands::build_trigger_payload's public surface — but
-    // since that helper is private, we replicate the merge order in-tests with the
-    // real helpers.
-    use newton_cli::cli::args::KeyValuePair;
-    let trigger_file = Some(base.clone());
     let trigger = vec![
         KeyValuePair {
             key: "a".to_string(),
@@ -116,18 +105,30 @@ async fn trigger_payload_merge_precedence() {
             value: format!("@{}", extra.display()),
         },
     ];
-    // Mirror commands::build_trigger_payload semantics.  This is an end-to-end
-    // shape check; the unit tests inside commands.rs cover the helper directly.
-    let mut payload: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(trigger_file.as_ref().unwrap()).unwrap()).unwrap();
-    let map = payload.as_object_mut().unwrap();
-    for kv in &trigger {
-        let v = if let Some(rest) = kv.value.strip_prefix('@') {
-            serde_json::Value::String(fs::read_to_string(rest).unwrap())
-        } else {
-            serde_json::Value::String(kv.value.clone())
-        };
-        map.insert(kv.key.clone(), v);
-    }
-    assert_eq!(payload, json!({"a":"1","b":"hello"}));
+
+    let payload = build_trigger_payload(&Some(base), &trigger)
+        .expect("build_trigger_payload")
+        .expect("payload present");
+
+    assert_eq!(payload, json!({"a": "1", "b": "hello"}));
+}
+
+// --- §7 criterion 4: additional legacy spellings on workflow.* and webhook ---
+
+#[test]
+fn legacy_workflow_subcommand_flags_rejected() {
+    assert_unrecognized(&["workflow", "lint", "wf.yaml", "--file", "wf.yaml"]);
+    assert_unrecognized(&["workflow", "validate", "wf.yaml", "--file", "wf.yaml"]);
+    assert_unrecognized(&["workflow", "preview", "wf.yaml", "--arg", "x=y"]);
+    assert_unrecognized(&["workflow", "preview", "wf.yaml", "--set", "x=y"]);
+    assert_unrecognized(&["workflow", "preview", "wf.yaml", "--trigger-json", "x.json"]);
+}
+
+#[test]
+fn webhook_legacy_file_flag_and_positional_rejected() {
+    // `--file` was renamed to `--workflow`.
+    assert_unrecognized(&["webhook", "serve", "--file", "wf.yaml", "--workspace", "."]);
+    assert_unrecognized(&["webhook", "status", "--file", "wf.yaml", "--workspace", "."]);
+    // The positional WORKFLOW slot was removed.
+    assert_unrecognized(&["webhook", "serve", "wf.yaml", "--workspace", "."]);
 }

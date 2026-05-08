@@ -1403,7 +1403,7 @@ fn try_load_trigger_payload(path: &Option<PathBuf>) -> StdResult<Option<Value>, 
     }
 }
 
-fn build_trigger_payload(
+pub fn build_trigger_payload(
     trigger_json: &Option<PathBuf>,
     args: &[KeyValuePair],
 ) -> StdResult<Option<Value>, AppError> {
