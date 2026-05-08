@@ -38,8 +38,9 @@ When aikit-sdk detects quota exhaustion, it sets `RunResult.quota_exceeded` and 
 | `WorkflowOperator` | Run a **nested workflow** from another YAML file; merges parent context and triggers into the child, returns child execution summary (for example `child_execution_id`) |
 | `HumanApprovalOperator` | Pause for a boolean approve/reject decision from a human operator |
 | `HumanDecisionOperator` | Pause for a multiple-choice selection from a human operator |
+| `GhOperator` | GitHub CLI wrapper for PR operations (`pr_create`, `pr_view`, `pr_approve`) and project board mutations (`project_resolve_board`, `project_item_set_status`) |
 
-Newton also bundles agent, GitHub, and MCP operator integrations. Their availability depends on the workflow you load — run `newton workflow preview <workflow.yaml>` for the exact operator list resolved by your file, and consult `docs/operators/` for the per-operator reference.
+Newton also bundles agent and MCP operator integrations. Their availability depends on the workflow you load — run `newton workflow preview <workflow.yaml>` for the exact operator list resolved by your file. For `GhOperator` reference documentation, see the [Newton skill](/.agents/skills/newton/references/gh-operator.md); for other operators, consult `docs/operators/`.
 
 #### Sub-workflows
 

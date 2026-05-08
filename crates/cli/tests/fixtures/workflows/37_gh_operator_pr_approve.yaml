@@ -1,0 +1,26 @@
+version: "2.0"
+mode: workflow_graph
+metadata:
+  name: "GhOperator PR Approve Test Workflow"
+workflow:
+  context: {}
+  settings:
+    entry_task: approve_pr
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 100
+  tasks:
+    - id: approve_pr
+      operator: GhOperator
+      params:
+        operation: pr_approve
+        pr_number: 36
+        repository: "owner/repo"
+      transitions:
+        - to: done
+    - id: done
+      operator: NoOpOperator
+      terminal: success
+      params: {}
