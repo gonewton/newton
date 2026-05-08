@@ -17,7 +17,8 @@ pub use framework_setup::build_app;
 pub use log_invocation::kind_for_command;
 
 pub use args::{
-    ArtifactCommand, ArtifactsArgs, BatchArgs, CheckpointCommand, CheckpointsArgs, DotArgs,
-    ExplainArgs, InitArgs, LintArgs, LogArgs, LogCommand, MonitorArgs, ResumeArgs, RunArgs,
-    ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
+    ArtifactArgs, ArtifactCommand, BatchArgs, CheckpointArgs, CheckpointCommand, DotArgs,
+    ExplainArgs, GraphFormat, InitArgs, LintArgs, MonitorArgs, ResumeArgs, RunArgs, RunsArgs,
+    RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
+    WebhookStatusArgs, WorkflowArgs, WorkflowCommand,
 };

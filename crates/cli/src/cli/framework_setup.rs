@@ -1,4 +1,4 @@
-//! cli-framework registration for Newton CLI (Issue #228 Stage 2).
+//! cli-framework registration for Newton CLI (spec 273 surface).
 //!
 //! All Command / CommandSpec / ArgSpec declarations and the `build_app()`
 //! entry point used by `crates/cli/src/main.rs` live here.
@@ -6,10 +6,9 @@
 //! ## Nested-command note
 //! The framework routes via its root-level `commands` map; nested paths in
 //! `tree_commands` are not yet dispatched by the clap adapter.  Group
-//! commands (checkpoints, artifacts, webhook, log) are therefore registered
-//! at root level and dispatch internally via their first positional arg.
-//! Proper hierarchical routing is deferred to Stage 3/4 once the framework
-//! adds nested-subcommand clap support.
+//! commands (workflow, runs, checkpoint, artifact, webhook) are therefore
+//! registered at root level and dispatch internally via their first
+//! positional arg (subcommand).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,9 +21,9 @@ use cli_framework::spec::command_tree::CommandSpec;
 use uuid::Uuid;
 
 use crate::cli::args::{
-    ArtifactCommand, ArtifactsArgs, BatchArgs, CheckpointCommand, CheckpointsArgs, DotArgs,
-    ExplainArgs, InitArgs, LintArgs, LogArgs, LogCommand, MonitorArgs, OutputFormat, ResumeArgs,
-    RunArgs, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
+    ArtifactArgs, ArtifactCommand, BatchArgs, CheckpointArgs, CheckpointCommand, DotArgs,
+    ExplainArgs, GraphFormat, InitArgs, LintArgs, MonitorArgs, OutputFormat, ResumeArgs, RunArgs,
+    RunsArgs, RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
     WebhookStatusArgs,
 };
 use crate::cli::categories;
@@ -35,7 +34,7 @@ use crate::cli::{commands, init};
 #[cfg(feature = "ask")]
 use crate::cli::ask;
 
-/// Stable error codes for the migration adapter layer (spec §6).
+/// Stable error codes for the migration adapter layer.
 pub mod error_codes {
     pub const CLI_MIG_001: &str = "CLI-MIG-001";
     pub const CLI_MIG_002: &str = "CLI-MIG-002";
@@ -51,25 +50,23 @@ pub mod error_codes {
 // ── help-text constants ───────────────────────────────────────────────────────
 
 const RUN_LONG_ABOUT: &str = "\
-Run executes a workflow graph defined in YAML, with optional trigger payload \
-from input file or arguments.
-
-Accepted forms:
-  newton run [WORKFLOW] [INPUT_FILE] [OPTIONS]
-  newton run --file <PATH> [OPTIONS]
+Run executes a workflow graph defined in YAML, with optional trigger payload.
 
 EXAMPLES:
   Basic workflow execution:
     newton run workflow.yaml
 
   With workspace and trigger data:
-    newton run workflow.yaml --workspace ./output --arg key=value
+    newton run workflow.yaml --workspace ./output --trigger key=value
 
-  Multiple arguments:
-    newton run workflow.yaml --arg env=prod --arg version=1.2.3
+  Multiple trigger arguments:
+    newton run workflow.yaml --trigger env=prod --trigger version=1.2.3
 
   With input file and verbose output:
-    newton run workflow.yaml input.txt --workspace ./workspace --verbose";
+    newton run workflow.yaml input.txt --workspace ./workspace --verbose
+
+  With base trigger payload from a JSON file:
+    newton run workflow.yaml --trigger-file payload.json --trigger override=1";
 
 const INIT_LONG_ABOUT: &str = "\
 Init creates the .newton workspace layout, installs the Newton template with \
@@ -83,7 +80,7 @@ EXAMPLES:
     newton init ./workspace
 
   Initialize with custom template source:
-    newton init . --template-source gonewton/newton-templates";
+    newton init . --template gonewton/newton-templates";
 
 const BATCH_LONG_ABOUT: &str = "\
 Batch reads plan files from .newton/plan/<project_id> and drives headless \
@@ -99,33 +96,12 @@ EXAMPLES:
   Process one plan and exit:
     newton batch project-alpha --once
 
-  Custom poll interval:
-    newton batch project-alpha --sleep 30";
+  Custom poll interval (seconds):
+    newton batch project-alpha --poll-interval 30";
 
-// Combined serve long_about: route-group description + examples block.
-// The framework renders only long_about in --help, so both must be here.
 const SERVE_LONG_ABOUT: &str = "\
 Serve runs the Newton HTTP/WebSocket API for UIs, agents, and integrations.
 Full REST contract: openapi/newton-backend-parity.yaml.
-Schemas and query parameters: skill/newton/references/serve-api.md.
-
-Mounted route groups (see OpenAPI for exact methods, params, and bodies):
-  \u{2022} Workflows       /api/workflows, /api/workflows/{id}, /api/workflows/{id}/nodes/{node_id}
-  \u{2022} HIL             /api/hil/instances, /api/hil/workflows/{id}
-  \u{2022} Streaming       /api/stream/workflow/{id}/{ws,sse}, /api/stream/logs/{id}/{node_id}/ws
-  \u{2022} Operators       /api/operators
-  \u{2022} Dashboard       /api/products, /api/components, /api/pending-approvals,
-                    /api/regressions, /api/indicators, /api/recent-actions
-  \u{2022} Portfolio       /api/repos, /api/repo-dependencies, /api/module-dependencies,
-                    /api/saved-views
-  \u{2022} Opportunities   /api/opportunities, /api/opportunities/{id}
-  \u{2022} Requests        /api/requests
-  \u{2022} Plans           /api/plans, /api/plans/{id}/{approve,reject}, /api/executions
-  \u{2022} Persistence     /api/persistence/{key}
-  \u{2022} Testing reset   /api/testing/reset
-Always available: GET /health.
-
-CORS is enabled for local development by default.
 
 EXAMPLES:
   Start API server on default port:
@@ -134,264 +110,103 @@ EXAMPLES:
   Start on custom host and port:
     newton serve --host 0.0.0.0 --port 9000
 
-  Run in background:
-    newton serve --host 0.0.0.0 --port 8080 &
-
-See openapi/newton-backend-parity.yaml for the full HTTP/WebSocket/SSE contract.";
+  Serve a built UI from a static directory:
+    newton serve --static-ui ./ui/dist";
 
 const MONITOR_LONG_ABOUT: &str = "\
 Monitor listens to every project/branch channel from the workspace using a \
 WebSocket/HTTP mix and lets you answer questions or approve authorizations in a queue.
 
-CONFIGURATION:
-  Monitor requires both HTTP and WebSocket endpoints to connect to the ailoop server.
-  Endpoints can come from CLI overrides (--http-url, --ws-url) or workspace config files.
-  Partial overrides are supported: one flag can be set while the other comes from config.
-
-Endpoint discovery order:
-    1. CLI overrides: --http-url and --ws-url (merged with config if partial)
-    2. .newton/configs/monitor.conf (if present)
-    3. First alphabetical .conf file in .newton/configs/ containing both keys
-
-Config files use simple key=value format:
-  ailoop_server_http_url = http://127.0.0.1:8081
-  ailoop_server_ws_url = ws://127.0.0.1:8080
-
 EXAMPLES:
   Using both CLI overrides:
-    newton monitor --http-url http://127.0.0.1:8081 --ws-url ws://127.0.0.1:8080
+    newton monitor --ailoop-http http://127.0.0.1:8081 --ailoop-ws ws://127.0.0.1:8080
 
   Using .newton/configs/monitor.conf:
     newton monitor
 
-  Partial override (HTTP from CLI, WS from config):
-    newton monitor --http-url http://192.168.1.10:8081
+  Also start the Newton HTTP API alongside the monitor:
+    newton monitor --with-api";
 
-TROUBLESHOOTING:
-  Missing URL configuration:
-    If both endpoints are not found, ensure .newton/configs/monitor.conf exists
-    or provide both --http-url and --ws-url on the command line.";
+const WORKFLOW_LONG_ABOUT: &str = "\
+Workflow groups commands that operate on a workflow YAML file: validate, \
+lint, preview, and graph.
 
-const VALIDATE_LONG_ABOUT: &str = "\
-Validate checks your workflow YAML file for syntax errors, schema compliance, \
-and logical issues before execution.
-
-Accepted forms:
-  newton validate [WORKFLOW]
-  newton validate --file <PATH>
+Subcommands:
+  validate <FILE>    Validate a workflow graph definition
+  lint <FILE>        Check workflow for best practices and issues
+  preview <FILE>     Preview what running the workflow would do
+  graph <FILE>       Render the workflow graph (default --format dot)
 
 EXAMPLES:
-  Validate a workflow file:
-    newton validate workflow.yaml
-
-  Validate with alternative syntax:
-    newton validate --file ./workflows/my-workflow.yaml
-
-RETURN CODES:
-  0: Workflow is valid and ready to run
-  1: Validation errors found (details printed to stderr)";
-
-const DOT_LONG_ABOUT: &str = "\
-Dot creates a Graphviz DOT file from your workflow definition that can be \
-rendered into visual diagrams.
-
-This command analyzes your workflow's task dependencies and generates a directed \
-graph showing task execution flow.
-
-Accepted forms:
-  newton dot [WORKFLOW]
-  newton dot --file <PATH>
-
-EXAMPLES:
-  Generate DOT file to stdout:
-    newton dot workflow.yaml
-
-  Save DOT file for rendering:
-    newton dot workflow.yaml --out graph.dot
-
-  Create PNG diagram (requires Graphviz):
-    newton dot workflow.yaml --out graph.dot && dot -Tpng graph.dot -o workflow.png
-
-VISUALIZATION:
-  Use online Graphviz viewers or install Graphviz locally.";
-
-const LINT_LONG_ABOUT: &str = "\
-Lint analyzes your workflow definition against Newton's best practices and \
-coding standards to identify potential issues.
-
-Unlike validate (which checks syntax), lint focuses on quality and best practices. \
-All lint warnings are advisory and won't prevent workflow execution.
-
-Accepted forms:
-  newton lint [WORKFLOW]
-  newton lint --file <PATH>
-
-EXAMPLES:
-  Check workflow with human-readable output:
-    newton lint workflow.yaml
-
-  Generate JSON report for CI/CD integration:
-    newton lint workflow.yaml --format json
-
-OUTPUT FORMATS:
-  text: Human-readable summary (default)
-  json: Machine-readable structured data for tooling integration";
-
-const EXPLAIN_LONG_ABOUT: &str = "\
-Explain creates detailed documentation about what your workflow does and how \
-it will execute.
-
-This command analyzes your workflow definition and produces explanations covering:
-  \u{2022} Step-by-step execution flow
-  \u{2022} Task dependencies and timing
-  \u{2022} Configuration settings and their effects
-  \u{2022} Expected inputs and outputs
-
-Accepted forms:
-  newton explain [WORKFLOW]
-  newton explain --file <PATH>
-
-EXAMPLES:
-  Generate structured explanation:
-    newton explain workflow.yaml --format text
-
-  Create natural language description:
-    newton explain workflow.yaml --format prose
-
-  Explain with custom trigger data:
-    newton explain workflow.yaml --arg env=production --format prose
-
-OUTPUT FORMATS:
-  text: Structured technical breakdown
-  prose: Natural language description
-  json: Machine-readable analysis for documentation generation";
+  newton workflow validate workflow.yaml
+  newton workflow lint workflow.yaml --format json
+  newton workflow preview workflow.yaml --trigger env=prod --format prose
+  newton workflow graph workflow.yaml --output graph.dot";
 
 const RESUME_LONG_ABOUT: &str = "\
-Resume restarts a workflow execution from its last saved checkpoint, allowing \
-you to continue from where it left off after an interrupted execution.
+Resume restarts a workflow execution from its last saved checkpoint.
 
 EXAMPLES:
-  Resume a specific workflow execution:
-    newton resume --execution-id 12345678-1234-1234-1234-123456789abc
+  Resume a specific run:
+    newton resume --run-id 12345678-1234-1234-1234-123456789abc
 
   Resume with custom workspace:
-    newton resume --execution-id abcdef01-2345-6789-abcd-ef0123456789 --workspace ./project
+    newton resume --run-id abcdef01-2345-6789-abcd-ef0123456789 --workspace ./project
 
   Resume and allow workflow definition changes:
-    newton resume --execution-id 12345678-1234-1234-1234-123456789abc --allow-workflow-change
+    newton resume --run-id 12345678-1234-1234-1234-123456789abc --allow-workflow-change
 
-FINDING EXECUTION IDs:
-  List available executions to resume:
-    newton checkpoints list --workspace ./workspace
+FINDING RUN IDs:
+  newton checkpoint list --workspace ./workspace";
 
-SAFETY:
-  By default, resume requires the workflow definition to be unchanged since the checkpoint.
-  Use --allow-workflow-change to override this safety check.";
-
-const CHECKPOINTS_LONG_ABOUT: &str = "\
-Checkpoints provides tools to manage the saved states that allow workflow \
+const CHECKPOINT_LONG_ABOUT: &str = "\
+Checkpoint provides tools to manage the saved states that allow workflow \
 resumption after interruption.
-
-Newton automatically creates checkpoints during workflow execution to preserve \
-progress and enable recovery.
 
 Subcommands:
   list   Display available workflow executions and their checkpoint details
   clean  Remove old checkpoint files to free up disk space
 
 EXAMPLES:
-  List all available checkpoints:
-    newton checkpoints list --workspace ./workspace
+  newton checkpoint list --workspace ./workspace
+  newton checkpoint list --workspace ./workspace --json
+  newton checkpoint clean --workspace ./workspace --older-than 7d";
 
-  Get checkpoint details in JSON format:
-    newton checkpoints list --workspace ./workspace --format-json
-
-  Clean old checkpoints (older than 7 days):
-    newton checkpoints clean --workspace ./workspace --older-than 7d
-
-  Clean checkpoints with custom retention:
-    newton checkpoints clean --workspace ./workspace --older-than 30d
-
-CHECKPOINT STORAGE:
-  Checkpoints are stored in .newton/checkpoints/ within your workspace.";
-
-const ARTIFACTS_LONG_ABOUT: &str = "\
-Artifacts provides tools to manage the output files, logs, and execution data \
-generated during workflow execution.  Regular cleanup helps maintain good \
-performance and disk space usage.
+const ARTIFACT_LONG_ABOUT: &str = "\
+Artifact provides tools to manage the output files, logs, and execution data \
+generated during workflow execution.
 
 Subcommands:
-  clean  Remove old workflow output files and execution artifacts to free disk space
+  clean  Remove old workflow output files and execution artifacts
 
 EXAMPLES:
-  Clean artifacts older than 7 days:
-    newton artifacts clean --workspace ./workspace --older-than 7d
-
-  Clean with custom retention period:
-    newton artifacts clean --workspace ./workspace --older-than 30d
-
-RETENTION FORMATS:
-  Supported time formats for --older-than: 7d, 30d, 1w, 2w, 24h, 48h
-
-ARTIFACT STORAGE:
-  Artifacts are stored in .newton/artifacts/ within your workspace.";
+  newton artifact clean --workspace ./workspace --older-than 7d
+  newton artifact clean --workspace ./workspace --older-than 30d";
 
 const WEBHOOK_LONG_ABOUT: &str = "\
 Webhook provides HTTP endpoints that can trigger workflow executions in \
 response to external events.
 
-This command enables integration with Git hosting services (GitHub, GitLab, \
-Bitbucket), CI/CD platforms, monitoring systems, and custom applications.
+Subcommands:
+  serve   Start an HTTP server to receive webhook events
+  status  Display webhook endpoint configuration and status
+
+EXAMPLES:
+  newton webhook serve --workflow workflow.yaml --workspace ./workspace
+  newton webhook status --workflow workflow.yaml --workspace ./workspace";
+
+const RUNS_LONG_ABOUT: &str = "\
+Runs provides access to the per-task execution history stored in .newton/state/workflows/.
 
 Subcommands:
-  serve   Start an HTTP server to receive webhook events and trigger workflows
-  status  Display webhook endpoint configuration and server status
+  list   Enumerate workflow execution history
+  show   Replay task-by-task detail for a specific run
 
 EXAMPLES:
-  Start webhook server for a workflow:
-    newton webhook serve workflow.yaml --workspace ./workspace
-
-  Check webhook configuration status:
-    newton webhook status workflow.yaml --workspace ./workspace
-
-  Serve webhook with alternative file syntax:
-    newton webhook serve --file ./workflows/deploy.yaml --workspace ./project
-
-INTEGRATION:
-  Configure your external services to send POST requests to the webhook URL.
-  The webhook server will parse the incoming payload and trigger the workflow.
-
-SECURITY:
-  Webhook endpoints include built-in security features like request validation \
-and rate limiting.  Configure authentication tokens and HTTPS for production deployments.";
-
-const LOG_LONG_ABOUT: &str = "\
-Log provides access to the per-task execution history stored in .newton/state/workflows/.
-
-Use 'log list' to enumerate executions, and 'log show <execution-id>' to display
-the resolved inputs, operator, and output for every task in that run.
-
-Subcommands: list, show
-
-DEFAULT LOG PATH:
-    <workspace>/.newton/logs/newton.log
-
-LOG LOCATION CONTROLS:
-    --log-dir PATH         Override log directory (highest priority)
-    logging.toml log_dir   Config file setting (second priority)
-    workspace default      <workspace>/.newton/logs/ (fallback)
-
-FILTER/VERBOSITY:
-    RUST_LOG=debug         Sets tracing filter level only; does NOT change log directory.
-
-EXAMPLES:
-  List recent executions:
-    newton log list --last 10
-    newton log list --workspace ./workspace
-
-  Show full execution log:
-    newton log show <execution-id>
-    newton log show <execution-id> --task <task-id> --verbose";
+  newton runs list --last 10
+  newton runs list --workspace ./workspace
+  newton runs show <run-id>
+  newton runs show <run-id> --task <task-id> --verbose";
 
 // ── shared helpers ────────────────────────────────────────────────────────────
 
@@ -430,21 +245,31 @@ fn parse_output_format(args: &CommandArgs) -> OutputFormat {
     }
 }
 
+fn require_workflow_path(args: &CommandArgs, label: &str) -> anyhow::Result<PathBuf> {
+    get_opt_path(args, "workflow").ok_or_else(|| {
+        anyhow!(
+            "{}: workflow file is required for {}",
+            error_codes::CLI_MIG_002,
+            label
+        )
+    })
+}
+
 // ── command constructors ──────────────────────────────────────────────────────
 
 fn run_command() -> Command {
     Command {
         id: "run",
         summary: "Execute a workflow graph",
-        syntax: Some("[WORKFLOW] [INPUT_FILE] [OPTIONS]"),
+        syntax: Some("<WORKFLOW> [INPUT_FILE] [OPTIONS]"),
         category: Some(categories::WORKFLOW),
         spec: Some(Arc::new(CommandSpec {
             summary: "Execute a workflow graph",
             long_about: Some(RUN_LONG_ABOUT),
             examples: vec![
                 "newton run workflow.yaml",
-                "newton run workflow.yaml --workspace ./output --arg key=value",
-                "newton run workflow.yaml --arg env=prod --arg version=1.2.3",
+                "newton run workflow.yaml --workspace ./output --trigger key=value",
+                "newton run workflow.yaml --trigger env=prod --trigger version=1.2.3",
                 "newton run workflow.yaml input.txt --workspace ./workspace --verbose",
             ],
             args: vec![
@@ -454,11 +279,11 @@ fn run_command() -> Command {
                     short: None,
                     long: None,
                     value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
+                    cardinality: Cardinality::Required,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Path to the workflow YAML file",
+                    help: "Path to the workflow YAML file (required)",
                 },
                 ArgSpec {
                     name: "input-file",
@@ -473,18 +298,6 @@ fn run_command() -> Command {
                     help: "Optional path written into triggers.payload.input_file",
                 },
                 ArgSpec {
-                    name: "file",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("file"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Path to the workflow YAML file (alternative to positional; takes precedence)",
-                },
-                ArgSpec {
                     name: "workspace",
                     kind: ArgKind::Option,
                     short: None,
@@ -497,22 +310,22 @@ fn run_command() -> Command {
                     help: "Workspace root directory",
                 },
                 ArgSpec {
-                    name: "arg",
+                    name: "trigger",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("arg"),
+                    long: Some("trigger"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Repeated,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Merge KEY=VALUE into triggers.payload (repeatable)",
+                    help: "Merge KEY=VALUE into trigger payload (repeatable; VALUE may be @path)",
                 },
                 ArgSpec {
-                    name: "set",
+                    name: "context",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("set"),
+                    long: Some("context"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Repeated,
                     default: None,
@@ -521,16 +334,16 @@ fn run_command() -> Command {
                     help: "Merge KEY=VALUE into workflow.context at runtime (repeatable)",
                 },
                 ArgSpec {
-                    name: "trigger-json",
+                    name: "trigger-file",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("trigger-json"),
+                    long: Some("trigger-file"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Load JSON object as base trigger payload before --arg overrides",
+                    help: "Load JSON object as base trigger payload before --trigger overrides",
                 },
                 ArgSpec {
                     name: "parallel-limit",
@@ -545,10 +358,10 @@ fn run_command() -> Command {
                     help: "Runtime override for bounded task concurrency",
                 },
                 ArgSpec {
-                    name: "max-time-seconds",
+                    name: "timeout",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("max-time-seconds"),
+                    long: Some("timeout"),
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
                     default: None,
@@ -559,7 +372,7 @@ fn run_command() -> Command {
                 ArgSpec {
                     name: "verbose",
                     kind: ArgKind::Flag,
-                    short: None,
+                    short: Some('v'),
                     long: Some("verbose"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
@@ -605,7 +418,7 @@ fn init_command() -> Command {
             examples: vec![
                 "newton init .",
                 "newton init ./workspace",
-                "newton init . --template-source gonewton/newton-templates",
+                "newton init . --template gonewton/newton-templates",
             ],
             args: vec![
                 ArgSpec {
@@ -622,10 +435,10 @@ fn init_command() -> Command {
                         "Directory where .newton/ will be created (defaults to current directory)",
                 },
                 ArgSpec {
-                    name: "template-source",
+                    name: "template",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("template-source"),
+                    long: Some("template"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
                     default: None,
@@ -659,7 +472,7 @@ fn batch_command() -> Command {
                 "newton batch project-alpha",
                 "newton batch project-alpha --workspace ./workspace",
                 "newton batch project-alpha --once",
-                "newton batch project-alpha --sleep 30",
+                "newton batch project-alpha --poll-interval 30",
             ],
             args: vec![
                 ArgSpec {
@@ -699,16 +512,16 @@ fn batch_command() -> Command {
                     help: "Process a single plan and exit instead of running as a daemon",
                 },
                 ArgSpec {
-                    name: "sleep",
+                    name: "poll-interval",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("sleep"),
+                    long: Some("poll-interval"),
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Sleep interval in seconds when the queue is empty (default: 60)",
+                    help: "Seconds to wait when the queue is empty (default: 60)",
                 },
             ],
             ..Default::default()
@@ -735,7 +548,7 @@ fn serve_command() -> Command {
             examples: vec![
                 "newton serve",
                 "newton serve --host 0.0.0.0 --port 9000",
-                "newton serve --host 0.0.0.0 --port 8080 &",
+                "newton serve --static-ui ./ui/dist",
             ],
             args: vec![
                 ArgSpec {
@@ -763,10 +576,10 @@ fn serve_command() -> Command {
                     help: "Port to listen on (default: 8080)",
                 },
                 ArgSpec {
-                    name: "ui-dir",
+                    name: "static-ui",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("ui-dir"),
+                    long: Some("static-ui"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
                     default: None,
@@ -797,46 +610,46 @@ fn monitor_command() -> Command {
             summary: "Monitor live ailoop channels via a terminal UI",
             long_about: Some(MONITOR_LONG_ABOUT),
             examples: vec![
-                "newton monitor --http-url http://127.0.0.1:8081 --ws-url ws://127.0.0.1:8080",
+                "newton monitor --ailoop-http http://127.0.0.1:8081 --ailoop-ws ws://127.0.0.1:8080",
                 "newton monitor",
-                "newton monitor --http-url http://192.168.1.10:8081",
+                "newton monitor --with-api",
             ],
             args: vec![
                 ArgSpec {
-                    name: "http-url",
+                    name: "ailoop-http",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("http-url"),
+                    long: Some("ailoop-http"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Override HTTP endpoint for the ailoop server",
+                    help: "HTTP endpoint for the ailoop server",
                 },
                 ArgSpec {
-                    name: "ws-url",
+                    name: "ailoop-ws",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("ws-url"),
+                    long: Some("ailoop-ws"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Override WebSocket endpoint for the ailoop server",
+                    help: "WebSocket endpoint for the ailoop server",
                 },
                 ArgSpec {
-                    name: "backend",
+                    name: "with-api",
                     kind: ArgKind::Flag,
                     short: None,
-                    long: Some("backend"),
+                    long: Some("with-api"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Also start the HTTP API backend server",
+                    help: "Also start the Newton HTTP API alongside the monitor",
                 },
             ],
             ..Default::default()
@@ -851,224 +664,57 @@ fn monitor_command() -> Command {
     }
 }
 
-fn validate_command() -> Command {
+fn workflow_command() -> Command {
     Command {
-        id: "validate",
-        summary: "Validate a workflow graph definition",
-        syntax: Some("[WORKFLOW] [OPTIONS]"),
+        id: "workflow",
+        summary: "Operate on a workflow YAML file (validate/lint/preview/graph)",
+        syntax: Some("<validate|lint|preview|graph> <FILE> [OPTIONS]"),
         category: Some(categories::WORKFLOW),
         spec: Some(Arc::new(CommandSpec {
-            summary: "Validate a workflow graph definition",
-            long_about: Some(VALIDATE_LONG_ABOUT),
+            summary: "Operate on a workflow YAML file (validate/lint/preview/graph)",
+            long_about: Some(WORKFLOW_LONG_ABOUT),
             examples: vec![
-                "newton validate workflow.yaml",
-                "newton validate --file ./workflows/my-workflow.yaml",
+                "newton workflow validate workflow.yaml",
+                "newton workflow lint workflow.yaml --format json",
+                "newton workflow preview workflow.yaml --trigger env=prod --format prose",
+                "newton workflow graph workflow.yaml --output graph.dot",
             ],
             args: vec![
+                ArgSpec {
+                    name: "subcommand",
+                    kind: ArgKind::Positional,
+                    short: None,
+                    long: None,
+                    value_type: ArgValueType::Enum(vec!["validate", "lint", "preview", "graph"]),
+                    cardinality: Cardinality::Required,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Subcommand: validate | lint | preview | graph",
+                },
                 ArgSpec {
                     name: "workflow",
                     kind: ArgKind::Positional,
                     short: None,
                     long: None,
                     value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
+                    cardinality: Cardinality::Required,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
                     help: "Path to the workflow YAML file",
-                },
-                ArgSpec {
-                    name: "file",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("file"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Path to the workflow YAML file (alternative to positional; takes precedence)",
-                },
-            ],
-            ..Default::default()
-        })),
-        validator: None,
-        execute: Arc::new(|_ctx, args| {
-            Box::pin(async move {
-                let dto = ValidateArgs::try_from(args)?;
-                commands::validate(dto).map_err(anyhow::Error::from)
-            })
-        }),
-    }
-}
-
-fn dot_command() -> Command {
-    Command {
-        id: "dot",
-        summary: "Generate a visual diagram of the workflow graph",
-        syntax: Some("[WORKFLOW] [OPTIONS]"),
-        category: Some(categories::WORKFLOW),
-        spec: Some(Arc::new(CommandSpec {
-            summary: "Generate a visual diagram of the workflow graph",
-            long_about: Some(DOT_LONG_ABOUT),
-            examples: vec![
-                "newton dot workflow.yaml",
-                "newton dot workflow.yaml --out graph.dot",
-                "newton dot workflow.yaml --out graph.dot && dot -Tpng graph.dot -o workflow.png",
-            ],
-            args: vec![
-                ArgSpec {
-                    name: "workflow",
-                    kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Path to the workflow YAML file",
-                },
-                ArgSpec {
-                    name: "file",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("file"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Path to the workflow YAML file (alternative to positional; takes precedence)",
-                },
-                ArgSpec {
-                    name: "out",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("out"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Write DOT output to file instead of stdout",
-                },
-            ],
-            ..Default::default()
-        })),
-        validator: None,
-        execute: Arc::new(|_ctx, args| {
-            Box::pin(async move {
-                let dto = DotArgs::try_from(args)?;
-                commands::dot(dto).map_err(anyhow::Error::from)
-            })
-        }),
-    }
-}
-
-fn lint_command() -> Command {
-    Command {
-        id: "lint",
-        summary: "Check workflow for best practices and potential issues",
-        syntax: Some("[WORKFLOW] [OPTIONS]"),
-        category: Some(categories::WORKFLOW),
-        spec: Some(Arc::new(CommandSpec {
-            summary: "Check workflow for best practices and potential issues",
-            long_about: Some(LINT_LONG_ABOUT),
-            examples: vec![
-                "newton lint workflow.yaml",
-                "newton lint workflow.yaml --format json",
-                "newton lint --file ./workflows/production.yaml --format json",
-            ],
-            args: vec![
-                ArgSpec {
-                    name: "workflow",
-                    kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Path to the workflow YAML file",
-                },
-                ArgSpec {
-                    name: "file",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("file"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Path to the workflow YAML file (alternative to positional; takes precedence)",
                 },
                 ArgSpec {
                     name: "format",
                     kind: ArgKind::Option,
                     short: None,
                     long: Some("format"),
-                    value_type: ArgValueType::Enum(vec!["text", "json", "prose"]),
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Output format: text (default), json, prose",
-                },
-            ],
-            ..Default::default()
-        })),
-        validator: None,
-        execute: Arc::new(|_ctx, args| {
-            Box::pin(async move {
-                let dto = LintArgs::try_from(args)?;
-                commands::lint(dto).map_err(anyhow::Error::from)
-            })
-        }),
-    }
-}
-
-fn explain_command() -> Command {
-    Command {
-        id: "explain",
-        summary: "Generate human-readable explanations of workflow behavior",
-        syntax: Some("[WORKFLOW] [OPTIONS]"),
-        category: Some(categories::WORKFLOW),
-        spec: Some(Arc::new(CommandSpec {
-            summary: "Generate human-readable explanations of workflow behavior",
-            long_about: Some(EXPLAIN_LONG_ABOUT),
-            examples: vec![
-                "newton explain workflow.yaml --format text",
-                "newton explain workflow.yaml --format prose",
-                "newton explain workflow.yaml --arg env=production --format prose",
-                "newton explain workflow.yaml --format json",
-            ],
-            args: vec![
-                ArgSpec {
-                    name: "workflow",
-                    kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Path to the workflow YAML file",
-                },
-                ArgSpec {
-                    name: "file",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("file"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Path to the workflow YAML file (alternative to positional; takes precedence)",
+                    help: "Output format (lint: text|json; preview: text|json|prose; graph: dot)",
                 },
                 ArgSpec {
                     name: "workspace",
@@ -1080,55 +726,55 @@ fn explain_command() -> Command {
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Workspace root directory",
+                    help: "Workspace root directory (preview)",
                 },
                 ArgSpec {
-                    name: "set",
+                    name: "context",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("set"),
+                    long: Some("context"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Repeated,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Merge KEY=VALUE into workflow.context at runtime (repeatable)",
+                    help: "Merge KEY=VALUE into workflow.context at runtime (preview)",
                 },
                 ArgSpec {
-                    name: "arg",
+                    name: "trigger",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("arg"),
+                    long: Some("trigger"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Repeated,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Trigger payload override KEY=VALUE (repeatable)",
+                    help: "Trigger payload override KEY=VALUE (preview)",
                 },
                 ArgSpec {
-                    name: "format",
+                    name: "trigger-file",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("format"),
-                    value_type: ArgValueType::Enum(vec!["text", "json", "prose"]),
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Output format: text (default), json, prose",
-                },
-                ArgSpec {
-                    name: "trigger-json",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("trigger-json"),
+                    long: Some("trigger-file"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Path to JSON file containing manual trigger payload",
+                    help: "JSON file with base trigger payload (preview)",
+                },
+                ArgSpec {
+                    name: "output",
+                    kind: ArgKind::Option,
+                    short: Some('o'),
+                    long: Some("output"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Output destination file (graph)",
                 },
             ],
             ..Default::default()
@@ -1136,8 +782,68 @@ fn explain_command() -> Command {
         validator: None,
         execute: Arc::new(|_ctx, args| {
             Box::pin(async move {
-                let dto = ExplainArgs::try_from(args)?;
-                commands::explain(dto).map_err(anyhow::Error::from)
+                let subcmd = args
+                    .named
+                    .get("subcommand")
+                    .map(String::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                match subcmd.as_str() {
+                    "validate" => {
+                        let workflow = require_workflow_path(&args, "workflow validate")?;
+                        commands::validate(ValidateArgs { workflow }).map_err(anyhow::Error::from)
+                    }
+                    "lint" => {
+                        let workflow = require_workflow_path(&args, "workflow lint")?;
+                        commands::lint(LintArgs {
+                            workflow,
+                            format: parse_output_format(&args),
+                        })
+                        .map_err(anyhow::Error::from)
+                    }
+                    "preview" => {
+                        let workflow = require_workflow_path(&args, "workflow preview")?;
+                        let context = parse_kvp_list(
+                            args.named.get("context").map(String::as_str).unwrap_or(""),
+                        )?;
+                        let trigger = parse_kvp_list(
+                            args.named.get("trigger").map(String::as_str).unwrap_or(""),
+                        )?;
+                        commands::explain(ExplainArgs {
+                            workflow,
+                            workspace: get_opt_path(&args, "workspace"),
+                            context,
+                            trigger,
+                            format: parse_output_format(&args),
+                            trigger_file: get_opt_path(&args, "trigger-file"),
+                        })
+                        .map_err(anyhow::Error::from)
+                    }
+                    "graph" => {
+                        let workflow = require_workflow_path(&args, "workflow graph")?;
+                        let format = match args.named.get("format").map(String::as_str) {
+                            Some("dot") | None => GraphFormat::Dot,
+                            Some(other) => {
+                                return Err(anyhow!(
+                                    "{}: unknown graph format '{}' (supported: dot)",
+                                    error_codes::CLI_MIG_002,
+                                    other
+                                ))
+                            }
+                        };
+                        commands::dot(DotArgs {
+                            workflow,
+                            format,
+                            output: get_opt_path(&args, "output"),
+                        })
+                        .map_err(anyhow::Error::from)
+                    }
+                    _ => Err(anyhow!(
+                        "{}: unknown workflow subcommand '{}'",
+                        error_codes::CLI_MIG_005,
+                        subcmd
+                    )),
+                }
             })
         }),
     }
@@ -1147,28 +853,28 @@ fn resume_command() -> Command {
     Command {
         id: "resume",
         summary: "Continue a workflow that was interrupted or stopped",
-        syntax: Some("[OPTIONS]"),
+        syntax: Some("--run-id <UUID> [OPTIONS]"),
         category: Some(categories::WORKFLOW),
         spec: Some(Arc::new(CommandSpec {
             summary: "Continue a workflow that was interrupted or stopped",
             long_about: Some(RESUME_LONG_ABOUT),
             examples: vec![
-                "newton resume --execution-id 12345678-1234-1234-1234-123456789abc",
-                "newton resume --execution-id abcdef01-2345-6789-abcd-ef0123456789 --workspace ./project",
-                "newton resume --execution-id 12345678-1234-1234-1234-123456789abc --allow-workflow-change",
+                "newton resume --run-id 12345678-1234-1234-1234-123456789abc",
+                "newton resume --run-id abcdef01-2345-6789-abcd-ef0123456789 --workspace ./project",
+                "newton resume --run-id 12345678-1234-1234-1234-123456789abc --allow-workflow-change",
             ],
             args: vec![
                 ArgSpec {
-                    name: "execution-id",
+                    name: "run-id",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("execution-id"),
+                    long: Some("run-id"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Required,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "UUID of the workflow execution to resume",
+                    help: "UUID of the workflow run to resume",
                 },
                 ArgSpec {
                     name: "workspace",
@@ -1207,20 +913,19 @@ fn resume_command() -> Command {
     }
 }
 
-fn checkpoints_command() -> Command {
+fn checkpoint_command() -> Command {
     Command {
-        id: "checkpoints",
+        id: "checkpoint",
         summary: "Manage and inspect workflow execution checkpoints",
         syntax: Some("<list|clean> [OPTIONS]"),
         category: Some(categories::MAINTENANCE),
         spec: Some(Arc::new(CommandSpec {
             summary: "Manage and inspect workflow execution checkpoints",
-            long_about: Some(CHECKPOINTS_LONG_ABOUT),
+            long_about: Some(CHECKPOINT_LONG_ABOUT),
             examples: vec![
-                "newton checkpoints list --workspace ./workspace",
-                "newton checkpoints list --workspace ./workspace --format-json",
-                "newton checkpoints clean --workspace ./workspace --older-than 7d",
-                "newton checkpoints clean --workspace ./workspace --older-than 30d",
+                "newton checkpoint list --workspace ./workspace",
+                "newton checkpoint list --workspace ./workspace --json",
+                "newton checkpoint clean --workspace ./workspace --older-than 7d",
             ],
             args: vec![
                 ArgSpec {
@@ -1248,10 +953,10 @@ fn checkpoints_command() -> Command {
                     help: "Workspace path",
                 },
                 ArgSpec {
-                    name: "format-json",
+                    name: "json",
                     kind: ArgKind::Flag,
                     short: None,
-                    long: Some("format-json"),
+                    long: Some("json"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
                     default: None,
@@ -1284,10 +989,10 @@ fn checkpoints_command() -> Command {
                     .unwrap_or("");
                 match subcmd {
                     "list" => {
-                        let dto = CheckpointsArgs {
+                        let dto = CheckpointArgs {
                             command: CheckpointCommand::List {
                                 workspace: get_opt_path(&args, "workspace"),
-                                format_json: get_bool(&args, "format-json"),
+                                json: get_bool(&args, "json"),
                             },
                         };
                         commands::checkpoints(dto).map_err(anyhow::Error::from)
@@ -1296,11 +1001,11 @@ fn checkpoints_command() -> Command {
                         let older_than =
                             args.named.get("older-than").cloned().ok_or_else(|| {
                                 anyhow!(
-                                    "{}: --older-than is required for checkpoints clean",
+                                    "{}: --older-than is required for checkpoint clean",
                                     error_codes::CLI_MIG_002
                                 )
                             })?;
-                        let dto = CheckpointsArgs {
+                        let dto = CheckpointArgs {
                             command: CheckpointCommand::Clean {
                                 workspace: get_opt_path(&args, "workspace"),
                                 older_than,
@@ -1309,7 +1014,7 @@ fn checkpoints_command() -> Command {
                         commands::checkpoints(dto).map_err(anyhow::Error::from)
                     }
                     _ => Err(anyhow!(
-                        "{}: unknown checkpoints subcommand '{}'",
+                        "{}: unknown checkpoint subcommand '{}'",
                         error_codes::CLI_MIG_005,
                         subcmd
                     )),
@@ -1319,19 +1024,18 @@ fn checkpoints_command() -> Command {
     }
 }
 
-fn artifacts_command() -> Command {
+fn artifact_command() -> Command {
     Command {
-        id: "artifacts",
+        id: "artifact",
         summary: "Manage workflow output files and execution artifacts",
         syntax: Some("<clean> [OPTIONS]"),
         category: Some(categories::MAINTENANCE),
         spec: Some(Arc::new(CommandSpec {
             summary: "Manage workflow output files and execution artifacts",
-            long_about: Some(ARTIFACTS_LONG_ABOUT),
+            long_about: Some(ARTIFACT_LONG_ABOUT),
             examples: vec![
-                "newton artifacts clean --workspace ./workspace --older-than 7d",
-                "newton artifacts clean --workspace ./workspace --older-than 30d",
-                "newton artifacts clean --workspace /path/to/project --older-than 1w",
+                "newton artifact clean --workspace ./workspace --older-than 7d",
+                "newton artifact clean --workspace ./workspace --older-than 30d",
             ],
             args: vec![
                 ArgSpec {
@@ -1386,11 +1090,11 @@ fn artifacts_command() -> Command {
                         let older_than =
                             args.named.get("older-than").cloned().ok_or_else(|| {
                                 anyhow!(
-                                    "{}: --older-than is required for artifacts clean",
+                                    "{}: --older-than is required for artifact clean",
                                     error_codes::CLI_MIG_002
                                 )
                             })?;
-                        let dto = ArtifactsArgs {
+                        let dto = ArtifactArgs {
                             command: ArtifactCommand::Clean {
                                 workspace: get_opt_path(&args, "workspace"),
                                 older_than,
@@ -1399,7 +1103,7 @@ fn artifacts_command() -> Command {
                         commands::artifacts(dto).map_err(anyhow::Error::from)
                     }
                     _ => Err(anyhow!(
-                        "{}: unknown artifacts subcommand '{}'",
+                        "{}: unknown artifact subcommand '{}'",
                         error_codes::CLI_MIG_005,
                         subcmd
                     )),
@@ -1413,15 +1117,14 @@ fn webhook_command() -> Command {
     Command {
         id: "webhook",
         summary: "Run webhooks to trigger workflows from external events",
-        syntax: Some("<serve|status> [WORKFLOW] --workspace <PATH>"),
+        syntax: Some("<serve|status> --workflow <PATH> --workspace <PATH>"),
         category: Some(categories::OPS),
         spec: Some(Arc::new(CommandSpec {
             summary: "Run webhooks to trigger workflows from external events",
             long_about: Some(WEBHOOK_LONG_ABOUT),
             examples: vec![
-                "newton webhook serve workflow.yaml --workspace ./workspace",
-                "newton webhook status workflow.yaml --workspace ./workspace",
-                "newton webhook serve --file ./workflows/deploy.yaml --workspace ./project",
+                "newton webhook serve --workflow workflow.yaml --workspace ./workspace",
+                "newton webhook status --workflow workflow.yaml --workspace ./workspace",
             ],
             args: vec![
                 ArgSpec {
@@ -1438,27 +1141,15 @@ fn webhook_command() -> Command {
                 },
                 ArgSpec {
                     name: "workflow",
-                    kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Path to the workflow YAML file",
-                },
-                ArgSpec {
-                    name: "file",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("file"),
+                    long: Some("workflow"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Path to the workflow YAML file (alternative to positional; takes precedence)",
+                    help: "Path to the workflow YAML file (required for serve)",
                 },
                 ArgSpec {
                     name: "workspace",
@@ -1478,29 +1169,32 @@ fn webhook_command() -> Command {
         validator: None,
         execute: Arc::new(|_ctx, args| {
             Box::pin(async move {
-                let subcmd = args.named.get("subcommand").map(String::as_str).unwrap_or("").to_string();
-                let workspace_str = args
+                let subcmd = args
                     .named
-                    .get("workspace")
-                    .cloned()
-                    .ok_or_else(|| anyhow!("{}: --workspace is required for webhook {}", error_codes::CLI_MIG_002, subcmd))?;
+                    .get("subcommand")
+                    .map(String::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let workspace_str = args.named.get("workspace").cloned().ok_or_else(|| {
+                    anyhow!(
+                        "{}: --workspace is required for webhook {}",
+                        error_codes::CLI_MIG_002,
+                        subcmd
+                    )
+                })?;
                 let workspace = PathBuf::from(workspace_str);
-                let workflow_pos = get_opt_path(&args, "workflow");
-                let file = get_opt_path(&args, "file");
-                if let (Some(f), Some(p)) = (&file, &workflow_pos) {
-                    if f != p {
-                        return Err(anyhow!(
-                            "{}: --file '{}' and positional workflow '{}' disagree; use one or the other",
-                            error_codes::CLI_MIG_003, f.display(), p.display()
-                        ));
-                    }
-                }
+                let workflow = get_opt_path(&args, "workflow");
                 match subcmd.as_str() {
                     "serve" => {
+                        let workflow = workflow.ok_or_else(|| {
+                            anyhow!(
+                                "{}: --workflow is required for webhook serve",
+                                error_codes::CLI_MIG_002
+                            )
+                        })?;
                         let dto = WebhookArgs {
                             command: WebhookCommand::Serve(WebhookServeArgs {
-                                workflow_positional: workflow_pos,
-                                file,
+                                workflow,
                                 workspace,
                             }),
                         };
@@ -1509,34 +1203,37 @@ fn webhook_command() -> Command {
                     "status" => {
                         let dto = WebhookArgs {
                             command: WebhookCommand::Status(WebhookStatusArgs {
-                                workflow_positional: workflow_pos,
-                                file,
+                                workflow,
                                 workspace,
                             }),
                         };
                         commands::webhook(dto).await.map_err(anyhow::Error::from)
                     }
-                    _ => Err(anyhow!("{}: unknown webhook subcommand '{}'", error_codes::CLI_MIG_005, subcmd)),
+                    _ => Err(anyhow!(
+                        "{}: unknown webhook subcommand '{}'",
+                        error_codes::CLI_MIG_005,
+                        subcmd
+                    )),
                 }
             })
         }),
     }
 }
 
-fn log_command() -> Command {
+fn runs_command() -> Command {
     Command {
-        id: "log",
+        id: "runs",
         summary: "List and replay workflow execution history",
         syntax: Some("<list|show> [OPTIONS]"),
         category: Some(categories::MAINTENANCE),
         spec: Some(Arc::new(CommandSpec {
             summary: "List and replay workflow execution history",
-            long_about: Some(LOG_LONG_ABOUT),
+            long_about: Some(RUNS_LONG_ABOUT),
             examples: vec![
-                "newton log list --workspace ./workspace",
-                "newton log list --last 10 --json",
-                "newton log show <execution-id> --workspace ./workspace",
-                "newton log show <execution-id> --task my-task --verbose",
+                "newton runs list --workspace ./workspace",
+                "newton runs list --last 10 --json",
+                "newton runs show <run-id> --workspace ./workspace",
+                "newton runs show <run-id> --task my-task --verbose",
             ],
             args: vec![
                 ArgSpec {
@@ -1552,7 +1249,7 @@ fn log_command() -> Command {
                     help: "Subcommand: list or show",
                 },
                 ArgSpec {
-                    name: "execution-id",
+                    name: "run-id",
                     kind: ArgKind::Positional,
                     short: None,
                     long: None,
@@ -1561,7 +1258,7 @@ fn log_command() -> Command {
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Execution UUID (required for log show)",
+                    help: "Run UUID (required for `runs show`)",
                 },
                 ArgSpec {
                     name: "workspace",
@@ -1642,22 +1339,18 @@ fn log_command() -> Command {
                             .get("last")
                             .map(|s| {
                                 let n: usize = s.parse().map_err(|_| {
-                                    anyhow!(
-                                        "{}: --last must be a positive integer",
-                                        error_codes::CLI_MIG_002
-                                    )
+                                    anyhow!("LOG-003: runs list --last must be a positive integer")
                                 })?;
                                 if n == 0 {
                                     return Err(anyhow!(
-                                        "{}: --last must be a positive integer",
-                                        error_codes::CLI_MIG_002
+                                        "LOG-003: runs list --last must be a positive integer"
                                     ));
                                 }
                                 Ok(n)
                             })
                             .transpose()?;
-                        let dto = LogArgs {
-                            command: LogCommand::List {
+                        let dto = RunsArgs {
+                            command: RunsCommand::List {
                                 workspace: get_opt_path(&args, "workspace"),
                                 last,
                                 json: get_bool(&args, "json"),
@@ -1666,23 +1359,18 @@ fn log_command() -> Command {
                         commands::log(dto).map_err(anyhow::Error::from)
                     }
                     "show" => {
-                        let exec_id_str =
-                            args.named.get("execution-id").cloned().ok_or_else(|| {
-                                anyhow!(
-                                    "{}: execution-id is required for log show",
-                                    error_codes::CLI_MIG_002
-                                )
-                            })?;
-                        let execution_id = Uuid::parse_str(&exec_id_str).map_err(|e| {
+                        let run_id_str = args.named.get("run-id").cloned().ok_or_else(|| {
                             anyhow!(
-                                "{}: invalid execution-id UUID: {}",
-                                error_codes::CLI_MIG_002,
-                                e
+                                "{}: <RUN_ID> is required for `runs show`",
+                                error_codes::CLI_MIG_002
                             )
                         })?;
-                        let dto = LogArgs {
-                            command: LogCommand::Show {
-                                execution_id,
+                        let run_id = Uuid::parse_str(&run_id_str).map_err(|e| {
+                            anyhow!("{}: invalid run-id UUID: {}", error_codes::CLI_MIG_002, e)
+                        })?;
+                        let dto = RunsArgs {
+                            command: RunsCommand::Show {
+                                run_id,
                                 workspace: get_opt_path(&args, "workspace"),
                                 task: get_opt_str(&args, "task"),
                                 verbose: get_bool(&args, "verbose"),
@@ -1692,7 +1380,7 @@ fn log_command() -> Command {
                         commands::log(dto).map_err(anyhow::Error::from)
                     }
                     _ => Err(anyhow!(
-                        "{}: unknown log subcommand '{}'",
+                        "{}: unknown runs subcommand '{}'",
                         error_codes::CLI_MIG_005,
                         subcmd
                     )),
@@ -1702,7 +1390,7 @@ fn log_command() -> Command {
     }
 }
 
-// ── operational command builders (issue #231) ────────────────────────────────
+// ── operational command builders ──────────────────────────────────────────────
 
 fn health_command() -> Command {
     Command {
@@ -1949,15 +1637,12 @@ fn ask_summaries() -> Vec<ask::CommandSummary> {
         batch_command(),
         serve_command(),
         monitor_command(),
-        validate_command(),
-        dot_command(),
-        lint_command(),
-        explain_command(),
+        workflow_command(),
         resume_command(),
-        checkpoints_command(),
-        artifacts_command(),
+        checkpoint_command(),
+        artifact_command(),
         webhook_command(),
-        log_command(),
+        runs_command(),
         health_command(),
         doctor_command(),
         config_command(),
@@ -1978,10 +1663,6 @@ fn ask_summaries() -> Vec<ask::CommandSummary> {
 // ── public entry point ────────────────────────────────────────────────────────
 
 /// Build the Newton CLI application backed by `cli-framework`.
-///
-/// All 14 top-level commands are registered here.  Group commands
-/// (checkpoints, artifacts, webhook, log) dispatch to their sub-actions
-/// internally via the first positional arg.
 pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
     #[allow(unused_mut)]
     let mut builder = AppBuilder::new()
@@ -1991,15 +1672,12 @@ pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
         .register_command(batch_command())?
         .register_command(serve_command())?
         .register_command(monitor_command())?
-        .register_command(validate_command())?
-        .register_command(dot_command())?
-        .register_command(lint_command())?
-        .register_command(explain_command())?
+        .register_command(workflow_command())?
         .register_command(resume_command())?
-        .register_command(checkpoints_command())?
-        .register_command(artifacts_command())?
+        .register_command(checkpoint_command())?
+        .register_command(artifact_command())?
         .register_command(webhook_command())?
-        .register_command(log_command())?
+        .register_command(runs_command())?
         .register_command(health_command())?
         .register_command(doctor_command())?
         .register_command(config_command())?
@@ -2013,24 +1691,19 @@ pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
         .map_err(|e| anyhow!("{}: {}", error_codes::CLI_MIG_001, e))
 }
 
-/// Stable list of command ids registered by [`build_app`].  Drives the
-/// registry-uniqueness assertion (Goal 4.6) and ensures any rename surfaces
-/// as a test failure rather than silent drift.
+/// Stable list of command ids registered by [`build_app`].
 pub const REGISTERED_COMMAND_IDS: &[&str] = &[
     "run",
     "init",
     "batch",
     "serve",
     "monitor",
-    "validate",
-    "dot",
-    "lint",
-    "explain",
+    "workflow",
     "resume",
-    "checkpoints",
-    "artifacts",
+    "checkpoint",
+    "artifact",
     "webhook",
-    "log",
+    "runs",
     "health",
     "doctor",
     "config",
@@ -2038,7 +1711,6 @@ pub const REGISTERED_COMMAND_IDS: &[&str] = &[
 ];
 
 /// Returns every `Command` registered by `build_app`, in registration order.
-/// Used by the metadata-audit unit test.
 pub fn enumerate_commands() -> Vec<Command> {
     #[allow(unused_mut)]
     let mut cmds = vec![
@@ -2047,15 +1719,12 @@ pub fn enumerate_commands() -> Vec<Command> {
         batch_command(),
         serve_command(),
         monitor_command(),
-        validate_command(),
-        dot_command(),
-        lint_command(),
-        explain_command(),
+        workflow_command(),
         resume_command(),
-        checkpoints_command(),
-        artifacts_command(),
+        checkpoint_command(),
+        artifact_command(),
         webhook_command(),
-        log_command(),
+        runs_command(),
         health_command(),
         doctor_command(),
         config_command(),
@@ -2069,32 +1738,17 @@ pub fn enumerate_commands() -> Vec<Command> {
 }
 
 // ── TryFrom<CommandArgs> adapters ─────────────────────────────────────────────
-//
-// Each adapter converts the framework's flat CommandArgs (named: HashMap<String,String>)
-// into the typed Newton DTO that the handler expects.
 
 impl TryFrom<CommandArgs> for RunArgs {
     type Error = anyhow::Error;
 
     fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
-        let workflow_positional = get_opt_path(&args, "workflow");
+        let workflow = require_workflow_path(&args, "run")?;
         let input_file = get_opt_path(&args, "input-file");
-        let file = get_opt_path(&args, "file");
-        // CLI-MIG-003: both positional and --file supplied with different paths
-        if let (Some(f), Some(p)) = (&file, &workflow_positional) {
-            if f != p {
-                return Err(anyhow!(
-                    "{}: --file '{}' and positional workflow '{}' disagree",
-                    error_codes::CLI_MIG_003,
-                    f.display(),
-                    p.display()
-                ));
-            }
-        }
         let workspace = get_opt_path(&args, "workspace");
-        let arg = parse_kvp_list(args.named.get("arg").map(String::as_str).unwrap_or(""))?;
-        let set = parse_kvp_list(args.named.get("set").map(String::as_str).unwrap_or(""))?;
-        let trigger_json = get_opt_path(&args, "trigger-json");
+        let trigger = parse_kvp_list(args.named.get("trigger").map(String::as_str).unwrap_or(""))?;
+        let context = parse_kvp_list(args.named.get("context").map(String::as_str).unwrap_or(""))?;
+        let trigger_file = get_opt_path(&args, "trigger-file");
         let parallel_limit = args
             .named
             .get("parallel-limit")
@@ -2107,13 +1761,13 @@ impl TryFrom<CommandArgs> for RunArgs {
                 })
             })
             .transpose()?;
-        let max_time_seconds = args
+        let timeout_seconds = args
             .named
-            .get("max-time-seconds")
+            .get("timeout")
             .map(|s| {
                 s.parse::<u64>().map_err(|_| {
                     anyhow!(
-                        "{}: --max-time-seconds must be a non-negative integer",
+                        "{}: --timeout must be a non-negative integer",
                         error_codes::CLI_MIG_002
                     )
                 })
@@ -2122,15 +1776,14 @@ impl TryFrom<CommandArgs> for RunArgs {
         let verbose = get_bool(&args, "verbose");
         let server = get_opt_str(&args, "server");
         Ok(RunArgs {
-            workflow_positional,
+            workflow,
             input_file,
-            file,
             workspace,
-            arg,
-            set,
-            trigger_json,
+            trigger,
+            context,
+            trigger_file,
             parallel_limit,
-            max_time_seconds,
+            timeout_seconds,
             verbose,
             server,
         })
@@ -2143,7 +1796,7 @@ impl TryFrom<CommandArgs> for InitArgs {
     fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
         Ok(InitArgs {
             path: get_opt_path(&args, "path"),
-            template_source: get_opt_str(&args, "template-source"),
+            template: get_opt_str(&args, "template"),
         })
     }
 }
@@ -2157,13 +1810,13 @@ impl TryFrom<CommandArgs> for BatchArgs {
             .get("project-id")
             .cloned()
             .ok_or_else(|| anyhow!("{}: project-id is required", error_codes::CLI_MIG_002))?;
-        let sleep = args
+        let poll_interval_seconds = args
             .named
-            .get("sleep")
+            .get("poll-interval")
             .map(|s| {
                 s.parse::<u64>().map_err(|_| {
                     anyhow!(
-                        "{}: --sleep must be a non-negative integer",
+                        "{}: --poll-interval must be a non-negative integer",
                         error_codes::CLI_MIG_002
                     )
                 })
@@ -2174,7 +1827,7 @@ impl TryFrom<CommandArgs> for BatchArgs {
             project_id,
             workspace: get_opt_path(&args, "workspace"),
             once: get_bool(&args, "once"),
-            sleep,
+            poll_interval_seconds,
         })
     }
 }
@@ -2208,7 +1861,7 @@ impl TryFrom<CommandArgs> for ServeArgs {
         Ok(ServeArgs {
             host,
             port,
-            ui_dir: get_opt_path(&args, "ui-dir"),
+            static_ui: get_opt_path(&args, "static-ui"),
         })
     }
 }
@@ -2218,110 +1871,9 @@ impl TryFrom<CommandArgs> for MonitorArgs {
 
     fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
         Ok(MonitorArgs {
-            http_url: get_opt_str(&args, "http-url"),
-            ws_url: get_opt_str(&args, "ws-url"),
-            backend: get_bool(&args, "backend"),
-        })
-    }
-}
-
-impl TryFrom<CommandArgs> for ValidateArgs {
-    type Error = anyhow::Error;
-
-    fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
-        let workflow_positional = get_opt_path(&args, "workflow");
-        let file = get_opt_path(&args, "file");
-        if let (Some(f), Some(p)) = (&file, &workflow_positional) {
-            if f != p {
-                return Err(anyhow!(
-                    "{}: --file '{}' and positional workflow '{}' disagree",
-                    error_codes::CLI_MIG_003,
-                    f.display(),
-                    p.display()
-                ));
-            }
-        }
-        Ok(ValidateArgs {
-            workflow_positional,
-            file,
-        })
-    }
-}
-
-impl TryFrom<CommandArgs> for DotArgs {
-    type Error = anyhow::Error;
-
-    fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
-        let workflow_positional = get_opt_path(&args, "workflow");
-        let file = get_opt_path(&args, "file");
-        if let (Some(f), Some(p)) = (&file, &workflow_positional) {
-            if f != p {
-                return Err(anyhow!(
-                    "{}: --file '{}' and positional workflow '{}' disagree",
-                    error_codes::CLI_MIG_003,
-                    f.display(),
-                    p.display()
-                ));
-            }
-        }
-        Ok(DotArgs {
-            workflow_positional,
-            file,
-            out: get_opt_path(&args, "out"),
-        })
-    }
-}
-
-impl TryFrom<CommandArgs> for LintArgs {
-    type Error = anyhow::Error;
-
-    fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
-        let workflow_positional = get_opt_path(&args, "workflow");
-        let file = get_opt_path(&args, "file");
-        if let (Some(f), Some(p)) = (&file, &workflow_positional) {
-            if f != p {
-                return Err(anyhow!(
-                    "{}: --file '{}' and positional workflow '{}' disagree",
-                    error_codes::CLI_MIG_003,
-                    f.display(),
-                    p.display()
-                ));
-            }
-        }
-        Ok(LintArgs {
-            workflow_positional,
-            file,
-            format: parse_output_format(&args),
-        })
-    }
-}
-
-impl TryFrom<CommandArgs> for ExplainArgs {
-    type Error = anyhow::Error;
-
-    fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
-        let workflow_positional = get_opt_path(&args, "workflow");
-        let file = get_opt_path(&args, "file");
-        if let (Some(f), Some(p)) = (&file, &workflow_positional) {
-            if f != p {
-                return Err(anyhow!(
-                    "{}: --file '{}' and positional workflow '{}' disagree",
-                    error_codes::CLI_MIG_003,
-                    f.display(),
-                    p.display()
-                ));
-            }
-        }
-        let set = parse_kvp_list(args.named.get("set").map(String::as_str).unwrap_or(""))?;
-        let arg = parse_kvp_list(args.named.get("arg").map(String::as_str).unwrap_or(""))?;
-        Ok(ExplainArgs {
-            workflow_positional,
-            file,
-            workspace: get_opt_path(&args, "workspace"),
-            set,
-            arg,
-            format: parse_output_format(&args),
-            trigger_json: get_opt_path(&args, "trigger-json"),
+            ailoop_http: get_opt_str(&args, "ailoop-http"),
+            ailoop_ws: get_opt_str(&args, "ailoop-ws"),
+            with_api: get_bool(&args, "with-api"),
         })
     }
 }
@@ -2330,21 +1882,21 @@ impl TryFrom<CommandArgs> for ResumeArgs {
     type Error = anyhow::Error;
 
     fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
-        let execution_id = args
+        let run_id = args
             .named
-            .get("execution-id")
-            .ok_or_else(|| anyhow!("{}: --execution-id is required", error_codes::CLI_MIG_002))
+            .get("run-id")
+            .ok_or_else(|| anyhow!("{}: --run-id is required", error_codes::CLI_MIG_002))
             .and_then(|s| {
                 Uuid::parse_str(s).map_err(|e| {
                     anyhow!(
-                        "{}: --execution-id must be a valid UUID: {}",
+                        "{}: --run-id must be a valid UUID: {}",
                         error_codes::CLI_MIG_002,
                         e
                     )
                 })
             })?;
         Ok(ResumeArgs {
-            execution_id,
+            run_id,
             workspace: get_opt_path(&args, "workspace"),
             allow_workflow_change: get_bool(&args, "allow-workflow-change"),
         })

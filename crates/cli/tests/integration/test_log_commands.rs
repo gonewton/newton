@@ -1,6 +1,6 @@
 use assert_cmd::prelude::*;
 use chrono::Utc;
-use newton_cli::cli::args::LogArgs;
+use newton_cli::cli::args::RunsArgs;
 use newton_cli::cli::commands;
 use newton_core::workflow::state::{
     AppErrorSummary, OutputRef, WorkflowCheckpoint, WorkflowExecution, WorkflowExecutionStatus,
@@ -112,9 +112,9 @@ fn make_task_record(
 fn log_list_last_zero_returns_log003() {
     let tmp = TempDir::new().unwrap();
     let workspace = create_workspace(&tmp);
-    use newton_cli::cli::args::LogCommand;
-    let args = LogArgs {
-        command: LogCommand::List {
+    use newton_cli::cli::args::RunsCommand;
+    let args = RunsArgs {
+        command: RunsCommand::List {
             workspace: Some(workspace.clone()),
             last: Some(0),
             json: false,
@@ -132,10 +132,10 @@ fn log_list_last_zero_returns_log003() {
 fn log_show_nonexistent_returns_log001() {
     let tmp = TempDir::new().unwrap();
     let workspace = create_workspace(&tmp);
-    use newton_cli::cli::args::LogCommand;
-    let args = LogArgs {
-        command: LogCommand::Show {
-            execution_id: Uuid::new_v4(),
+    use newton_cli::cli::args::RunsCommand;
+    let args = RunsArgs {
+        command: RunsCommand::Show {
+            run_id: Uuid::new_v4(),
             workspace: Some(workspace.clone()),
             task: None,
             verbose: false,
@@ -165,10 +165,10 @@ fn log_show_task_filter_no_match_returns_log002() {
     );
     write_checkpoint(&workspace, id, &ckpt);
 
-    use newton_cli::cli::args::LogCommand;
-    let args = LogArgs {
-        command: LogCommand::Show {
-            execution_id: id,
+    use newton_cli::cli::args::RunsCommand;
+    let args = RunsArgs {
+        command: RunsCommand::Show {
+            run_id: id,
             workspace: Some(workspace.clone()),
             task: Some("nonexistent".to_string()),
             verbose: false,
@@ -199,9 +199,9 @@ fn log_list_two_executions_text_mode() {
         &make_execution(id2, "workflow.yaml", WorkflowExecutionStatus::Failed),
     );
 
-    use newton_cli::cli::args::LogCommand;
-    let args = LogArgs {
-        command: LogCommand::List {
+    use newton_cli::cli::args::RunsCommand;
+    let args = RunsArgs {
+        command: RunsCommand::List {
             workspace: Some(workspace.clone()),
             last: None,
             json: false,
@@ -229,10 +229,10 @@ fn log_list_with_last_limits_output() {
         );
     }
 
-    use newton_cli::cli::args::LogCommand;
+    use newton_cli::cli::args::RunsCommand;
     // --last 2: should succeed
-    let args = LogArgs {
-        command: LogCommand::List {
+    let args = RunsArgs {
+        command: RunsCommand::List {
             workspace: Some(workspace.clone()),
             last: Some(2),
             json: false,
@@ -253,10 +253,10 @@ fn log_list_json_has_required_keys() {
         &make_execution(id, "workflow.yaml", WorkflowExecutionStatus::Completed),
     );
 
-    use newton_cli::cli::args::LogCommand;
+    use newton_cli::cli::args::RunsCommand;
     // JSON mode just checks it succeeds; the keys are validated via the JSON structure.
-    let args = LogArgs {
-        command: LogCommand::List {
+    let args = RunsArgs {
+        command: RunsCommand::List {
             workspace: Some(workspace.clone()),
             last: None,
             json: true,
@@ -287,10 +287,10 @@ fn log_show_success_run_shows_task_sections() {
     );
     write_checkpoint(&workspace, id, &ckpt);
 
-    use newton_cli::cli::args::LogCommand;
-    let args = LogArgs {
-        command: LogCommand::Show {
-            execution_id: id,
+    use newton_cli::cli::args::RunsCommand;
+    let args = RunsArgs {
+        command: RunsCommand::Show {
+            run_id: id,
             workspace: Some(workspace.clone()),
             task: None,
             verbose: false,
@@ -321,10 +321,10 @@ fn log_show_task_filter_succeeds() {
     );
     write_checkpoint(&workspace, id, &ckpt);
 
-    use newton_cli::cli::args::LogCommand;
-    let args = LogArgs {
-        command: LogCommand::Show {
-            execution_id: id,
+    use newton_cli::cli::args::RunsCommand;
+    let args = RunsArgs {
+        command: RunsCommand::Show {
+            run_id: id,
             workspace: Some(workspace.clone()),
             task: Some("fetch_data".to_string()),
             verbose: false,
@@ -353,10 +353,10 @@ fn log_show_json_no_task_filter_key() {
 
     // Capture output by redirecting stdout is tricky in unit tests, so
     // we just verify the command succeeds.
-    use newton_cli::cli::args::LogCommand;
-    let args = LogArgs {
-        command: LogCommand::Show {
-            execution_id: id,
+    use newton_cli::cli::args::RunsCommand;
+    let args = RunsArgs {
+        command: RunsCommand::Show {
+            run_id: id,
             workspace: Some(workspace.clone()),
             task: None,
             verbose: false,
@@ -383,10 +383,10 @@ fn log_show_json_with_task_filter() {
     );
     write_checkpoint(&workspace, id, &ckpt);
 
-    use newton_cli::cli::args::LogCommand;
-    let args = LogArgs {
-        command: LogCommand::Show {
-            execution_id: id,
+    use newton_cli::cli::args::RunsCommand;
+    let args = RunsArgs {
+        command: RunsCommand::Show {
+            run_id: id,
             workspace: Some(workspace.clone()),
             task: Some("task_a".to_string()),
             verbose: false,
@@ -419,10 +419,10 @@ fn log_show_json_two_run_seqs_for_same_task_id() {
     );
     write_checkpoint(&workspace, id, &ckpt);
 
-    use newton_cli::cli::args::LogCommand;
-    let args = LogArgs {
-        command: LogCommand::Show {
-            execution_id: id,
+    use newton_cli::cli::args::RunsCommand;
+    let args = RunsArgs {
+        command: RunsCommand::Show {
+            run_id: id,
             workspace: Some(workspace.clone()),
             task: Some("retry_task".to_string()),
             verbose: false,
@@ -443,10 +443,10 @@ fn log_show_without_checkpoint_shows_fallback_notice() {
     write_execution(&workspace, &exec);
     // No checkpoint written.
 
-    use newton_cli::cli::args::LogCommand;
-    let args = LogArgs {
-        command: LogCommand::Show {
-            execution_id: id,
+    use newton_cli::cli::args::RunsCommand;
+    let args = RunsArgs {
+        command: RunsCommand::Show {
+            run_id: id,
             workspace: Some(workspace.clone()),
             task: None,
             verbose: false,
@@ -622,7 +622,7 @@ workflow:
     let stdout = String::from_utf8_lossy(&output.stdout);
     // Assert the normative hint line is present in stdout.
     let hint_re = regex::Regex::new(
-        r"(?m)^newton: task failed execution_id=[0-9a-f-]{36} task_id=\S+ inspect: newton log show [0-9a-f-]{36} --task \S+$"
+        r"(?m)^newton: task failed execution_id=[0-9a-f-]{36} task_id=\S+ inspect: newton runs show [0-9a-f-]{36} --task \S+$"
     ).expect("valid regex");
     assert!(
         hint_re.is_match(&stdout),
@@ -695,7 +695,7 @@ workflow:
     );
     // Goal 7: hint regex still matches.
     let hint_re = regex::Regex::new(
-        r"(?m)^newton: task failed execution_id=[0-9a-f-]{36} task_id=\S+ inspect: newton log show [0-9a-f-]{36} --task \S+$"
+        r"(?m)^newton: task failed execution_id=[0-9a-f-]{36} task_id=\S+ inspect: newton runs show [0-9a-f-]{36} --task \S+$"
     ).unwrap();
     assert!(
         hint_re.is_match(&stdout),
@@ -815,30 +815,30 @@ workflow:
     );
 }
 
-// --- CLI test: newton log --help ---
+// --- CLI test: newton runs --help ---
 
 #[test]
 fn newton_log_help_works() {
     let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
-    cmd.arg("log").arg("--help");
+    cmd.arg("runs").arg("--help");
     cmd.assert().success();
 }
 
-// --- CLI test: newton log list --help ---
+// --- CLI test: newton runs list --help ---
 
 #[test]
 fn newton_log_list_help_works() {
     let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
-    cmd.arg("log").arg("list").arg("--help");
+    cmd.arg("runs").arg("list").arg("--help");
     cmd.assert().success();
 }
 
-// --- CLI test: newton log show --help ---
+// --- CLI test: newton runs show --help ---
 
 #[test]
 fn newton_log_show_help_works() {
     let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
-    cmd.arg("log").arg("show").arg("--help");
+    cmd.arg("runs").arg("show").arg("--help");
     cmd.assert().success();
 }
 
@@ -851,7 +851,7 @@ fn log_dir_global_flag_accepted() {
     // Pass --log-dir before the subcommand (global flag behavior).
     cmd.arg("--log-dir")
         .arg(tmp.path())
-        .arg("log")
+        .arg("runs")
         .arg("list")
         .arg("--help");
     cmd.assert().success();
@@ -863,9 +863,9 @@ fn log_dir_global_flag_accepted() {
 fn log_list_last_zero_via_internal_api() {
     let tmp = TempDir::new().unwrap();
     let workspace = create_workspace(&tmp);
-    use newton_cli::cli::args::LogCommand;
-    let args = LogArgs {
-        command: LogCommand::List {
+    use newton_cli::cli::args::RunsCommand;
+    let args = RunsArgs {
+        command: RunsCommand::List {
             workspace: Some(workspace.clone()),
             last: Some(0),
             json: false,
@@ -874,4 +874,60 @@ fn log_list_last_zero_via_internal_api() {
     let result = commands::log(args);
     assert!(result.is_err());
     assert_eq!(result.unwrap_err().code, "LOG-003");
+}
+
+// --- §7 criterion 6: kind_for_command enumeration covers every top-level command ---
+
+#[test]
+fn kind_for_command_maps_every_top_level_command() {
+    use newton_cli::cli::kind_for_command;
+    use newton_core::logging::LogInvocationKind;
+
+    assert_eq!(kind_for_command("run"), LogInvocationKind::Run);
+    assert_eq!(kind_for_command("resume"), LogInvocationKind::Resume);
+    assert_eq!(kind_for_command("init"), LogInvocationKind::Init);
+    assert_eq!(kind_for_command("batch"), LogInvocationKind::Batch);
+    assert_eq!(kind_for_command("serve"), LogInvocationKind::Serve);
+    assert_eq!(kind_for_command("monitor"), LogInvocationKind::Monitor);
+    assert_eq!(kind_for_command("workflow"), LogInvocationKind::Workflow);
+    assert_eq!(kind_for_command("runs"), LogInvocationKind::Runs);
+    assert_eq!(
+        kind_for_command("checkpoint"),
+        LogInvocationKind::Checkpoint
+    );
+    assert_eq!(kind_for_command("artifact"), LogInvocationKind::Artifact);
+    assert_eq!(kind_for_command("webhook"), LogInvocationKind::Webhook);
+    for diag in ["health", "doctor", "config", "completion", "ask"] {
+        assert_eq!(kind_for_command(diag), LogInvocationKind::Diagnostic);
+    }
+}
+
+// --- §7 criterion 3: legacy top-level command spellings MUST NOT parse ---
+
+#[test]
+fn legacy_top_level_commands_are_rejected() {
+    // The cli-framework prints "unrecognized subcommand" to stderr.  The binary
+    // may exit 0 after printing the hint; the absence of the legacy id from
+    // the registered command set is what matters.  We assert that stderr or
+    // stdout reports unrecognized for every legacy spelling.
+    for legacy in [
+        "validate",
+        "lint",
+        "explain",
+        "dot",
+        "log",
+        "checkpoints",
+        "artifacts",
+    ] {
+        let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
+        cmd.arg(legacy).arg("--help");
+        let output = cmd.output().expect("spawn newton");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let combined = format!("{stderr}{stdout}");
+        assert!(
+            combined.contains("unrecognized") || combined.contains("error"),
+            "legacy command `newton {legacy}` must report unrecognized; got stderr=\n{stderr}\nstdout=\n{stdout}"
+        );
+    }
 }

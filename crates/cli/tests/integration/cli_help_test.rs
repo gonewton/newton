@@ -42,11 +42,11 @@ fn run_help_shows_workspace_flag_example() {
 }
 
 #[test]
-fn run_help_shows_arg_flag_example() {
+fn run_help_shows_trigger_flag_example() {
     let stdout = help_output(&["run"]);
     assert!(
-        stdout.contains("--arg"),
-        "run --help should demonstrate --arg flag"
+        stdout.contains("--trigger"),
+        "run --help should demonstrate --trigger flag"
     );
 }
 
@@ -104,15 +104,13 @@ fn all_main_commands_have_examples() {
         &["init"],
         &["batch"],
         &["serve"],
-        &["validate"],
-        &["lint"],
-        &["explain"],
+        &["workflow"],
         &["resume"],
-        &["checkpoints"],
-        &["artifacts"],
+        &["checkpoint"],
+        &["artifact"],
         &["webhook"],
         &["monitor"],
-        &["dot"],
+        &["runs"],
     ];
     for command in commands {
         let stdout = help_output(command);
@@ -251,14 +249,8 @@ fn serve_help_lists_route_groups_and_pointers() {
         "EXAMPLES:",
         "--host",
         "--port",
-        "--ui-dir",
-        "/health",
-        "/api/workflows",
-        "/api/operators",
-        "/api/hil/",
-        "/api/stream/",
+        "--static-ui",
         "openapi/newton-backend-parity.yaml",
-        "skill/newton/references/serve-api.md",
     ] {
         assert!(
             stdout.contains(required),

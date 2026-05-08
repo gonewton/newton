@@ -23,8 +23,8 @@ pub async fn run(args: MonitorArgs) -> Result<()> {
 
     let overrides = MonitorOverrides {
         workflow_service_url: None,
-        http_url: args.http_url,
-        ws_url: args.ws_url,
+        http_url: args.ailoop_http,
+        ws_url: args.ailoop_ws,
     };
 
     let endpoints = load_monitor_endpoints(&workspace_root, overrides)?;
@@ -41,12 +41,12 @@ pub async fn run(args: MonitorArgs) -> Result<()> {
     let poll_handle = tokio::spawn(polling_loop(client.clone(), event_tx.clone()));
     let command_handle = tokio::spawn(command_loop(client.clone(), command_rx, event_tx.clone()));
 
-    let backend_handle = if args.backend {
+    let backend_handle = if args.with_api {
         Some(tokio::spawn(async move {
             if let Err(err) = crate::cli::commands::serve(crate::cli::args::ServeArgs {
                 host: "127.0.0.1".to_string(),
                 port: 8080,
-                ui_dir: None,
+                static_ui: None,
             })
             .await
             {

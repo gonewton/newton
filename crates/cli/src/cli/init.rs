@@ -45,7 +45,7 @@ pub fn run(args: InitArgs) -> Result<()> {
 
     // Install template using aikit-sdk
     let template_source = args
-        .template_source
+        .template
         .unwrap_or_else(|| DEFAULT_TEMPLATE_SOURCE.to_string());
     install_template(&path, &template_source)?;
 

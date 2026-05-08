@@ -13,7 +13,7 @@ You can still think in terms of **evaluate → advise → act** when designing w
 
 Newton includes a production workflow runner with YAML-defined tasks and deterministic execution semantics:
 
-- Workflow commands: `newton run|lint|validate|dot|explain|resume|checkpoints|artifacts|webhook`
+- Workflow commands: `newton run`, `newton workflow {validate|lint|preview|graph}`, `newton resume`, `newton runs {list|show}`, `newton checkpoint {list|clean}`, `newton artifact clean`, `newton webhook {serve|status}`
 - Safety checks: workflow lint, early validation of expressions, guarded shell usage, reachability checks
 - Deterministic completion: goal gates, terminal tasks, explicit completion policy, stable error codes
 - Runtime durability: checkpoint persistence, resume support, artifact routing/cleanup, execution warnings
@@ -39,7 +39,7 @@ When aikit-sdk detects quota exhaustion, it sets `RunResult.quota_exceeded` and 
 | `HumanApprovalOperator` | Pause for a boolean approve/reject decision from a human operator |
 | `HumanDecisionOperator` | Pause for a multiple-choice selection from a human operator |
 
-Newton also bundles agent, GitHub, and MCP operator integrations. Their availability depends on the workflow you load — run `newton explain <workflow.yaml>` for the exact operator list resolved by your file, and consult `docs/operators/` for the per-operator reference.
+Newton also bundles agent, GitHub, and MCP operator integrations. Their availability depends on the workflow you load — run `newton workflow preview <workflow.yaml>` for the exact operator list resolved by your file, and consult `docs/operators/` for the per-operator reference.
 
 #### Sub-workflows
 
@@ -85,7 +85,7 @@ scoop install newton
 
 - **Required**: The Newton CLI itself, installed via the package instructions above. Once the CLI is available, `newton init .` installs the Newton workspace template via the bundled `aikit-sdk` (a statically linked workspace dependency — you do **not** need `aikit` on your `PATH`).
 - **Optional**: Git for working with version control, hooks, and batch workflows.
-- If `newton init .` cannot complete (missing template, network issues, or template source errors), check your connectivity and that the configured template source is reachable. The default template source is `gonewton/newton-templates`; override with `--template-source <SOURCE>` to use a different locator or a local path.
+- If `newton init .` cannot complete (missing template, network issues, or template source errors), check your connectivity and that the configured template source is reachable. The default template source is `gonewton/newton-templates`; override with `--template <SOURCE>` to use a different locator or a local path.
 
 ## Quick Start
 
@@ -137,13 +137,17 @@ Execute a workflow graph defined in YAML.
 
 **Options:**
 - `--workspace <PATH>`: Workspace root directory (default: current directory)
-- `--arg KEY=VALUE`: Merge key into triggers.payload (repeatable)
-- `--set KEY=VALUE`: Merge key into workflow context at runtime (repeatable)
-- `--max-time-seconds N`: Wall-clock time limit override in seconds
+- `--trigger KEY=VALUE`: Merge key into triggers.payload (repeatable; VALUE may be `@path` to load file content as the value)
+- `--trigger-file <PATH>`: Load JSON object as base trigger payload before `--trigger` overrides
+- `--context KEY=VALUE`: Merge key into workflow context at runtime (repeatable)
+- `--timeout SECONDS`: Wall-clock time limit override (in seconds)
 - `--parallel-limit N`: Runtime override for bounded task concurrency
-- `--verbose`: Print task stdout/stderr to terminal after each task completes
-- `--file <PATH>`: Path to workflow YAML file (alternative to positional argument)
-- `--trigger-json <PATH>`: Load JSON object as base trigger payload before --arg overrides
+- `-v`, `--verbose`: Print task stdout/stderr to terminal after each task completes
+- `--server <URL>`: Newton server URL to register this run (optional)
+
+The workflow YAML is supplied as a required positional argument; the legacy named flag has been removed.
+
+**Trigger payload merge order** (left to right): `--trigger-file` is loaded first as the base JSON object, then each `--trigger KEY=VAL` overlays in order. Within a value, `@path` reads the file as a string.
 
 **Examples:**
 ```bash
@@ -151,13 +155,13 @@ Execute a workflow graph defined in YAML.
 newton run workflow.yaml
 
 # With workspace and trigger data
-newton run workflow.yaml --workspace ./output --arg key=value
+newton run workflow.yaml --workspace ./output --trigger key=value
 
-# Multiple arguments
-newton run workflow.yaml --arg env=prod --arg version=1.2.3
+# Multiple trigger overrides
+newton run workflow.yaml --trigger env=prod --trigger version=1.2.3
 
 # With time limit
-newton run workflow.yaml --max-time-seconds 3600
+newton run workflow.yaml --timeout 3600
 ```
 
 ### `init [workspace-path]`
@@ -165,7 +169,7 @@ newton run workflow.yaml --max-time-seconds 3600
 Create the `.newton` workspace layout, install the default Newton workspace template, and write `.newton/configs/default.conf` with `project_root` (absolute path to the directory you initialized), a default `coding_model` (typically `zai-coding-plan/glm-4.7`), and commented guidance for `workflow_file` (set this when using `newton batch`).
 
 **Options:**
-- `--template-source <SOURCE>`: Optional template locator (default: `gonewton/newton-templates`). If the value is a path on disk, that template is used; otherwise the built-in template shipped with the CLI is used.
+- `--template <SOURCE>`: Optional template locator (default: `gonewton/newton-templates`). If the value is a path on disk, that template is used; otherwise the built-in template shipped with the CLI is used.
 
 **Examples:**
 ```bash
@@ -179,7 +183,7 @@ Process queued plan files for a project. `newton batch` discovers the workspace 
 
 - `--workspace PATH`: Override workspace discovery.
 - `--once`: Process one todo file then exit.
-- `--sleep SECONDS`: Poll interval when the queue is empty (default 60).
+- `--poll-interval SECONDS`: Poll interval when the queue is empty (default 60).
 
 Plan files move from `todo` to `completed` when the workflow succeeds, or to `failed` when it errors.
 
@@ -192,7 +196,7 @@ Serve starts the HTTP/WebSocket API server that provides real-time access to wor
 **Options** (from `crates/cli/src/cli/args.rs`):
 - `--host <HOST>`: Host address to bind to (default: `127.0.0.1`).
 - `--port <PORT>`: Port to listen on (default: `8080`).
-- `--ui-dir <PATH>`: Optional path to a built Newton UI dist directory; when present the UI is served alongside the API.
+- `--static-ui <PATH>`: Optional path to a built Newton UI dist directory; when present the UI is served alongside the API.
 
 **Example:**
 ```bash
@@ -249,41 +253,41 @@ newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
 
 Monitor listens to every project/branch channel from the workspace using a WebSocket/HTTP mix and lets you answer questions or approve authorizations from a queue. See **Logging → `monitor`** below for the full configuration and usage walkthrough.
 
-### `validate <workflow.yaml>`
+### `workflow validate <workflow.yaml>`
 
-Validate checks your workflow YAML for syntax errors, schema compliance, and logical issues before execution (YAML structure, schema, task dependencies, and resource configuration). Returns 0 on success and 1 with errors on stderr.
+Validates a workflow YAML for syntax errors, schema compliance, and logical issues before execution (YAML structure, schema, task dependencies, and resource configuration). Returns 0 on success and 1 with errors on stderr.
 
-### `dot <workflow.yaml>`
+### `workflow graph <workflow.yaml>`
 
-Dot creates a Graphviz DOT file from your workflow definition that can be rendered into visual diagrams of task dependencies, parallel execution opportunities, the critical path, and data flow. Use `--out graph.dot` and render with `dot -Tpng graph.dot -o workflow.png`.
+Renders a Graphviz DOT representation of the workflow graph that can be turned into visual diagrams of task dependencies, parallel execution opportunities, the critical path, and data flow. The current single supported value is `--format dot`. Use `--output graph.dot` (`-o`) and render with `dot -Tpng graph.dot -o workflow.png`.
 
-### `lint <workflow.yaml>`
+### `workflow lint <workflow.yaml>`
 
-Lint analyzes your workflow against Newton's best-practice rules — performance anti-patterns, resource usage, security and maintainability issues, and common workflow design mistakes. Lint warnings are advisory and do not block execution. Use `--format json` for CI integration.
+Analyzes a workflow against Newton's best-practice rules — performance anti-patterns, resource usage, security and maintainability issues, and common workflow design mistakes. Lint warnings are advisory and do not block execution. Use `--format json` for CI integration.
 
-### `explain <workflow.yaml>`
+### `workflow preview <workflow.yaml>`
 
-Explain produces detailed, human-readable documentation about what your workflow does and how it will execute, covering step-by-step flow, dependencies, configuration effects, resource constraints, and expected inputs/outputs. Output formats: `text` (default), `prose`, and `json`.
+Produces detailed, human-readable documentation about what the workflow does and how it will execute, covering step-by-step flow, dependencies, configuration effects, resource constraints, and expected inputs/outputs. Accepts `--trigger`, `--trigger-file`, `--context`, and `--workspace` to mirror the `run` invocation. Output formats: `text` (default), `prose`, and `json`.
 
 ### `resume`
 
-Resume restarts a workflow execution from its last saved checkpoint, useful after interruptions, parameter changes, or maintenance windows. Requires `--execution-id <UUID>`; pass `--allow-workflow-change` to override the default safety check that the workflow definition is unchanged since the checkpoint.
+Restarts a workflow execution from its last saved checkpoint, useful after interruptions, parameter changes, or maintenance windows. Requires `--run-id <UUID>`; pass `--allow-workflow-change` to override the default safety check that the workflow definition is unchanged since the checkpoint.
 
-### `checkpoints`
+### `checkpoint`
 
-Checkpoints provides tools to manage saved workflow states that allow resumption after interruption — list executions, clean old checkpoint data with `--older-than 7d`, and inspect storage usage. Checkpoints are stored under `.newton/checkpoints/` in the workspace.
+`checkpoint list` and `checkpoint clean` manage saved workflow states that allow resumption after interruption. Use `newton checkpoint list --workspace ./workspace --json` for a machine-readable list and `newton checkpoint clean --workspace ./workspace --older-than 7d` to remove old checkpoints. Checkpoints live under `.newton/checkpoints/` in the workspace.
 
-### `artifacts`
+### `artifact`
 
-Artifacts manages the files, logs, and output data generated during workflow execution. Use `newton artifacts clean --workspace ./workspace --older-than 7d` to reclaim disk space; retention strings accept days (`7d`), weeks (`1w`), or hours (`24h`). Artifacts live under `.newton/artifacts/`.
+`artifact clean` removes the files, logs, and output data generated during workflow execution. Use `newton artifact clean --workspace ./workspace --older-than 7d` to reclaim disk space; retention strings accept days (`7d`), weeks (`1w`), or hours (`24h`). Artifacts live under `.newton/artifacts/`.
 
 ### `webhook`
 
-Webhook exposes HTTP endpoints that trigger workflow executions in response to external events (Git hosting services, CI/CD platforms, monitoring/alerting systems, and custom integrations). Use `newton webhook serve <workflow.yaml>` to start the server and `newton webhook status <workflow.yaml>` to inspect configuration.
+Webhook exposes HTTP endpoints that trigger workflow executions in response to external events (Git hosting services, CI/CD platforms, monitoring/alerting systems, and custom integrations). Use `newton webhook serve --workflow <PATH> --workspace <PATH>` to start the server and `newton webhook status --workflow <PATH> --workspace <PATH>` to inspect configuration.
 
-### `log`
+### `runs`
 
-Log provides access to per-task execution history stored in `.newton/state/workflows/`. Use `newton log list` to enumerate runs and `newton log show <execution-id>` to display resolved inputs, operators, and outputs for every task. See **Logging → Reviewing execution history** for examples.
+`runs list` and `runs show` provide access to per-task execution history stored in `.newton/state/workflows/`. Use `newton runs list` to enumerate runs and `newton runs show <RUN_ID>` to display resolved inputs, operators, and outputs for every task. See **Logging → Reviewing execution history** for examples.
 
 ### Plans and the batch queue
 
@@ -382,29 +386,29 @@ Newton records each workflow run to `.newton/state/workflows/<execution-id>/`. U
 
 ```bash
 # List recent runs in the current workspace (newest first)
-newton log list
+newton runs list
 
 # Limit output to the last 5 runs
-newton log list --last 5
+newton runs list --last 5
 
 # Show task-by-task replay for a specific run
-newton log show <execution-id>
+newton runs show <RUN_ID>
 
 # Filter to a single task and show resolved parameters
-newton log show <execution-id> --task my-task-id --verbose
+newton runs show <RUN_ID> --task my-task-id --verbose
 
 # Output as JSON (for scripting)
-newton log list --json
-newton log show <execution-id> --json
+newton runs list --json
+newton runs show <RUN_ID> --json
 ```
 
 When a task fails, Newton prints a hint to stdout:
 
 ```
-newton: task failed execution_id=<UUID> task_id=<TASK_ID> inspect: newton log show <UUID> --task <TASK_ID>
+newton: task failed run_id=<UUID> task_id=<TASK_ID> inspect: newton runs show <UUID> --task <TASK_ID>
 ```
 
-If you invoke `newton log show` from a directory other than the workspace root, pass `--workspace <path>` so Newton can locate the execution state (e.g. `newton log show <UUID> --task <TASK_ID> --workspace /path/to/workspace`).
+If you invoke `newton runs show` from a directory other than the workspace root, pass `--workspace <path>` so Newton can locate the execution state (e.g. `newton runs show <UUID> --task <TASK_ID> --workspace /path/to/workspace`).
 
 ### Troubleshooting TUI/logging conflicts
 
@@ -420,8 +424,9 @@ Stream live ailoop channels for every project/branch in the workspace via a term
 `newton monitor` walks up from the current directory to find the workspace root containing `.newton`, then reads `ailoop_server_http_url` and `ailoop_server_ws_url` from the first `.newton/configs/*.conf` file that defines both keys (alphabetically) or from `.newton/configs/monitor.conf` when present. It connects to those HTTP and WebSocket endpoints, loads recent messages per channel, and opens a full-screen terminal UI with stream views, a queue for pending prompts, filtering, and keyboard shortcuts (see `?` in the UI for help).
 
 **Options:**
-- `--http-url <URL>`: Override the HTTP base URL for this session.
-- `--ws-url <URL>`: Override the WebSocket URL for this session.
+- `--ailoop-http <URL>`: Override the ailoop HTTP base URL for this session.
+- `--ailoop-ws <URL>`: Override the ailoop WebSocket URL for this session.
+- `--with-api`: Also start Newton's HTTP API alongside the monitor.
 
 **Example:**
 ```bash
@@ -442,7 +447,7 @@ newton monitor
 
 3. **Start newton monitor in another terminal:**
    ```bash
-   newton monitor --http-url http://127.0.0.1:8081 --ws-url ws://127.0.0.1:8080
+   newton monitor --ailoop-http http://127.0.0.1:8081 --ailoop-ws ws://127.0.0.1:8080
    ```
 
 4. **Send messages from agents or other terminals:**
@@ -484,13 +489,13 @@ Configure execution limits for workflows:
 
 ```bash
 # Set a wall-clock time limit (30 minutes)
-newton run workflow.yaml --max-time-seconds 1800
+newton run workflow.yaml --timeout 1800
 
 # Limit concurrent task execution
 newton run workflow.yaml --parallel-limit 4
 
 # Combined: time limit and concurrency
-newton run workflow.yaml --max-time-seconds 3600 --parallel-limit 2
+newton run workflow.yaml --timeout 3600 --parallel-limit 2
 ```
 
 ### Git and plans
@@ -554,7 +559,7 @@ Any other keys in that file are ignored by `newton batch` unless documented for 
 Configure execution limits for workflow runs:
 
 ```bash
---max-time-seconds N    Wall-clock time limit in seconds
+--timeout N    Wall-clock time limit in seconds
 --parallel-limit N      Maximum number of tasks to run concurrently
 ```
 
@@ -576,7 +581,7 @@ Each workflow run writes checkpoints, task output, and artifacts under your work
 
 2. **Verbose Newton logging:**
    ```bash
-   RUST_LOG=newton=debug,info newton monitor --http-url http://127.0.0.1:8081 --ws-url ws://127.0.0.1:8080
+   RUST_LOG=newton=debug,info newton monitor --ailoop-http http://127.0.0.1:8081 --ailoop-ws ws://127.0.0.1:8080
    ```
    Then inspect `<workspace>/.newton/logs/newton.log` for connection or parse errors.
 
@@ -614,7 +619,7 @@ Each workflow run writes checkpoints, task output, and artifacts under your work
 **Configuration issues:**
 
 If monitor can't find the ailoop URLs, ensure you have either:
-- Command-line flags: `--http-url` and `--ws-url`
+- Command-line flags: `--ailoop-http` and `--ailoop-ws`
 - Or a config file at `.newton/configs/monitor.conf` with:
   ```
   ailoop_server_http_url=http://127.0.0.1:8081

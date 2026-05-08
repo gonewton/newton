@@ -1,9 +1,9 @@
 #![allow(clippy::result_large_err)] // CLI command handlers return AppError directly to preserve diagnostic context without boxing.
 
 use crate::cli::args::{
-    ArtifactCommand, ArtifactsArgs, BatchArgs, CheckpointCommand, CheckpointsArgs, DotArgs,
-    ExplainArgs, KeyValuePair, LintArgs, LogArgs, LogCommand, MonitorArgs, OutputFormat,
-    ResumeArgs, RunArgs, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
+    ArtifactArgs, ArtifactCommand, BatchArgs, CheckpointArgs, CheckpointCommand, DotArgs,
+    ExplainArgs, KeyValuePair, LintArgs, MonitorArgs, OutputFormat, ResumeArgs, RunArgs, RunsArgs,
+    RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
     WebhookStatusArgs,
 };
 use crate::monitor;
@@ -39,23 +39,11 @@ use std::{
 };
 use tokio::time::sleep;
 
-/// Hint to the user how to view help for the command they tripped over.
-/// The cli-framework registry owns help text now, so we cannot render it
-/// from this side without circular access; just point users to `--help`.
-fn print_help_for_command(command_name: &str) {
-    let parts: Vec<&str> = command_name.split_whitespace().collect();
-    let main_command = parts.first().copied().unwrap_or(command_name);
-    eprintln!("Run `newton {main_command} --help` for usage details.");
-}
-
 /// Load and validate a workflow document from the given arguments
 fn load_and_validate_workflow(
     args: &RunArgs,
 ) -> Result<(workflow_schema::WorkflowDocument, PathBuf)> {
-    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
-        print_help_for_command("run");
-        anyhow!("missing workflow file; pass WORKFLOW or --file PATH")
-    })?;
+    let workflow_path = args.workflow.clone();
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
 
@@ -73,7 +61,7 @@ fn load_and_validate_workflow(
         ));
     }
 
-    apply_context_overrides(&mut document.workflow.context, &args.set);
+    apply_context_overrides(&mut document.workflow.context, &args.context);
     document.validate(&ExpressionEngine::default())?;
 
     Ok((document, workflow_path))
@@ -86,7 +74,7 @@ fn build_comprehensive_trigger_payload(
 ) -> Result<Option<Value>> {
     // Start with base trigger payload from args
     let mut trigger_payload =
-        build_trigger_payload(&args.trigger_json, &args.arg)?.unwrap_or_else(|| json!({}));
+        build_trigger_payload(&args.trigger_file, &args.trigger)?.unwrap_or_else(|| json!({}));
 
     // Add input_file to payload if provided
     if let Some(input_file) = &args.input_file {
@@ -122,7 +110,7 @@ fn setup_workflow_execution(
 
     let overrides = ExecutionOverrides {
         parallel_limit: args.parallel_limit,
-        max_time_seconds: args.max_time_seconds,
+        max_time_seconds: args.timeout_seconds,
         checkpoint_base_path: None,
         artifact_base_path: None,
         max_nesting_depth: None,
@@ -188,13 +176,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
 }
 
 pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
-    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
-        print_help_for_command("run");
-        AppError::new(
-            ErrorCategory::ValidationError,
-            "missing workflow file; pass WORKFLOW or --file PATH",
-        )
-    })?;
+    let workflow_path = args.workflow.clone();
     let workspace = resolve_workflow_workspace(args.workspace)?;
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
@@ -212,10 +194,10 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
             format!("workflow lint detected {error_count} error(s); fix before running"),
         ));
     }
-    apply_context_overrides(&mut document.workflow.context, &args.set);
+    apply_context_overrides(&mut document.workflow.context, &args.context);
     document.validate(&ExpressionEngine::default())?;
 
-    if let Some(payload) = build_trigger_payload(&args.trigger_json, &args.arg)? {
+    if let Some(payload) = build_trigger_payload(&args.trigger_file, &args.trigger)? {
         document.triggers = Some(workflow_schema::WorkflowTrigger {
             trigger_type: workflow_schema::TriggerType::Manual,
             schema_version: "1".to_string(),
@@ -230,7 +212,7 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
 
     let overrides = ExecutionOverrides {
         parallel_limit: args.parallel_limit,
-        max_time_seconds: args.max_time_seconds,
+        max_time_seconds: args.timeout_seconds,
         checkpoint_base_path: None,
         artifact_base_path: None,
         max_nesting_depth: None,
@@ -276,13 +258,7 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
 }
 
 pub fn validate(args: ValidateArgs) -> StdResult<(), AppError> {
-    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
-        print_help_for_command("validate");
-        AppError::new(
-            ErrorCategory::ValidationError,
-            "missing workflow file; pass WORKFLOW or --file PATH",
-        )
-    })?;
+    let workflow_path = args.workflow.clone();
     let document = workflow_schema::load_workflow(&workflow_path)?;
     let unreachable = workflow_dot::reachability_warnings(&document);
     for id in &unreachable {
@@ -293,16 +269,10 @@ pub fn validate(args: ValidateArgs) -> StdResult<(), AppError> {
 }
 
 pub fn dot(args: DotArgs) -> StdResult<(), AppError> {
-    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
-        print_help_for_command("dot");
-        AppError::new(
-            ErrorCategory::ValidationError,
-            "missing workflow file; pass WORKFLOW or --file PATH",
-        )
-    })?;
+    let workflow_path = args.workflow.clone();
     let document = workflow_schema::load_workflow(&workflow_path)?;
     let dot = workflow_dot::workflow_to_dot(&document);
-    if let Some(path) = args.out {
+    if let Some(path) = args.output {
         fs::write(path, dot).map_err(|err| {
             AppError::new(
                 ErrorCategory::IoError,
@@ -316,13 +286,7 @@ pub fn dot(args: DotArgs) -> StdResult<(), AppError> {
 }
 
 pub fn lint(args: LintArgs) -> StdResult<(), AppError> {
-    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
-        print_help_for_command("lint");
-        AppError::new(
-            ErrorCategory::ValidationError,
-            "missing workflow file; pass WORKFLOW or --file PATH",
-        )
-    })?;
+    let workflow_path = args.workflow.clone();
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let document = workflow_transform::apply_default_pipeline(raw_document)?;
     let results = LintRegistry::new().run(&document);
@@ -356,21 +320,15 @@ pub fn lint(args: LintArgs) -> StdResult<(), AppError> {
 }
 
 pub fn explain(args: ExplainArgs) -> StdResult<(), AppError> {
-    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
-        print_help_for_command("explain");
-        AppError::new(
-            ErrorCategory::ValidationError,
-            "missing workflow file; pass WORKFLOW or --file PATH",
-        )
-    })?;
+    let workflow_path = args.workflow.clone();
     let _workspace = resolve_workflow_workspace(args.workspace)?;
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let source_tasks = raw_document.workflow.tasks.len();
     let source_macro_invocations = raw_document.workflow.macro_invocation_count();
     let source_macro_names = raw_document.workflow.macro_names_referenced();
     let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
-    let overrides = parse_set_overrides(&args.set);
-    let trigger_payload = build_trigger_payload(&args.trigger_json, &args.arg)?
+    let overrides = parse_set_overrides(&args.context);
+    let trigger_payload = build_trigger_payload(&args.trigger_file, &args.trigger)?
         .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
     if !trigger_payload.is_null() {
         document.triggers = Some(workflow_schema::WorkflowTrigger {
@@ -410,7 +368,7 @@ pub fn explain(args: ExplainArgs) -> StdResult<(), AppError> {
 
 pub async fn resume(args: ResumeArgs) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(args.workspace)?;
-    let execution = checkpoint::load_execution(&workspace, &args.execution_id)?;
+    let execution = checkpoint::load_execution(&workspace, &args.run_id)?;
     let mut builder = OperatorRegistry::builder();
     let settings = execution.settings_effective.clone();
     let interviewer = newton_core::workflow::human::lazy_interviewer_provider(
@@ -430,7 +388,7 @@ pub async fn resume(args: ResumeArgs) -> StdResult<(), AppError> {
     let summary = workflow_executor::resume_workflow(
         registry,
         workspace.clone(),
-        args.execution_id,
+        args.run_id,
         args.allow_workflow_change,
     )
     .await?;
@@ -441,12 +399,9 @@ pub async fn resume(args: ResumeArgs) -> StdResult<(), AppError> {
     Ok(())
 }
 
-pub fn checkpoints(args: CheckpointsArgs) -> StdResult<(), AppError> {
+pub fn checkpoints(args: CheckpointArgs) -> StdResult<(), AppError> {
     match args.command {
-        CheckpointCommand::List {
-            workspace,
-            format_json,
-        } => workflow_checkpoints_list(workspace, format_json),
+        CheckpointCommand::List { workspace, json } => workflow_checkpoints_list(workspace, json),
         CheckpointCommand::Clean {
             workspace,
             older_than,
@@ -561,7 +516,7 @@ fn workflow_checkpoints_clean(
     Ok(())
 }
 
-pub fn artifacts(args: ArtifactsArgs) -> StdResult<(), AppError> {
+pub fn artifacts(args: ArtifactArgs) -> StdResult<(), AppError> {
     match args.command {
         ArtifactCommand::Clean {
             workspace,
@@ -589,13 +544,7 @@ pub async fn webhook(args: WebhookArgs) -> StdResult<(), AppError> {
 }
 
 async fn workflow_webhook_serve(args: WebhookServeArgs) -> StdResult<(), AppError> {
-    let workflow_path = args.resolved_workflow_path().ok_or_else(|| {
-        print_help_for_command("webhook");
-        AppError::new(
-            ErrorCategory::ValidationError,
-            "missing workflow file; pass WORKFLOW or --file PATH",
-        )
-    })?;
+    let workflow_path = args.workflow.clone();
     let workspace = resolve_workflow_workspace(Some(args.workspace))?;
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let document = workflow_transform::apply_default_pipeline(raw_document)?;
@@ -654,9 +603,8 @@ async fn workflow_webhook_serve(args: WebhookServeArgs) -> StdResult<(), AppErro
 }
 
 fn workflow_webhook_status(args: WebhookStatusArgs) -> StdResult<(), AppError> {
-    let resolved_workflow = args.resolved_workflow_path();
     let workspace = resolve_workflow_workspace(Some(args.workspace))?;
-    let workflow_path = resolve_workspace_workflow_path(&workspace, resolved_workflow)?;
+    let workflow_path = resolve_workspace_workflow_path(&workspace, args.workflow)?;
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let document = workflow_transform::apply_default_pipeline(raw_document)?;
     let settings = document.workflow.settings.webhook;
@@ -702,20 +650,20 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
-pub fn log(args: LogArgs) -> StdResult<(), AppError> {
+pub fn log(args: RunsArgs) -> StdResult<(), AppError> {
     match args.command {
-        LogCommand::List {
+        RunsCommand::List {
             workspace,
             last,
             json,
         } => log_list(workspace, last, json),
-        LogCommand::Show {
-            execution_id,
+        RunsCommand::Show {
+            run_id,
             workspace,
             task,
             verbose,
             json,
-        } => log_show(execution_id, workspace, task, verbose, json),
+        } => log_show(run_id, workspace, task, verbose, json),
     }
 }
 
@@ -1455,7 +1403,7 @@ fn try_load_trigger_payload(path: &Option<PathBuf>) -> StdResult<Option<Value>, 
     }
 }
 
-fn build_trigger_payload(
+pub fn build_trigger_payload(
     trigger_json: &Option<PathBuf>,
     args: &[KeyValuePair],
 ) -> StdResult<Option<Value>, AppError> {
@@ -1587,7 +1535,7 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
 
     let state = AppState::new(operator_descriptors, backend);
 
-    let app = api::create_router(state, args.ui_dir.clone());
+    let app = api::create_router(state, args.static_ui.clone());
 
     let addr = format!("{}:{}", args.host, args.port);
     let socket_addr: SocketAddr = addr.parse().map_err(|err| {
@@ -1677,7 +1625,8 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
     let dirs = ensure_batch_dirs(&workspace_root, &args.project_id)?;
 
     loop {
-        let plan_file = fetch_next_task(&dirs.todo_dir, args.once, args.sleep).await?;
+        let plan_file =
+            fetch_next_task(&dirs.todo_dir, args.once, args.poll_interval_seconds).await?;
         if plan_file.is_none() {
             return Ok(());
         }
@@ -1720,7 +1669,7 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
         }
 
         if !args.once {
-            sleep_if_needed(args.sleep).await;
+            sleep_if_needed(args.poll_interval_seconds).await;
         }
     }
 }

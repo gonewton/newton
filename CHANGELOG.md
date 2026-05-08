@@ -4,6 +4,72 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Breaking — CLI restructure (issue #273)
+
+This is a clean cut: there are no aliases, no deprecation period, and no
+migration shims. Scripts and dashboards must be updated in lockstep with the
+binary.
+
+**Top-level command renames**
+
+| Was | Now |
+|---|---|
+| `newton validate <FILE>` | `newton workflow validate <FILE>` |
+| `newton lint <FILE>` | `newton workflow lint <FILE>` |
+| `newton explain <FILE>` | `newton workflow preview <FILE>` |
+| `newton dot <FILE>` | `newton workflow graph <FILE>` (`--format dot`, `-o/--output`) |
+| `newton log list` | `newton runs list` |
+| `newton log show --execution-id <UUID>` | `newton runs show <RUN_ID>` |
+| `newton checkpoints {list,clean}` | `newton checkpoint {list,clean}` |
+| `newton artifacts clean` | `newton artifact clean` |
+
+`newton run`, `resume`, `init`, `batch`, `serve`, `monitor`, and `webhook` keep
+their top-level spellings; their flags changed (see below).
+
+**Argument-shape changes**
+
+- `newton run` now requires the workflow path as the sole positional
+  argument; the legacy named alternative was removed.
+- `workflow validate|lint|preview|graph` all take a required positional
+  `<WORKFLOW>` and reject the legacy named flag.
+- `newton runs show` takes `<RUN_ID>` positionally instead of via a named
+  flag.
+- `newton webhook serve` and `newton webhook status` now use a named
+  workflow flag (`--workflow <PATH>`) and no longer accept a positional
+  workflow argument.
+
+**Flag renames**
+
+| Was | Now |
+|---|---|
+| `--arg KEY=VAL` (run/preview) | `--trigger KEY=VAL` |
+| `--set KEY=VAL` (run/preview) | `--context KEY=VAL` |
+| `--trigger-json PATH` | `--trigger-file PATH` |
+| `--max-time-seconds N` | `--timeout SECONDS` |
+| `--out PATH` (graph) | `--output PATH` (`-o`) |
+| `--execution-id UUID` (resume) | `--run-id UUID` |
+| `--ui-dir PATH` (serve) | `--static-ui PATH` |
+| `--http-url URL` (monitor) | `--ailoop-http URL` |
+| `--ws-url URL` (monitor) | `--ailoop-ws URL` |
+| `--backend` (monitor) | `--with-api` |
+| `--sleep SECONDS` (batch) | `--poll-interval SECONDS` |
+| `--template-source SOURCE` (init) | `--template SOURCE` |
+| `--format-json` (checkpoint list) | `--json` |
+| `--file PATH` (webhook serve/status) | `--workflow PATH` |
+
+`--parallel-limit` is intentionally retained to stay aligned with the YAML
+`parallel_limit` key.
+
+**Telemetry**
+
+- `LogInvocationKind` adds `Workflow`, `Runs`, `Checkpoint`, `Artifact`.
+- `LogInvocationKind::Validate`, `Dot`, `Lint`, `Explain`, `Log`,
+  `Checkpoints`, and `Artifacts` are removed (no compatibility shim).
+
+**Not in this release (explicit):** `--allow-workflow-change` semantics fix
+(separate PR), additional `--format` values for `workflow graph`, unit
+suffixes on `--timeout`, and the YAML `parallel_limit` rename.
+
 ### Added
 
 - **MCP server mode** (issue #237): top-level `--mcp-serve`, `--mcp-host`,
