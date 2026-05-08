@@ -205,6 +205,46 @@ newton serve --host 0.0.0.0 --port 9000
 
 **Authoritative contract:** The HTTP/WebSocket/SSE surface is specified in [`openapi/newton-backend-parity.yaml`](openapi/newton-backend-parity.yaml).
 
+### MCP mode
+
+Newton can run as a Model Context Protocol (MCP) server so Cursor/Claude-style clients can invoke every registered Newton command as an MCP tool. MCP mode is a top-level mode (not a subcommand) — it short-circuits subcommand dispatch and is mutually exclusive with `newton serve`.
+
+**Defaults (Newton operator targets, spec §4.2):**
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--mcp-serve` | off | Required to enable MCP mode |
+| `--mcp-host` | `127.0.0.1` | Loopback only |
+| `--mcp-port` | `8730` | Distinct from `newton serve` (8080) |
+| `--mcp-path` | `/mcp` | HTTP path prefix |
+
+**Example:**
+
+```bash
+# Default (loopback, port 8730, /mcp)
+newton --mcp-serve
+
+# Custom interface, port, and path
+newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
+```
+
+**Note on `--help` output.** The current upstream `cli-framework` clap definition prints `--mcp-port [default: 8080]`; Newton transparently rewrites argv to inject `8730` when no explicit port is given so the actual bind matches the table above. **For maximum clarity, always pass `--mcp-port` explicitly** until upstream defaults are aligned (tracked at [cli-framework#29](https://github.com/aroff/cli-framework/issues/29)).
+
+**Cursor/Claude client config:**
+
+```json
+{
+  "mcpServers": {
+    "newton": {
+      "command": "newton",
+      "args": ["--mcp-serve", "--mcp-port", "8730"]
+    }
+  }
+}
+```
+
+**Port-conflict policy.** On bind failure Newton exits non-zero and prints a single line `NEWTON-MCP-001: failed to bind MCP server to <host>:<port>: <os error>`. There is no auto-rebind — pass an alternate `--mcp-port`. An unrecoverable upstream runtime error after a successful bind surfaces as `NEWTON-MCP-002`.
+
 ### `monitor`
 
 Monitor listens to every project/branch channel from the workspace using a WebSocket/HTTP mix and lets you answer questions or approve authorizations from a queue. See **Logging → `monitor`** below for the full configuration and usage walkthrough.
