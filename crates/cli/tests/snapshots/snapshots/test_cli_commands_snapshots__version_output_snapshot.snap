@@ -1,5 +1,0 @@
----
-source: tests/snapshots/test_cli_commands_snapshots.rs
-expression: stdout
----
-newton 0.5.3

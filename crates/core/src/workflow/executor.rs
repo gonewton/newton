@@ -622,7 +622,7 @@ impl WorkflowRuntime {
             if err.code == "WFG-EXEC-001" && !final_failed_records.is_empty() {
                 for (task_id, record) in &final_failed_records {
                     println!(
-                        "newton: task failed execution_id={} task_id={} inspect: newton log show {} --task {}",
+                        "newton: task failed execution_id={} task_id={} inspect: newton runs show {} --task {}",
                         self.workflow_execution.execution_id,
                         task_id,
                         self.workflow_execution.execution_id,
@@ -828,7 +828,7 @@ impl WorkflowRuntime {
             failed_task_ids.sort_unstable();
             for task_id in &failed_task_ids {
                 println!(
-                    "newton: task failed execution_id={} task_id={} inspect: newton log show {} --task {}",
+                    "newton: task failed execution_id={} task_id={} inspect: newton runs show {} --task {}",
                     self.workflow_execution.execution_id,
                     task_id,
                     self.workflow_execution.execution_id,

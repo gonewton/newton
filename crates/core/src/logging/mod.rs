@@ -196,10 +196,7 @@ fn workspace_root_for_command(command: &LogInvocation) -> Result<Option<PathBuf>
                 .ok()
                 .and_then(|cwd| find_workspace_root(&cwd).ok())
         }),
-        LogInvocationKind::Init
-        | LogInvocationKind::Validate
-        | LogInvocationKind::Dot
-        | LogInvocationKind::Lint => command
+        LogInvocationKind::Init | LogInvocationKind::Workflow => command
             .workspace_candidate
             .clone()
             .or_else(|| env::current_dir().ok()),

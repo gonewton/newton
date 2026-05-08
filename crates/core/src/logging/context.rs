@@ -42,15 +42,12 @@ pub fn detect_context(command: &LogInvocation) -> ExecutionContext {
     match command.kind {
         LogInvocationKind::Batch => ExecutionContext::Batch,
         LogInvocationKind::Run
-        | LogInvocationKind::Validate
-        | LogInvocationKind::Dot
-        | LogInvocationKind::Lint
-        | LogInvocationKind::Explain
+        | LogInvocationKind::Workflow
         | LogInvocationKind::Resume
-        | LogInvocationKind::Checkpoints
-        | LogInvocationKind::Artifacts
+        | LogInvocationKind::Checkpoint
+        | LogInvocationKind::Artifact
         | LogInvocationKind::Webhook
-        | LogInvocationKind::Log
+        | LogInvocationKind::Runs
         | LogInvocationKind::Init
         | LogInvocationKind::Diagnostic => ExecutionContext::LocalDev,
         LogInvocationKind::Monitor => ExecutionContext::Tui,

@@ -14,17 +14,19 @@ fn parse_positive_usize(value: &str) -> Result<usize, String> {
     }
 }
 
+// ── Runs (was Log) ────────────────────────────────────────────────────────────
+
 #[derive(Args, Clone)]
-pub struct LogArgs {
+pub struct RunsArgs {
     #[command(subcommand)]
-    pub command: LogCommand,
+    pub command: RunsCommand,
 }
 
 #[derive(Subcommand, Clone)]
-pub enum LogCommand {
+pub enum RunsCommand {
     #[command(
         about = "List workflow execution history for a workspace",
-        after_help = "EXAMPLES:\n  List recent runs for a workspace:\n    newton log list --workspace ./workspace\n\n  Last 10 runs as JSON:\n    newton log list --last 10 --json"
+        after_help = "EXAMPLES:\n  newton runs list --workspace ./workspace\n  newton runs list --last 10 --json"
     )]
     List {
         #[arg(long, value_name = "PATH")]
@@ -32,71 +34,70 @@ pub enum LogCommand {
         /// Only list the N most recent executions (after sort by started_at desc)
         #[arg(long, value_name = "N", value_parser = parse_positive_usize)]
         last: Option<usize>,
-        /// Emit machine-readable JSON (stable keys per spec §4.2)
+        /// Emit machine-readable JSON
         #[arg(long)]
         json: bool,
     },
     #[command(
         about = "Replay task-by-task execution detail for a specific run",
-        after_help = "EXAMPLES:\n  Show full execution detail:\n    newton log show <execution-id> --workspace ./workspace\n\n  Filter to a single task with verbose output:\n    newton log show <execution-id> --task my-task --verbose"
+        after_help = "EXAMPLES:\n  newton runs show <run-id>\n  newton runs show <run-id> --task my-task --verbose"
     )]
     Show {
-        #[arg(value_name = "EXECUTION_ID")]
-        execution_id: Uuid,
+        /// Run identifier (UUID)
+        #[arg(value_name = "RUN_ID")]
+        run_id: Uuid,
         #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
         /// Filter output to a single task ID
         #[arg(long, value_name = "TASK_ID")]
         task: Option<String>,
-        /// Expand single-task output for debugging (only effective with --task)
+        /// Expand single-task output for debugging
         #[arg(short, long)]
         verbose: bool,
-        /// Emit machine-readable JSON (stable keys per spec §4.2)
+        /// Emit machine-readable JSON
         #[arg(long)]
         json: bool,
     },
 }
 
+// ── Run ───────────────────────────────────────────────────────────────────────
+
 #[derive(Args, Clone)]
 pub struct RunArgs {
     /// Path to the workflow YAML file
     #[arg(value_name = "WORKFLOW", index = 1)]
-    pub workflow_positional: Option<PathBuf>,
+    pub workflow: PathBuf,
 
     /// Optional path written into triggers.payload.input_file
     #[arg(value_name = "INPUT_FILE", index = 2)]
     pub input_file: Option<PathBuf>,
 
-    /// Path to the workflow YAML file (alternative to positional)
-    #[arg(long, value_name = "PATH")]
-    pub file: Option<PathBuf>,
-
     /// Workspace root directory (default: current directory)
     #[arg(long, value_name = "PATH")]
     pub workspace: Option<PathBuf>,
 
-    /// Merge KEY into triggers.payload; VALUE may be @path to read from file, @@ for literal @
-    #[arg(long, value_name = "KEY=VALUE")]
-    pub arg: Vec<KeyValuePair>,
+    /// Merge KEY into trigger payload; VALUE may be @path to read from file, @@ for literal @
+    #[arg(long = "trigger", value_name = "KEY=VALUE")]
+    pub trigger: Vec<KeyValuePair>,
 
     /// Merge KEY into workflow.context at runtime
-    #[arg(long, value_name = "KEY=VALUE")]
-    pub set: Vec<KeyValuePair>,
+    #[arg(long = "context", value_name = "KEY=VALUE")]
+    pub context: Vec<KeyValuePair>,
 
-    /// Load JSON object as base trigger payload before --arg overrides
-    #[arg(long, value_name = "PATH")]
-    pub trigger_json: Option<PathBuf>,
+    /// Load JSON object as base trigger payload before --trigger overrides
+    #[arg(long = "trigger-file", value_name = "PATH")]
+    pub trigger_file: Option<PathBuf>,
 
     /// Runtime override for bounded task concurrency
     #[arg(long, value_name = "N")]
     pub parallel_limit: Option<usize>,
 
     /// Runtime wall-clock limit override (seconds)
-    #[arg(long, value_name = "N")]
-    pub max_time_seconds: Option<u64>,
+    #[arg(long = "timeout", value_name = "SECONDS")]
+    pub timeout_seconds: Option<u64>,
 
     /// Print task stdout/stderr to terminal after each task completes
-    #[arg(long)]
+    #[arg(short, long)]
     pub verbose: bool,
 
     /// Newton server URL to register this run (optional)
@@ -104,14 +105,7 @@ pub struct RunArgs {
     pub server: Option<String>,
 }
 
-impl RunArgs {
-    /// Resolve workflow path with precedence: --file over positional
-    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
-        self.file
-            .clone()
-            .or_else(|| self.workflow_positional.clone())
-    }
-}
+// ── Webhook ───────────────────────────────────────────────────────────────────
 
 #[derive(Args, Clone)]
 pub struct WebhookArgs {
@@ -123,12 +117,12 @@ pub struct WebhookArgs {
 pub enum WebhookCommand {
     #[command(
         about = "Start an HTTP server to receive webhook events and trigger workflows",
-        after_help = "EXAMPLES:\n  Serve a workflow with positional argument:\n    newton webhook serve workflow.yaml --workspace ./workspace\n\n  Serve a workflow specified via --file:\n    newton webhook serve --file ./workflows/deploy.yaml --workspace ./project"
+        after_help = "EXAMPLES:\n  newton webhook serve --workflow ./workflows/deploy.yaml --workspace ./project"
     )]
     Serve(WebhookServeArgs),
     #[command(
         about = "Display webhook endpoint configuration and server status",
-        after_help = "EXAMPLES:\n  Show webhook status for a workflow:\n    newton webhook status workflow.yaml --workspace ./workspace"
+        after_help = "EXAMPLES:\n  newton webhook status --workflow workflow.yaml --workspace ./workspace"
     )]
     Status(WebhookStatusArgs),
 }
@@ -136,47 +130,21 @@ pub enum WebhookCommand {
 #[derive(Args, Clone)]
 pub struct WebhookServeArgs {
     /// Path to the workflow YAML file
-    #[arg(value_name = "WORKFLOW")]
-    pub workflow_positional: Option<PathBuf>,
-
-    /// Path to the workflow YAML file (alternative to positional)
-    #[arg(long, value_name = "PATH")]
-    pub file: Option<PathBuf>,
+    #[arg(long = "workflow", value_name = "PATH")]
+    pub workflow: PathBuf,
 
     #[arg(long, value_name = "PATH")]
     pub workspace: PathBuf,
-}
-
-impl WebhookServeArgs {
-    /// Resolve workflow path with precedence: --file over positional
-    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
-        self.file
-            .clone()
-            .or_else(|| self.workflow_positional.clone())
-    }
 }
 
 #[derive(Args, Clone)]
 pub struct WebhookStatusArgs {
     /// Path to the workflow YAML file (optional)
-    #[arg(value_name = "WORKFLOW")]
-    pub workflow_positional: Option<PathBuf>,
-
-    /// Path to the workflow YAML file (alternative to positional)
-    #[arg(long, value_name = "PATH")]
-    pub file: Option<PathBuf>,
+    #[arg(long = "workflow", value_name = "PATH")]
+    pub workflow: Option<PathBuf>,
 
     #[arg(long, value_name = "PATH")]
     pub workspace: PathBuf,
-}
-
-impl WebhookStatusArgs {
-    /// Resolve workflow path with precedence: --file over positional
-    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
-        self.file
-            .clone()
-            .or_else(|| self.workflow_positional.clone())
-    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -187,113 +155,96 @@ pub enum OutputFormat {
     Prose,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Default)]
+#[value(rename_all = "lowercase")]
+pub enum GraphFormat {
+    #[default]
+    Dot,
+}
+
+// ── Workflow group ────────────────────────────────────────────────────────────
+
+#[derive(Args, Clone)]
+pub struct WorkflowArgs {
+    #[command(subcommand)]
+    pub command: WorkflowCommand,
+}
+
+#[derive(Subcommand, Clone)]
+pub enum WorkflowCommand {
+    #[command(about = "Validate a workflow graph definition")]
+    Validate(ValidateArgs),
+    #[command(about = "Check workflow for best practices and potential issues")]
+    Lint(LintArgs),
+    #[command(about = "Preview what the workflow will do at runtime")]
+    Preview(ExplainArgs),
+    #[command(about = "Render the workflow graph (dot output)")]
+    Graph(DotArgs),
+}
+
 #[derive(Args, Clone)]
 pub struct LintArgs {
     /// Path to the workflow YAML file
     #[arg(value_name = "WORKFLOW")]
-    pub workflow_positional: Option<PathBuf>,
-
-    /// Path to the workflow YAML file (alternative to positional)
-    #[arg(long, value_name = "PATH")]
-    pub file: Option<PathBuf>,
+    pub workflow: PathBuf,
 
     #[arg(long, value_enum, default_value = "text")]
     pub format: OutputFormat,
-}
-
-impl LintArgs {
-    /// Resolve workflow path with precedence: --file over positional
-    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
-        self.file
-            .clone()
-            .or_else(|| self.workflow_positional.clone())
-    }
 }
 
 #[derive(Args, Clone)]
 pub struct ExplainArgs {
     /// Path to the workflow YAML file
     #[arg(value_name = "WORKFLOW")]
-    pub workflow_positional: Option<PathBuf>,
+    pub workflow: PathBuf,
 
-    /// Path to the workflow YAML file (alternative to positional)
-    #[arg(long, value_name = "PATH")]
-    pub file: Option<PathBuf>,
-
+    /// Workspace root directory (default: current directory)
     #[arg(long, value_name = "PATH")]
     pub workspace: Option<PathBuf>,
 
-    #[arg(long, value_name = "KEY=VALUE")]
-    pub set: Vec<KeyValuePair>,
+    /// Merge KEY into workflow.context at runtime
+    #[arg(long = "context", value_name = "KEY=VALUE")]
+    pub context: Vec<KeyValuePair>,
 
     /// Trigger payload override in KEY=VALUE form (supports VALUE=@path)
-    #[arg(long, value_name = "KEY=VALUE")]
-    pub arg: Vec<KeyValuePair>,
+    #[arg(long = "trigger", value_name = "KEY=VALUE")]
+    pub trigger: Vec<KeyValuePair>,
 
     #[arg(long, value_enum, default_value = "text")]
     pub format: OutputFormat,
 
-    /// Path to JSON file containing manual trigger payload
-    #[arg(long, value_name = "PATH")]
-    pub trigger_json: Option<PathBuf>,
-}
-
-impl ExplainArgs {
-    /// Resolve workflow path with precedence: --file over positional
-    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
-        self.file
-            .clone()
-            .or_else(|| self.workflow_positional.clone())
-    }
+    /// Path to JSON file containing manual trigger payload (base)
+    #[arg(long = "trigger-file", value_name = "PATH")]
+    pub trigger_file: Option<PathBuf>,
 }
 
 #[derive(Args, Clone)]
 pub struct ValidateArgs {
     /// Path to the workflow YAML file
     #[arg(value_name = "WORKFLOW")]
-    pub workflow_positional: Option<PathBuf>,
-
-    /// Path to the workflow YAML file (alternative to positional)
-    #[arg(long, value_name = "PATH")]
-    pub file: Option<PathBuf>,
-}
-
-impl ValidateArgs {
-    /// Resolve workflow path with precedence: --file over positional
-    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
-        self.file
-            .clone()
-            .or_else(|| self.workflow_positional.clone())
-    }
+    pub workflow: PathBuf,
 }
 
 #[derive(Args, Clone)]
 pub struct DotArgs {
     /// Path to the workflow YAML file
     #[arg(value_name = "WORKFLOW")]
-    pub workflow_positional: Option<PathBuf>,
+    pub workflow: PathBuf,
 
-    /// Path to the workflow YAML file (alternative to positional)
-    #[arg(long, value_name = "PATH")]
-    pub file: Option<PathBuf>,
+    /// Output graph format (currently only `dot` is supported)
+    #[arg(long, value_enum, default_value = "dot")]
+    pub format: GraphFormat,
 
-    #[arg(long, value_name = "FILE")]
-    pub out: Option<PathBuf>,
-}
-
-impl DotArgs {
-    /// Resolve workflow path with precedence: --file over positional
-    pub fn resolved_workflow_path(&self) -> Option<PathBuf> {
-        self.file
-            .clone()
-            .or_else(|| self.workflow_positional.clone())
-    }
+    /// Output destination file (defaults to stdout)
+    #[arg(short = 'o', long = "output", value_name = "PATH")]
+    pub output: Option<PathBuf>,
 }
 
 #[derive(Args, Clone)]
 pub struct ResumeArgs {
-    #[arg(long, value_name = "UUID")]
-    pub execution_id: Uuid,
+    /// Run identifier (UUID) of the workflow execution to resume
+    #[arg(long = "run-id", value_name = "UUID")]
+    pub run_id: Uuid,
 
     #[arg(long, value_name = "PATH")]
     pub workspace: Option<PathBuf>,
@@ -303,7 +254,7 @@ pub struct ResumeArgs {
 }
 
 #[derive(Args, Clone)]
-pub struct CheckpointsArgs {
+pub struct CheckpointArgs {
     #[command(subcommand)]
     pub command: CheckpointCommand,
 }
@@ -312,18 +263,18 @@ pub struct CheckpointsArgs {
 pub enum CheckpointCommand {
     #[command(
         about = "Display available workflow executions and their checkpoint details",
-        after_help = "EXAMPLES:\n  List checkpoints in a workspace:\n    newton checkpoints list --workspace ./workspace\n\n  List checkpoints as JSON:\n    newton checkpoints list --workspace ./workspace --format-json"
+        after_help = "EXAMPLES:\n  newton checkpoint list --workspace ./workspace\n  newton checkpoint list --workspace ./workspace --json"
     )]
     List {
         #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
 
-        #[arg(long)]
-        format_json: bool,
+        #[arg(long = "json")]
+        json: bool,
     },
     #[command(
         about = "Remove old checkpoint files to free up disk space",
-        after_help = "EXAMPLES:\n  Remove checkpoints older than 7 days:\n    newton checkpoints clean --workspace ./workspace --older-than 7d"
+        after_help = "EXAMPLES:\n  newton checkpoint clean --workspace ./workspace --older-than 7d"
     )]
     Clean {
         #[arg(long, value_name = "PATH")]
@@ -335,7 +286,7 @@ pub enum CheckpointCommand {
 }
 
 #[derive(Args, Clone)]
-pub struct ArtifactsArgs {
+pub struct ArtifactArgs {
     #[command(subcommand)]
     pub command: ArtifactCommand,
 }
@@ -344,7 +295,7 @@ pub struct ArtifactsArgs {
 pub enum ArtifactCommand {
     #[command(
         about = "Remove old workflow output files and execution artifacts",
-        after_help = "EXAMPLES:\n  Remove artifacts older than 30 days:\n    newton artifacts clean --workspace ./workspace --older-than 30d"
+        after_help = "EXAMPLES:\n  newton artifact clean --workspace ./workspace --older-than 30d"
     )]
     Clean {
         #[arg(long, value_name = "PATH")]
@@ -397,12 +348,10 @@ pub struct BatchArgs {
     #[arg(long)]
     pub once: bool,
 
-    /// Sleep interval in seconds when the queue is empty (default: 60)
-    #[arg(long, default_value = "60", value_name = "SECONDS")]
-    pub sleep: u64,
+    /// Seconds to wait when the queue is empty (default: 60)
+    #[arg(long = "poll-interval", default_value = "60", value_name = "SECONDS")]
+    pub poll_interval_seconds: u64,
 }
-
-// StepArgs removed - command retired
 
 #[derive(Args)]
 pub struct InitArgs {
@@ -411,35 +360,23 @@ pub struct InitArgs {
     pub path: Option<PathBuf>,
 
     /// Template source (GitHub repo, URL, or local path; default: gonewton/newton-templates)
-    #[arg(long, value_name = "SOURCE")]
-    pub template_source: Option<String>,
+    #[arg(long = "template", value_name = "SOURCE")]
+    pub template: Option<String>,
 }
-
-// StatusArgs removed - command retired
-
-// ReportArgs and ReportFormat removed - commands retired
 
 #[derive(Args, Clone, Debug)]
 pub struct MonitorArgs {
-    /// Override HTTP endpoint for the ailoop server.
-    ///
-    /// When provided, --ws-url must also be provided (or available in config).
-    /// If omitted, HTTP URL is loaded from .newton/configs/monitor.conf or the
-    /// first alphabetically-sorted .conf file that defines both endpoints.
-    #[arg(long, value_name = "URL")]
-    pub http_url: Option<String>,
+    /// HTTP endpoint for the ailoop server (overrides config).
+    #[arg(long = "ailoop-http", value_name = "URL")]
+    pub ailoop_http: Option<String>,
 
-    /// Override WebSocket endpoint for the ailoop server.
-    ///
-    /// When provided, --http-url must also be provided (or available in config).
-    /// If omitted, WebSocket URL is loaded from .newton/configs/monitor.conf or
-    /// the first alphabetically-sorted .conf file that defines both endpoints.
-    #[arg(long, value_name = "URL")]
-    pub ws_url: Option<String>,
+    /// WebSocket endpoint for the ailoop server (overrides config).
+    #[arg(long = "ailoop-ws", value_name = "URL")]
+    pub ailoop_ws: Option<String>,
 
-    /// Also start the HTTP API backend server
-    #[arg(long)]
-    pub backend: bool,
+    /// Also start Newton's HTTP API alongside the monitor
+    #[arg(long = "with-api")]
+    pub with_api: bool,
 }
 
 #[derive(Args, Clone, Debug)]
@@ -453,9 +390,6 @@ pub struct ServeArgs {
     pub port: u16,
 
     /// Path to the built Newton UI dist directory (optional)
-    #[arg(long, value_name = "PATH")]
-    pub ui_dir: Option<PathBuf>,
+    #[arg(long = "static-ui", value_name = "PATH")]
+    pub static_ui: Option<PathBuf>,
 }
-
-// ErrorArgs removed - command retired
-// ErrorArgs removed - command retired
