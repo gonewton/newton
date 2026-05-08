@@ -86,6 +86,9 @@ impl Operator for GhOperator {
             "pr_view" => {
                 validate_pr_view(map)?;
             }
+            "pr_approve" => {
+                validate_pr_approve(map)?;
+            }
             _ => {
                 return Err(AppError::new(
                     ErrorCategory::ValidationError,
@@ -120,6 +123,7 @@ impl Operator for GhOperator {
             "project_item_set_status" => self.execute_project_item_set_status(map).await,
             "pr_create" => self.execute_pr_create(map).await,
             "pr_view" => self.execute_pr_view(map).await,
+            "pr_approve" => self.execute_pr_approve(map).await,
             _ => Err(AppError::new(
                 ErrorCategory::ValidationError,
                 format!("unknown operation: {operation}"),
@@ -237,6 +241,24 @@ fn derive_default_prompt(operation: &str, map: &Map<String, Value>) -> String {
             } else {
                 let status = map.get("status").and_then(Value::as_str).unwrap_or("");
                 format!("Authorize gh project item-edit: item={item}, status={status}")
+            }
+        }
+        "pr_approve" => {
+            let selector = map
+                .get("pr_url")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| {
+                    map.get("pr_number")
+                        .and_then(Value::as_i64)
+                        .map(|n| n.to_string())
+                })
+                .unwrap_or_default();
+            let repo = map.get("repository").and_then(Value::as_str).unwrap_or("");
+            if repo.is_empty() {
+                format!("Authorize gh pr review --approve: pr={selector}")
+            } else {
+                format!("Authorize gh pr review --approve: pr={selector}, repository={repo}")
             }
         }
         _ => format!("Authorize gh {operation}"),
@@ -376,6 +398,164 @@ fn validate_pr_view(map: &Map<String, Value>) -> Result<(), AppError> {
         }
     }
     Ok(())
+}
+
+fn validate_pr_approve(map: &Map<String, Value>) -> Result<(), AppError> {
+    let has_number = map.get("pr_number").is_some();
+    let has_url = map.get("pr_url").is_some();
+    if has_number == has_url {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            "pr_approve requires exactly one of pr_number or pr_url",
+        )
+        .with_code("WFG-GH-005"));
+    }
+    if has_number {
+        let n = map
+            .get("pr_number")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| {
+                AppError::new(
+                    ErrorCategory::ValidationError,
+                    "pr_number must be an integer",
+                )
+                .with_code("WFG-GH-008")
+            })?;
+        if n < 1 {
+            return Err(
+                AppError::new(ErrorCategory::ValidationError, "pr_number must be >= 1")
+                    .with_code("WFG-GH-008"),
+            );
+        }
+        if let Some(repo) = map.get("repository").and_then(Value::as_str) {
+            validate_repository_format(repo)?;
+        }
+    } else {
+        let url = map.get("pr_url").and_then(Value::as_str).ok_or_else(|| {
+            AppError::new(ErrorCategory::ValidationError, "pr_url must be a string")
+                .with_code("WFG-GH-006")
+        })?;
+        parse_pr_url(url)?;
+    }
+    Ok(())
+}
+
+fn parse_pr_url(url: &str) -> Result<(String, u64), AppError> {
+    if !url.starts_with("https://") {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            "pr_url must use https scheme",
+        )
+        .with_code("WFG-GH-006"));
+    }
+    let without_scheme = &url["https://".len()..];
+    let slash_pos = without_scheme.find('/').ok_or_else(|| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            "pr_url is not a valid GitHub pull request URL",
+        )
+        .with_code("WFG-GH-006")
+    })?;
+    let host = &without_scheme[..slash_pos];
+    if !host.contains("github") {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            "pr_url host must contain 'github'",
+        )
+        .with_code("WFG-GH-006"));
+    }
+    let path = &without_scheme[slash_pos..];
+    let parts: Vec<&str> = path.split('/').collect();
+    // Expected: ["", owner, repo, "pull", number]
+    if parts.len() < 5 || parts[3] != "pull" {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            "pr_url path must contain /pull/<number>",
+        )
+        .with_code("WFG-GH-006"));
+    }
+    let owner = parts[1];
+    let repo = parts[2];
+    let pr_number: u64 = parts[4].parse().map_err(|_| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            "pr_url pull request number must be a positive integer",
+        )
+        .with_code("WFG-GH-006")
+    })?;
+    if pr_number < 1 {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            "pr_url pull request number must be >= 1",
+        )
+        .with_code("WFG-GH-006"));
+    }
+    Ok((format!("{owner}/{repo}"), pr_number))
+}
+
+fn validate_repository_format(repo: &str) -> Result<(), AppError> {
+    let slash_count = repo.chars().filter(|&c| c == '/').count();
+    if slash_count != 1 {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            "repository must be in owner/repo format",
+        )
+        .with_code("WFG-GH-007"));
+    }
+    let valid = repo
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' || c == '/');
+    if !valid || repo.starts_with('/') || repo.ends_with('/') {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            "repository must match owner/repo format with valid characters",
+        )
+        .with_code("WFG-GH-007"));
+    }
+    Ok(())
+}
+
+impl GhOperator {
+    async fn execute_pr_approve(&self, map: &Map<String, Value>) -> Result<Value, AppError> {
+        let (pr_number, repository, pr_url_input) =
+            if let Some(url) = map.get("pr_url").and_then(Value::as_str) {
+                let (owner_repo, number) = parse_pr_url(url)?;
+                (number, Some(owner_repo), Some(url.to_string()))
+            } else {
+                let n = map.get("pr_number").and_then(Value::as_i64).unwrap() as u64;
+                let repo = map
+                    .get("repository")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                (n, repo, None)
+            };
+
+        let pr_str = pr_number.to_string();
+        let mut args: Vec<&str> = vec!["pr", "review", &pr_str, "--approve"];
+        if let Some(ref repo) = repository {
+            args.push("-R");
+            args.push(repo);
+        }
+
+        self.runner.run(&args).await?;
+
+        let mut out = serde_json::Map::new();
+        out.insert("review_submitted".to_string(), json!(true));
+        out.insert("pr_number".to_string(), json!(pr_number));
+        if let Some(ref repo) = repository {
+            out.insert("repository".to_string(), json!(repo));
+        }
+        if let Some(url) = pr_url_input {
+            out.insert("pr_url".to_string(), json!(url));
+        } else if let Some(ref repo) = repository {
+            out.insert(
+                "pr_url".to_string(),
+                json!(format!("https://github.com/{repo}/pull/{pr_number}")),
+            );
+        }
+
+        Ok(Value::Object(out))
+    }
 }
 
 impl GhOperator {
