@@ -9,7 +9,6 @@ use crate::cli::args::{
 use crate::monitor;
 use crate::Result;
 use anyhow::anyhow;
-use clap::CommandFactory;
 use humantime::{format_duration, parse_duration};
 use newton_core::core::batch_config::BatchProjectConfig;
 use newton_core::core::error::AppError;
@@ -40,20 +39,13 @@ use std::{
 };
 use tokio::time::sleep;
 
-/// Print help for a specific command by name
-/// For nested commands (e.g., "webhook serve"), displays the parent help
+/// Hint to the user how to view help for the command they tripped over.
+/// The cli-framework registry owns help text now, so we cannot render it
+/// from this side without circular access; just point users to `--help`.
 fn print_help_for_command(command_name: &str) {
-    let mut cmd = crate::cli::Args::command();
-
-    // Get the first part of the command name (parent command)
     let parts: Vec<&str> = command_name.split_whitespace().collect();
-    let main_command = parts.first().unwrap_or(&command_name);
-
-    // Find and print help for the main command
-    // For nested commands, this will show the parent help which includes subcommand list
-    if let Some(subcommand) = cmd.find_subcommand_mut(main_command) {
-        let _ = subcommand.print_long_help();
-    }
+    let main_command = parts.first().copied().unwrap_or(command_name);
+    eprintln!("Run `newton {main_command} --help` for usage details.");
 }
 
 /// Load and validate a workflow document from the given arguments

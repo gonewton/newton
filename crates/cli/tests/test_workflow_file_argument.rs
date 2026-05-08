@@ -1,84 +1,17 @@
-use clap::{error::ErrorKind, Parser};
+//! Handler-level tests for workflow-file argument plumbing.
+//!
+//! The argv-parsing portions of this file used the legacy clap `Args` enum
+//! that issue #231 removed; cli-framework owns argv parsing now and is
+//! exercised by the integration help tests.  The remaining tests here just
+//! verify that the `commands::*` handlers raise the expected error when no
+//! workflow file is supplied.
+
 use newton_cli::cli::args::{
     DotArgs, ExplainArgs, LintArgs, OutputFormat, RunArgs, ValidateArgs, WebhookArgs,
     WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
 };
-use newton_cli::cli::{commands, Args, Command};
+use newton_cli::cli::commands;
 use std::path::PathBuf;
-
-fn parse_command(argv: &[&str]) -> Command {
-    Args::try_parse_from(argv)
-        .unwrap_or_else(|err| panic!("expected parse success for {:?}: {err}", argv))
-        .command
-}
-
-#[test]
-fn run_positional_indices_and_file_override_parse_correctly() {
-    let Command::Run(run) = parse_command(&[
-        "newton",
-        "run",
-        "flow-a.yaml",
-        "--file",
-        "flow-b.yaml",
-        "input.txt",
-    ]) else {
-        panic!("expected run command");
-    };
-
-    assert_eq!(run.workflow_positional, Some(PathBuf::from("flow-a.yaml")));
-    assert_eq!(run.file, Some(PathBuf::from("flow-b.yaml")));
-    assert_eq!(run.input_file, Some(PathBuf::from("input.txt")));
-    assert_eq!(
-        run.resolved_workflow_path(),
-        Some(PathBuf::from("flow-b.yaml"))
-    );
-}
-
-#[test]
-fn commands_accept_positional_workflow_path() {
-    let Command::Validate(validate) = parse_command(&["newton", "validate", "flow.yaml"]) else {
-        panic!("expected validate command");
-    };
-    assert_eq!(
-        validate.resolved_workflow_path(),
-        Some(PathBuf::from("flow.yaml"))
-    );
-
-    let Command::Dot(dot) = parse_command(&["newton", "dot", "flow.yaml", "--out", "graph.dot"])
-    else {
-        panic!("expected dot command");
-    };
-    assert_eq!(
-        dot.resolved_workflow_path(),
-        Some(PathBuf::from("flow.yaml"))
-    );
-
-    let Command::Lint(lint) = parse_command(&["newton", "lint", "flow.yaml", "--format", "json"])
-    else {
-        panic!("expected lint command");
-    };
-    assert_eq!(
-        lint.resolved_workflow_path(),
-        Some(PathBuf::from("flow.yaml"))
-    );
-
-    let Command::Explain(explain) =
-        parse_command(&["newton", "explain", "flow.yaml", "--format", "text"])
-    else {
-        panic!("expected explain command");
-    };
-    assert_eq!(
-        explain.resolved_workflow_path(),
-        Some(PathBuf::from("flow.yaml"))
-    );
-
-    let Command::Explain(explain) =
-        parse_command(&["newton", "explain", "flow.yaml", "--format", "prose"])
-    else {
-        panic!("expected explain command");
-    };
-    assert_eq!(explain.format, OutputFormat::Prose);
-}
 
 #[test]
 fn lint_rejects_prose_format() {
@@ -93,57 +26,6 @@ fn lint_rejects_prose_format() {
     assert!(err
         .to_string()
         .contains("prose format is not supported for lint command"));
-}
-
-#[test]
-fn webhook_commands_accept_positional_and_file_forms() {
-    let Command::Webhook(WebhookArgs {
-        command: WebhookCommand::Serve(serve),
-    }) = parse_command(&[
-        "newton",
-        "webhook",
-        "serve",
-        "flow.yaml",
-        "--workspace",
-        ".",
-    ])
-    else {
-        panic!("expected webhook serve command");
-    };
-    assert_eq!(
-        serve.resolved_workflow_path(),
-        Some(PathBuf::from("flow.yaml"))
-    );
-
-    let Command::Webhook(WebhookArgs {
-        command: WebhookCommand::Status(status),
-    }) = parse_command(&[
-        "newton",
-        "webhook",
-        "status",
-        "flow-a.yaml",
-        "--file",
-        "flow-b.yaml",
-        "--workspace",
-        ".",
-    ])
-    else {
-        panic!("expected webhook status command");
-    };
-    assert_eq!(
-        status.resolved_workflow_path(),
-        Some(PathBuf::from("flow-b.yaml"))
-    );
-}
-
-#[test]
-fn workflow_flag_is_rejected_by_parser() {
-    let err = match Args::try_parse_from(["newton", "validate", "--workflow", "flow.yaml"]) {
-        Ok(_) => panic!("expected parser to reject --workflow"),
-        Err(err) => err,
-    };
-    assert_eq!(err.kind(), ErrorKind::UnknownArgument);
-    assert!(err.to_string().contains("--workflow"));
 }
 
 #[tokio::test]
@@ -172,13 +54,11 @@ async fn run_missing_workflow_returns_custom_error() {
 
 #[test]
 fn required_workflow_commands_return_custom_error_when_missing() {
-    // Capture stderr to verify help is printed before error
     let validate_err = commands::validate(ValidateArgs {
         workflow_positional: None,
         file: None,
     })
     .expect_err("expected validate missing workflow error");
-    // Help is printed to stdout/stderr as a side effect before error is returned
     assert!(validate_err
         .to_string()
         .contains("missing workflow file; pass WORKFLOW or --file PATH"));
@@ -228,7 +108,6 @@ async fn webhook_serve_missing_workflow_returns_custom_error() {
         }),
     };
 
-    // Help is printed to stdout/stderr as a side effect before error is returned
     let err = commands::webhook(args)
         .await
         .expect_err("expected missing workflow error");

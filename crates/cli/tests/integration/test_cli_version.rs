@@ -15,3 +15,13 @@ fn version_flag_prints_crate_version() {
         .stdout(starts_with(expected));
 }
 
+#[test]
+fn health_command_prints_ok_with_version() {
+    let expected = format!("newton OK {}", newton_cli::VERSION);
+    Command::cargo_bin(BIN)
+        .expect("binary should build")
+        .arg("health")
+        .assert()
+        .success()
+        .stdout(starts_with(expected));
+}

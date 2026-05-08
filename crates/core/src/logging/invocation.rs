@@ -24,6 +24,7 @@ pub enum LogInvocationKind {
     Log,
     Monitor,
     Serve,
+    Diagnostic,
 }
 
 impl LogInvocationKind {
@@ -44,6 +45,7 @@ impl LogInvocationKind {
             LogInvocationKind::Log => "log",
             LogInvocationKind::Monitor => "monitor",
             LogInvocationKind::Serve => "serve",
+            LogInvocationKind::Diagnostic => "diagnostic",
         }
     }
 }
