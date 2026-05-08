@@ -19,7 +19,10 @@ auto_release_trigger.txt
 
 # Agents
 .opencode
-.agents
+.agents/**
+!.agents/skills/
+!.agents/skills/newton/
+!.agents/skills/newton/**
 
 # Newton planner scratch (planner.sh ./tmp)
 /tmp/

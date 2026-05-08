@@ -1,0 +1,13 @@
+[metadata]
+id = "newton"
+version = "1.2.0"
+name = "newton"
+description = "Newton CLI for workflow YAML graphs, batch plan queues, serve and monitor, validate, lint, explain, resume, checkpoints, artifacts, and webhook."
+author = "gonewton"
+tags = ["tools", "newton", "cli", "workflow", "yaml", "batch", "workspace", "ailoop"]
+capabilities = ["workflow-graph-cli", "workspace-config", "batch-queue", "hil-monitor"]
+
+[dependencies]
+
+[tool.fastskill]
+skills_directory = "newton"
