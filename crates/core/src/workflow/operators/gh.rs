@@ -382,6 +382,22 @@ fn validate_pr_create(map: &Map<String, Value>) -> Result<(), AppError> {
             ));
         }
     }
+    if let Some(mult) = map.get("retry_multiplier").and_then(Value::as_f64) {
+        if mult < 1.0 {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "retry_multiplier must be >= 1.0",
+            ));
+        }
+    }
+    if let Some(jitter) = map.get("retry_jitter_ms").and_then(Value::as_i64) {
+        if jitter < 0 {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "retry_jitter_ms must be non-negative",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -825,7 +841,15 @@ impl GhOperator {
         Err(error)
     }
 
+    /// Executes `gh pr create` with bounded retries.
+    ///
+    /// Retry timing: starts at `retry_delay_ms` (default 5000), grows by
+    /// `retry_multiplier` (default 2.0) per attempt, with optional uniform
+    /// jitter in `[0, retry_jitter_ms]`. Each per-attempt delay is clamped to
+    /// `MAX_RETRY_DELAY_MS` (5 minutes). The `ailoop` approver is consulted
+    /// at most once per logical invocation (outside this retry loop).
     async fn execute_pr_create(&self, map: &Map<String, Value>) -> Result<Value, AppError> {
+        use rand::Rng;
         let base = map.get("base").and_then(Value::as_str).unwrap_or("main");
         let title = map.get("title").and_then(Value::as_str).unwrap();
         let body = map.get("body").and_then(Value::as_str).unwrap_or("");
@@ -834,7 +858,15 @@ impl GhOperator {
             .get("retry_delay_ms")
             .and_then(Value::as_i64)
             .unwrap_or(5000) as u64;
-        let capped_delay = retry_delay_ms.min(MAX_RETRY_DELAY_MS);
+        let multiplier = map
+            .get("retry_multiplier")
+            .and_then(Value::as_f64)
+            .unwrap_or(2.0) as f32;
+        let jitter_ms = map
+            .get("retry_jitter_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let mut delay_ms = retry_delay_ms.min(MAX_RETRY_DELAY_MS);
 
         let mut last_error: Option<AppError> = None;
 
@@ -868,12 +900,20 @@ impl GhOperator {
             }
 
             if attempt < retry_count {
+                let jitter = if jitter_ms > 0 {
+                    rand::thread_rng().gen_range(0..=jitter_ms)
+                } else {
+                    0
+                };
+                let sleep_ms = delay_ms.saturating_add(jitter).min(MAX_RETRY_DELAY_MS);
                 tracing::warn!(
                     attempt,
                     max_attempts = retry_count,
+                    delay_ms = sleep_ms,
                     "pr create failed, retrying after delay"
                 );
-                sleep(Duration::from_millis(capped_delay)).await;
+                sleep(Duration::from_millis(sleep_ms)).await;
+                delay_ms = ((delay_ms as f32) * multiplier).min(MAX_RETRY_DELAY_MS as f32) as u64;
             }
         }
 

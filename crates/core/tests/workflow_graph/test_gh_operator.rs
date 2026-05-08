@@ -1514,3 +1514,267 @@ workflow:
     assert_eq!(output["repository"], "owner/repo");
     assert_eq!(output["pr_url"], "https://github.com/owner/repo/pull/36");
 }
+
+/// Mock that fails the first N invocations with a configurable error, then succeeds.
+#[derive(Clone)]
+struct FlakyGhRunner {
+    fail_count: Arc<AtomicUsize>,
+    success_output: GhOutput,
+    error_message: String,
+    error_code: String,
+    calls: Arc<AtomicUsize>,
+}
+
+impl FlakyGhRunner {
+    fn new(
+        fail_count: usize,
+        success_output: GhOutput,
+        error_message: &str,
+        error_code: &str,
+    ) -> Self {
+        Self {
+            fail_count: Arc::new(AtomicUsize::new(fail_count)),
+            success_output,
+            error_message: error_message.to_string(),
+            error_code: error_code.to_string(),
+            calls: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+    fn call_count(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl GhRunner for FlakyGhRunner {
+    async fn run(&self, _args: &[&str]) -> Result<GhOutput, AppError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let remaining = self.fail_count.load(Ordering::SeqCst);
+        if remaining > 0 {
+            self.fail_count.fetch_sub(1, Ordering::SeqCst);
+            return Err(AppError::new(
+                ErrorCategory::ToolExecutionError,
+                self.error_message.clone(),
+            )
+            .with_code(&self.error_code));
+        }
+        Ok(self.success_output.clone())
+    }
+}
+
+#[tokio::test]
+async fn pr_view_retries_on_tls_timeout() {
+    let workspace = tempdir().expect("workspace");
+    let runner = Arc::new(FlakyGhRunner::new(
+        3,
+        GhOutput {
+            stdout: r#"{"state":"OPEN"}"#.to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+        "gh command failed: TLS handshake timeout",
+        "WFG-GH-004",
+    ));
+
+    let yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: view_pr
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 100
+  tasks:
+    - id: view_pr
+      operator: GhOperator
+      retry:
+        max_attempts: 5
+        backoff_ms: 10
+        backoff_multiplier: 2.0
+      params:
+        operation: pr_view
+        pr: 42
+      transitions:
+        - to: done
+    - id: done
+      operator: NoOpOperator
+      terminal: success
+      params: {}
+"#;
+    let summary = execute_yaml_with_gh_runner(workspace.path(), yaml, runner.clone())
+        .await
+        .expect("workflow should complete");
+
+    let task = summary
+        .completed_tasks
+        .get("view_pr")
+        .expect("view_pr task");
+    assert_eq!(task.output["state"], "OPEN");
+    assert_eq!(runner.call_count(), 4);
+}
+
+#[tokio::test]
+async fn pr_view_no_retry_on_validation_error() {
+    let workspace = tempdir().expect("workspace");
+    // Stdout that produces a JSON parse error (WFG-GH-002).
+    let runner = Arc::new(FlakyGhRunner::new(
+        0,
+        GhOutput {
+            stdout: "not-json".to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+        "unused",
+        "unused",
+    ));
+
+    let yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: view_pr
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: true
+    max_task_iterations: 10
+    max_workflow_iterations: 100
+  tasks:
+    - id: view_pr
+      operator: GhOperator
+      retry:
+        max_attempts: 5
+        backoff_ms: 10
+        backoff_multiplier: 2.0
+      params:
+        operation: pr_view
+        pr: 42
+      transitions:
+        - to: done
+    - id: done
+      operator: NoOpOperator
+      terminal: success
+      params: {}
+"#;
+    let _ = execute_yaml_with_gh_runner(workspace.path(), yaml, runner.clone()).await;
+    // Engine must short-circuit on WFG-GH-002 (parse error) — exactly one attempt.
+    assert_eq!(runner.call_count(), 1);
+}
+
+/// Counts approver invocations to ensure pr_create calls the approver at most once
+/// across retries.
+#[derive(Clone)]
+struct CountingApprover {
+    calls: Arc<AtomicUsize>,
+}
+
+impl CountingApprover {
+    fn new() -> Self {
+        Self {
+            calls: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+    fn count(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl AiloopApprover for CountingApprover {
+    async fn authorize(&self, _req: AuthorizationRequest) -> Result<ApprovalOutcome, AppError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(ApprovalOutcome::Approved)
+    }
+}
+
+#[tokio::test]
+async fn pr_create_exponential_backoff_and_single_approval() {
+    use std::time::Instant;
+    let runner = Arc::new(FlakyGhRunner::new(
+        2,
+        GhOutput {
+            stdout: "https://github.com/o/r/pull/7".to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+        "TLS handshake timeout",
+        "WFG-GH-004",
+    ));
+    let approver = Arc::new(CountingApprover::new());
+    let op = GhOperator::with_runner_and_approver(runner.clone(), approver.clone());
+
+    let params = json!({
+        "operation": "pr_create",
+        "title": "T",
+        "body": "B",
+        "base": "main",
+        "retry_count": 3,
+        "retry_delay_ms": 100,
+        "retry_multiplier": 2.0,
+        "require_authorization": true
+    });
+
+    let workspace = tempdir().expect("workspace");
+    let registry = OperatorRegistry::builder().build();
+    let ctx = ExecutionContext {
+        workspace_path: workspace.path().to_path_buf(),
+        execution_id: "exec".to_string(),
+        task_id: "create".to_string(),
+        iteration: 0,
+        state_view: StateView::new(json!({}), json!({}), json!({})),
+        graph: GraphHandle::new(HashMap::new()),
+        workflow_file: workspace.path().join("wf.yaml"),
+        nesting_depth: 0,
+        execution_overrides: ExecutionOverrides {
+            parallel_limit: None,
+            max_time_seconds: None,
+            checkpoint_base_path: None,
+            artifact_base_path: None,
+            max_nesting_depth: None,
+            verbose: false,
+            server_notifier: None,
+            pre_seed_nodes: true,
+        },
+        operator_registry: registry,
+    };
+
+    let start = Instant::now();
+    let out = op.execute(params, ctx).await.expect("pr_create succeeds");
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+
+    assert_eq!(out["pr_number"], 7);
+    assert_eq!(runner.call_count(), 3);
+    assert_eq!(
+        approver.count(),
+        1,
+        "approver must be called at most once across retries"
+    );
+    // Sleeps: 100ms + 200ms = 300ms minimum.
+    assert!(
+        elapsed_ms >= 300,
+        "expected >=300ms total sleep, got {}",
+        elapsed_ms
+    );
+}
+
+#[test]
+fn validate_pr_create_rejects_bad_retry_multiplier() {
+    let params = json!({
+        "operation": "pr_create",
+        "title": "T",
+        "retry_multiplier": 0.5
+    });
+    assert!(GhOperator::new().validate_params(&params).is_err());
+
+    let params = json!({
+        "operation": "pr_create",
+        "title": "T",
+        "retry_jitter_ms": -1
+    });
+    assert!(GhOperator::new().validate_params(&params).is_err());
+}

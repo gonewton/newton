@@ -23,6 +23,38 @@ use crate::workflow::executor::{ExecutionOverrides, GraphHandle, TaskOutcome};
 
 pub const RESOLVED_PARAMS_SNAPSHOT_LIMIT_BYTES: usize = 65_536;
 
+/// Cap on a single backoff sleep, before jitter. Mirrors `gh.rs::MAX_RETRY_DELAY_MS`.
+pub(crate) const MAX_TASK_BACKOFF_MS: u64 = 300_000;
+
+/// Returns true if an `AppError` represents a transient failure that should be retried.
+///
+/// Used by the engine retry loop to short-circuit on non-transient errors. Defaults
+/// to `true` for unknown codes to preserve existing "always retry" behavior for
+/// non-gh operators.
+pub(crate) fn is_retryable(err: &AppError) -> bool {
+    if matches!(err.category, ErrorCategory::ValidationError) {
+        return false;
+    }
+    match err.code.as_str() {
+        "WFG-GH-001" | "WFG-GH-002" | "WFG-GH-005" | "WFG-GH-006" | "WFG-GH-007" | "WFG-GH-008"
+        | "WFG-GH-AUTH-001" | "WFG-GH-AUTH-002" | "WFG-GH-AUTH-003" => false,
+        "WFG-GH-003" => true,
+        "WFG-GH-004" => {
+            let msg = err.message.to_lowercase();
+            const TRANSIENT_PATTERNS: &[&str] = &[
+                "tls handshake timeout",
+                "dial tcp",
+                "i/o timeout",
+                "connection reset",
+                "eof",
+                "http 5",
+            ];
+            TRANSIENT_PATTERNS.iter().any(|p| msg.contains(p))
+        }
+        _ => true,
+    }
+}
+
 /// Executes a single workflow task with retry logic, timeout handling, and context patching.
 ///
 /// This function handles the complete lifecycle of task execution including:
@@ -91,7 +123,7 @@ pub async fn run_task(
                 ));
             }
             Err(err) => {
-                if retry_state.attempts >= retry_state.max_attempts {
+                if retry_state.attempts >= retry_state.max_attempts || !is_retryable(&err) {
                     return Ok(build_failure_outcome(
                         task.id,
                         &err,
@@ -103,7 +135,17 @@ pub async fn run_task(
                         resolved_params.clone(),
                     ));
                 }
-                apply_backoff_and_retry(&mut retry_state, &mut rng).await;
+                let delay_ms = apply_backoff_and_retry(&mut retry_state, &mut rng).await;
+                tracing::warn!(
+                    task_id = %task.id,
+                    operation = %task.operator,
+                    attempt = retry_state.attempts,
+                    max_attempts = retry_state.max_attempts,
+                    delay_ms = delay_ms,
+                    error_code = %err.code,
+                    error_message = %err.message,
+                    "transient gh failure; retrying after backoff"
+                );
             }
         }
     }
@@ -297,14 +339,16 @@ fn build_failure_outcome(
     }
 }
 
-/// Applies backoff delay and prepares for retry.
-async fn apply_backoff_and_retry(retry_state: &mut RetryState, rng: &mut StdRng) {
-    let sleep_ms = calculate_backoff(retry_state, rng);
+/// Applies backoff delay and prepares for retry. Returns the actual delay in ms.
+async fn apply_backoff_and_retry(retry_state: &mut RetryState, rng: &mut StdRng) -> u64 {
+    let sleep_ms = calculate_backoff(retry_state, rng).min(MAX_TASK_BACKOFF_MS);
     if sleep_ms > 0 {
         sleep(Duration::from_millis(sleep_ms)).await;
     }
-    retry_state.backoff_ms =
-        ((retry_state.backoff_ms as f32) * retry_state.multiplier).max(1.0) as u64;
+    retry_state.backoff_ms = (((retry_state.backoff_ms as f32) * retry_state.multiplier).max(1.0)
+        as u64)
+        .min(MAX_TASK_BACKOFF_MS);
+    sleep_ms
 }
 
 /// Calculates backoff duration with jitter.
@@ -365,4 +409,117 @@ pub fn build_workflow_task_run_record(
         error: outcome.error_summary.clone(),
         resolved_params_snapshot,
     })
+}
+
+#[cfg(test)]
+mod retry_classification_tests {
+    use super::*;
+
+    fn err(category: ErrorCategory, code: &str, msg: &str) -> AppError {
+        AppError::new(category, msg.to_string()).with_code(code)
+    }
+
+    #[test]
+    fn validation_errors_are_not_retryable() {
+        let e = err(ErrorCategory::ValidationError, "ANY-CODE", "bad input");
+        assert!(!is_retryable(&e));
+    }
+
+    #[test]
+    fn gh_001_002_005_006_007_008_not_retryable() {
+        for code in [
+            "WFG-GH-001",
+            "WFG-GH-002",
+            "WFG-GH-005",
+            "WFG-GH-006",
+            "WFG-GH-007",
+            "WFG-GH-008",
+        ] {
+            let e = err(ErrorCategory::ToolExecutionError, code, "x");
+            assert!(!is_retryable(&e), "code {code} should not be retryable");
+        }
+    }
+
+    #[test]
+    fn gh_auth_codes_not_retryable() {
+        for code in ["WFG-GH-AUTH-001", "WFG-GH-AUTH-002", "WFG-GH-AUTH-003"] {
+            let e = err(ErrorCategory::ToolExecutionError, code, "x");
+            assert!(!is_retryable(&e), "{code} should not be retryable");
+        }
+    }
+
+    #[test]
+    fn gh_003_is_retryable() {
+        let e = err(
+            ErrorCategory::ToolExecutionError,
+            "WFG-GH-003",
+            "spawn failed",
+        );
+        assert!(is_retryable(&e));
+    }
+
+    #[test]
+    fn gh_004_retryable_only_on_transient_message() {
+        let transient_msgs = [
+            "gh failed: TLS handshake timeout",
+            "dial tcp: connection failed",
+            "i/o timeout reading body",
+            "connection reset by peer",
+            "unexpected EOF",
+            "HTTP 503 Service Unavailable",
+        ];
+        for m in transient_msgs {
+            let e = err(ErrorCategory::ToolExecutionError, "WFG-GH-004", m);
+            assert!(is_retryable(&e), "msg {m:?} should be retryable");
+        }
+        let e = err(
+            ErrorCategory::ToolExecutionError,
+            "WFG-GH-004",
+            "exit 1: not found",
+        );
+        assert!(!is_retryable(&e));
+    }
+
+    #[test]
+    fn unknown_codes_default_to_retryable() {
+        let e = err(ErrorCategory::ToolExecutionError, "SOME-OTHER-CODE", "x");
+        assert!(is_retryable(&e));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn backoff_clamped_to_max() {
+        let mut state = RetryState {
+            attempts: 0,
+            max_attempts: 5,
+            backoff_ms: 200_000,
+            multiplier: 5.0,
+            jitter_ms: 0,
+        };
+        let mut rng = StdRng::from_entropy();
+        // First call sleeps 200_000 (under cap), then bumps state to clamped 300_000.
+        let d1 = apply_backoff_and_retry(&mut state, &mut rng).await;
+        assert_eq!(d1, 200_000);
+        assert_eq!(state.backoff_ms, MAX_TASK_BACKOFF_MS);
+        // Second call clamps the sleep to MAX_TASK_BACKOFF_MS.
+        let d2 = apply_backoff_and_retry(&mut state, &mut rng).await;
+        assert_eq!(d2, MAX_TASK_BACKOFF_MS);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn backoff_grows_exponentially() {
+        let mut state = RetryState {
+            attempts: 0,
+            max_attempts: 5,
+            backoff_ms: 100,
+            multiplier: 2.0,
+            jitter_ms: 0,
+        };
+        let mut rng = StdRng::from_entropy();
+        let d1 = apply_backoff_and_retry(&mut state, &mut rng).await;
+        let d2 = apply_backoff_and_retry(&mut state, &mut rng).await;
+        let d3 = apply_backoff_and_retry(&mut state, &mut rng).await;
+        assert_eq!(d1, 100);
+        assert_eq!(d2, 200);
+        assert_eq!(d3, 400);
+    }
 }
