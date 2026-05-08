@@ -452,6 +452,11 @@ workflow:
       operator: GhOperator
       max_iterations: 15000
       timeout_ms: 120000
+      retry:
+        max_attempts: 5
+        backoff_ms: 2000
+        backoff_multiplier: 2.0
+        jitter_ms: 500
       params:
         operation: pr_view
         pr:

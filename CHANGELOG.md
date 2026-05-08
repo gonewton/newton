@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### GhOperator — transient-failure retry (issue #284)
+
+- Engine retry loop now consults a per-error-code `is_retryable` classifier:
+  malformed-JSON parse errors (`WFG-GH-002`), validation errors, auth errors,
+  and most non-network gh failures fail fast instead of consuming retry
+  attempts. Transient `WFG-GH-003` (spawn IO) and `WFG-GH-004` (non-zero exit
+  with `TLS handshake timeout`/`dial tcp`/`i/o timeout`/`connection reset`/
+  `EOF`/`HTTP 5xx` in stderr) remain retryable. Unknown codes default to
+  retryable, preserving existing behavior for non-gh operators.
+- New `MAX_TASK_BACKOFF_MS = 300_000` cap applied to per-attempt backoff (after
+  multiplier, before sleep), mirroring `MAX_RETRY_DELAY_MS` in `gh.rs`.
+- Per-retry `tracing::warn!` events now include `attempt`, `max_attempts`,
+  `delay_ms`, `error_code`, and `operation` fields.
+- `develop.yaml` template: `poll_pr` task now ships with a default
+  `retry: { max_attempts: 5, backoff_ms: 2000, backoff_multiplier: 2.0,
+  jitter_ms: 500 }` so transient `api.github.com` outages no longer abort
+  develop runs.
+- **Behavioral change** to `pr_create`: the operator-internal retry loop now
+  uses exponential growth (`retry_multiplier`, default `2.0`) plus optional
+  uniform jitter (`retry_jitter_ms`, default `0`). Previous behavior was a
+  fixed-delay loop; pass `retry_multiplier: 1.0` to preserve byte-identical
+  timing. The `ailoop` approver is still consulted at most once per logical
+  invocation, regardless of retries.
+
 ### Breaking — CLI restructure (issue #273)
 
 This is a clean cut: there are no aliases, no deprecation period, and no
