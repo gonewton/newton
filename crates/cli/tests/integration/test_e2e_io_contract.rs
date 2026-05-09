@@ -244,3 +244,83 @@ fn parameters_json_at_prefix_resolves_file() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+/// AC 4 / AC 19: WFG-IO-001 is emitted when the trigger payload exceeds max_input_bytes.
+/// The fixture has max_input_bytes: 1 so any non-empty params file will exceed the limit.
+#[test]
+fn wfg_io_001_emitted_when_payload_exceeds_max_input_bytes() {
+    let ws = TempWorkspace::new();
+    let wf = fixture_path("workflows/io_contract_max_input_bytes.yaml");
+
+    // Write a params file — any non-trivial JSON exceeds max_input_bytes: 1
+    let params_file = ws.path().join("params.json");
+    std::fs::write(&params_file, r#"{"repo": "my-repo"}"#).expect("write params");
+
+    let out = newton()
+        .args([
+            "run",
+            &wf.to_string_lossy(),
+            "--workspace",
+            &ws.path().to_string_lossy(),
+            "--parameters-json",
+            &params_file.to_string_lossy(),
+            "--emit-completion-json",
+        ])
+        .output()
+        .expect("newton run should execute");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "exit code should be 1 for WFG-IO-001; stdout={stdout}, stderr={stderr}"
+    );
+    let envelope: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout must be valid JSON: {e}; stdout={stdout}"));
+    assert_eq!(
+        envelope["status"], "internal_error",
+        "status must be 'internal_error' for WFG-IO-001; envelope={envelope}"
+    );
+    assert_eq!(
+        envelope["error"]["code"], "WFG-IO-001",
+        "error code must be WFG-IO-001; envelope={envelope}"
+    );
+}
+
+/// AC 20: WFG-IO-003 is emitted when the serialized result exceeds max_output_bytes.
+/// The fixture has max_output_bytes: 1 and a result_map with a non-trivial result.
+#[test]
+fn wfg_io_003_emitted_when_result_exceeds_max_output_bytes() {
+    let ws = TempWorkspace::new();
+    let wf = fixture_path("workflows/io_contract_max_output_bytes.yaml");
+
+    let out = newton()
+        .args([
+            "run",
+            &wf.to_string_lossy(),
+            "--workspace",
+            &ws.path().to_string_lossy(),
+            "--emit-completion-json",
+        ])
+        .output()
+        .expect("newton run should execute");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "exit code should be 2 for WFG-IO-003 (output size exceeded); stdout={stdout}, stderr={stderr}"
+    );
+    let envelope: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout must be valid JSON: {e}; stdout={stdout}"));
+    assert_eq!(
+        envelope["status"], "failure",
+        "status must be 'failure' for WFG-IO-003; envelope={envelope}"
+    );
+    assert_eq!(
+        envelope["error"]["code"], "WFG-IO-003",
+        "error code must be WFG-IO-003; envelope={envelope}"
+    );
+}

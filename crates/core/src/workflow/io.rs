@@ -152,6 +152,42 @@ pub fn validate_error_schema(schema: &Value, error_payload: &Value) -> Result<()
     Ok(())
 }
 
+/// Validate that the serialized trigger payload does not exceed max_input_bytes.
+/// Returns WFG-IO-001 on violation.
+pub fn validate_input_size(payload: &Value, max_bytes: usize) -> Result<(), AppError> {
+    let serialized = serde_json::to_string(payload).unwrap_or_default();
+    if serialized.len() > max_bytes {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "trigger payload exceeds max_input_bytes ({}): {} bytes",
+                max_bytes,
+                serialized.len()
+            ),
+        )
+        .with_code("WFG-IO-001"));
+    }
+    Ok(())
+}
+
+/// Validate that the serialized result does not exceed max_output_bytes.
+/// Returns WFG-IO-003 on violation.
+pub fn validate_output_size(result: &Value, max_bytes: usize) -> Result<(), AppError> {
+    let serialized = serde_json::to_string(result).unwrap_or_default();
+    if serialized.len() > max_bytes {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "output exceeds max_output_bytes ({}): {} bytes",
+                max_bytes,
+                serialized.len()
+            ),
+        )
+        .with_code("WFG-IO-003"));
+    }
+    Ok(())
+}
+
 /// Validate the trigger payload against input_schema.
 pub fn validate_input_schema(schema: &Value, payload: &Value) -> Result<(), AppError> {
     let compiled = jsonschema::JSONSchema::compile(schema).map_err(|e| {

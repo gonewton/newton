@@ -2,8 +2,8 @@ use newton_core::workflow::{
     executor::{self, ExecutionOverrides},
     expression::ExpressionEngine,
     io::{
-        evaluate_result_map, validate_error_schema, validate_input_schema, validate_output_schema,
-        CompletionStatus,
+        evaluate_result_map, validate_error_schema, validate_input_schema, validate_input_size,
+        validate_output_schema, validate_output_size, CompletionStatus,
     },
     operator::{OperatorRegistry, StateView},
     operators, schema,
@@ -180,6 +180,48 @@ fn validate_output_schema_fails_for_missing_required_field() {
     assert!(
         err.message.contains("output_schema"),
         "message should mention output_schema: {}",
+        err.message
+    );
+}
+
+// ─── validate_input_size (WFG-IO-001) ────────────────────────────────────────
+
+#[test]
+fn validate_input_size_passes_when_under_limit() {
+    let payload = json!({ "repo": "my-repo" });
+    validate_input_size(&payload, 65536).expect("should pass when payload is under limit");
+}
+
+#[test]
+fn validate_input_size_fails_with_wfg_io_001_when_over_limit() {
+    // max_input_bytes: 1 — any non-trivial payload will exceed this
+    let payload = json!({ "repo": "my-repo" });
+    let err = validate_input_size(&payload, 1).expect_err("should fail when payload exceeds limit");
+    assert_eq!(err.code, "WFG-IO-001", "expected WFG-IO-001, got {:?}", err);
+    assert!(
+        err.message.contains("max_input_bytes"),
+        "message should mention max_input_bytes: {}",
+        err.message
+    );
+}
+
+// ─── validate_output_size (WFG-IO-003 via max_output_bytes) ──────────────────
+
+#[test]
+fn validate_output_size_passes_when_under_limit() {
+    let result = json!({ "status": "ok" });
+    validate_output_size(&result, 65536).expect("should pass when result is under limit");
+}
+
+#[test]
+fn validate_output_size_fails_with_wfg_io_003_when_over_limit() {
+    // max_output_bytes: 1 — any non-trivial result will exceed this
+    let result = json!({ "status": "ok" });
+    let err = validate_output_size(&result, 1).expect_err("should fail when result exceeds limit");
+    assert_eq!(err.code, "WFG-IO-003", "expected WFG-IO-003, got {:?}", err);
+    assert!(
+        err.message.contains("max_output_bytes"),
+        "message should mention max_output_bytes: {}",
         err.message
     );
 }
