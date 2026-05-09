@@ -75,6 +75,7 @@ fn make_checkpoint(execution_id: Uuid) -> WorkflowCheckpoint {
         completed: HashMap::new(),
         version: 0,
         runtime_tasks: None,
+        io_snapshot: None,
     }
 }
 

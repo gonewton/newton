@@ -74,7 +74,7 @@ fn build_comprehensive_trigger_payload(
 ) -> Result<Option<Value>> {
     // Start with base trigger payload from args
     let mut trigger_payload =
-        build_trigger_payload(&args.trigger_file, &args.trigger)?.unwrap_or_else(|| json!({}));
+        build_trigger_payload(&args.parameters_json, &args.trigger)?.unwrap_or_else(|| json!({}));
 
     // Add input_file to payload if provided
     if let Some(input_file) = &args.input_file {
@@ -157,22 +157,141 @@ pub async fn run(args: RunArgs) -> Result<()> {
         });
     }
 
+    // Input validation (size and schema)
+    if let Some(triggers) = &document.triggers {
+        let settings = &document.workflow.settings;
+        let payload = &triggers.payload;
+        if let Some(max_bytes) = settings.io_settings.max_input_bytes {
+            let serialized = serde_json::to_string(payload).unwrap_or_default();
+            if serialized.len() > max_bytes {
+                return Err(anyhow::anyhow!(
+                    "trigger payload exceeds max_input_bytes ({}): WFG-IO-001",
+                    max_bytes
+                ));
+            }
+        }
+        if let Some(schema) = &settings.io.input_schema {
+            use newton_core::workflow::io::validate_input_schema;
+            validate_input_schema(schema, payload).map_err(anyhow::Error::from)?;
+        }
+    }
+
+    let io_settings = document.workflow.settings.io_settings.clone();
+    let io_block = document.workflow.settings.io.clone();
+    let emit_json = args.emit_completion_json;
+
     let (overrides, registry) =
         setup_workflow_execution(&args, &workspace, &document.workflow.settings);
 
-    let summary = workflow_executor::execute_workflow(
+    let summary_result = workflow_executor::execute_workflow(
         document,
         workflow_path,
         registry,
         workspace.clone(),
         overrides,
     )
-    .await?;
-    println!(
-        "Workflow completed in {} iterations",
-        summary.total_iterations
-    );
-    Ok(())
+    .await;
+
+    match summary_result {
+        Ok(summary) => {
+            // Check output_schema after successful execution
+            if let (Some(schema), Some(ref result_val)) = (&io_block.output_schema, &summary.result)
+            {
+                use newton_core::workflow::io::validate_output_schema;
+                if let Err(e) = validate_output_schema(schema, result_val) {
+                    if emit_json {
+                        let envelope = newton_core::workflow::io::CompletionEnvelope::failure(
+                            Some(summary.execution_id),
+                            newton_core::workflow::io::CompletionError {
+                                code: Some("WFG-IO-003".to_string()),
+                                category: "ValidationError".to_string(),
+                                message: e.message.clone(),
+                                error_payload: None,
+                            },
+                        );
+                        println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
+                        std::process::exit(2);
+                    }
+                    return Err(anyhow::anyhow!("{}", e.message));
+                }
+            }
+            // Check max_output_bytes
+            if let (Some(max_bytes), Some(ref result_val)) =
+                (io_settings.max_output_bytes, &summary.result)
+            {
+                let serialized = serde_json::to_string(result_val).unwrap_or_default();
+                if serialized.len() > max_bytes {
+                    if emit_json {
+                        let envelope = newton_core::workflow::io::CompletionEnvelope::failure(
+                            Some(summary.execution_id),
+                            newton_core::workflow::io::CompletionError {
+                                code: Some("WFG-IO-003".to_string()),
+                                category: "ValidationError".to_string(),
+                                message: "output exceeds max_output_bytes".to_string(),
+                                error_payload: None,
+                            },
+                        );
+                        println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
+                        std::process::exit(2);
+                    }
+                    return Err(anyhow::anyhow!(
+                        "output exceeds max_output_bytes: WFG-IO-003"
+                    ));
+                }
+            }
+            if emit_json {
+                let envelope = newton_core::workflow::io::CompletionEnvelope::success(
+                    summary.execution_id,
+                    summary.result.clone(),
+                );
+                println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
+            } else {
+                println!(
+                    "Workflow completed in {} iterations",
+                    summary.total_iterations
+                );
+            }
+            Ok(())
+        }
+        Err(app_error) => {
+            if emit_json {
+                let is_workflow_failure = matches!(
+                    app_error.code.as_str(),
+                    "WFG-EXEC-001"
+                        | "WFG-GATE-001"
+                        | "WFG-ITER-001"
+                        | "WFG-ITER-002"
+                        | "WFG-TIME-001"
+                );
+                let status = if is_workflow_failure {
+                    newton_core::workflow::io::CompletionStatus::Failure
+                } else {
+                    newton_core::workflow::io::CompletionStatus::InternalError
+                };
+                let error = newton_core::workflow::io::CompletionError {
+                    code: if app_error.code.is_empty() {
+                        None
+                    } else {
+                        Some(app_error.code.clone())
+                    },
+                    category: format!("{:?}", app_error.category),
+                    message: app_error.message.clone(),
+                    error_payload: None,
+                };
+                let envelope = newton_core::workflow::io::CompletionEnvelope {
+                    schema_version: "1".to_string(),
+                    execution_id: None,
+                    status,
+                    result: None,
+                    error: Some(error),
+                };
+                println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
+                let exit_code = if is_workflow_failure { 2 } else { 1 };
+                std::process::exit(exit_code);
+            }
+            Err(anyhow::anyhow!("{}", app_error.message))
+        }
+    }
 }
 
 pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
@@ -197,12 +316,33 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
     apply_context_overrides(&mut document.workflow.context, &args.context);
     document.validate(&ExpressionEngine::default())?;
 
-    if let Some(payload) = build_trigger_payload(&args.trigger_file, &args.trigger)? {
+    if let Some(payload) = build_trigger_payload(&args.parameters_json, &args.trigger)? {
         document.triggers = Some(workflow_schema::WorkflowTrigger {
             trigger_type: workflow_schema::TriggerType::Manual,
             schema_version: "1".to_string(),
             payload,
         });
+    }
+
+    // Input validation (size and schema)
+    if let Some(triggers) = &document.triggers {
+        let settings = &document.workflow.settings;
+        let payload = &triggers.payload;
+        if let Some(max_bytes) = settings.io_settings.max_input_bytes {
+            let serialized = serde_json::to_string(payload).unwrap_or_default();
+            if serialized.len() > max_bytes {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    format!(
+                        "trigger payload exceeds max_input_bytes ({}): WFG-IO-001",
+                        max_bytes
+                    ),
+                ));
+            }
+        }
+        if let Some(schema) = &settings.io.input_schema {
+            newton_core::workflow::io::validate_input_schema(schema, payload)?;
+        }
     }
 
     let server_notifier = args
@@ -328,7 +468,7 @@ pub fn explain(args: ExplainArgs) -> StdResult<(), AppError> {
     let source_macro_names = raw_document.workflow.macro_names_referenced();
     let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
     let overrides = parse_set_overrides(&args.context);
-    let trigger_payload = build_trigger_payload(&args.trigger_file, &args.trigger)?
+    let trigger_payload = build_trigger_payload(&args.parameters_json, &args.trigger)?
         .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
     if !trigger_payload.is_null() {
         document.triggers = Some(workflow_schema::WorkflowTrigger {
@@ -1451,10 +1591,21 @@ fn resolve_trigger_arg_value(value: &str) -> StdResult<Value, AppError> {
 }
 
 fn load_trigger_payload(path: &Path) -> StdResult<Value, AppError> {
-    let content = fs::read_to_string(path).map_err(|err| {
+    // Strip leading @ if present (@path syntax)
+    let path_str = path.to_str().unwrap_or("");
+    let actual_path = if let Some(stripped) = path_str.strip_prefix('@') {
+        std::path::Path::new(stripped)
+    } else {
+        path
+    };
+    let content = fs::read_to_string(actual_path).map_err(|err| {
         AppError::new(
             ErrorCategory::IoError,
-            format!("failed to read trigger JSON {}: {}", path.display(), err),
+            format!(
+                "failed to read trigger JSON {}: {}",
+                actual_path.display(),
+                err
+            ),
         )
     })?;
     let value: Value = serde_json::from_str(&content).map_err(|err| {

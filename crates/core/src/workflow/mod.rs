@@ -8,6 +8,7 @@ pub mod executor;
 pub mod explain;
 pub mod expression;
 pub mod human;
+pub mod io;
 pub mod lint;
 pub mod operator;
 pub mod operators;

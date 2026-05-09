@@ -1,5 +1,5 @@
 ---
-source: tests/integration/test_workflow_scenarios.rs
+source: crates/cli/tests/integration/test_workflow_scenarios.rs
 expression: summary
 ---
 execution_id: "[uuid]"
@@ -28,3 +28,5 @@ completed_tasks:
     error_code: ~
     duration_ms: "[duration]"
     run_seq: 1
+result: ~
+output_valid: true

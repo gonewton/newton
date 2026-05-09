@@ -29,6 +29,9 @@ pub fn built_in_rules() -> Vec<Box<dyn WorkflowLintRule>> {
         Box::new(AgentNamedDriverNoPromptRule),
         Box::new(StaticTaskIdContainsColonRule),
         Box::new(BarrierExpectedNonExistentTaskRule),
+        Box::new(IoResultMapTaskRefsRule),
+        Box::new(IoSchemaTypeRule),
+        Box::new(IoOutputSchemaRequiresResultMapRule),
     ]
 }
 
@@ -945,5 +948,101 @@ impl BarrierExpectedNonExistentTaskRule {
                 "Remove '{expected_id}' from expected list or add the missing task"
             )),
         ));
+    }
+}
+
+struct IoResultMapTaskRefsRule;
+
+impl WorkflowLintRule for IoResultMapTaskRefsRule {
+    fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
+        let result_map = match &workflow.workflow.settings.io.result_map {
+            None => return vec![],
+            Some(rm) => rm,
+        };
+        let known_ids: HashSet<&str> = workflow
+            .workflow
+            .tasks()
+            .map(|task| task.id.as_str())
+            .collect();
+        let mut out = Vec::new();
+        for (key, value) in result_map {
+            if let Value::String(s) = value {
+                if let Some(expr) = s.strip_prefix("$expr:") {
+                    // Check for tasks['<id>'] references
+                    let mut remaining = expr;
+                    while let Some(pos) = remaining.find("tasks['") {
+                        let after = &remaining[pos + 7..];
+                        if let Some(end) = after.find("']") {
+                            let task_ref = &after[..end];
+                            if !known_ids.contains(task_ref) {
+                                out.push(LintResult::new(
+                                    "WFG-LINT-122",
+                                    LintSeverity::Warning,
+                                    format!("result_map key '{key}' references undeclared task '{task_ref}'"),
+                                    Some(format!("io.result_map.{key}")),
+                                    Some("update result_map to reference only declared task ids".to_string()),
+                                ));
+                            }
+                            remaining = &after[end + 2..];
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
+struct IoSchemaTypeRule;
+
+impl WorkflowLintRule for IoSchemaTypeRule {
+    fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
+        let io = &workflow.workflow.settings.io;
+        let mut out = Vec::new();
+        for (field, schema) in [
+            ("io.input_schema", &io.input_schema),
+            ("io.output_schema", &io.output_schema),
+        ] {
+            if let Some(schema_val) = schema {
+                let type_ok = schema_val
+                    .as_object()
+                    .and_then(|m| m.get("type"))
+                    .and_then(Value::as_str)
+                    .map(|t| t == "object")
+                    .unwrap_or(false);
+                if !type_ok {
+                    out.push(LintResult::new(
+                        "WFG-LINT-123",
+                        LintSeverity::Error,
+                        format!("{field} must have top-level type: object"),
+                        Some(field.to_string()),
+                        Some("add `type: object` to the schema root".to_string()),
+                    ));
+                }
+            }
+        }
+        out
+    }
+}
+
+struct IoOutputSchemaRequiresResultMapRule;
+
+impl WorkflowLintRule for IoOutputSchemaRequiresResultMapRule {
+    fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
+        let io = &workflow.workflow.settings.io;
+        if io.output_schema.is_some() && io.result_map.is_none() {
+            return vec![LintResult::new(
+                "WFG-LINT-124",
+                LintSeverity::Error,
+                "io.output_schema is defined but io.result_map is absent",
+                Some("io.output_schema".to_string()),
+                Some(
+                    "add result_map to produce the output that output_schema validates".to_string(),
+                ),
+            )];
+        }
+        vec![]
     }
 }

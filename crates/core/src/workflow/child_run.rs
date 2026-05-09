@@ -56,6 +56,8 @@ pub struct ChildWorkflowRunSummary {
     pub total_iterations: usize,
     /// Number of tasks completed by the child workflow.
     pub completed_task_count: usize,
+    /// Result from result_map if configured; None otherwise.
+    pub result: Option<Value>,
 }
 
 /// Runner responsible for executing a child workflow for [`crate::workflow::operators::workflow::WorkflowOperator`].

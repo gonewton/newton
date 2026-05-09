@@ -1,5 +1,7 @@
 # SPEC-052 — Planning enrich workflow: clarifier + structured HITL
 
+**Tracking:** [gonewton/newton#310](https://github.com/gonewton/newton/issues/310)
+
 ## Status
 
 Draft. Typical edit location: consumer workspace `.newton/workflows/planning_enriching.yaml`. Newton product templates may ship a copy under `templates/` or docs; keep this spec aligned with the graph authors actually run.

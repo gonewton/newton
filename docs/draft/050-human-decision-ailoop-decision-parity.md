@@ -1,5 +1,7 @@
 # REQ-050 — HumanDecisionOperator parity with ailoop `Decision` JSON
 
+**Tracking:** [gonewton/newton#311](https://github.com/gonewton/newton/issues/311)
+
 ## Status
 
 Draft requirement. Tracks GitHub issue on `gonewton/newton` (see issue body for number).

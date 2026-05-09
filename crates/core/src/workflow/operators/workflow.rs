@@ -110,6 +110,8 @@ impl Operator for WorkflowOperator {
             "child_status": "Completed",
             "child_total_iterations": summary.total_iterations,
             "child_completed_task_count": summary.completed_task_count,
+            "result": summary.result,
+            "error": serde_json::Value::Null,
         }))
     }
 }
@@ -223,6 +225,7 @@ mod tests {
                 workflow_file: "/tmp/child.yaml".to_string(),
                 total_iterations: 1,
                 completed_task_count: 1,
+                result: None,
             })
         }
     }

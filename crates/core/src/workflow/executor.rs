@@ -7,6 +7,7 @@ use crate::workflow::artifacts::ArtifactStore;
 use crate::workflow::checkpoint;
 use crate::workflow::child_run::{ChildRunInput, ChildWorkflowRunSummary, ChildWorkflowRunner};
 use crate::workflow::expression::ExpressionEngine;
+use crate::workflow::io::{evaluate_result_map, validate_output_schema};
 use crate::workflow::lint::{LintRegistry, LintSeverity};
 use crate::workflow::operator::{OperatorRegistry, StateView};
 use crate::workflow::schema::{
@@ -69,6 +70,10 @@ pub struct ExecutionSummary {
     pub execution_id: Uuid,
     pub total_iterations: usize,
     pub completed_tasks: BTreeMap<String, TaskRunRecord>,
+    /// Assembled result from result_map; None if no result_map defined.
+    pub result: Option<Value>,
+    /// True if output_schema validation passed (or no output_schema defined).
+    pub output_valid: bool,
 }
 
 /// Link metadata used to record a parent-child relationship for nested workflow runs.
@@ -668,10 +673,67 @@ impl WorkflowRuntime {
         };
         self.notify_completion(final_status);
 
+        // Evaluate result_map if configured
+        let io = &self.graph_settings.io;
+        let final_state_view = StateView::new(
+            final_state.context.clone(),
+            // Build tasks value from completed tasks
+            {
+                let mut tasks_map = serde_json::Map::new();
+                for (id, record) in &final_state.completed {
+                    tasks_map.insert(id.clone(), record.output.clone());
+                }
+                Value::Object(tasks_map)
+            },
+            final_state.triggers.clone(),
+        );
+        let result = if io.result_map.is_some() {
+            match evaluate_result_map(io, &final_state_view, &self.engine) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!("result_map evaluation failed: {}", e.message);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Validate output_schema if present
+        let output_valid =
+            if let (Some(schema), Some(ref result_val)) = (&io.output_schema, &result) {
+                match validate_output_schema(schema, result_val) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        tracing::warn!("output_schema validation failed: {}", e.message);
+                        false
+                    }
+                }
+            } else {
+                true
+            };
+
+        // Write completion.json when result_map is present
+        if result.is_some() {
+            let completion_path = self
+                .checkpoint_root
+                .join(self.workflow_execution.execution_id.to_string())
+                .join("completion.json");
+            let envelope = crate::workflow::io::CompletionEnvelope::success(
+                self.workflow_execution.execution_id,
+                result.clone(),
+            );
+            if let Ok(json) = serde_json::to_string_pretty(&envelope) {
+                let _ = fs::write(&completion_path, json);
+            }
+        }
+
         Ok(ExecutionSummary {
             execution_id: self.workflow_execution.execution_id,
             total_iterations: self.total_iterations,
             completed_tasks,
+            result,
+            output_valid,
         })
     }
 
@@ -952,7 +1014,7 @@ impl WorkflowRuntime {
         let checkpoint_records = guard.checkpoint_records.clone();
         drop(guard);
         let runtime_tasks = self.runtime_graph.get_all_tasks();
-        let checkpoint = WorkflowCheckpoint::new_v2(
+        let mut checkpoint = WorkflowCheckpoint::new_v2(
             self.workflow_execution.execution_id,
             self.workflow_execution.workflow_hash.clone(),
             redacted_context,
@@ -963,6 +1025,8 @@ impl WorkflowRuntime {
             checkpoint_records,
             runtime_tasks,
         );
+        checkpoint.io_snapshot =
+            Some(serde_json::to_value(&self.graph_settings.io).unwrap_or(Value::Null));
         checkpoint::save_checkpoint_at(
             &self.checkpoint_root,
             &self.workflow_execution.execution_id,
@@ -1316,6 +1380,7 @@ impl ChildWorkflowRunner for InProcessChildWorkflowRunner {
             workflow_file,
             total_iterations: summary.total_iterations,
             completed_task_count: summary.completed_tasks.len(),
+            result: summary.result,
         })
     }
 }
@@ -1550,6 +1615,27 @@ pub async fn resume_workflow(
             "workflow hash does not match checkpoint",
         )
         .with_code("WFG-CKPT-001"));
+    }
+
+    // Check io_snapshot if present in checkpoint
+    if let Some(io_snapshot) = &checkpoint_data.io_snapshot {
+        let current_io =
+            serde_json::to_value(&document.workflow.settings.io).unwrap_or(Value::Null);
+        if io_snapshot != &current_io && !allow_workflow_change {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "workflow io block has changed since checkpoint was created",
+            )
+            .with_code("WFG-CKPT-001"));
+        }
+        // With allow_workflow_change: re-validate original trigger payload against new input_schema
+        if allow_workflow_change {
+            if let Some(schema) = &document.workflow.settings.io.input_schema {
+                let trigger_payload = &checkpoint_data.trigger_payload;
+                use crate::workflow::io::validate_input_schema;
+                validate_input_schema(schema, trigger_payload)?;
+            }
+        }
     }
 
     // GUARD: Detect old-format checkpoint where a hard task abort left the queue empty
