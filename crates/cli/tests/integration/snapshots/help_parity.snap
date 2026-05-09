@@ -22,6 +22,7 @@ Commands:
   run         Execute a workflow graph
   runs        List and replay workflow execution history
   serve       Start the Newton HTTP API server
+  spec        Export the CLI command surface as JSON, YAML, or Markdown
   version     Print version information
   webhook     Run webhooks to trigger workflows from external events
   workflow    Operate on a workflow YAML file (validate/lint/preview/graph)

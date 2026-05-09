@@ -1,21 +1,17 @@
 name: Auto Release
 
-# This workflow automatically creates release branches and PRs when the version
-# in Cargo.toml is bumped on the main branch.
+# Triggers on every push to main (excluding pure doc/workflow changes) and
+# cuts a new patch release by:
+#   1. Computing the next patch version from the last git tag (not from
+#      Cargo.toml), so releases fire on every merge without requiring a
+#      manual version bump.
+#   2. Creating an auto-release branch, bumping Cargo.toml, tagging, and
+#      pushing — which triggers the Release workflow via the v*.*.* tag.
 #
-# Features:
-# - Cleans up existing release branches to avoid conflicts
-# - Uses force-with-lease for safe force pushing
-# - Updates existing PRs if they exist instead of creating duplicates
-# - Automatically cleans up old merged release branches
-# - Retries git operations for reliability
+# Escape hatch: include "[skip release]" in the commit message to suppress.
 #
-# Best Practices Implemented:
-# - Delete stale branches before creating new ones
-# - Use --force-with-lease instead of --force for safety
-# - Check for existing PRs before creating new ones
-# - Automatic cleanup of merged branches
-# - Proper error handling and logging
+# Concurrency: at most one auto-release run at a time on main; later pushes
+# cancel in-progress runs so versions don't collide.
 
 on:
   push:
@@ -26,6 +22,10 @@ on:
       - 'README.md'
       - 'CHANGELOG.md'
 
+concurrency:
+  group: auto-release-main
+  cancel-in-progress: true
+
 permissions:
   contents: write
   actions: write
@@ -35,7 +35,7 @@ jobs:
   auto-release:
     name: Auto Release
     runs-on: ubuntu-latest
-    if: "!contains(github.event.head_commit.message, '[skip release]') && !contains(github.event.pull_request.labels.*.name, 'no-release')"
+    if: "!contains(github.event.head_commit.message, '[skip release]')"
     steps:
       - name: Generate GitHub App Token
         id: app-token
@@ -52,111 +52,87 @@ jobs:
           fetch-tags: true
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Check if Cargo.toml version changed
-        id: check-version
+      - name: Compute next version from last tag
+        id: next-version
         run: |
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null) || LAST_TAG=""
+          # Derive the next patch release from the most recent reachable tag so
+          # every merge to main triggers a release — no manual version bump needed.
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           LAST_VERSION=${LAST_TAG#v}
-          CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          if [ -n "$LAST_VERSION" ] && [ "$LAST_VERSION" = "$CURRENT_VERSION" ]; then
-            echo "Version unchanged ($CURRENT_VERSION), skipping auto-release"
-            echo "skip=true" >> $GITHUB_OUTPUT
-          else
-            echo "Version changed (last tag: ${LAST_VERSION:-none} -> Cargo.toml: $CURRENT_VERSION), proceeding with auto-release"
-            echo "skip=false" >> $GITHUB_OUTPUT
-          fi
+          IFS='.' read -r major minor patch <<< "$LAST_VERSION"
+          NEXT_PATCH=$((patch + 1))
+          NEXT_VERSION="$major.$minor.$NEXT_PATCH"
+          echo "last_tag=$LAST_TAG"
+          echo "next_version=$NEXT_VERSION"
+          echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+          echo "branch_name=auto-release-$NEXT_VERSION" >> $GITHUB_OUTPUT
 
       - name: Create release branch
-        if: steps.check-version.outputs.skip == 'false'
         id: create-branch
         run: |
-          CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          BRANCH_NAME="auto-release-$CURRENT_VERSION"
-          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          BRANCH_NAME="${{ steps.next-version.outputs.branch_name }}"
 
-          # Configure git
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
 
-          # Delete remote branch if it exists (cleanup old releases)
+          # Clean up any stale branch from a previous concurrent run.
           if git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; then
             echo "Remote branch $BRANCH_NAME exists, deleting it..."
             git push origin --delete "$BRANCH_NAME" || true
           fi
-
-          # Delete local branch if it exists
           if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
-            echo "Local branch $BRANCH_NAME exists, deleting it..."
             git branch -D "$BRANCH_NAME" || true
           fi
 
-          # Create fresh branch from current main
           git checkout -b "$BRANCH_NAME"
 
-      - name: Bump patch version
-        if: steps.check-version.outputs.skip == 'false'
+      - name: Set version in Cargo.toml
         run: |
           CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
-          NEW_PATCH=$((patch + 1))
-          NEW_VERSION="$major.$minor.$NEW_PATCH"
-          sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" Cargo.toml
+          NEXT_VERSION="${{ steps.next-version.outputs.next_version }}"
+          sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$NEXT_VERSION\"/" Cargo.toml
+          echo "Bumped Cargo.toml: $CURRENT_VERSION → $NEXT_VERSION"
 
       - name: Install Rust toolchain
-        if: steps.check-version.outputs.skip == 'false'
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: 1.94
 
       - name: Regenerate OpenAPI parity spec
-        if: steps.check-version.outputs.skip == 'false'
         run: ./scripts/generate-openapi.sh
 
       - name: Commit version bump
-        if: steps.check-version.outputs.skip == 'false'
         run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          NEXT_VERSION="${{ steps.next-version.outputs.next_version }}"
           git add Cargo.toml Cargo.lock openapi/newton-backend-parity.yaml
-          NEW_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          git commit -m "chore: bump version to $NEW_VERSION"
+          git commit -m "chore: bump version to $NEXT_VERSION"
 
       - name: Push release branch
-        if: steps.check-version.outputs.skip == 'false'
         run: |
-          # Use force push since we've cleaned up any existing branch
-          # This ensures the push succeeds even if there were concurrent changes
-          git push --force-with-lease origin "${{ steps.create-branch.outputs.branch_name }}"
+          git push --force-with-lease origin "${{ steps.next-version.outputs.branch_name }}"
 
-      - name: Create Pull Request
-        if: steps.check-version.outputs.skip == 'false'
+      - name: Create or update Pull Request
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          NEW_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          BRANCH_NAME="${{ steps.create-branch.outputs.branch_name }}"
-          PR_TITLE="chore: release v$NEW_VERSION"
-          PR_BODY="Automated release for version $NEW_VERSION
+          NEXT_VERSION="${{ steps.next-version.outputs.next_version }}"
+          BRANCH_NAME="${{ steps.next-version.outputs.branch_name }}"
+          PR_TITLE="chore: release v$NEXT_VERSION"
+          PR_BODY="Automated release for version $NEXT_VERSION
 
-          This PR was created by the auto-release workflow.
+          This PR was created by the auto-release workflow. Merging it brings
+          the bumped version back into \`main\`.
 
-          - Bumps version from previous to $NEW_VERSION
-          - Creates and pushes git tag
-          - Triggers release workflow
+          **What triggered this release:**
+          Commit: ${{ github.sha }}
+          Message: ${{ github.event.head_commit.message }}"
 
-          **Changes:**
-          - Version bump in Cargo.toml"
-
-          # Check if PR already exists
           EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number' || echo "")
-
           if [ -n "$EXISTING_PR" ]; then
-            echo "PR #$EXISTING_PR already exists for branch $BRANCH_NAME, updating it..."
-            gh pr edit "$EXISTING_PR" \
-              --title "$PR_TITLE" \
-              --body "$PR_BODY"
+            echo "Updating existing PR #$EXISTING_PR..."
+            gh pr edit "$EXISTING_PR" --title "$PR_TITLE" --body "$PR_BODY"
           else
-            echo "Creating new PR for branch $BRANCH_NAME..."
+            echo "Creating PR for $BRANCH_NAME..."
             gh pr create \
               --title "$PR_TITLE" \
               --body "$PR_BODY" \
@@ -166,23 +142,22 @@ jobs:
               --draft
           fi
 
-      - name: Create tag and push (triggers Release workflow)
-        if: steps.check-version.outputs.skip == 'false'
+      - name: Tag and push (triggers Release workflow)
         env:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -e
-          NEW_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          TAG="v$NEW_VERSION"
+          NEXT_VERSION="${{ steps.next-version.outputs.next_version }}"
+          TAG="v$NEXT_VERSION"
           git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${{ github.repository }}.git"
           HEAD_SHA=$(git rev-parse HEAD)
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             if [ "$(git rev-parse "$TAG^{commit}")" = "$HEAD_SHA" ]; then
               git push origin "$TAG"
-              exit 0
+            else
+              git tag -f "$TAG"
+              git push -f origin "$TAG"
             fi
-            git tag -f "$TAG"
-            git push -f origin "$TAG"
           else
             git tag "$TAG"
             git push origin "$TAG"
@@ -213,7 +188,6 @@ jobs:
         run: |
           echo "Cleaning up old auto-release branches..."
 
-          # Get all remote branches matching auto-release pattern
           RELEASE_BRANCHES=$(git branch -r | grep 'origin/auto-release-' | sed 's|origin/||' || true)
 
           if [ -z "$RELEASE_BRANCHES" ]; then
@@ -223,19 +197,15 @@ jobs:
 
           for BRANCH in $RELEASE_BRANCHES; do
             echo "Checking branch: $BRANCH"
-
-            # Check if PR for this branch exists and is merged
             PR_STATE=$(gh pr list --head "$BRANCH" --state all --json state,mergedAt --jq '.[0] | select(.mergedAt != null) | .state' || echo "")
 
             if [ "$PR_STATE" = "MERGED" ]; then
               echo "PR for $BRANCH is merged, deleting branch..."
               git push origin --delete "$BRANCH" || echo "Failed to delete $BRANCH (may already be deleted)"
             else
-              # Also delete branches older than 7 days with no associated PR
               BRANCH_AGE=$(git log -1 --format=%ct "origin/$BRANCH" 2>/dev/null || echo "0")
               CURRENT_TIME=$(date +%s)
               AGE_DAYS=$(( (CURRENT_TIME - BRANCH_AGE) / 86400 ))
-
               if [ "$AGE_DAYS" -gt 7 ]; then
                 PR_EXISTS=$(gh pr list --head "$BRANCH" --state all --json number --jq '.[0].number' || echo "")
                 if [ -z "$PR_EXISTS" ]; then

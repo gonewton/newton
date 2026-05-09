@@ -1,0 +1,13 @@
+{
+  "format_version": "1",
+  "execution_id": "11111111-1111-1111-1111-111111111111",
+  "workflow_file": "minimal_smoke.yaml",
+  "workflow_version": "2.0",
+  "workflow_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "started_at": "2026-01-01T00:00:00Z",
+  "completed_at": "2026-01-01T00:00:01Z",
+  "status": "Completed",
+  "task_runs": [],
+  "settings_effective": {},
+  "nesting_depth": 0
+}

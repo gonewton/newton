@@ -411,6 +411,12 @@ fn run_command() -> Command {
                 commands::run(dto).await
             })
         }),
+        // MCP tool exposure is managed at the serve layer via `newton serve
+        // --with-mcp` (issue #294), not per-command. All commands set
+        // `expose_mcp: false` so the cli-framework does not create a parallel
+        // per-command MCP export path; the unified MCP router reuses the same
+        // `CommandRegistry` and exposes every command as a tool automatically.
+        expose_mcp: false,
     }
 }
 
@@ -464,6 +470,7 @@ fn init_command() -> Command {
                 init::run(dto)
             })
         }),
+        expose_mcp: false,
     }
 }
 
@@ -541,6 +548,7 @@ fn batch_command() -> Command {
                 commands::batch(dto).await
             })
         }),
+        expose_mcp: false,
     }
 }
 
@@ -629,6 +637,7 @@ fn serve_command() -> Command {
                 commands::serve(dto).await.map_err(anyhow::Error::from)
             })
         }),
+        expose_mcp: false,
     }
 }
 
@@ -693,6 +702,7 @@ fn monitor_command() -> Command {
                 commands::monitor(dto).await
             })
         }),
+        expose_mcp: false,
     }
 }
 
@@ -878,6 +888,7 @@ fn workflow_command() -> Command {
                 }
             })
         }),
+        expose_mcp: false,
     }
 }
 
@@ -942,6 +953,7 @@ fn resume_command() -> Command {
                 commands::resume(dto).await.map_err(anyhow::Error::from)
             })
         }),
+        expose_mcp: false,
     }
 }
 
@@ -1053,6 +1065,7 @@ fn checkpoint_command() -> Command {
                 }
             })
         }),
+        expose_mcp: false,
     }
 }
 
@@ -1142,6 +1155,7 @@ fn artifact_command() -> Command {
                 }
             })
         }),
+        expose_mcp: false,
     }
 }
 
@@ -1249,6 +1263,7 @@ fn webhook_command() -> Command {
                 }
             })
         }),
+        expose_mcp: false,
     }
 }
 
@@ -1419,6 +1434,7 @@ fn runs_command() -> Command {
                 }
             })
         }),
+        expose_mcp: false,
     }
 }
 
@@ -1442,6 +1458,7 @@ fn health_command() -> Command {
         })),
         validator: None,
         execute: Arc::new(|_ctx, _args| Box::pin(async move { ops::health::run() })),
+        expose_mcp: false,
     }
 }
 
@@ -1485,6 +1502,7 @@ fn doctor_command() -> Command {
                 Ok(())
             })
         }),
+        expose_mcp: false,
     }
 }
 
@@ -1554,6 +1572,7 @@ fn config_command() -> Command {
                 ops::config_show::run(ops::config_show::ConfigShowArgs { workspace })
             })
         }),
+        expose_mcp: false,
     }
 }
 
@@ -1607,6 +1626,7 @@ fn completion_command() -> Command {
                 ops::completion::run(shell)
             })
         }),
+        expose_mcp: false,
     }
 }
 
@@ -1650,6 +1670,7 @@ fn ask_command() -> Command {
                 ask::run(&query, &summaries)
             })
         }),
+        expose_mcp: false,
     }
 }
 

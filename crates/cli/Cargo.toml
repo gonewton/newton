@@ -18,7 +18,7 @@ name = "logging_integration_helper"
 path = "tests/bin/logging_integration_helper.rs"
 
 [dependencies]
-cli-framework = { git = "https://github.com/aroff/cli-framework", features = ["mcp-server"] }
+cli-framework = { git = "https://github.com/aroff/cli-framework", rev = "1ee1f2befabf121b6677fa14668b33788ba35e11", features = ["mcp-server"] }
 rmcp = { version = "1.6", features = ["server", "transport-streamable-http-server"] }
 newton-core = { path = "../core" }
 newton-types = { path = "../types" }
@@ -73,6 +73,7 @@ tokio-test = { workspace = true }
 regex = { workspace = true }
 tempfile = { workspace = true }
 wiremock = { workspace = true }
+wait-timeout = "0.2"
 
 [[test]]
 name = "test_main_functionality"
@@ -142,3 +143,63 @@ path = "tests/integration/serve_without_mcp_unchanged.rs"
 [[test]]
 name = "serve_mcp_path_validation"
 path = "tests/integration/serve_mcp_path_validation.rs"
+
+[[test]]
+name = "test_e2e_smoke"
+path = "tests/integration/test_e2e_smoke.rs"
+
+[[test]]
+name = "test_e2e_coverage_matrix"
+path = "tests/test_e2e_coverage_matrix.rs"
+
+[[test]]
+name = "test_e2e_run"
+path = "tests/integration/test_e2e_run.rs"
+
+[[test]]
+name = "test_e2e_workflow"
+path = "tests/integration/test_e2e_workflow.rs"
+
+[[test]]
+name = "test_e2e_runs"
+path = "tests/integration/test_e2e_runs.rs"
+
+[[test]]
+name = "test_e2e_resume"
+path = "tests/integration/test_e2e_resume.rs"
+
+[[test]]
+name = "test_e2e_checkpoint"
+path = "tests/integration/test_e2e_checkpoint.rs"
+
+[[test]]
+name = "test_e2e_artifact"
+path = "tests/integration/test_e2e_artifact.rs"
+
+[[test]]
+name = "test_e2e_init"
+path = "tests/integration/test_e2e_init.rs"
+
+[[test]]
+name = "test_e2e_batch"
+path = "tests/integration/test_e2e_batch.rs"
+
+[[test]]
+name = "test_e2e_ops"
+path = "tests/integration/test_e2e_ops.rs"
+
+[[test]]
+name = "test_e2e_serve_monitor"
+path = "tests/integration/test_e2e_serve_monitor.rs"
+
+[[test]]
+name = "test_e2e_webhook"
+path = "tests/integration/test_e2e_webhook.rs"
+
+[[test]]
+name = "test_e2e_ask"
+path = "tests/integration/test_e2e_ask.rs"
+
+[[test]]
+name = "test_e2e_negative"
+path = "tests/integration/test_e2e_negative.rs"
