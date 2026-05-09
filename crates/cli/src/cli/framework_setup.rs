@@ -3,6 +3,15 @@
 //! All Command / CommandSpec / ArgSpec declarations and the `build_app()`
 //! entry point used by `crates/cli/src/main.rs` live here.
 //!
+//! ## MCP tool surface (issue #309)
+//!
+//! Newton uses `McpToolExportPolicy::ExposeMcpOnly` for both MCP entry points
+//! (`newton --mcp-serve` and `newton serve --with-mcp`). Only commands with
+//! `expose_mcp: true` appear in `tools/list`. The curated allowlist is:
+//! `config`, `health`, `resume`, `run`, `runs`, `workflow`.
+//! All other commands (`init`, `batch`, `serve`, `checkpoint`, `artifact`,
+//! `webhook`, `doctor`, `completion`, `ask`) are excluded from the MCP surface.
+//!
 //! ## Nested-command note
 //! The framework routes via its root-level `commands` map; nested paths in
 //! `tree_commands` are not yet dispatched by the clap adapter.  Group
@@ -409,12 +418,7 @@ fn run_command() -> Command {
                 commands::run(dto).await
             })
         }),
-        // MCP tool exposure is managed at the serve layer via `newton serve
-        // --with-mcp` (issue #294), not per-command. All commands set
-        // `expose_mcp: false` so the cli-framework does not create a parallel
-        // per-command MCP export path; the unified MCP router reuses the same
-        // `CommandRegistry` and exposes every command as a tool automatically.
-        expose_mcp: false,
+        expose_mcp: true,
     }
 }
 
@@ -821,7 +825,7 @@ fn workflow_command() -> Command {
                 }
             })
         }),
-        expose_mcp: false,
+        expose_mcp: true,
     }
 }
 
@@ -886,7 +890,7 @@ fn resume_command() -> Command {
                 commands::resume(dto).await.map_err(anyhow::Error::from)
             })
         }),
-        expose_mcp: false,
+        expose_mcp: true,
     }
 }
 
@@ -1367,7 +1371,7 @@ fn runs_command() -> Command {
                 }
             })
         }),
-        expose_mcp: false,
+        expose_mcp: true,
     }
 }
 
@@ -1391,7 +1395,7 @@ fn health_command() -> Command {
         })),
         validator: None,
         execute: Arc::new(|_ctx, _args| Box::pin(async move { ops::health::run() })),
-        expose_mcp: false,
+        expose_mcp: true,
     }
 }
 
@@ -1505,7 +1509,7 @@ fn config_command() -> Command {
                 ops::config_show::run(ops::config_show::ConfigShowArgs { workspace })
             })
         }),
-        expose_mcp: false,
+        expose_mcp: true,
     }
 }
 
@@ -1667,7 +1671,7 @@ pub fn build_mcp_router_for_serve(
     mcp_path: &str,
 ) -> anyhow::Result<axum::Router> {
     use cli_framework::command::registry::CommandRegistry;
-    use cli_framework::mcp::{CliFrameworkHandler, McpToolRegistry};
+    use cli_framework::mcp::{CliFrameworkHandler, McpToolExportPolicy, McpToolRegistry};
     use rmcp::transport::streamable_http_server::{
         session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
     };
@@ -1679,8 +1683,11 @@ pub fn build_mcp_router_for_serve(
         registry.register(cmd);
     }
 
-    let tool_registry =
-        std::sync::Arc::new(McpToolRegistry::from_command_registry(&registry, "newton"));
+    let tool_registry = std::sync::Arc::new(McpToolRegistry::from_command_registry_with_policy(
+        &registry,
+        "newton",
+        McpToolExportPolicy::ExposeMcpOnly,
+    ));
     if tool_registry.tool_count() == 0 {
         return Err(anyhow!(
             "{}: cli-framework returned an empty MCP tool registry",
@@ -1708,6 +1715,7 @@ pub fn build_mcp_router_for_serve(
 
 /// Build the Newton CLI application backed by `cli-framework`.
 pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
+    use cli_framework::mcp::McpToolExportPolicy;
     #[allow(unused_mut)]
     let mut builder = AppBuilder::new()
         .with_version("newton", env!("CARGO_PKG_VERSION"))
@@ -1730,6 +1738,7 @@ pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
         builder = builder.register_command(ask_command())?;
     }
     builder
+        .with_mcp_export_policy(McpToolExportPolicy::ExposeMcpOnly)
         .build(ctx)
         .map_err(|e| anyhow!("{}: {}", error_codes::CLI_MIG_001, e))
 }
@@ -1751,6 +1760,11 @@ pub const REGISTERED_COMMAND_IDS: &[&str] = &[
     "config",
     "completion",
 ];
+
+/// Commands exposed as MCP tools under the ExposeMcpOnly policy (issue #309).
+/// The order is alphabetical for readability; it does not affect registration order.
+pub const MCP_EXPOSED_COMMAND_IDS: &[&str] =
+    &["config", "health", "resume", "run", "runs", "workflow"];
 
 /// Returns every `Command` registered by `build_app`, in registration order.
 pub fn enumerate_commands() -> Vec<Command> {

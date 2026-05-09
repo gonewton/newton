@@ -141,6 +141,10 @@ name = "serve_mcp_path_validation"
 path = "tests/integration/serve_mcp_path_validation.rs"
 
 [[test]]
+name = "mcp_expose_mcp_only"
+path = "tests/integration/mcp_expose_mcp_only.rs"
+
+[[test]]
 name = "test_e2e_smoke"
 path = "tests/integration/test_e2e_smoke.rs"
 

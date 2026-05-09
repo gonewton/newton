@@ -85,7 +85,7 @@ newton resume --run-id <uuid> --workspace .
 
 ## MCP Server Mode
 
-Newton exposes every registered command as an MCP (Model Context Protocol) tool. Two deployment topologies are supported.
+Newton exposes a curated subset of commands as MCP (Model Context Protocol) tools via the `ExposeMcpOnly` policy. Two deployment topologies are supported.
 
 ### Option A — Single-port (`newton serve --with-mcp`) _(recommended)_
 
@@ -151,7 +151,18 @@ newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
 
 ### Tool surface
 
-Tools are derived from the cli-framework `Command` registry (`build_app`) — every command in `REGISTERED_COMMAND_IDS` becomes an MCP tool with name = command id verbatim (e.g. `run`, `init`, `serve`, `health`, `workflow`, `resume`, `checkpoint`, `artifact`, `webhook`, `batch`, `config`, `doctor`, `runs`, `version`). Argument schemas come from each `CommandSpec.args`. Adding a new Newton command auto-publishes a new MCP tool — there is no per-command MCP wiring.
+Newton uses `McpToolExportPolicy::ExposeMcpOnly` for both MCP entry points. Only the following six commands are exposed as MCP tools (issue #309):
+
+| MCP tool name | Command | Notes |
+| --- | --- | --- |
+| `newton.run` | `run` | Execute a workflow graph from YAML |
+| `newton.workflow` | `workflow` | validate / lint / preview / graph via positional `subcommand` |
+| `newton.resume` | `resume` | Resume interrupted runs by UUID |
+| `newton.runs` | `runs` | List and replay execution history via positional `subcommand` |
+| `newton.health` | `health` | Liveness probe |
+| `newton.config` | `config` | Redacted configuration inspection |
+
+The following commands are **NOT** available as MCP tools: `newton.init`, `newton.batch`, `newton.serve`, `newton.checkpoint`, `newton.artifact`, `newton.webhook`, `newton.doctor`, `newton.completion`. Adding a new Newton command does **not** automatically expose it as an MCP tool — it must have `expose_mcp: true` set in its `Command` definition.
 
 ### Port-conflict policy
 

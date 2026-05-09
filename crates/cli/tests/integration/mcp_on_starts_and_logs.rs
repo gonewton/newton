@@ -1,12 +1,12 @@
 //! Issue #237: MCP-mode startup emits a single structured log line containing
 //! `event="mcp_serve_started"`, `mcp_enabled=true`, `bind_address`, `mcp_path`
-//! and an integer `tool_count` matching `REGISTERED_COMMAND_IDS.len()` (+1
-//! when the optional `ask` feature is enabled).
+//! and an integer `tool_count` matching `MCP_EXPOSED_COMMAND_IDS.len()` (the
+//! curated allowlist of 6 commands; issue #309).
 //!
 //! We verify the contract end-to-end by spawning the binary on a free port
 //! and reading the JSON-line we mirror to stderr (spec §4.6). The cli-framework
 //! HTTP transport keeps running until killed; we read one line then SIGKILL.
-use newton_cli::cli::framework_setup::REGISTERED_COMMAND_IDS;
+use newton_cli::cli::framework_setup::MCP_EXPOSED_COMMAND_IDS;
 use newton_cli::cli::mcp;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
@@ -19,8 +19,7 @@ fn pick_free_port() -> u16 {
 
 #[test]
 fn tool_count_matches_registered_command_ids() {
-    let expected = REGISTERED_COMMAND_IDS.len() + if cfg!(feature = "ask") { 1 } else { 0 };
-    assert_eq!(mcp::tool_count(), expected);
+    assert_eq!(mcp::tool_count(), MCP_EXPOSED_COMMAND_IDS.len());
 }
 
 #[test]
@@ -72,9 +71,8 @@ fn mcp_serve_emits_structured_startup_log() {
         line
     );
     assert!(line.contains("\"mcp_path\":\"/mcp\""), "line={}", line);
-    let expected_count = REGISTERED_COMMAND_IDS.len() + if cfg!(feature = "ask") { 1 } else { 0 };
     assert!(
-        line.contains(&format!("\"tool_count\":{}", expected_count)),
+        line.contains(&format!("\"tool_count\":{}", MCP_EXPOSED_COMMAND_IDS.len())),
         "line={}",
         line
     );
