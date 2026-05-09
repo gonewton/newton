@@ -1,5 +1,16 @@
-version: 2
-tasks:
-  - id: noop
-    operator: command
-    command: ["true"]
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Minimal smoke"
+workflow:
+  settings:
+    entry_task: "noop"
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 1
+    max_workflow_iterations: 5
+  tasks:
+    - id: "noop"
+      operator: "NoOpOperator"
+      terminal: success

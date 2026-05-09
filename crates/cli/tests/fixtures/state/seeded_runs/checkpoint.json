@@ -1,0 +1,10 @@
+{
+  "format_version": "1",
+  "execution_id": "11111111-1111-1111-1111-111111111111",
+  "workflow_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "created_at": "2026-01-01T00:00:01Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {}
+}

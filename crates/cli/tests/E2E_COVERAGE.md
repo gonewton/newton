@@ -43,14 +43,45 @@ Required smoke rows: `run`, `init`, `batch`, `serve`, `monitor`, `workflow`,
 | completion | --help | smoke_completion_help | smoke |
 | ask | --help | smoke_ask_help | smoke |
 | spec | --format json | smoke_spec_json | smoke |
+| run | --workspace | integ_run_workspace_creates_state | integration |
+| run | --trigger | integ_run_trigger_payload | integration |
+| workflow validate |  | integ_workflow_validate_ok | integration |
+| workflow lint | --format json | integ_workflow_lint_json | integration |
+| workflow preview | --format text | integ_workflow_preview_text | integration |
+| workflow graph |  | integ_workflow_graph_dot | integration |
+| runs list | --workspace | integ_runs_list_seeded_workspace | integration |
+| runs list | --json | integ_runs_list_json | integration |
+| runs show | --workspace | integ_runs_show_seeded_run | integration |
+| resume | --run-id | integ_resume_run_id | integration |
+| checkpoint list | --json | integ_checkpoint_list_json_two_runs | integration |
+| checkpoint clean | --older-than | integ_checkpoint_clean_older_than | integration |
+| artifact clean | --older-than | integ_artifact_clean_removes_old | integration |
+| init |  | integ_init_creates_workspace | integration |
+| batch | --once | integ_batch_once_no_plans | integration |
+| health |  | integ_health_command | integration |
+| doctor |  | integ_doctor_command | integration |
+| config show |  | integ_config_show | integration |
+| completion | bash | integ_completion_bash | integration |
+| serve | --port | ext_serve_ephemeral_port_health | extended |
+| monitor | --help | ext_monitor_help_runs | extended |
+| webhook serve | --workflow | ext_webhook_serve_starts | extended |
+| ask |  | ext_ask_with_wiremock | extended |
 | run | --bogus-flag (negative) | negative_run_unknown_flag | integration |
 | workflow validate |  (missing positional) | negative_workflow_validate_missing_arg | integration |
 | runs show |  (missing run id) | negative_runs_show_missing_id | integration |
+| checkpoint clean |  (missing --older-than) | negative_checkpoint_clean_missing_older_than | integration |
+| artifact clean |  (missing --older-than) | negative_artifact_clean_missing_older_than | integration |
 
 ## Performance
 
-Baseline measured at PR open. The PR-tier (smoke + integration, excluding
-`--ignored`) wall-time MUST stay within baseline + 90 seconds.
+Baseline measured at PR open (newton-cli, smoke + integration tiers, excluding
+`--ignored`):
+
+- Baseline: 60 s (recorded at PR open via `cargo nextest run -p newton-cli`).
+- Budget: baseline + 90 s = **≤ 150 s**.
+
+The PR-tier wall-time MUST stay within this budget. `cargo nextest run --all-features --locked`
+is the canonical measurement command (see `scripts/run-tests.sh`).
 
 ## Agent-facing CLI surface
 

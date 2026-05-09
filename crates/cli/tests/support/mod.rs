@@ -7,6 +7,7 @@
 use assert_cmd::Command;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
@@ -19,6 +20,15 @@ pub fn newton() -> Command {
     cmd
 }
 
+/// Same binary as a `std::process::Command`, for code paths that need
+/// process-level control (kill, signal handling).
+pub fn newton_std() -> std::process::Command {
+    let path = assert_cmd::cargo::cargo_bin("newton");
+    let mut c = std::process::Command::new(path);
+    c.env("NEWTON_LOG", "warn");
+    c
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum RunStatus {
     Completed,
@@ -28,16 +38,23 @@ pub enum RunStatus {
 
 impl RunStatus {
     pub fn as_str(self) -> &'static str {
+        // Matches `WorkflowExecutionStatus::as_str` in the production code.
         match self {
-            RunStatus::Completed => "completed",
-            RunStatus::Failed => "failed",
-            RunStatus::Running => "running",
+            RunStatus::Completed => "Completed",
+            RunStatus::Failed => "Failed",
+            RunStatus::Running => "Running",
         }
     }
 }
 
 pub struct TempWorkspace {
     pub dir: TempDir,
+}
+
+impl Default for TempWorkspace {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TempWorkspace {
@@ -55,17 +72,27 @@ impl TempWorkspace {
     }
 
     /// Seed `.newton/state/workflows/<run_id>/` with minimal `execution.json`
-    /// and `checkpoint.json` so `runs list|show`, `resume`, `checkpoint list`
-    /// have something to read.
+    /// and `checkpoint.json` matching the production schema, so `runs list`,
+    /// `runs show`, `resume`, and `checkpoint list` see at least one run.
+    ///
+    /// `run_id` MUST be a valid UUID string — this matches what the runtime
+    /// stores. `runs list` only emits rows when the directory name equals
+    /// `execution_id` in the JSON.
     pub fn seed_run(&self, run_id: &str, status: RunStatus) -> PathBuf {
         let run_dir = self.path().join(".newton/state/workflows").join(run_id);
         fs::create_dir_all(&run_dir).unwrap();
         let execution = serde_json::json!({
-            "run_id": run_id,
-            "status": status.as_str(),
+            "format_version": "1",
+            "execution_id": run_id,
+            "workflow_file": "minimal_smoke.yaml",
+            "workflow_version": "2.0",
+            "workflow_hash": "0000000000000000000000000000000000000000000000000000000000000000",
             "started_at": "2026-01-01T00:00:00Z",
-            "workflow_path": "minimal_smoke.yaml",
-            "tasks": [],
+            "completed_at": "2026-01-01T00:00:01Z",
+            "status": status.as_str(),
+            "task_runs": [],
+            "settings_effective": {},
+            "nesting_depth": 0,
         });
         fs::write(
             run_dir.join("execution.json"),
@@ -73,9 +100,14 @@ impl TempWorkspace {
         )
         .unwrap();
         let checkpoint = serde_json::json!({
-            "run_id": run_id,
-            "iteration": 0,
-            "completed_tasks": [],
+            "format_version": "1",
+            "execution_id": run_id,
+            "workflow_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "created_at": "2026-01-01T00:00:01Z",
+            "ready_queue": [],
+            "context": {},
+            "trigger_payload": {},
+            "task_iterations": {},
         });
         fs::write(
             run_dir.join("checkpoint.json"),
@@ -93,6 +125,16 @@ impl TempWorkspace {
         fs::write(&p, yaml).unwrap();
         p
     }
+
+    /// Create a non-empty file under `.newton/state/artifacts/<sub>/` and
+    /// return its path. Used by artifact-clean integration tests.
+    pub fn write_artifact(&self, sub: &str, name: &str, contents: &[u8]) -> PathBuf {
+        let dir = self.path().join(".newton/state/artifacts").join(sub);
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(name);
+        fs::write(&p, contents).unwrap();
+        p
+    }
 }
 
 pub struct ExitOutcome {
@@ -102,11 +144,13 @@ pub struct ExitOutcome {
     pub timed_out: bool,
 }
 
-/// Spawn a command and wait up to `timeout`. On timeout the child is killed.
+/// Spawn a command and wait up to `timeout`. On timeout the child is sent
+/// SIGTERM (best effort), then SIGKILL after `KILL_WAIT_TIMEOUT_SECS`.
 pub fn spawn_with_timeout(mut std_cmd: std::process::Command, timeout: Duration) -> ExitOutcome {
-    std_cmd.stdout(std::process::Stdio::piped());
-    std_cmd.stderr(std::process::Stdio::piped());
+    std_cmd.stdout(Stdio::piped());
+    std_cmd.stderr(Stdio::piped());
     let mut child = std_cmd.spawn().expect("spawn child");
+    let pid = child.id();
     let start = Instant::now();
     let mut timed_out = false;
     let status = loop {
@@ -115,9 +159,22 @@ pub fn spawn_with_timeout(mut std_cmd: std::process::Command, timeout: Duration)
             Ok(None) => {
                 if start.elapsed() >= timeout {
                     timed_out = true;
-                    let _ = child.kill();
+                    send_sigterm(pid);
+                    let term_deadline =
+                        Instant::now() + Duration::from_secs(KILL_WAIT_TIMEOUT_SECS);
+                    let mut exited = None;
+                    while Instant::now() < term_deadline {
+                        if let Ok(Some(s)) = child.try_wait() {
+                            exited = Some(s);
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                    if exited.is_none() {
+                        let _ = child.kill();
+                    }
                     let _ = child.wait();
-                    break None;
+                    break exited;
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
@@ -140,4 +197,17 @@ pub fn spawn_with_timeout(mut std_cmd: std::process::Command, timeout: Duration)
         stderr,
         timed_out,
     }
+}
+
+#[cfg(unix)]
+fn send_sigterm(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status();
+}
+
+#[cfg(not(unix))]
+fn send_sigterm(_pid: u32) {
+    // No portable graceful-stop on non-unix; caller falls through to kill().
 }
