@@ -657,6 +657,23 @@ fn workflow_command() -> Command {
                     requires: vec![],
                     help: "Second-level subcommand (runs: list|show; checkpoint: list|clean; artifact: clean) or workflow file path (validate/lint/preview/graph)",
                 },
+                // Positional 3: YAML file path (validate/lint/preview/graph only).
+                // Note: because the framework fills positionals left-to-right, a file path
+                // passed after a file-oriented subcommand lands in subcommand2 (position 2),
+                // not here. This slot is declared per spec §4.4 but is not populated in
+                // normal usage — dispatch arms read from subcommand2 instead.
+                ArgSpec {
+                    name: "workflow",
+                    kind: ArgKind::Positional,
+                    short: None,
+                    long: None,
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Path to the workflow YAML file (validate/lint/preview/graph)",
+                },
                 // Named options — pre-existing
                 ArgSpec {
                     name: "format",
