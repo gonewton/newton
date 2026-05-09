@@ -85,17 +85,20 @@ fn smoke_completion_help() {
 
 #[test]
 fn smoke_ask_help() {
-    // `ask` is gated by the `ask` feature; under `--all-features` it is
-    // registered. Without the feature the binary still exposes `ask --help`
-    // via cli-framework only when registered, so keep this lenient: accept
-    // either success or a clear "unknown subcommand" failure so the smoke
-    // row exists for the matrix gate.
+    // `ask` is gated by the `ask` feature flag. Under `--all-features` the
+    // command is registered and `--help` exits 0. Without the feature the
+    // binary reports it as unknown. Either outcome is acceptable — what is NOT
+    // acceptable is a crash or an unrelated error message.
     let out = newton().args(["ask", "--help"]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let ok = out.status.success()
+        || stderr.to_lowercase().contains("unknown")
+        || stderr.to_lowercase().contains("unrecognized");
     assert!(
-        out.status.success() || !out.stderr.is_empty(),
-        "ask --help: status={:?}, stderr={}",
+        ok,
+        "ask --help: expected success or 'unknown'/'unrecognized' in stderr; \
+         got status={:?} stderr={stderr}",
         out.status,
-        String::from_utf8_lossy(&out.stderr)
     );
 }
 
@@ -115,9 +118,13 @@ fn smoke_spec_json() {
         "spec JSON must contain top-level `commands` key; got: {}",
         &stdout[..stdout.len().min(200)]
     );
+    // `spec` is provided by cli-framework; its JSON always uses camelCase
+    // `schemaVersion`. If the field name changes upstream, this assertion
+    // catches the regression rather than silently accepting either casing.
     assert!(
-        parsed.get("schemaVersion").is_some() || parsed.get("schema_version").is_some(),
-        "spec JSON must contain a schemaVersion field"
+        parsed.get("schemaVersion").is_some(),
+        "spec JSON must contain a `schemaVersion` field (camelCase); got: {}",
+        &stdout[..stdout.len().min(300)]
     );
 }
 

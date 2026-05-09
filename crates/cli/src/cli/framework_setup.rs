@@ -411,6 +411,11 @@ fn run_command() -> Command {
                 commands::run(dto).await
             })
         }),
+        // MCP tool exposure is managed at the serve layer via `newton serve
+        // --with-mcp` (issue #294), not per-command. All commands set
+        // `expose_mcp: false` so the cli-framework does not create a parallel
+        // per-command MCP export path; the unified MCP router reuses the same
+        // `CommandRegistry` and exposes every command as a tool automatically.
         expose_mcp: false,
     }
 }

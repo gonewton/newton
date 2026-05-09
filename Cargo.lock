@@ -2440,6 +2440,7 @@ dependencies = [
  "tungstenite 0.20.1",
  "url",
  "uuid",
+ "wait-timeout",
  "wiremock",
 ]
 

@@ -73,6 +73,7 @@ tokio-test = { workspace = true }
 regex = { workspace = true }
 tempfile = { workspace = true }
 wiremock = { workspace = true }
+wait-timeout = "0.2"
 
 [[test]]
 name = "test_main_functionality"

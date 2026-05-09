@@ -1,15 +1,24 @@
 //! Shared test-support helpers for `newton` CLI E2E tests (spec 301).
 //!
 //! Files include this module via `#[path = "../support/mod.rs"] mod support;`.
-
+//!
+//! ## Why `#![allow(dead_code)]`
+//! This module is compiled once per test binary that includes it via `#[path]`.
+//! Each binary uses a different subset of helpers, so items that are live in one
+//! binary appear dead in another. The module-level suppression avoids per-item
+//! annotations for every cross-binary false-positive. Extended-tier helpers
+//! (`spawn_with_timeout`, `ExitOutcome`, `newton_std`) are currently unused by
+//! any active test binary — they will be activated in Stages 2–4.
 #![allow(dead_code)]
 
 use assert_cmd::Command;
+use chrono::Utc;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tempfile::TempDir;
+use wait_timeout::ChildExt;
 
 pub const KILL_WAIT_TIMEOUT_SECS: u64 = 5;
 
@@ -87,14 +96,17 @@ impl TempWorkspace {
     pub fn seed_run(&self, run_id: &str, status: RunStatus) -> PathBuf {
         let run_dir = self.path().join(".newton/state/workflows").join(run_id);
         fs::create_dir_all(&run_dir).unwrap();
+        let now = Utc::now();
+        let started_at = now.to_rfc3339();
+        let completed_at = (now + chrono::Duration::seconds(1)).to_rfc3339();
         let execution = serde_json::json!({
             "format_version": "1",
             "execution_id": run_id,
             "workflow_file": "minimal_smoke.yaml",
             "workflow_version": "2.0",
             "workflow_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-            "started_at": "2026-01-01T00:00:00Z",
-            "completed_at": "2026-01-01T00:00:01Z",
+            "started_at": started_at,
+            "completed_at": completed_at,
             "status": status.as_str(),
             "task_runs": [],
             "settings_effective": {},
@@ -109,7 +121,7 @@ impl TempWorkspace {
             "format_version": "1",
             "execution_id": run_id,
             "workflow_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-            "created_at": "2026-01-01T00:00:01Z",
+            "created_at": completed_at,
             "ready_queue": [],
             "context": {},
             "trigger_payload": {},
@@ -152,41 +164,29 @@ pub struct ExitOutcome {
 
 /// Spawn a command and wait up to `timeout`. On timeout the child is sent
 /// SIGTERM (best effort), then SIGKILL after `KILL_WAIT_TIMEOUT_SECS`.
+///
+/// Uses `wait_timeout::ChildExt::wait_timeout` to block without spinning.
 pub fn spawn_with_timeout(mut std_cmd: std::process::Command, timeout: Duration) -> ExitOutcome {
     std_cmd.stdout(Stdio::piped());
     std_cmd.stderr(Stdio::piped());
     let mut child = std_cmd.spawn().expect("spawn child");
-    let pid = child.id();
-    let start = Instant::now();
-    let mut timed_out = false;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(s)) => break Some(s),
-            Ok(None) => {
-                if start.elapsed() >= timeout {
-                    timed_out = true;
-                    send_sigterm(pid);
-                    let term_deadline =
-                        Instant::now() + Duration::from_secs(KILL_WAIT_TIMEOUT_SECS);
-                    let mut exited = None;
-                    while Instant::now() < term_deadline {
-                        if let Ok(Some(s)) = child.try_wait() {
-                            exited = Some(s);
-                            break;
-                        }
-                        std::thread::sleep(Duration::from_millis(50));
-                    }
-                    if exited.is_none() {
-                        let _ = child.kill();
-                    }
-                    let _ = child.wait();
-                    break exited;
-                }
-                std::thread::sleep(Duration::from_millis(50));
+
+    let (status, timed_out) = match child.wait_timeout(timeout).expect("wait_timeout") {
+        Some(s) => (Some(s), false),
+        None => {
+            // Timed out — ask nicely first, then force.
+            send_sigterm(child.id());
+            let graceful = child
+                .wait_timeout(Duration::from_secs(KILL_WAIT_TIMEOUT_SECS))
+                .expect("wait_timeout after sigterm");
+            if graceful.is_none() {
+                let _ = child.kill();
+                let _ = child.wait();
             }
-            Err(_) => break None,
+            (graceful, true)
         }
     };
+
     let mut stdout = String::new();
     let mut stderr = String::new();
     if let Some(mut out) = child.stdout.take() {

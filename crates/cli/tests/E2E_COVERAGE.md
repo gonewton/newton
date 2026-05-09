@@ -83,6 +83,11 @@ Baseline measured at PR open (newton-cli, smoke + integration tiers, excluding
 The PR-tier wall-time MUST stay within this budget. `cargo nextest run --all-features --locked`
 is the canonical measurement command (see `scripts/run-tests.sh`).
 
+> **CI enforcement:** The budget is not yet automatically enforced in CI; it is
+> measured manually on each PR. Track enforcement work in issue #301 follow-up.
+> The nightly job (`ci-nightly.yml`) runs the extended tier but does not assert
+> against this budget — it relies on the 20-minute job timeout as a coarse gate.
+
 ## Agent-facing CLI surface
 
 `newton spec --format json` is the supported machine-readable export of the

@@ -84,7 +84,10 @@ fn parse_rows(md: &str) -> Vec<Row> {
 }
 
 fn collect_test_names() -> BTreeSet<String> {
-    // Scan all `.rs` files under tests/ for `fn <name>(`
+    // Scan all `.rs` files under tests/ and collect only function names that
+    // are preceded by a `#[test]` attribute (possibly with other attributes or
+    // blank lines between). This avoids false-positive matches on helper
+    // functions and non-test `fn` declarations.
     let mut names = BTreeSet::new();
     let root = cli_tests_dir();
     fn walk(dir: &Path, names: &mut BTreeSet<String>) {
@@ -97,14 +100,36 @@ fn collect_test_names() -> BTreeSet<String> {
                 walk(&p, names);
             } else if p.extension().and_then(|s| s.to_str()) == Some("rs") {
                 if let Ok(src) = fs::read_to_string(&p) {
+                    // Track whether we are inside an attribute block that
+                    // contains `#[test]`. The block is reset on any non-
+                    // attribute, non-blank line (including the `fn` itself).
+                    let mut in_test_block = false;
                     for line in src.lines() {
-                        if let Some(rest) = line.trim().strip_prefix("fn ") {
-                            if let Some(end) = rest.find('(') {
-                                let n = &rest[..end];
-                                if !n.is_empty() {
-                                    names.insert(n.to_string());
+                        let t = line.trim();
+                        if t.starts_with("#[test") {
+                            in_test_block = true;
+                        } else if t.starts_with('#') {
+                            // another attribute — keep the block alive
+                        } else if t.is_empty() {
+                            // blank line — keep the block alive (rare but valid)
+                        } else {
+                            // Code line — extract the fn name if under #[test].
+                            if in_test_block {
+                                // Strip optional `pub` / `async` prefixes.
+                                let stripped = t
+                                    .trim_start_matches("pub ")
+                                    .trim_start_matches("async ")
+                                    .trim_start_matches("pub ");
+                                if let Some(rest) = stripped.strip_prefix("fn ") {
+                                    if let Some(end) = rest.find('(') {
+                                        let n = rest[..end].trim();
+                                        if !n.is_empty() {
+                                            names.insert(n.to_string());
+                                        }
+                                    }
                                 }
                             }
+                            in_test_block = false;
                         }
                     }
                 }
