@@ -13,6 +13,12 @@ use tempfile::TempDir;
 
 pub const KILL_WAIT_TIMEOUT_SECS: u64 = 5;
 
+pub fn fixture_path(relative: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(relative)
+}
+
 /// Build a `newton` Command with a clean env.
 pub fn newton() -> Command {
     let mut cmd = Command::cargo_bin("newton").expect("newton binary builds");
@@ -62,7 +68,7 @@ impl TempWorkspace {
         let dir = tempfile::tempdir().expect("tempdir");
         let p = dir.path();
         fs::create_dir_all(p.join(".newton/state/workflows")).unwrap();
-        fs::create_dir_all(p.join(".newton/state/artifacts")).unwrap();
+        fs::create_dir_all(p.join(".newton/artifacts")).unwrap();
         fs::create_dir_all(p.join(".newton/scripts")).unwrap();
         Self { dir }
     }
@@ -126,10 +132,10 @@ impl TempWorkspace {
         p
     }
 
-    /// Create a non-empty file under `.newton/state/artifacts/<sub>/` and
+    /// Create a non-empty file under `.newton/artifacts/<sub>/` and
     /// return its path. Used by artifact-clean integration tests.
     pub fn write_artifact(&self, sub: &str, name: &str, contents: &[u8]) -> PathBuf {
-        let dir = self.path().join(".newton/state/artifacts").join(sub);
+        let dir = self.path().join(".newton/artifacts").join(sub);
         fs::create_dir_all(&dir).unwrap();
         let p = dir.join(name);
         fs::write(&p, contents).unwrap();
