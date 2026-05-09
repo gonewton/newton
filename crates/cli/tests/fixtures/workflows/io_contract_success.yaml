@@ -1,0 +1,19 @@
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: start
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 1
+    max_workflow_iterations: 5
+    io:
+      result_map:
+        status: ok
+        message: workflow completed
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+      terminal: success

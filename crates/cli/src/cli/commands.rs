@@ -157,28 +157,58 @@ pub async fn run(args: RunArgs) -> Result<()> {
         });
     }
 
-    // Input validation (size and schema)
+    let io_settings = document.workflow.settings.io_settings.clone();
+    let io_block = document.workflow.settings.io.clone();
+    let emit_json = args.emit_completion_json;
+
+    // Input validation (size and schema) — must run before execute_workflow so that
+    // pre-execution errors can still emit a JSON envelope when --emit-completion-json is set.
     if let Some(triggers) = &document.triggers {
-        let settings = &document.workflow.settings;
         let payload = &triggers.payload;
-        if let Some(max_bytes) = settings.io_settings.max_input_bytes {
+        if let Some(max_bytes) = io_settings.max_input_bytes {
             let serialized = serde_json::to_string(payload).unwrap_or_default();
             if serialized.len() > max_bytes {
+                let msg = format!(
+                    "trigger payload exceeds max_input_bytes ({}): WFG-IO-001",
+                    max_bytes
+                );
+                if emit_json {
+                    let envelope = newton_core::workflow::io::CompletionEnvelope::internal_error(
+                        newton_core::workflow::io::CompletionError {
+                            code: Some("WFG-IO-001".to_string()),
+                            category: "ValidationError".to_string(),
+                            message: msg,
+                            error_payload: None,
+                        },
+                    );
+                    println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
+                    std::process::exit(1);
+                }
                 return Err(anyhow::anyhow!(
                     "trigger payload exceeds max_input_bytes ({}): WFG-IO-001",
                     max_bytes
                 ));
             }
         }
-        if let Some(schema) = &settings.io.input_schema {
+        if let Some(schema) = &io_block.input_schema {
             use newton_core::workflow::io::validate_input_schema;
-            validate_input_schema(schema, payload).map_err(anyhow::Error::from)?;
+            if let Err(e) = validate_input_schema(schema, payload) {
+                if emit_json {
+                    let envelope = newton_core::workflow::io::CompletionEnvelope::internal_error(
+                        newton_core::workflow::io::CompletionError {
+                            code: Some(e.code.clone()),
+                            category: e.category.to_string(),
+                            message: e.message.clone(),
+                            error_payload: None,
+                        },
+                    );
+                    println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
+                    std::process::exit(1);
+                }
+                return Err(anyhow::Error::from(e));
+            }
         }
     }
-
-    let io_settings = document.workflow.settings.io_settings.clone();
-    let io_block = document.workflow.settings.io.clone();
-    let emit_json = args.emit_completion_json;
 
     let (overrides, registry) =
         setup_workflow_execution(&args, &workspace, &document.workflow.settings);

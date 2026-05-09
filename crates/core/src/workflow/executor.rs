@@ -677,11 +677,21 @@ impl WorkflowRuntime {
         let io = &self.graph_settings.io;
         let final_state_view = StateView::new(
             final_state.context.clone(),
-            // Build tasks value from completed tasks
+            // Build tasks value from completed tasks; each entry is wrapped as
+            // {output: <raw_output>, result: <output.result if present>} so that
+            // parent workflows can access tasks['id'].output.x for regular tasks
+            // and tasks['id'].result.x for WorkflowOperator child results.
             {
                 let mut tasks_map = serde_json::Map::new();
                 for (id, record) in &final_state.completed {
-                    tasks_map.insert(id.clone(), record.output.clone());
+                    let result_val = record.output.get("result").cloned().unwrap_or(Value::Null);
+                    tasks_map.insert(
+                        id.clone(),
+                        serde_json::json!({
+                            "output": record.output,
+                            "result": result_val,
+                        }),
+                    );
                 }
                 Value::Object(tasks_map)
             },

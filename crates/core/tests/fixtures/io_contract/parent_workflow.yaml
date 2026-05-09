@@ -10,7 +10,7 @@ workflow:
     max_workflow_iterations: 10
     io:
       result_map:
-        child_status: "$expr: tasks['run-child'].output.status"
+        child_status: "$expr: tasks['run-child'].result.status"
   tasks:
     - id: run-child
       operator: WorkflowOperator
