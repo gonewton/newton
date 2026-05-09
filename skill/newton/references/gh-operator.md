@@ -12,6 +12,7 @@ operations. Implemented in `crates/core/src/workflow/operators/gh.rs`.
 | `pr_approve` | Approve a pull request via `gh pr review --approve` |
 | `project_resolve_board` | Resolve a GitHub Project board's field and option IDs |
 | `project_item_set_status` | Set the status of a project board item |
+| `branch_push` | Push a branch to a remote via `git push` |
 
 ## Input schema per operation
 
@@ -69,6 +70,28 @@ When `pr_number` is provided with `repository`, the operator passes
 
 Either `status` or `single_select_option_id`/`option_id` must be provided.
 
+### `branch_push`
+
+Pushes a branch to a remote via `git push` with exponential-backoff retry.
+Uses an injectable `GitRunner` (mockable in tests); does not call `gh` CLI.
+
+| Field | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `remote` | string | no | `origin` | Remote name; must be non-empty, no whitespace, no `..`, not starting with `-` |
+| `branch` | string | no | `HEAD` | Branch ref to push; must be non-empty after trimming |
+| `set_upstream` | bool | no | `true` | Pass `--set-upstream` (`-u`) to `git push` |
+| `retry_count` | integer | no | `3` | Number of attempts; must be >= 1 if provided |
+| `retry_delay_ms` | integer | no | `5000` | Initial delay between retries in ms (capped at 300 000 ms) |
+| `retry_multiplier` | float | no | `2.0` | Exponential backoff multiplier; must be >= 1.0 if provided |
+| `retry_jitter_ms` | integer | no | `0` | Uniform random jitter in ms added to each delay; must be >= 0 |
+| `require_authorization` | bool | no | `false` | Gate execution on ailoop approval |
+| `authorization_prompt` | string | no | derived | Custom prompt sent to ailoop |
+| `authorization_channel` | string | no | workspace channel | Per-task ailoop channel override |
+| `authorization_timeout_seconds` | number | no | `300` | Must be > 0 and <= 86400 |
+| `on_authorization_unavailable` | `fail` \| `skip` | no | `fail` | Behavior when approver is unavailable |
+
+Unknown/extra fields are silently ignored (consistent with all GhOperator operations).
+
 ## Output schema per operation
 
 ### `pr_create`
@@ -122,6 +145,20 @@ Either `status` or `single_select_option_id`/`option_id` must be provided.
 
 On failure with `on_error: warn`: `{ "updated": false, "warning": "..." }`.
 
+### `branch_push`
+
+```json
+{
+  "pushed": true,
+  "remote": "origin",
+  "branch": "HEAD",
+  "set_upstream": true
+}
+```
+
+- `remote`, `branch`, and `set_upstream` reflect effective values (defaults resolved).
+- `stdout`/`stderr` from `git push` are not included in the output object.
+
 ## Optional ailoop authorization
 
 All operations support an optional ailoop authorization gate. The gate is
@@ -144,6 +181,7 @@ When `authorization_prompt` is absent, a default is derived per operation:
 - `pr_approve` → `Authorize gh pr review --approve: pr=<selector>` (with `, repository=<repo>` when present)
 - `project_resolve_board` → `Authorize gh project view/field-list: owner=<owner>, project=<n>`
 - `project_item_set_status` → `Authorize gh project item-edit: item=<item_id>, status=<status>`
+- `branch_push` → `Authorize git push: remote=<remote>, branch=<branch>`
 
 Internal subprocess retries (e.g. `pr_create`'s retry loop) reuse the single
 approval granted for the `execute` invocation; ailoop is not re-prompted.
@@ -160,6 +198,9 @@ approval granted for the `execute` invocation; ailoop is not re-prompted.
 | `WFG-GH-006` | `ValidationError` | `pr_url` is not HTTPS, host lacks `github`, or path does not end with `/pull/<positive_integer>` |
 | `WFG-GH-007` | `ValidationError` | `repository` does not match `owner/repo` format |
 | `WFG-GH-008` | `ValidationError` | `pr_number` is missing, non-integer, or `< 1` |
+| `WFG-GH-009` | `ValidationError` | `remote` or `branch` is empty, `remote` contains whitespace, `..`, or starts with `-` |
+| `WFG-GH-010` | `ToolExecutionError` | OS failed to spawn the `git` binary (binary not found, permission denied) |
+| `WFG-GH-011` | `ToolExecutionError` | `git push` returned non-zero exit code |
 | `WFG-GH-AUTH-001` | `ValidationError` | Approver returned `Denied` |
 | `WFG-GH-AUTH-002` | `TimeoutError` | Approver returned `Timeout` |
 | `WFG-GH-AUTH-003` | `ToolExecutionError` | Approver `Unavailable` and `on_authorization_unavailable: fail` |
@@ -237,6 +278,36 @@ approval granted for the `execute` invocation; ailoop is not re-prompted.
     board: { $expr: 'tasks.resolve_board.output' }
     status: "In progress"
     on_error: fail
+```
+
+### `branch_push`
+
+```yaml
+- id: push-branch
+  operator: GhOperator
+  params:
+    operation: branch_push
+    remote: origin
+    branch: HEAD
+    set_upstream: true
+    retry_count: 3
+    retry_delay_ms: 5000
+    retry_multiplier: 2.0
+```
+
+### `branch_push` with authorization gate
+
+```yaml
+- id: push-branch
+  operator: GhOperator
+  params:
+    operation: branch_push
+    remote: origin
+    branch: feature/my-branch
+    set_upstream: false
+    require_authorization: true
+    authorization_prompt: "Authorize push of feature/my-branch to origin"
+    on_authorization_unavailable: fail
 ```
 
 ### Authorization example

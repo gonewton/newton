@@ -1,0 +1,27 @@
+version: "2.0"
+mode: workflow_graph
+metadata:
+  name: "GhOperator Branch Push Test Workflow"
+workflow:
+  context: {}
+  settings:
+    entry_task: push_branch
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 100
+  tasks:
+    - id: push_branch
+      operator: GhOperator
+      params:
+        operation: branch_push
+        remote: origin
+        branch: HEAD
+        set_upstream: true
+      transitions:
+        - to: done
+    - id: done
+      operator: NoOpOperator
+      terminal: success
+      params: {}
