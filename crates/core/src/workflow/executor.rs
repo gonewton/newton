@@ -644,6 +644,29 @@ impl WorkflowRuntime {
             }
             self.persist_checkpoint_force().await?;
             self.notify_completion(WorkflowStatus::Failed);
+            // Write failure completion.json when result_map is configured and execution_id is known.
+            if self.graph_settings.io.result_map.is_some() {
+                let completion_path = self
+                    .checkpoint_root
+                    .join(self.workflow_execution.execution_id.to_string())
+                    .join("completion.json");
+                let failure_envelope = crate::workflow::io::CompletionEnvelope::failure(
+                    Some(self.workflow_execution.execution_id),
+                    crate::workflow::io::CompletionError {
+                        code: if err.code.is_empty() {
+                            None
+                        } else {
+                            Some(err.code.clone())
+                        },
+                        category: format!("{:?}", err.category),
+                        message: err.message.clone(),
+                        error_payload: None,
+                    },
+                );
+                if let Ok(json) = serde_json::to_string_pretty(&failure_envelope) {
+                    let _ = fs::write(&completion_path, json);
+                }
+            }
             return Err(err);
         }
         if self.graph_settings.checkpoint.checkpoint_enabled {

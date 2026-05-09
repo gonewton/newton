@@ -371,11 +371,9 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
             if serialized.len() > max_bytes {
                 return Err(AppError::new(
                     ErrorCategory::ValidationError,
-                    format!(
-                        "trigger payload exceeds max_input_bytes ({}): WFG-IO-001",
-                        max_bytes
-                    ),
-                ));
+                    format!("trigger payload exceeds max_input_bytes ({})", max_bytes),
+                )
+                .with_code("WFG-IO-001"));
             }
         }
         if let Some(schema) = &settings.io.input_schema {

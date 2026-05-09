@@ -1,15 +1,57 @@
 use newton_core::workflow::{
+    executor::{self, ExecutionOverrides},
     expression::ExpressionEngine,
     io::{
         evaluate_result_map, validate_error_schema, validate_input_schema, validate_output_schema,
         CompletionStatus,
     },
-    operator::StateView,
+    operator::{OperatorRegistry, StateView},
+    operators, schema,
     schema::{IoBlock, WorkflowDocument},
 };
 use serde_json::{json, Value};
 use std::fs;
-use tempfile::NamedTempFile;
+use std::io::Write;
+use std::path::Path;
+use tempfile::{tempdir, NamedTempFile};
+
+fn write_workflow(yaml: &str) -> NamedTempFile {
+    let mut file = NamedTempFile::new().expect("temp file");
+    write!(file, "{yaml}").expect("write workflow");
+    file
+}
+
+fn read_json(path: &Path) -> Value {
+    let bytes = fs::read(path).expect("read file");
+    serde_json::from_slice(&bytes).expect("parse json")
+}
+
+fn write_json(path: &Path, value: &Value) {
+    let bytes = serde_json::to_vec_pretty(value).expect("serialize json");
+    fs::write(path, bytes).expect("write file");
+}
+
+fn default_overrides() -> ExecutionOverrides {
+    ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
+        max_nesting_depth: None,
+        verbose: false,
+        server_notifier: None,
+        pre_seed_nodes: true,
+    }
+}
+
+fn build_registry(
+    workspace: std::path::PathBuf,
+    settings: newton_core::workflow::state::GraphSettings,
+) -> OperatorRegistry {
+    let mut builder = OperatorRegistry::builder();
+    operators::register_builtins(&mut builder, workspace, settings);
+    builder.build()
+}
 
 fn make_state_view(context: Value, tasks: Value, triggers: Value) -> StateView {
     StateView::new(context, tasks, triggers)
@@ -252,4 +294,453 @@ fn completion_envelope_internal_error_shape() {
     assert!(env.result.is_none());
     let err = env.error.expect("error field present");
     assert_eq!(err.code, Some("WFG-IO-002".to_string()));
+}
+
+// ─── WorkflowOperator child result surface (AC 17, AC 18) ────────────────────
+
+/// AC 17: parent workflow accessing tasks['run-child'].result.status receives
+/// the child's result_map output.
+#[tokio::test]
+async fn ac17_workflow_operator_child_result_accessible_in_parent() {
+    let workspace = tempdir().expect("workspace");
+
+    let child_yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: child-task
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    io:
+      result_map:
+        status: done
+  tasks:
+    - id: child-task
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+    fs::write(workspace.path().join("child_workflow.yaml"), child_yaml)
+        .expect("write child workflow");
+
+    let parent_yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: run-child
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    io:
+      result_map:
+        child_status: "$expr: tasks[\"run-child\"].result.status"
+  tasks:
+    - id: run-child
+      operator: WorkflowOperator
+      params:
+        workflow_path: child_workflow.yaml
+      terminal: success
+"#;
+    let parent_path = workspace.path().join("parent.yaml");
+    fs::write(&parent_path, parent_yaml).expect("write parent workflow");
+
+    let document = schema::load_workflow(&parent_path).expect("parse parent workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let summary = executor::execute_workflow(
+        document,
+        parent_path,
+        registry,
+        workspace.path().to_path_buf(),
+        default_overrides(),
+    )
+    .await
+    .expect("parent workflow should succeed");
+
+    let result = summary
+        .result
+        .expect("parent should have result from result_map");
+    assert_eq!(
+        result["child_status"],
+        json!("done"),
+        "parent should read child result_map output via tasks['run-child'].result.status"
+    );
+}
+
+/// AC 18: child with no result_map → parent sees tasks['child'].result as null.
+#[tokio::test]
+async fn ac18_workflow_operator_no_result_map_gives_null_result() {
+    let workspace = tempdir().expect("workspace");
+
+    let child_yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: child-task
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+  tasks:
+    - id: child-task
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+    fs::write(workspace.path().join("child_workflow.yaml"), child_yaml)
+        .expect("write child workflow");
+
+    let parent_yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: run-child
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    io:
+      result_map:
+        child_ran: "true"
+  tasks:
+    - id: run-child
+      operator: WorkflowOperator
+      params:
+        workflow_path: child_workflow.yaml
+      terminal: success
+"#;
+    let parent_path = workspace.path().join("parent.yaml");
+    fs::write(&parent_path, parent_yaml).expect("write parent workflow");
+
+    let document = schema::load_workflow(&parent_path).expect("parse parent workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let summary = executor::execute_workflow(
+        document,
+        parent_path,
+        registry,
+        workspace.path().to_path_buf(),
+        default_overrides(),
+    )
+    .await
+    .expect("parent workflow should succeed");
+
+    let child_task_record = summary
+        .completed_tasks
+        .get("run-child")
+        .expect("run-child task should be in completed_tasks");
+    assert!(
+        child_task_record.output["result"].is_null(),
+        "child with no result_map should produce null result in task output; got {:?}",
+        child_task_record.output["result"]
+    );
+
+    let result = summary.result.expect("parent should have its own result");
+    assert_eq!(result["child_ran"], json!("true"));
+}
+
+// ─── Resume io_snapshot guard (AC 24–27) ─────────────────────────────────────
+
+const IO_SNAPSHOT_WORKFLOW: &str = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: first
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+    io:
+      result_map:
+        status: ok
+  tasks:
+    - id: first
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: second
+    - id: second
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: done
+    - id: done
+      operator: NoOpOperator
+      params: {}
+"#;
+
+/// Runs IO_SNAPSHOT_WORKFLOW to completion, then patches checkpoint.json and
+/// execution.json to simulate a mid-run partial state (only "first" completed,
+/// "second" queued). Returns the workspace TempDir and execution UUID so the
+/// caller can perform additional checkpoint manipulation before resuming.
+async fn run_and_make_partial_io_checkpoint(
+    workflow_file: &NamedTempFile,
+    workspace: &tempfile::TempDir,
+) -> uuid::Uuid {
+    let document = schema::load_workflow(workflow_file.path()).expect("parse workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let summary = executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry,
+        workspace.path().to_path_buf(),
+        default_overrides(),
+    )
+    .await
+    .expect("first run succeeded");
+
+    let state_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(summary.execution_id.to_string());
+
+    let mut exec_val = read_json(&state_dir.join("execution.json"));
+    exec_val["status"] = Value::String("Running".to_string());
+    exec_val["completed_at"] = Value::Null;
+    if let Some(arr) = exec_val["task_runs"].as_array_mut() {
+        arr.retain(|e| e["task_id"] == "first");
+    }
+    write_json(&state_dir.join("execution.json"), &exec_val);
+
+    let mut ckpt_val = read_json(&state_dir.join("checkpoint.json"));
+    if let Some(map) = ckpt_val.as_object_mut() {
+        map.insert("ready_queue".to_string(), json!(["second"]));
+        map.insert("task_iterations".to_string(), json!({"first": 1}));
+        map.insert("total_iterations".to_string(), json!(1));
+        if let Some(completed) = map.get_mut("completed").and_then(Value::as_object_mut) {
+            completed.retain(|k, _| k == "first");
+        }
+    }
+    write_json(&state_dir.join("checkpoint.json"), &ckpt_val);
+
+    summary.execution_id
+}
+
+/// AC 24: resuming a run whose io_snapshot matches the current workflow's io
+/// block succeeds without error.
+#[tokio::test]
+async fn ac24_resume_matching_io_snapshot_succeeds() {
+    let workspace = tempdir().expect("workspace");
+    let workflow_file = write_workflow(IO_SNAPSHOT_WORKFLOW);
+    let execution_id = run_and_make_partial_io_checkpoint(&workflow_file, &workspace).await;
+
+    let document = schema::load_workflow(workflow_file.path()).expect("parse");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let result = executor::resume_workflow(
+        registry,
+        workspace.path().to_path_buf(),
+        execution_id,
+        false,
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "resume with matching io_snapshot should succeed; err={:?}",
+        result.err()
+    );
+}
+
+/// AC 25: resuming a run whose io_snapshot differs from the current io block
+/// fails with WFG-CKPT-001 unless --allow-workflow-change is passed.
+#[tokio::test]
+async fn ac25_resume_mismatched_io_snapshot_fails_with_ckpt_001() {
+    let workspace = tempdir().expect("workspace");
+    let workflow_file = write_workflow(IO_SNAPSHOT_WORKFLOW);
+    let execution_id = run_and_make_partial_io_checkpoint(&workflow_file, &workspace).await;
+
+    // Patch checkpoint.json: set io_snapshot to an empty object (different from current io)
+    let state_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(execution_id.to_string());
+    let mut ckpt_val = read_json(&state_dir.join("checkpoint.json"));
+    ckpt_val["io_snapshot"] = json!({});
+    write_json(&state_dir.join("checkpoint.json"), &ckpt_val);
+
+    let document = schema::load_workflow(workflow_file.path()).expect("parse");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let err = executor::resume_workflow(
+        registry,
+        workspace.path().to_path_buf(),
+        execution_id,
+        false,
+    )
+    .await
+    .expect_err("mismatched io_snapshot should block resume");
+    assert_eq!(
+        err.code, "WFG-CKPT-001",
+        "expected WFG-CKPT-001 on io_snapshot mismatch; got {:?}",
+        err
+    );
+}
+
+/// AC 26: resuming with --allow-workflow-change re-validates the original
+/// trigger payload against the new input_schema; if validation fails, resume
+/// is blocked with WFG-IO-002.
+#[tokio::test]
+async fn ac26_resume_allow_workflow_change_revalidates_trigger_payload() {
+    let workspace = tempdir().expect("workspace");
+
+    // Initial workflow: no input_schema, but has io block (result_map) so io_snapshot is stored.
+    let initial_yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: first
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+    io:
+      result_map:
+        status: ok
+  tasks:
+    - id: first
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: second
+    - id: second
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: done
+    - id: done
+      operator: NoOpOperator
+      params: {}
+"#;
+    let workflow_file = write_workflow(initial_yaml);
+    let execution_id = run_and_make_partial_io_checkpoint(&workflow_file, &workspace).await;
+
+    // Rewrite the workflow file to add a strict input_schema (requires "branch" field).
+    // The original trigger payload is {} (no branch), so re-validation will fail.
+    let updated_yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: first
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+    io:
+      input_schema:
+        type: object
+        properties:
+          branch:
+            type: string
+        required:
+          - branch
+      result_map:
+        status: ok
+  tasks:
+    - id: first
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: second
+    - id: second
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: done
+    - id: done
+      operator: NoOpOperator
+      params: {}
+"#;
+    fs::write(workflow_file.path(), updated_yaml).expect("rewrite workflow");
+
+    // Patch checkpoint: set io_snapshot to something different so the re-validate branch runs.
+    let state_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(execution_id.to_string());
+    let mut ckpt_val = read_json(&state_dir.join("checkpoint.json"));
+    ckpt_val["io_snapshot"] = json!({"result_map": {"status": "ok"}});
+    write_json(&state_dir.join("checkpoint.json"), &ckpt_val);
+
+    let document = schema::load_workflow(workflow_file.path()).expect("parse updated workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    // allow_workflow_change=true: hash check skipped, but payload re-validated against new schema.
+    let err =
+        executor::resume_workflow(registry, workspace.path().to_path_buf(), execution_id, true)
+            .await
+            .expect_err("re-validation of original payload against new schema should fail");
+    assert_eq!(
+        err.code, "WFG-IO-002",
+        "expected WFG-IO-002 when original trigger payload fails new input_schema; got {:?}",
+        err
+    );
+}
+
+/// AC 27: resuming a checkpoint written before this spec (no io_snapshot field)
+/// succeeds (backward-compatible).
+#[tokio::test]
+async fn ac27_resume_old_checkpoint_without_io_snapshot_succeeds() {
+    let workspace = tempdir().expect("workspace");
+    let workflow_file = write_workflow(IO_SNAPSHOT_WORKFLOW);
+    let execution_id = run_and_make_partial_io_checkpoint(&workflow_file, &workspace).await;
+
+    // Remove io_snapshot from checkpoint.json to simulate an old-format checkpoint.
+    let state_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(execution_id.to_string());
+    let mut ckpt_val = read_json(&state_dir.join("checkpoint.json"));
+    if let Some(map) = ckpt_val.as_object_mut() {
+        map.remove("io_snapshot");
+    }
+    write_json(&state_dir.join("checkpoint.json"), &ckpt_val);
+
+    let document = schema::load_workflow(workflow_file.path()).expect("parse");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let result = executor::resume_workflow(
+        registry,
+        workspace.path().to_path_buf(),
+        execution_id,
+        false,
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "resume of old checkpoint without io_snapshot should succeed (backward-compat); err={:?}",
+        result.err()
+    );
 }
