@@ -18,7 +18,7 @@ name = "logging_integration_helper"
 path = "tests/bin/logging_integration_helper.rs"
 
 [dependencies]
-cli-framework = { git = "https://github.com/aroff/cli-framework", features = ["mcp-server"] }
+cli-framework = { git = "https://github.com/aroff/cli-framework", rev = "1ee1f2befabf121b6677fa14668b33788ba35e11", features = ["mcp-server"] }
 rmcp = { version = "1.6", features = ["server", "transport-streamable-http-server"] }
 newton-core = { path = "../core" }
 newton-types = { path = "../types" }
@@ -142,3 +142,11 @@ path = "tests/integration/serve_without_mcp_unchanged.rs"
 [[test]]
 name = "serve_mcp_path_validation"
 path = "tests/integration/serve_mcp_path_validation.rs"
+
+[[test]]
+name = "test_e2e_smoke"
+path = "tests/integration/test_e2e_smoke.rs"
+
+[[test]]
+name = "test_e2e_coverage_matrix"
+path = "tests/test_e2e_coverage_matrix.rs"
