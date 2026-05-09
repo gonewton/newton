@@ -212,18 +212,48 @@ newton serve --host 0.0.0.0 --port 9000
 
 ### MCP mode
 
-Newton can run as a Model Context Protocol (MCP) server so Cursor/Claude-style clients can invoke every registered Newton command as an MCP tool. MCP mode is a top-level mode (not a subcommand) — it short-circuits subcommand dispatch and is mutually exclusive with `newton serve`.
+Newton exposes every registered command as an MCP tool. There are two ways to enable MCP, depending on whether you want a dedicated MCP-only process or a combined REST + MCP server on a single port.
 
-**Defaults (Newton operator targets, spec §4.2):**
+#### Option A — Single-port topology (`newton serve --with-mcp`) _(recommended)_
+
+`newton serve --with-mcp` mounts the MCP HTTP router on the **same listener** as the Newton REST API. One process, one port, one URL prefix — simpler firewall rules, simpler TLS termination, simpler client config.
+
+```bash
+newton serve --host 127.0.0.1 --port 8080 --with-mcp --mcp-path /mcp
+# REST:  curl  http://127.0.0.1:8080/health
+# MCP:   POST  http://127.0.0.1:8080/mcp
+```
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--mcp-serve` | off | Required to enable MCP mode |
+| `--with-mcp` | off | Opt-in; absent leaves `serve` behavior unchanged |
+| `--mcp-path` | `/mcp` | HTTP path prefix; must start with `/`, must not be `/` or collide with a REST route |
+
+**Cursor/Claude client config (single-port):**
+
+```json
+{
+  "mcpServers": {
+    "newton": {
+      "url": "http://127.0.0.1:8080/mcp",
+      "transport": "http"
+    }
+  }
+}
+```
+
+**Failure modes:** `NEWTON-SERVE-MCP-001` — invalid `--mcp-path`; `NEWTON-SERVE-MCP-002` — path collides with an existing REST route; `NEWTON-SERVE-MCP-004` — MCP router construction failed.
+
+#### Option B — Dedicated MCP-only process (`newton --mcp-serve`)
+
+MCP mode is a top-level mode (not a subcommand) — it short-circuits subcommand dispatch and runs a standalone MCP HTTP listener on a separate port.
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--mcp-serve` | off | Required to enable MCP-only mode |
 | `--mcp-host` | `127.0.0.1` | Loopback only |
 | `--mcp-port` | `8730` | Distinct from `newton serve` (8080) |
 | `--mcp-path` | `/mcp` | HTTP path prefix |
-
-**Example:**
 
 ```bash
 # Default (loopback, port 8730, /mcp)
@@ -233,9 +263,9 @@ newton --mcp-serve
 newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
 ```
 
-**Note on `--help` output.** The current upstream `cli-framework` clap definition prints `--mcp-port [default: 8080]`; Newton transparently rewrites argv to inject `8730` when no explicit port is given so the actual bind matches the table above. **For maximum clarity, always pass `--mcp-port` explicitly** until upstream defaults are aligned (tracked at [cli-framework#29](https://github.com/aroff/cli-framework/issues/29)).
+**Note on `--help` output.** The current upstream `cli-framework` clap definition prints `--mcp-port [default: 8080]`; Newton transparently rewrites argv to inject `8730` when no explicit port is given so the actual bind matches the table above. **For maximum clarity, always pass `--mcp-port` explicitly** until upstream defaults are aligned.
 
-**Cursor/Claude client config:**
+**Cursor/Claude client config (dedicated process):**
 
 ```json
 {

@@ -87,11 +87,41 @@ newton monitor
 
 ## MCP Server Mode
 
-Newton exposes every registered command as an MCP (Model Context Protocol) tool when the binary is invoked with the top-level `--mcp-serve` flag. This lets Cursor, Claude Desktop, and custom MCP agents drive Newton workflows over standard MCP without bespoke shims. The transport and tool derivation are owned by the upstream `cli-framework` crate (`mcp-server` feature); Newton wires the flag surface and emits a structured startup log line.
+Newton exposes every registered command as an MCP (Model Context Protocol) tool. Two deployment topologies are supported.
 
-`--mcp-serve` is **a top-level mode**, not a subcommand argument. It short-circuits subcommand dispatch and is mutually exclusive with `newton serve` in a single process — run them in separate processes if you need both.
+### Option A — Single-port (`newton serve --with-mcp`) _(recommended)_
 
-### MCP flags (Newton operator targets, spec §4.2)
+Mount the MCP HTTP router on the **same listener** as the Newton REST API. One process, one port, one client URL.
+
+```bash
+newton serve --host 127.0.0.1 --port 8080 --with-mcp --mcp-path /mcp
+# REST:  http://127.0.0.1:8080/health
+# MCP:   http://127.0.0.1:8080/mcp
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--with-mcp` | off | Opt-in; absent leaves `serve` behavior unchanged |
+| `--mcp-path` | `/mcp` | Path prefix for the MCP endpoint (must start with `/`, must not collide with a REST route) |
+
+**Cursor / Claude Desktop integration (single-port HTTP):**
+
+```json
+{
+  "mcpServers": {
+    "newton": {
+      "url": "http://127.0.0.1:8080/mcp",
+      "transport": "http"
+    }
+  }
+}
+```
+
+**Failure modes:** `NEWTON-SERVE-MCP-001` — invalid `--mcp-path`; `NEWTON-SERVE-MCP-002` — path collides with an existing REST route; `NEWTON-SERVE-MCP-004` — MCP router construction failed.
+
+### Option B — Dedicated MCP-only process (`newton --mcp-serve`)
+
+`--mcp-serve` is **a top-level mode**, not a subcommand argument. It short-circuits subcommand dispatch and binds a separate MCP-only listener. Use this when you do not want the REST API running.
 
 | Flag | Default | Description |
 | --- | --- | --- |
@@ -99,16 +129,6 @@ Newton exposes every registered command as an MCP (Model Context Protocol) tool 
 | `--mcp-host` | `127.0.0.1` | Bind address for the Streamable HTTP listener |
 | `--mcp-port` | `8730` | Distinct from `newton serve` (8080) to avoid collision |
 | `--mcp-path` | `/mcp` | HTTP path prefix for the MCP endpoint |
-
-### Default-port caveat
-
-The current upstream `cli-framework` clap definition prints `--mcp-port [default: 8080]` in `newton --help`, but Newton's argv layer rewrites unset values to `8730` before handing off to the framework — so the actual bind matches the table above. To avoid confusion, **always pass `--mcp-port` explicitly** until the upstream default is aligned (tracked at [cli-framework#29](https://github.com/aroff/cli-framework/issues/29)).
-
-### Tool surface
-
-Tools are derived from the cli-framework `Command` registry (`build_app`) — every command in `REGISTERED_COMMAND_IDS` becomes an MCP tool with name = command id verbatim (e.g. `run`, `init`, `serve`, `health`, `workflow`, `resume`, `checkpoint`, `artifact`, `webhook`, `monitor`, `batch`, `config`, `doctor`, `runs`, `version`). Argument schemas come from each `CommandSpec.args`. Adding a new Newton command auto-publishes a new MCP tool — there is no per-command MCP wiring.
-
-### Usage
 
 ```bash
 # Default (loopback, port 8730, /mcp)
@@ -118,7 +138,7 @@ newton --mcp-serve --mcp-port 8730
 newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
 ```
 
-### Cursor / Claude Desktop integration
+**Cursor / Claude Desktop integration (dedicated process):**
 
 ```json
 {
@@ -131,9 +151,13 @@ newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
 }
 ```
 
+### Tool surface
+
+Tools are derived from the cli-framework `Command` registry (`build_app`) — every command in `REGISTERED_COMMAND_IDS` becomes an MCP tool with name = command id verbatim (e.g. `run`, `init`, `serve`, `health`, `workflow`, `resume`, `checkpoint`, `artifact`, `webhook`, `monitor`, `batch`, `config`, `doctor`, `runs`, `version`). Argument schemas come from each `CommandSpec.args`. Adding a new Newton command auto-publishes a new MCP tool — there is no per-command MCP wiring.
+
 ### Port-conflict policy
 
-Bind failure exits non-zero with a single line containing `NEWTON-MCP-001` and the failed `host:port`. There is no auto-rebind — pass an alternate `--mcp-port`. Unrecoverable upstream MCP runtime errors after a successful bind surface as `NEWTON-MCP-002`.
+Bind failure (Option B) exits non-zero with a single line containing `NEWTON-MCP-001` and the failed `host:port`. There is no auto-rebind — pass an alternate `--mcp-port`. Unrecoverable upstream MCP runtime errors after a successful bind surface as `NEWTON-MCP-002`.
 
 ### Startup log
 
