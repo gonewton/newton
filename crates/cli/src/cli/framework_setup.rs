@@ -127,7 +127,7 @@ WebSocket/HTTP mix and lets you answer questions or approve authorizations in a 
 
 EXAMPLES:
   Using both CLI overrides:
-    newton monitor --ailoop-http http://127.0.0.1:8081 --ailoop-ws ws://127.0.0.1:8080
+    newton monitor --ailoop-http http://127.0.0.1:8080 --ailoop-ws ws://127.0.0.1:8080
 
   Using .newton/configs/monitor.conf:
     newton monitor
@@ -642,7 +642,7 @@ fn monitor_command() -> Command {
             summary: "Monitor live ailoop channels via a terminal UI",
             long_about: Some(MONITOR_LONG_ABOUT),
             examples: vec![
-                "newton monitor --ailoop-http http://127.0.0.1:8081 --ailoop-ws ws://127.0.0.1:8080",
+                "newton monitor --ailoop-http http://127.0.0.1:8080 --ailoop-ws ws://127.0.0.1:8080",
                 "newton monitor",
                 "newton monitor --with-api",
             ],

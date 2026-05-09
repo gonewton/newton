@@ -70,8 +70,8 @@ url = "https://github.com/goailoop/skill/tree/main/ailoop"
 branch = "main"
 
 [dependencies.newton]
-source = "git"
-url = "https://github.com/gonewton/skill"
+source = "local"
+path = "skill/newton"
 
 [dependencies.rust-project-template]
 source = "git"
