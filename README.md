@@ -473,12 +473,12 @@ newton monitor
 2. **Start the ailoop server:**
    ```bash
    ailoop serve
-   # Default: WebSocket on ws://127.0.0.1:8080, HTTP API on http://127.0.0.1:8081
+   # Default: HTTP and WebSocket served on the same listener at 127.0.0.1:8080
    ```
 
 3. **Start newton monitor in another terminal:**
    ```bash
-   newton monitor --ailoop-http http://127.0.0.1:8081 --ailoop-ws ws://127.0.0.1:8080
+   newton monitor --ailoop-http http://127.0.0.1:8080 --ailoop-ws ws://127.0.0.1:8080
    ```
 
 4. **Send messages from agents or other terminals:**
@@ -499,7 +499,7 @@ Messages will appear in the newton monitor UI in real-time. Interactive messages
 
 To avoid passing URLs each time, create `.newton/configs/monitor.conf`:
 ```
-ailoop_server_http_url=http://127.0.0.1:8081
+ailoop_server_http_url=http://127.0.0.1:8080
 ailoop_server_ws_url=ws://127.0.0.1:8080
 ```
 
@@ -606,13 +606,13 @@ Each workflow run writes checkpoints, task output, and artifacts under your work
 
 1. **Verify ailoop server is running:**
    ```bash
-   # Check if ailoop is listening on the correct ports
-   lsof -i :8080 -i :8081
+   # Check if ailoop is listening on the unified port
+   lsof -i :8080
    ```
 
 2. **Verbose Newton logging:**
    ```bash
-   RUST_LOG=newton=debug,info newton monitor --ailoop-http http://127.0.0.1:8081 --ailoop-ws ws://127.0.0.1:8080
+   RUST_LOG=newton=debug,info newton monitor --ailoop-http http://127.0.0.1:8080 --ailoop-ws ws://127.0.0.1:8080
    ```
    Then inspect `<workspace>/.newton/logs/newton.log` for connection or parse errors.
 
@@ -653,7 +653,7 @@ If monitor can't find the ailoop URLs, ensure you have either:
 - Command-line flags: `--ailoop-http` and `--ailoop-ws`
 - Or a config file at `.newton/configs/monitor.conf` with:
   ```
-  ailoop_server_http_url=http://127.0.0.1:8081
+  ailoop_server_http_url=http://127.0.0.1:8080
   ailoop_server_ws_url=ws://127.0.0.1:8080
   ```
 

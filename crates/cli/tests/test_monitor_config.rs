@@ -306,6 +306,100 @@ fn missing_configs_dir_provides_actionable_error() {
 }
 
 #[test]
+fn missing_configs_dir_error_uses_unified_port_and_canonical_flags() {
+    let workspace = TempDir::new().unwrap();
+
+    let overrides = MonitorOverrides {
+        workflow_service_url: None,
+        http_url: None,
+        ws_url: None,
+    };
+
+    let error_msg = load_monitor_endpoints(workspace.path(), overrides)
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        error_msg.contains("--ailoop-http") && error_msg.contains("--ailoop-ws"),
+        "Error should mention canonical CLI flags --ailoop-http/--ailoop-ws: {}",
+        error_msg
+    );
+    assert!(
+        !error_msg.contains("--http-url") && !error_msg.contains("--ws-url"),
+        "Error should not mention legacy --http-url/--ws-url flags: {}",
+        error_msg
+    );
+}
+
+#[test]
+fn missing_endpoints_error_uses_unified_port_example() {
+    let workspace = TempDir::new().unwrap();
+    let configs_dir = workspace.path().join(".newton").join("configs");
+    fs::create_dir_all(&configs_dir).unwrap();
+
+    let monitor_conf = configs_dir.join("monitor.conf");
+    fs::write(&monitor_conf, "# Empty config\n").unwrap();
+
+    let overrides = MonitorOverrides {
+        workflow_service_url: None,
+        http_url: None,
+        ws_url: None,
+    };
+
+    let error_msg = load_monitor_endpoints(workspace.path(), overrides)
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        error_msg.contains(
+            "newton monitor --ailoop-http http://127.0.0.1:8080 \
+             --ailoop-ws ws://127.0.0.1:8080"
+        ),
+        "Error should suggest unified-port CLI fix: {}",
+        error_msg
+    );
+    assert!(
+        error_msg.contains("ailoop_server_http_url = http://127.0.0.1:8080")
+            && error_msg.contains("ailoop_server_ws_url   = ws://127.0.0.1:8080"),
+        "Error should embed unified-port monitor.conf example: {}",
+        error_msg
+    );
+    assert!(
+        !error_msg.contains(":8081"),
+        "Error should not reference legacy split-port :8081: {}",
+        error_msg
+    );
+}
+
+#[test]
+fn legacy_split_port_monitor_conf_still_loads() {
+    // Backward-compat regression: existing monitor.conf files using the old
+    // split-port topology (HTTP on :8081, WS on :8080) MUST keep working —
+    // the unified-port move is a documentation default only.
+    let workspace = TempDir::new().unwrap();
+    let configs_dir = workspace.path().join(".newton").join("configs");
+    fs::create_dir_all(&configs_dir).unwrap();
+
+    let monitor_conf = configs_dir.join("monitor.conf");
+    fs::write(
+        &monitor_conf,
+        "ailoop_server_http_url=http://127.0.0.1:8081\n\
+         ailoop_server_ws_url=ws://127.0.0.1:8080\n",
+    )
+    .unwrap();
+
+    let overrides = MonitorOverrides {
+        workflow_service_url: None,
+        http_url: None,
+        ws_url: None,
+    };
+
+    let result = load_monitor_endpoints(workspace.path(), overrides).unwrap();
+    assert_eq!(result.http_url.as_str(), "http://127.0.0.1:8081/");
+    assert_eq!(result.ws_url.as_str(), "ws://127.0.0.1:8080/");
+}
+
+#[test]
 fn cli_overrides_work_without_config_dir() {
     let workspace = TempDir::new().unwrap();
     // Don't create .newton/configs directory - CLI overrides should still work

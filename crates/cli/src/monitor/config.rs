@@ -64,7 +64,7 @@ fn validate_configs_dir(workspace_root: &Path) -> Result<PathBuf> {
              To fix:\n  \
              - Run 'newton init' in your workspace root, or\n  \
              - Manually create a directory and add a monitor.conf file, or\n  \
-             - Provide both --http-url and --ws-url on the command line",
+             - Provide both --ailoop-http and --ailoop-ws on the command line",
             configs_dir.display()
         ));
     }
@@ -120,8 +120,8 @@ fn finalize_endpoints(
              - Other .conf files in {}\n\n\
              To fix:\n  \
              - Create {}/monitor.conf with both keys:\n    \
-             ailoop_server_http_url = http://127.0.0.1:8081\n    \
-             ailoop_server_ws_url = ws://127.0.0.1:8080\n  \
+             ailoop_server_http_url = http://127.0.0.1:8080\n    \
+             ailoop_server_ws_url   = ws://127.0.0.1:8080\n  \
              - Or provide missing endpoint(s) via CLI:\n    \
              {}",
             missing,
@@ -180,11 +180,11 @@ impl ConfigPair {
     fn describe_cli_fix(&self) -> String {
         match (self.http_url.is_some(), self.ws_url.is_some()) {
             (false, false) => {
-                "newton monitor --http-url http://127.0.0.1:8081 --ws-url ws://127.0.0.1:8080"
+                "newton monitor --ailoop-http http://127.0.0.1:8080 --ailoop-ws ws://127.0.0.1:8080"
                     .to_string()
             }
-            (false, true) => "newton monitor --http-url http://127.0.0.1:8081".to_string(),
-            (true, false) => "newton monitor --ws-url ws://127.0.0.1:8080".to_string(),
+            (false, true) => "newton monitor --ailoop-http http://127.0.0.1:8080".to_string(),
+            (true, false) => "newton monitor --ailoop-ws ws://127.0.0.1:8080".to_string(),
             (true, true) => "No CLI fix needed (both endpoints present)".to_string(),
         }
     }

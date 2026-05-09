@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Align monitor docs with ailoop unified-port endpoint and migrate Newton skill in-tree (issue #298)
+
+- Documentation, `newton monitor --help`, and monitor config-error messages now use the unified-port topology (`http://127.0.0.1:8080` and `ws://127.0.0.1:8080`) to match upstream ailoop's single-listener default.
+- Monitor config error messages reference the canonical CLI flags `--ailoop-http` and `--ailoop-ws` instead of the legacy `--http-url` / `--ws-url` spellings.
+- Newton skill is now vendored in-tree at `skill/newton/` (bumped to `1.2.1`); the root `skill-project.toml` `[dependencies.newton]` entry points at the local path. The standalone `gonewton/skill` repository is deprecated; its README will direct users to the canonical in-tree location.
+- No behavioral or CLI changes: existing `monitor.conf` files using the previous split-port URLs continue to work; `--ailoop-http`, `--ailoop-ws`, and the two `monitor.conf` keys are unchanged.
+
 ### Optional MCP on the same URL as `newton serve` (issue #294)
 
 - `newton serve` now accepts `--with-mcp` (opt-in, default off) and `--mcp-path <PATH>` (default `/mcp`) to mount the cli-framework MCP HTTP router on the same listener as the Newton REST API. One process, one port, one client URL prefix.
