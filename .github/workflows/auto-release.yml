@@ -62,7 +62,20 @@ jobs:
           IFS='.' read -r major minor patch <<< "$LAST_VERSION"
           NEXT_PATCH=$((patch + 1))
           NEXT_VERSION="$major.$minor.$NEXT_PATCH"
+
+          # Guard: if Cargo.toml is already at or ahead of the tag-derived version
+          # (e.g. a prior auto-release PR was merged without a matching tag), advance
+          # past the Cargo.toml version so the version bump is never a no-op.
+          CARGO_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          IFS='.' read -r cmaj cmin cpatch <<< "$CARGO_VERSION"
+          if [ "$cmaj" = "$major" ] && [ "$cmin" = "$minor" ] && [ "$cpatch" -ge "$NEXT_PATCH" ]; then
+            NEXT_PATCH=$((cpatch + 1))
+            NEXT_VERSION="$major.$minor.$NEXT_PATCH"
+            echo "Cargo.toml already at $CARGO_VERSION — advancing to $NEXT_VERSION"
+          fi
+
           echo "last_tag=$LAST_TAG"
+          echo "cargo_version=$CARGO_VERSION"
           echo "next_version=$NEXT_VERSION"
           echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
           echo "branch_name=auto-release-$NEXT_VERSION" >> $GITHUB_OUTPUT
@@ -105,6 +118,10 @@ jobs:
         run: |
           NEXT_VERSION="${{ steps.next-version.outputs.next_version }}"
           git add Cargo.toml Cargo.lock openapi/newton-backend-parity.yaml
+          if git diff --cached --quiet; then
+            echo "::error::Nothing staged after version bump to $NEXT_VERSION — Cargo.toml may already be at this version. Investigate version/tag drift."
+            exit 1
+          fi
           git commit -m "chore: bump version to $NEXT_VERSION"
 
       - name: Push release branch
