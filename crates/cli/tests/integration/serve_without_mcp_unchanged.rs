@@ -110,7 +110,7 @@ async fn run_serve_without_mcp_test() -> Result<(), String> {
     if !ready {
         stderr_task.abort();
         let _ = stderr_task.await;
-        let _ = child.kill();
+        let _ = child.kill().await;
         let _ = tokio::time::timeout(Duration::from_secs(10), child.wait()).await;
         return Err(format!(
             "server did not become ready (GET {health_url}) within {:?}",
@@ -133,7 +133,7 @@ async fn run_serve_without_mcp_test() -> Result<(), String> {
     stderr_task.abort();
     let _ = stderr_task.await;
 
-    let _ = child.kill();
+    let _ = child.kill().await;
     let _ = tokio::time::timeout(Duration::from_secs(10), child.wait()).await;
 
     assert!(
