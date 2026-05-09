@@ -1,8 +1,8 @@
 # Newton configuration (`.newton/configs`)
 
-Workspace Newton metadata lives under `.newton/`. This sheet describes the **`key=value` `.conf` files** in `.newton/configs/` and **which keys the Newton CLI reads** for batch and monitor.
+Workspace Newton metadata lives under `.newton/`. This sheet describes the **`key=value` `.conf` files** in `.newton/configs/` and **which keys the Newton CLI reads** for batch.
 
-The same file may also be sourced or extended by **organization-specific** shell, CI, or wrappers; only the keys in the sections below are read by Newton's `batch` and `monitor` subcommands. Anything else is outside the tool unless your distribution documents it.
+The same file may also be sourced or extended by **organization-specific** shell, CI, or wrappers; only the keys in the sections below are read by Newton's `batch` subcommand. Anything else is outside the tool unless your distribution documents it.
 
 Lines support `#` comments. Unknown keys are ignored by each consumer unless noted.
 
@@ -56,22 +56,6 @@ After `newton init .`, Newton writes `default.conf` with:
 - A commented `# workflow_file=...` hint for batch.
 
 `coding_model` in that stub is **not** consumed by `newton batch`; it is legacy/extra context for templates and humans. Set `workflow_file` (or `workflow_path`) when you use batch.
-
----
-
-## `newton monitor` — ailoop endpoints
-
-Monitor needs **both** HTTP and WebSocket base URLs. It reads `.newton/configs/monitor.conf` first, then scans other `.conf` files in alphabetical order until both values are set.
-
-| Key | Purpose |
-| --- | --- |
-| `ailoop_server_http_url` | ailoop HTTP API base (e.g. `http://127.0.0.1:8080`). |
-| `ailoop_server_ws_url` | ailoop WebSocket URL (e.g. `ws://127.0.0.1:8080`). |
-| `workflow_service_url` | Optional Newton HTTP API (`newton serve`) for workflow UI integration. |
-
-CLI overrides: `newton monitor --ailoop-http ... --ailoop-ws ...`.
-
-Keys such as `ailoop_ws_url` alone are **not** read by Newton monitor; use the pair above or pass URLs on the command line.
 
 ---
 

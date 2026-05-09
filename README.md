@@ -280,9 +280,9 @@ newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
 
 **Port-conflict policy.** On bind failure Newton exits non-zero and prints a single line `NEWTON-MCP-001: failed to bind MCP server to <host>:<port>: <os error>`. There is no auto-rebind — pass an alternate `--mcp-port`. An unrecoverable upstream runtime error after a successful bind surfaces as `NEWTON-MCP-002`.
 
-### `monitor`
+### Ailoop human-in-the-loop integration
 
-Monitor listens to every project/branch channel from the workspace using a WebSocket/HTTP mix and lets you answer questions or approve authorizations from a queue. See **Logging → `monitor`** below for the full configuration and usage walkthrough.
+The `newton monitor` TUI subcommand has been removed. To interact with ailoop channels, use ailoop's own clients directly (for example `ailoop serve`, `ailoop ask`, and `ailoop say`). The `HumanApprovalOperator` and `HumanDecisionOperator` workflow operators continue to integrate with ailoop for in-workflow human gates.
 
 ### `workflow validate <workflow.yaml>`
 
@@ -379,10 +379,9 @@ Re-queuing a plan (moving it back to `todo/`) reuses the same task ID and task d
 
 Newton sends log output to files and sometimes to the terminal depending on how you invoke the CLI:
 
-- **`newton monitor`**: logs go to the log file; the TUI is not mixed with debug log lines by default.
 - **Interactive commands** (for example `newton run`, `newton init`): console output defaults to `stderr` for normal messages.
 - **`newton batch`**: quiet terminal by default; inspect the log file when troubleshooting.
-- **`NEWTON_REMOTE_AGENT=1`**: keeps file logging on and avoids spamming the agent console (does not apply to `monitor`).
+- **`NEWTON_REMOTE_AGENT=1`**: keeps file logging on and avoids spamming the agent console.
 
 All commands write to `<workspace>/.newton/logs/newton.log` when a workspace is detected, or to `$HOME/.newton/logs/newton.log` as a fallback. The directory is created automatically when missing, and paths provided via config are normalized to avoid accidental traversal.
 
@@ -441,72 +440,10 @@ newton: task failed run_id=<UUID> task_id=<TASK_ID> inspect: newton runs show <U
 
 If you invoke `newton runs show` from a directory other than the workspace root, pass `--workspace <path>` so Newton can locate the execution state (e.g. `newton runs show <UUID> --task <TASK_ID> --workspace /path/to/workspace`).
 
-### Troubleshooting TUI/logging conflicts
+### Troubleshooting logging
 
-- If `newton monitor` shows garbled output when you run `RUST_LOG=debug`, confirm no console sink is configured (`console_output` defaults to `none` in the TUI context) and inspect `<workspace>/.newton/logs/newton.log` for the emitted events.
 - To temporarily force console logging for debugging, set `logging.console_output = "stderr"` or add `logging.console_output = "stdout"` and rely on the file sink for production runs.
 - Setting `NEWTON_REMOTE_AGENT=1` switches the context to `RemoteAgent`, which guarantees file logging remains active even when the console is disabled, making it ideal for remote workers or batch troubleshooting.
-
-### `monitor`
-
-Stream live ailoop channels for every project/branch in the workspace via a terminal UI that highlights blocking questions and authorizations, keeps a queue of pending prompts, lets you answer/approve/deny directly in the terminal, and provides filtering (`/`), layout toggle (`V`), queue tab (`Q`), and help (`?`).
-
-**Behavior:**
-`newton monitor` walks up from the current directory to find the workspace root containing `.newton`, then reads `ailoop_server_http_url` and `ailoop_server_ws_url` from the first `.newton/configs/*.conf` file that defines both keys (alphabetically) or from `.newton/configs/monitor.conf` when present. It connects to those HTTP and WebSocket endpoints, loads recent messages per channel, and opens a full-screen terminal UI with stream views, a queue for pending prompts, filtering, and keyboard shortcuts (see `?` in the UI for help).
-
-**Options:**
-- `--ailoop-http <URL>`: Override the ailoop HTTP base URL for this session.
-- `--ailoop-ws <URL>`: Override the ailoop WebSocket URL for this session.
-- `--with-api`: Also start Newton's HTTP API alongside the monitor.
-
-**Example:**
-```bash
-newton monitor
-```
-
-**Setup with ailoop:**
-
-`newton monitor` works with [ailoop](https://github.com/goailoop/ailoop), a human-in-the-loop messaging server for AI agents. To use newton monitor:
-
-1. **Install ailoop** (for example with Homebrew: `brew install ailoop`, or follow the [ailoop installation docs](https://github.com/goailoop/ailoop)).
-
-2. **Start the ailoop server:**
-   ```bash
-   ailoop serve
-   # Default: HTTP and WebSocket served on the same listener at 127.0.0.1:8080
-   ```
-
-3. **Start newton monitor in another terminal:**
-   ```bash
-   newton monitor --ailoop-http http://127.0.0.1:8080 --ailoop-ws ws://127.0.0.1:8080
-   ```
-
-4. **Send messages from agents or other terminals:**
-   ```bash
-   # Send a notification
-   ailoop say "Task completed successfully" --server ws://127.0.0.1:8080 --channel myproject
-
-   # Ask a question
-   ailoop ask "Should I proceed with deployment?" --server ws://127.0.0.1:8080 --channel myproject
-
-   # Request authorization
-   ailoop authorize "Push to production branch" --server ws://127.0.0.1:8080 --channel myproject
-   ```
-
-Messages will appear in the newton monitor UI in real-time. Interactive messages (questions, authorizations) appear in the queue panel where you can respond directly.
-
-**Configuration:**
-
-To avoid passing URLs each time, create `.newton/configs/monitor.conf`:
-```
-ailoop_server_http_url=http://127.0.0.1:8080
-ailoop_server_ws_url=ws://127.0.0.1:8080
-```
-
-Then simply run:
-```bash
-newton monitor
-```
 
 ### `init <workspace-path>` (same as `init [workspace-path]`)
 
@@ -597,65 +534,6 @@ Configure execution limits for workflow runs:
 ## Output, logs, and artifacts
 
 Each workflow run writes checkpoints, task output, and artifacts under your workspace, typically under `.newton/state/` and `.newton/artifacts/` (exact layout depends on the workflow and operators you use). Use `newton run ... --verbose` to print task stdout/stderr to the terminal after each task. Log files are described in **Logging** above.
-
-## Troubleshooting
-
-### Monitor Issues
-
-**Monitor not receiving messages:**
-
-1. **Verify ailoop server is running:**
-   ```bash
-   # Check if ailoop is listening on the unified port
-   lsof -i :8080
-   ```
-
-2. **Verbose Newton logging:**
-   ```bash
-   RUST_LOG=newton=debug,info newton monitor --ailoop-http http://127.0.0.1:8080 --ailoop-ws ws://127.0.0.1:8080
-   ```
-   Then inspect `<workspace>/.newton/logs/newton.log` for connection or parse errors.
-
-3. **Test ailoop server directly:**
-   ```bash
-   # In one terminal
-   ailoop serve
-
-   # In another terminal, test sending a message
-   ailoop say "Test message" --server ws://127.0.0.1:8080 --channel test
-   ```
-
-4. **Verify message format:**
-   Messages sent to ailoop must match the expected format:
-   ```json
-   {
-     "id": "<uuid>",
-     "channel": "channel-name",
-     "sender_type": "AGENT",
-     "content": {
-       "type": "notification",
-       "text": "Message text",
-       "priority": "normal"
-     },
-     "timestamp": "2024-01-15T10:00:00Z"
-   }
-   ```
-
-**Common errors in ailoop serve:**
-
-- `Failed to parse message: missing field 'sender_type'` - Message is missing required fields
-- `unknown variant 'agent', expected 'AGENT' or 'HUMAN'` - sender_type must be uppercase
-- `expected struct Message` - Message structure is incorrect
-
-**Configuration issues:**
-
-If monitor can't find the ailoop URLs, ensure you have either:
-- Command-line flags: `--ailoop-http` and `--ailoop-ws`
-- Or a config file at `.newton/configs/monitor.conf` with:
-  ```
-  ailoop_server_http_url=http://127.0.0.1:8080
-  ailoop_server_ws_url=ws://127.0.0.1:8080
-  ```
 
 ## Development
 

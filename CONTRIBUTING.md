@@ -7,11 +7,11 @@ The repository is a Cargo workspace with four member crates:
 | Crate | Package | Role |
 |---|---|---|
 | `crates/core` | `newton-core` | Library: workflow engine, batch runner, HTTP API, integrations, logging, utils. No CLI/TUI deps. |
-| `crates/cli` | `newton-cli` | Binary `newton`: argument parsing, logging bootstrap, TUI monitor. Depends on `newton-core`. |
+| `crates/cli` | `newton-cli` | Binary `newton`: argument parsing, logging bootstrap. Depends on `newton-core`. |
 | `crates/types` | `newton-types` | Shared types (leaf crate). |
 | `crates/backend` | `newton-backend` | Persistence/store models. Depends on `newton-types`. |
 
-Dependency direction: `newton-cli` → `newton-core` → `{ newton-types, newton-backend }`. `newton-core` MUST NOT depend on `clap`, `ratatui`, or `crossterm`; this invariant is verified in CI via `cargo tree -p newton-core`.
+Dependency direction: `newton-cli` → `newton-core` → `{ newton-types, newton-backend }`. `newton-core` MUST NOT depend on `clap`; this invariant is verified in CI via `cargo tree -p newton-core`.
 
 To build the binary: `cargo build -p newton-cli`. To embed the engine as a library: add `newton-core = { path = "crates/core" }` to your `Cargo.toml`.
 
@@ -37,7 +37,7 @@ All ailoop communication uses **WebSocket only** via the `ailoop-core` git depen
 Configuration is resolved from (highest priority first):
 
 1. `NEWTON_AILOOP_WS_URL` + `NEWTON_AILOOP_CHANNEL` environment variables
-2. `ailoop_server_ws_url` / `ailoop_channel` keys in `.newton/configs/monitor.conf` (or other `.conf` files in that directory)
+2. `ailoop_server_ws_url` / `ailoop_channel` keys in `.newton/configs/*.conf` files in the workspace configs directory
 
 Integration is disabled unless explicitly enabled via `NEWTON_AILOOP_INTEGRATION=1` or via env vars that provide a complete config.
 
@@ -62,10 +62,6 @@ Integration is disabled unless explicitly enabled via `NEWTON_AILOOP_INTEGRATION
 There is no console fallback. CLI subcommands wrap this in a lazy `InterviewerProvider` (`workflow::human::lazy_interviewer_provider`) so workflows without human tasks never require an ailoop context.
 
 `AiloopInterviewer` calls `ailoop_core::client::authorize()` (for `HumanApprovalOperator`) and `ailoop_core::client::ask()` (for `HumanDecisionOperator`). Error codes `WFG-HUMAN-101…105` are mapped from transport and response outcomes.
-
-### TUI Monitor
-
-The CLI's `newton monitor` command uses a **separate** HTTP endpoint for the ailoop REST API (`/api/...` routes). This is configured via `MonitorEndpoints` in `crates/cli/src/monitor/config.rs` and is unrelated to the integration transport above.
 
 ## Build Commands
 

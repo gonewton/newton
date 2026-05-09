@@ -29,11 +29,6 @@ fn smoke_serve_help() {
 }
 
 #[test]
-fn smoke_monitor_help() {
-    newton().args(["monitor", "--help"]).assert().success();
-}
-
-#[test]
 fn smoke_workflow_help() {
     newton().args(["workflow", "--help"]).assert().success();
 }

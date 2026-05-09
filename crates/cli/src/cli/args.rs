@@ -371,21 +371,6 @@ pub struct InitArgs {
 }
 
 #[derive(Args, Clone, Debug)]
-pub struct MonitorArgs {
-    /// HTTP endpoint for the ailoop server (overrides config).
-    #[arg(long = "ailoop-http", value_name = "URL")]
-    pub ailoop_http: Option<String>,
-
-    /// WebSocket endpoint for the ailoop server (overrides config).
-    #[arg(long = "ailoop-ws", value_name = "URL")]
-    pub ailoop_ws: Option<String>,
-
-    /// Also start Newton's HTTP API alongside the monitor
-    #[arg(long = "with-api")]
-    pub with_api: bool,
-}
-
-#[derive(Args, Clone, Debug)]
 pub struct ServeArgs {
     /// Host address to bind the server to (default: 127.0.0.1)
     #[arg(long, default_value = "127.0.0.1")]

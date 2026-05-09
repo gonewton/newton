@@ -18,7 +18,7 @@ smoke row below. The required set is the sixteen Newton ids registered in
 `crates/cli/src/cli/framework_setup.rs`, plus the framework-provided `spec`
 command.
 
-Required smoke rows: `run`, `init`, `batch`, `serve`, `monitor`, `workflow`,
+Required smoke rows: `run`, `init`, `batch`, `serve`, `workflow`,
 `resume`, `checkpoint`, `artifact`, `webhook`, `runs`, `health`, `doctor`,
 `config`, `completion`, `ask`, `spec`.
 
@@ -30,7 +30,6 @@ Required smoke rows: `run`, `init`, `batch`, `serve`, `monitor`, `workflow`,
 | init | --help | smoke_init_help | smoke |
 | batch | --help | smoke_batch_help | smoke |
 | serve | --help | smoke_serve_help | smoke |
-| monitor | --help | smoke_monitor_help | smoke |
 | workflow | --help | smoke_workflow_help | smoke |
 | resume | --help | smoke_resume_help | smoke |
 | checkpoint | --help | smoke_checkpoint_help | smoke |
@@ -63,7 +62,6 @@ Required smoke rows: `run`, `init`, `batch`, `serve`, `monitor`, `workflow`,
 | config show |  | integ_config_show | integration |
 | completion | bash | integ_completion_bash | integration |
 | serve | --port | ext_serve_ephemeral_port_health | extended |
-| monitor | --help | ext_monitor_help_runs | extended |
 | webhook serve | --workflow | ext_webhook_serve_starts | extended |
 | ask |  | ext_ask_with_wiremock | extended |
 | run | --bogus-flag (negative) | negative_run_unknown_flag | integration |

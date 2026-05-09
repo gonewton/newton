@@ -22,8 +22,8 @@ use uuid::Uuid;
 
 use crate::cli::args::{
     ArtifactArgs, ArtifactCommand, BatchArgs, CheckpointArgs, CheckpointCommand, DotArgs,
-    ExplainArgs, GraphFormat, InitArgs, LintArgs, MonitorArgs, OutputFormat, ResumeArgs, RunArgs,
-    RunsArgs, RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
+    ExplainArgs, GraphFormat, InitArgs, LintArgs, OutputFormat, ResumeArgs, RunArgs, RunsArgs,
+    RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
     WebhookStatusArgs,
 };
 use crate::cli::categories;
@@ -120,20 +120,6 @@ EXAMPLES:
 
   Serve a built UI from a static directory:
     newton serve --static-ui ./ui/dist";
-
-const MONITOR_LONG_ABOUT: &str = "\
-Monitor listens to every project/branch channel from the workspace using a \
-WebSocket/HTTP mix and lets you answer questions or approve authorizations in a queue.
-
-EXAMPLES:
-  Using both CLI overrides:
-    newton monitor --ailoop-http http://127.0.0.1:8080 --ailoop-ws ws://127.0.0.1:8080
-
-  Using .newton/configs/monitor.conf:
-    newton monitor
-
-  Also start the Newton HTTP API alongside the monitor:
-    newton monitor --with-api";
 
 const WORKFLOW_LONG_ABOUT: &str = "\
 Workflow groups commands that operate on a workflow YAML file: validate, \
@@ -647,71 +633,6 @@ fn serve_command() -> Command {
             Box::pin(async move {
                 let dto = ServeArgs::try_from(args)?;
                 commands::serve(dto).await.map_err(anyhow::Error::from)
-            })
-        }),
-        expose_mcp: false,
-    }
-}
-
-fn monitor_command() -> Command {
-    Command {
-        id: "monitor",
-        summary: "Monitor live ailoop channels via a terminal UI",
-        syntax: Some("[OPTIONS]"),
-        category: Some(categories::OPS),
-        spec: Some(Arc::new(CommandSpec {
-            summary: "Monitor live ailoop channels via a terminal UI",
-            long_about: Some(MONITOR_LONG_ABOUT),
-            examples: vec![
-                "newton monitor --ailoop-http http://127.0.0.1:8080 --ailoop-ws ws://127.0.0.1:8080",
-                "newton monitor",
-                "newton monitor --with-api",
-            ],
-            args: vec![
-                ArgSpec {
-                    name: "ailoop-http",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("ailoop-http"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "HTTP endpoint for the ailoop server",
-                },
-                ArgSpec {
-                    name: "ailoop-ws",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("ailoop-ws"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "WebSocket endpoint for the ailoop server",
-                },
-                ArgSpec {
-                    name: "with-api",
-                    kind: ArgKind::Flag,
-                    short: None,
-                    long: Some("with-api"),
-                    value_type: ArgValueType::Bool,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Also start the Newton HTTP API alongside the monitor",
-                },
-            ],
-            ..Default::default()
-        })),
-        validator: None,
-        execute: Arc::new(|_ctx, args| {
-            Box::pin(async move {
-                let dto = MonitorArgs::try_from(args)?;
-                commands::monitor(dto).await
             })
         }),
         expose_mcp: false,
@@ -1701,7 +1622,6 @@ fn ask_summaries() -> Vec<ask::CommandSummary> {
         init_command(),
         batch_command(),
         serve_command(),
-        monitor_command(),
         workflow_command(),
         resume_command(),
         checkpoint_command(),
@@ -1795,7 +1715,6 @@ pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
         .register_command(init_command())?
         .register_command(batch_command())?
         .register_command(serve_command())?
-        .register_command(monitor_command())?
         .register_command(workflow_command())?
         .register_command(resume_command())?
         .register_command(checkpoint_command())?
@@ -1821,7 +1740,6 @@ pub const REGISTERED_COMMAND_IDS: &[&str] = &[
     "init",
     "batch",
     "serve",
-    "monitor",
     "workflow",
     "resume",
     "checkpoint",
@@ -1842,7 +1760,6 @@ pub fn enumerate_commands() -> Vec<Command> {
         init_command(),
         batch_command(),
         serve_command(),
-        monitor_command(),
         workflow_command(),
         resume_command(),
         checkpoint_command(),
@@ -1996,18 +1913,6 @@ impl TryFrom<CommandArgs> for ServeArgs {
             static_ui: get_opt_path(&args, "static-ui"),
             with_mcp,
             mcp_path,
-        })
-    }
-}
-
-impl TryFrom<CommandArgs> for MonitorArgs {
-    type Error = anyhow::Error;
-
-    fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
-        Ok(MonitorArgs {
-            ailoop_http: get_opt_str(&args, "ailoop-http"),
-            ailoop_ws: get_opt_str(&args, "ailoop-ws"),
-            with_api: get_bool(&args, "with-api"),
         })
     }
 }

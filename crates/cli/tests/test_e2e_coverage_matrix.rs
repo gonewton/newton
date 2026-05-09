@@ -18,7 +18,6 @@ const REQUIRED_SMOKE_IDS: &[&str] = &[
     "init",
     "batch",
     "serve",
-    "monitor",
     "workflow",
     "resume",
     "checkpoint",
