@@ -127,6 +127,31 @@ pub fn validate_output_schema(schema: &Value, result: &Value) -> Result<(), AppE
     Ok(())
 }
 
+/// Validate error_payload against error_schema (non-fatal; returns WFG-IO-004 on failure).
+pub fn validate_error_schema(schema: &Value, error_payload: &Value) -> Result<(), AppError> {
+    let compiled = jsonschema::JSONSchema::compile(schema).map_err(|e| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            format!("invalid error_schema: {e}"),
+        )
+        .with_code("WFG-IO-004")
+    })?;
+
+    if let Err(errors) = compiled.validate(error_payload) {
+        let first = errors
+            .into_iter()
+            .next()
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "validation failed".to_string());
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!("error_payload does not satisfy io.error_schema: {first}"),
+        )
+        .with_code("WFG-IO-004"));
+    }
+    Ok(())
+}
+
 /// Validate the trigger payload against input_schema.
 pub fn validate_input_schema(schema: &Value, payload: &Value) -> Result<(), AppError> {
     let compiled = jsonschema::JSONSchema::compile(schema).map_err(|e| {

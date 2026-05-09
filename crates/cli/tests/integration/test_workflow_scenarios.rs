@@ -1404,13 +1404,12 @@ async fn test_scenario_37_nested_workflow_basic() {
         .get("call_child")
         .expect("call_child must complete")
         .output;
-    let child_execution_id = output["child_execution_id"]
+    let child_execution_id = output["execution_id"]
         .as_str()
-        .expect("child_execution_id must be string");
+        .expect("execution_id must be string");
 
     let state_root = harness.temp_dir.path().join(".newton/state/workflows");
-    let child_uuid =
-        Uuid::parse_str(child_execution_id).expect("child_execution_id must be valid UUID");
+    let child_uuid = Uuid::parse_str(child_execution_id).expect("execution_id must be valid UUID");
     let child_execution = read_execution_json(&state_root, child_uuid);
     let child_task_ids = task_run_ids(&child_execution);
     assert_eq!(
@@ -1424,10 +1423,7 @@ async fn test_scenario_37_nested_workflow_basic() {
     assert_yaml_snapshot!(summary, {
         ".execution_id" => "[uuid]",
         ".completed_tasks.*.duration_ms" => "[duration]",
-        ".completed_tasks.call_child.output.child_execution_id" => "[uuid]",
-        ".completed_tasks.call_child.output.child_workflow_file" => "[path]",
-        ".completed_tasks.call_child.output.child_total_iterations" => "[iterations]",
-        ".completed_tasks.call_child.output.child_completed_task_count" => "[count]",
+        ".completed_tasks.call_child.output.execution_id" => "[uuid]",
     });
 }
 

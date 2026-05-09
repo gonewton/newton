@@ -1,6 +1,6 @@
 use super::{LintResult, LintSeverity, WorkflowLintRule};
 use crate::workflow::expression::{EvaluationContext, ExpressionEngine};
-use crate::workflow::schema::{BarrierParams, Condition, WorkflowDocument, WorkflowTask};
+use crate::workflow::schema::{Condition, WorkflowDocument, WorkflowTask};
 use petgraph::algo::{has_path_connecting, tarjan_scc};
 use petgraph::graph::{DiGraph, NodeIndex};
 use regex::Regex;
@@ -28,7 +28,6 @@ pub fn built_in_rules() -> Vec<Box<dyn WorkflowLintRule>> {
         Box::new(AgentCommandNoEngineCommandRule),
         Box::new(AgentNamedDriverNoPromptRule),
         Box::new(StaticTaskIdContainsColonRule),
-        Box::new(BarrierExpectedNonExistentTaskRule),
         Box::new(IoResultMapTaskRefsRule),
         Box::new(IoSchemaTypeRule),
         Box::new(IoOutputSchemaRequiresResultMapRule),
@@ -866,7 +865,7 @@ impl WorkflowLintRule for StaticTaskIdContainsColonRule {
         for task in workflow.workflow.tasks() {
             if task.id.contains(':') {
                 out.push(LintResult::new(
-                    "WFG-LINT-120",
+                    "WFG-LINT-119",
                     LintSeverity::Error,
                     format!(
                         "Static task ID '{}' contains colon which is reserved for dynamic namespacing",
@@ -878,76 +877,6 @@ impl WorkflowLintRule for StaticTaskIdContainsColonRule {
             }
         }
         out
-    }
-}
-
-struct BarrierExpectedNonExistentTaskRule;
-
-impl WorkflowLintRule for BarrierExpectedNonExistentTaskRule {
-    fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
-        let mut out = Vec::new();
-
-        // Get all task IDs in the workflow
-        let task_ids: HashSet<String> = workflow
-            .workflow
-            .tasks()
-            .map(|task| task.id.clone())
-            .collect();
-
-        // Check barrier tasks
-        for task in workflow.workflow.tasks() {
-            self.validate_barrier_task(task, &task_ids, &mut out);
-        }
-        out
-    }
-}
-
-impl BarrierExpectedNonExistentTaskRule {
-    fn validate_barrier_task(
-        &self,
-        task: &crate::workflow::schema::WorkflowTask,
-        task_ids: &HashSet<String>,
-        results: &mut Vec<LintResult>,
-    ) {
-        // Skip non-barrier tasks
-        if task.operator != "barrier" {
-            return;
-        }
-
-        // Parse barrier parameters, skip if parsing fails
-        let barrier_params = match serde_json::from_value::<BarrierParams>(task.params.clone()) {
-            Ok(params) => params,
-            Err(_) => return,
-        };
-
-        // Check each expected task ID
-        for expected_id in &barrier_params.expected {
-            Self::check_expected_task_exists(task, expected_id, task_ids, results);
-        }
-    }
-
-    fn check_expected_task_exists(
-        barrier_task: &crate::workflow::schema::WorkflowTask,
-        expected_id: &str,
-        task_ids: &HashSet<String>,
-        results: &mut Vec<LintResult>,
-    ) {
-        if task_ids.contains(expected_id) {
-            return; // Task exists, no error
-        }
-
-        results.push(LintResult::new(
-            "WFG-LINT-121",
-            LintSeverity::Error,
-            format!(
-                "Barrier task '{}' references non-existent task '{}' in expected list",
-                barrier_task.id, expected_id
-            ),
-            Some(barrier_task.id.clone()),
-            Some(format!(
-                "Remove '{expected_id}' from expected list or add the missing task"
-            )),
-        ));
     }
 }
 
@@ -976,7 +905,7 @@ impl WorkflowLintRule for IoResultMapTaskRefsRule {
                             let task_ref = &after[..end];
                             if !known_ids.contains(task_ref) {
                                 out.push(LintResult::new(
-                                    "WFG-LINT-122",
+                                    "WFG-LINT-120",
                                     LintSeverity::Warning,
                                     format!("result_map key '{key}' references undeclared task '{task_ref}'"),
                                     Some(format!("io.result_map.{key}")),
@@ -1014,7 +943,7 @@ impl WorkflowLintRule for IoSchemaTypeRule {
                     .unwrap_or(false);
                 if !type_ok {
                     out.push(LintResult::new(
-                        "WFG-LINT-123",
+                        "WFG-LINT-121",
                         LintSeverity::Error,
                         format!("{field} must have top-level type: object"),
                         Some(field.to_string()),
@@ -1034,7 +963,7 @@ impl WorkflowLintRule for IoOutputSchemaRequiresResultMapRule {
         let io = &workflow.workflow.settings.io;
         if io.output_schema.is_some() && io.result_map.is_none() {
             return vec![LintResult::new(
-                "WFG-LINT-124",
+                "WFG-LINT-122",
                 LintSeverity::Error,
                 "io.output_schema is defined but io.result_map is absent",
                 Some("io.output_schema".to_string()),

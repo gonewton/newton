@@ -105,11 +105,8 @@ impl Operator for WorkflowOperator {
             .await?;
 
         Ok(json!({
-            "child_execution_id": summary.execution_id.to_string(),
-            "child_workflow_file": summary.workflow_file,
-            "child_status": "Completed",
-            "child_total_iterations": summary.total_iterations,
-            "child_completed_task_count": summary.completed_task_count,
+            "execution_id": summary.execution_id.to_string(),
+            "status": "success",
             "result": summary.result,
             "error": serde_json::Value::Null,
         }))

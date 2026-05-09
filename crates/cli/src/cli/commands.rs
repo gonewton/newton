@@ -254,15 +254,23 @@ pub async fn run(args: RunArgs) -> Result<()> {
             Ok(())
         }
         Err(app_error) => {
+            let is_workflow_failure = matches!(
+                app_error.code.as_str(),
+                "WFG-EXEC-001" | "WFG-GATE-001" | "WFG-ITER-001" | "WFG-ITER-002" | "WFG-TIME-001"
+            );
+            let error_payload: Option<Value> = None;
+            // WFG-IO-004: validate error_payload against error_schema (non-fatal warning).
+            if let (Some(error_schema), Some(ref ep)) = (&io_block.error_schema, &error_payload) {
+                use newton_core::workflow::io::validate_error_schema;
+                if let Err(e) = validate_error_schema(error_schema, ep) {
+                    tracing::warn!(
+                        code = "WFG-IO-004",
+                        message = %e.message,
+                        "error_payload failed error_schema validation (non-fatal)"
+                    );
+                }
+            }
             if emit_json {
-                let is_workflow_failure = matches!(
-                    app_error.code.as_str(),
-                    "WFG-EXEC-001"
-                        | "WFG-GATE-001"
-                        | "WFG-ITER-001"
-                        | "WFG-ITER-002"
-                        | "WFG-TIME-001"
-                );
                 let status = if is_workflow_failure {
                     newton_core::workflow::io::CompletionStatus::Failure
                 } else {
@@ -276,7 +284,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
                     },
                     category: format!("{:?}", app_error.category),
                     message: app_error.message.clone(),
-                    error_payload: None,
+                    error_payload,
                 };
                 let envelope = newton_core::workflow::io::CompletionEnvelope {
                     schema_version: "1".to_string(),
