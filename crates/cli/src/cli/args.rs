@@ -392,4 +392,12 @@ pub struct ServeArgs {
     /// Path to the built Newton UI dist directory (optional)
     #[arg(long = "static-ui", value_name = "PATH")]
     pub static_ui: Option<PathBuf>,
+
+    /// Mount the MCP HTTP router on the same listener as the Newton API.
+    #[arg(long = "with-mcp", default_value_t = false)]
+    pub with_mcp: bool,
+
+    /// Path prefix at which the MCP HTTP router is mounted (used only with --with-mcp).
+    #[arg(long = "mcp-path", default_value = "/mcp")]
+    pub mcp_path: String,
 }

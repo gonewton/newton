@@ -1472,6 +1472,111 @@ fn load_trigger_payload(path: &Path) -> StdResult<Value, AppError> {
     Ok(value)
 }
 
+/// Newton REST route prefixes that the optional MCP mount MUST NOT shadow
+/// (issue #294 §4.4). Kept in sync with `crates/core/src/api/mod.rs`.
+const NEWTON_REST_ROUTE_PREFIXES: &[&str] = &[
+    "/health",
+    "/workflows",
+    "/hil",
+    "/streaming",
+    "/operators",
+    "/dashboard",
+    "/portfolio",
+    "/opportunities",
+    "/requests",
+    "/plans",
+    "/persistence",
+    "/testing",
+];
+
+/// Validate `--mcp-path` shape (issue #294 §4.4).
+///
+/// Returns `NEWTON-SERVE-MCP-001` when the value is empty, missing the leading
+/// slash, equal to the bare root `/`, or ends with `/`.
+fn validate_mcp_path(p: &str) -> StdResult<(), AppError> {
+    let invalid =
+        p.is_empty() || !p.starts_with('/') || p == "/" || (p.len() > 1 && p.ends_with('/'));
+    if invalid {
+        return Err(AppError::new(
+            newton_core::core::types::ErrorCategory::ValidationError,
+            format!(
+                "NEWTON-SERVE-MCP-001: --mcp-path must start with '/' and must not be '/' or end with '/'; got {:?}",
+                p
+            ),
+        )
+        .with_code("NEWTON-SERVE-MCP-001"));
+    }
+    Ok(())
+}
+
+/// Reject `--mcp-path` values that collide with or are an ancestor of an
+/// existing Newton REST route prefix (issue #294 §4.4). Returns
+/// `NEWTON-SERVE-MCP-002`.
+fn ensure_no_route_collision(mcp_path: &str) -> StdResult<(), AppError> {
+    for prefix in NEWTON_REST_ROUTE_PREFIXES {
+        if mcp_path == *prefix
+            || prefix.starts_with(&format!("{}/", mcp_path))
+            || mcp_path.starts_with(&format!("{}/", prefix))
+        {
+            return Err(AppError::new(
+                newton_core::core::types::ErrorCategory::ValidationError,
+                format!(
+                    "NEWTON-SERVE-MCP-002: --mcp-path {:?} collides with Newton REST route prefix {:?}",
+                    mcp_path, prefix
+                ),
+            )
+            .with_code("NEWTON-SERVE-MCP-002"));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod serve_mcp_validation_tests {
+    use super::*;
+
+    #[test]
+    fn validate_path_accepts_normal_paths() {
+        assert!(validate_mcp_path("/mcp").is_ok());
+        assert!(validate_mcp_path("/api/mcp").is_ok());
+    }
+
+    #[test]
+    fn validate_path_rejects_empty_or_root() {
+        assert!(validate_mcp_path("").is_err());
+        assert!(validate_mcp_path("/").is_err());
+    }
+
+    #[test]
+    fn validate_path_rejects_missing_leading_slash() {
+        let err = validate_mcp_path("mcp").unwrap_err();
+        assert!(err.message.contains("NEWTON-SERVE-MCP-001"));
+    }
+
+    #[test]
+    fn validate_path_rejects_trailing_slash() {
+        assert!(validate_mcp_path("/mcp/").is_err());
+    }
+
+    #[test]
+    fn collision_detects_health() {
+        let err = ensure_no_route_collision("/health").unwrap_err();
+        assert!(err.message.contains("NEWTON-SERVE-MCP-002"));
+    }
+
+    #[test]
+    fn collision_detects_ancestor_of_health() {
+        // /health is an existing prefix; mounting under it would shadow it.
+        assert!(ensure_no_route_collision("/health/x").is_err());
+    }
+
+    #[test]
+    fn collision_allows_unrelated_path() {
+        assert!(ensure_no_route_collision("/mcp").is_ok());
+        assert!(ensure_no_route_collision("/api/mcp").is_ok());
+    }
+}
+
 /// Launch the Newton HTTP API server
 pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     use newton_core::api::{self, state::AppState};
@@ -1479,6 +1584,11 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     use std::net::SocketAddr;
     use tokio::net::TcpListener;
     use tracing::info;
+
+    if args.with_mcp {
+        validate_mcp_path(&args.mcp_path)?;
+        ensure_no_route_collision(&args.mcp_path)?;
+    }
 
     info!("Starting Newton API server on {}: {}", args.host, args.port);
 
@@ -1535,7 +1645,22 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
 
     let state = AppState::new(operator_descriptors, backend);
 
-    let app = api::create_router(state, args.static_ui.clone());
+    let mut app = api::create_router(state, args.static_ui.clone());
+
+    if args.with_mcp {
+        let ctx = crate::cli::context::NewtonContext::new();
+        let mcp_router =
+            crate::cli::framework_setup::build_mcp_router_for_serve(ctx, &args.mcp_path).map_err(
+                |err| {
+                    AppError::new(
+                        newton_core::core::types::ErrorCategory::InternalError,
+                        format!("NEWTON-SERVE-MCP-004: failed to build MCP router: {err}"),
+                    )
+                    .with_code("NEWTON-SERVE-MCP-004")
+                },
+            )?;
+        app = app.merge(mcp_router);
+    }
 
     let addr = format!("{}:{}", args.host, args.port);
     let socket_addr: SocketAddr = addr.parse().map_err(|err| {
@@ -1553,6 +1678,25 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     })?;
 
     info!("Newton API server listening on {}", socket_addr);
+
+    if args.with_mcp {
+        let bind_address = format!("{}:{}", args.host, args.port);
+        let count = crate::cli::mcp::tool_count();
+        tracing::info!(
+            event = "mcp_serve_started",
+            mcp_enabled = true,
+            bind_address = %bind_address,
+            mcp_path = %args.mcp_path,
+            tool_count = count,
+            "MCP router mounted on Newton serve listener"
+        );
+        // Mirror to stderr as a single JSON line so integration tests have a
+        // deterministic surface (matches `cli/mcp.rs:166-169`).
+        eprintln!(
+            "{{\"event\":\"mcp_serve_started\",\"mcp_enabled\":true,\"bind_address\":\"{}\",\"mcp_path\":\"{}\",\"tool_count\":{}}}",
+            bind_address, args.mcp_path, count
+        );
+    }
 
     axum::serve(listener, app.into_make_service())
         .await

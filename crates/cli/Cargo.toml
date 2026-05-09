@@ -19,6 +19,7 @@ path = "tests/bin/logging_integration_helper.rs"
 
 [dependencies]
 cli-framework = { git = "https://github.com/aroff/cli-framework", features = ["mcp-server"] }
+rmcp = { version = "1.6", features = ["server", "transport-streamable-http-server"] }
 newton-core = { path = "../core" }
 newton-types = { path = "../types" }
 newton-backend = { path = "../backend" }
@@ -129,3 +130,15 @@ path = "tests/integration/mcp_port_conflict.rs"
 [[test]]
 name = "mcp_tool_call_health"
 path = "tests/integration/mcp_tool_call_health.rs"
+
+[[test]]
+name = "serve_with_mcp_responds"
+path = "tests/integration/serve_with_mcp_responds.rs"
+
+[[test]]
+name = "serve_without_mcp_unchanged"
+path = "tests/integration/serve_without_mcp_unchanged.rs"
+
+[[test]]
+name = "serve_mcp_path_validation"
+path = "tests/integration/serve_mcp_path_validation.rs"

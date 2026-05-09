@@ -47,6 +47,8 @@ pub async fn run(args: MonitorArgs) -> Result<()> {
                 host: "127.0.0.1".to_string(),
                 port: 8080,
                 static_ui: None,
+                with_mcp: false,
+                mcp_path: "/mcp".to_string(),
             })
             .await
             {

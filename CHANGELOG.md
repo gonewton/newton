@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Optional MCP on the same URL as `newton serve` (issue #294)
+
+- `newton serve` now accepts `--with-mcp` (opt-in, default off) and `--mcp-path <PATH>` (default `/mcp`) to mount the cli-framework MCP HTTP router on the same listener as the Newton REST API. One process, one port, one client URL prefix.
+- When `--with-mcp` is absent the behavior of `newton serve` is unchanged (backward-compatible).
+- Emits a single structured `mcp_serve_started` JSON log line on stderr (fields: `event`, `mcp_enabled`, `bind_address`, `mcp_path`, `tool_count`) when enabled.
+- New error codes: `NEWTON-SERVE-MCP-001` (invalid `--mcp-path`), `NEWTON-SERVE-MCP-002` (path collides with existing REST route), `NEWTON-SERVE-MCP-003` (upstream mount API unavailable), `NEWTON-SERVE-MCP-004` (router construction failure).
+- README and Newton skill updated with single-port topology docs and Cursor `mcpServers` HTTP example.
+
 ### GhOperator — transient-failure retry (issue #284)
 
 - Engine retry loop now consults a per-error-code `is_retryable` classifier:

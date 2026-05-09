@@ -45,6 +45,14 @@ pub mod error_codes {
     pub const NEWTON_MCP_001: &str = "NEWTON-MCP-001";
     /// MCP-mode upstream runtime error after successful bind (issue #237).
     pub const NEWTON_MCP_002: &str = "NEWTON-MCP-002";
+    /// `serve --with-mcp`: invalid `--mcp-path` value (issue #294).
+    pub const NEWTON_SERVE_MCP_001: &str = "NEWTON-SERVE-MCP-001";
+    /// `serve --with-mcp`: `--mcp-path` collides with an existing Newton REST route prefix (issue #294).
+    pub const NEWTON_SERVE_MCP_002: &str = "NEWTON-SERVE-MCP-002";
+    /// `serve --with-mcp`: cli-framework MCP-mount API unavailable in linked version (issue #294).
+    pub const NEWTON_SERVE_MCP_003: &str = "NEWTON-SERVE-MCP-003";
+    /// `serve --with-mcp`: cli-framework returned an error while constructing the MCP router (issue #294).
+    pub const NEWTON_SERVE_MCP_004: &str = "NEWTON-SERVE-MCP-004";
 }
 
 // ── help-text constants ───────────────────────────────────────────────────────
@@ -586,6 +594,30 @@ fn serve_command() -> Command {
                     conflicts_with: vec![],
                     requires: vec![],
                     help: "Path to the built Newton UI dist directory (optional)",
+                },
+                ArgSpec {
+                    name: "with-mcp",
+                    kind: ArgKind::Flag,
+                    short: None,
+                    long: Some("with-mcp"),
+                    value_type: ArgValueType::Bool,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Mount the MCP HTTP router on the same listener as the Newton API",
+                },
+                ArgSpec {
+                    name: "mcp-path",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("mcp-path"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Path prefix where the MCP HTTP router is mounted (default: /mcp)",
                 },
             ],
             ..Default::default()
@@ -1662,6 +1694,65 @@ fn ask_summaries() -> Vec<ask::CommandSummary> {
 
 // ── public entry point ────────────────────────────────────────────────────────
 
+/// Build an `axum::Router` that mounts the cli-framework MCP HTTP transport
+/// under `mcp_path` on the caller-owned listener (issue #294).
+///
+/// This is the Newton-side adapter for what `aroff/cli-framework#29` aims to
+/// expose upstream. Until the upstream `App::into_mcp_router(...)` lands,
+/// Newton constructs the equivalent registry/service/router stack directly
+/// from cli-framework's public MCP primitives. If the upstream API later
+/// becomes available the implementation switches to that without changing the
+/// public function signature here.
+///
+/// Returns:
+/// * `NEWTON-SERVE-MCP-003` — required upstream MCP-mount API not available
+///   in the linked cli-framework version.
+/// * `NEWTON-SERVE-MCP-004` — cli-framework returned an error while building
+///   the registry, the tool registry, or the HTTP service.
+pub fn build_mcp_router_for_serve(
+    _ctx: NewtonContext,
+    mcp_path: &str,
+) -> anyhow::Result<axum::Router> {
+    use cli_framework::command::registry::CommandRegistry;
+    use cli_framework::mcp::{CliFrameworkHandler, McpToolRegistry};
+    use rmcp::transport::streamable_http_server::{
+        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+    };
+
+    // Build the same flat registry that `build_app` populates so MCP tool
+    // names line up exactly with Newton's `--mcp-serve` mode.
+    let mut registry = CommandRegistry::new();
+    for cmd in enumerate_commands() {
+        registry.register(cmd);
+    }
+
+    let tool_registry =
+        std::sync::Arc::new(McpToolRegistry::from_command_registry(&registry, "newton"));
+    if tool_registry.tool_count() == 0 {
+        return Err(anyhow!(
+            "{}: cli-framework returned an empty MCP tool registry",
+            error_codes::NEWTON_SERVE_MCP_004
+        ));
+    }
+
+    let session_manager = std::sync::Arc::new(LocalSessionManager::default());
+    let config = StreamableHttpServerConfig::default();
+    let service = StreamableHttpService::new(
+        {
+            let tool_registry = std::sync::Arc::clone(&tool_registry);
+            move || {
+                Ok(CliFrameworkHandler::new(std::sync::Arc::clone(
+                    &tool_registry,
+                )))
+            }
+        },
+        session_manager,
+        config,
+    );
+
+    Ok(axum::Router::new().nest_service(mcp_path, service))
+}
+
 /// Build the Newton CLI application backed by `cli-framework`.
 pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
     #[allow(unused_mut)]
@@ -1858,10 +1949,18 @@ impl TryFrom<CommandArgs> for ServeArgs {
             })
             .transpose()?
             .unwrap_or(8080);
+        let with_mcp = get_bool(&args, "with-mcp");
+        let mcp_path = args
+            .named
+            .get("mcp-path")
+            .cloned()
+            .unwrap_or_else(|| "/mcp".to_string());
         Ok(ServeArgs {
             host,
             port,
             static_ui: get_opt_path(&args, "static-ui"),
+            with_mcp,
+            mcp_path,
         })
     }
 }
