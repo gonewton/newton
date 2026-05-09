@@ -11,7 +11,7 @@
 //!    error after a successful bind).
 //!
 //! See spec `tmp/237-046-newton-consumption-of-cli-framework-mcp-mode.md`.
-use crate::cli::framework_setup::{error_codes, REGISTERED_COMMAND_IDS};
+use crate::cli::framework_setup::{error_codes, MCP_EXPOSED_COMMAND_IDS};
 
 /// Newton's documented MCP defaults (spec §4.2). cli-framework currently
 /// defaults `--mcp-port` to `8080`; Newton overrides to `8730` to avoid
@@ -90,14 +90,11 @@ pub fn parse_mcp_flags(argv: &[String]) -> McpFlags {
     flags
 }
 
-/// Compile-time tool count: top-level Newton commands registered in
-/// [`REGISTERED_COMMAND_IDS`], +1 when the optional `ask` feature is on.
+/// Returns the number of Newton commands exposed as MCP tools under the
+/// ExposeMcpOnly policy (issue #309). Does not include `ask` (excluded
+/// from the curated MCP surface regardless of feature flag).
 pub fn tool_count() -> usize {
-    let mut n = REGISTERED_COMMAND_IDS.len();
-    if cfg!(feature = "ask") {
-        n += 1;
-    }
-    n
+    MCP_EXPOSED_COMMAND_IDS.len()
 }
 
 /// Build the argv that cli-framework expects: ensure host/port/path flags are
