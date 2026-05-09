@@ -32,6 +32,8 @@ pub struct BuiltinOperatorDeps {
     pub child_workflow_runner: Option<Arc<dyn ChildWorkflowRunner>>,
     /// Ailoop approver for GhOperator. Defaults to NoopApprover when None.
     pub gh_approver: Option<Arc<dyn gh_authorization::AiloopApprover>>,
+    /// GitRunner for GhOperator branch_push. Defaults to TokioGitRunner when None.
+    pub git_runner: Option<Arc<dyn gh::GitRunner>>,
 }
 
 /// Register built-in operators into the supplied builder.
@@ -73,15 +75,22 @@ pub fn register_builtins_with_deps(
     let engine_manager = AikitEngineManager::new(workspace.clone())
         .expect("AikitEngineManager::new should not fail");
     let agent_operator = agent::AgentOperator::new(workspace, settings, engine_manager);
+    let git_runner: Arc<dyn gh::GitRunner> = deps
+        .git_runner
+        .unwrap_or_else(|| Arc::new(gh::default_git_runner()));
     let gh_operator = match (deps.gh_runner, deps.gh_approver) {
-        (Some(runner), Some(approver)) => {
-            gh::GhOperator::with_runner_and_approver(runner, approver)
+        (Some(runner), Some(approver)) => gh::GhOperator::with_all(runner, git_runner, approver),
+        (Some(runner), None) => {
+            gh::GhOperator::with_all(runner, git_runner, Arc::new(gh_authorization::NoopApprover))
         }
-        (Some(runner), None) => gh::GhOperator::with_runner(runner),
         (None, Some(approver)) => {
-            gh::GhOperator::with_runner_and_approver(Arc::new(gh::default_runner()), approver)
+            gh::GhOperator::with_all(Arc::new(gh::default_runner()), git_runner, approver)
         }
-        (None, None) => gh::GhOperator::new(),
+        (None, None) => gh::GhOperator::with_all(
+            Arc::new(gh::default_runner()),
+            git_runner,
+            Arc::new(gh_authorization::NoopApprover),
+        ),
     };
     let child_runner: Arc<dyn ChildWorkflowRunner> =
         deps.child_workflow_runner.unwrap_or_else(|| {

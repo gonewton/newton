@@ -9,6 +9,7 @@ use newton_core::workflow::operator::{OperatorRegistry, OperatorRegistryBuilder}
 use newton_core::workflow::operators::command::{
     CommandExecutionOutput, CommandExecutionRequest, CommandRunner,
 };
+use newton_core::workflow::operators::gh::{GhOutput, GitRunner};
 use newton_core::workflow::operators::{self, BuiltinOperatorDeps};
 use newton_core::workflow::schema::{self, TriggerType, WorkflowTrigger};
 use newton_core::workflow::state::GraphSettings;
@@ -334,6 +335,7 @@ impl WorkflowTestHarness {
             gh_runner: None,
             child_workflow_runner: None,
             gh_approver: None,
+            git_runner: None,
         };
 
         let settings = document.workflow.settings.clone();
@@ -912,6 +914,7 @@ async fn test_scenario_17_checkpoint_resume() {
                 gh_runner: None,
                 child_workflow_runner: None,
                 gh_approver: None,
+                git_runner: None,
             },
         );
         builder.build()
@@ -1783,4 +1786,95 @@ async fn test_scenario_46_planner_short_circuit_on_enrich_failure() {
             .is_some_and(|msg| !msg.is_empty()),
         "checkpoint should persist non-empty error summary message"
     );
+}
+
+// ─── Scenario 47: GhOperator branch_push operation ───────────────────────────
+
+#[derive(Clone)]
+struct MockGitRunner47 {
+    calls: Arc<Mutex<usize>>,
+}
+
+impl MockGitRunner47 {
+    fn new() -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(0)),
+        }
+    }
+}
+
+#[async_trait]
+impl GitRunner for MockGitRunner47 {
+    async fn run(
+        &self,
+        _args: &[&str],
+        _cwd: &std::path::Path,
+    ) -> Result<GhOutput, newton_core::core::error::AppError> {
+        *self.calls.lock().unwrap() += 1;
+        Ok(GhOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        })
+    }
+}
+
+#[tokio::test]
+async fn test_scenario_47_gh_operator_branch_push() {
+    use newton_core::workflow::schema;
+
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let git_runner = Arc::new(MockGitRunner47::new());
+
+    let fixture_src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/workflows/47_gh_operator_branch_push.yaml");
+    let fixture_dst = temp_dir.path().join("workflow.yaml");
+    std::fs::copy(&fixture_src, &fixture_dst).expect("copy fixture");
+
+    let document = schema::load_workflow(&fixture_dst).expect("load fixture");
+    let settings = document.workflow.settings.clone();
+    let mut builder = OperatorRegistry::builder();
+    operators::register_builtins_with_deps(
+        &mut builder,
+        temp_dir.path().to_path_buf(),
+        settings,
+        BuiltinOperatorDeps {
+            command_runner: None,
+            interviewer: None,
+            gh_runner: None,
+            child_workflow_runner: None,
+            gh_approver: None,
+            git_runner: Some(git_runner.clone()),
+        },
+    );
+    let registry = builder.build();
+
+    let summary = newton_core::workflow::executor::execute_workflow(
+        document,
+        fixture_dst,
+        registry,
+        temp_dir.path().to_path_buf(),
+        newton_core::workflow::executor::ExecutionOverrides {
+            parallel_limit: None,
+            max_time_seconds: None,
+            checkpoint_base_path: None,
+            artifact_base_path: None,
+            max_nesting_depth: None,
+            verbose: false,
+            server_notifier: None,
+            pre_seed_nodes: true,
+        },
+    )
+    .await
+    .expect("workflow should complete successfully");
+
+    let push_task = summary
+        .completed_tasks
+        .get("push_branch")
+        .expect("push_branch task must complete");
+    assert_eq!(push_task.output["pushed"], true);
+    assert_eq!(push_task.output["remote"], "origin");
+    assert_eq!(push_task.output["branch"], "HEAD");
+    assert_eq!(push_task.output["set_upstream"], true);
+    assert_eq!(*git_runner.calls.lock().unwrap(), 1);
 }

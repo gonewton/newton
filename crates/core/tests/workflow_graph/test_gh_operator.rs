@@ -3,7 +3,7 @@ use newton_core::core::error::AppError;
 use newton_core::core::types::ErrorCategory;
 use newton_core::workflow::executor::{ExecutionOverrides, ExecutionSummary, GraphHandle};
 use newton_core::workflow::operator::{ExecutionContext, Operator, OperatorRegistry, StateView};
-use newton_core::workflow::operators::gh::{GhOperator, GhOutput, GhRunner};
+use newton_core::workflow::operators::gh::{GhOperator, GhOutput, GhRunner, GitRunner};
 use newton_core::workflow::operators::gh_authorization::{
     AiloopApprover, ApprovalOutcome, AuthorizationRequest,
 };
@@ -55,6 +55,73 @@ impl GhRunner for MockGhRunner {
     }
 }
 
+type GitResponses = Arc<Mutex<HashMap<Vec<String>, GhOutput>>>;
+
+#[derive(Clone)]
+struct MockGitRunner {
+    responses: GitResponses,
+    calls: Arc<AtomicUsize>,
+    last_cwd: Arc<Mutex<Option<std::path::PathBuf>>>,
+}
+
+impl MockGitRunner {
+    fn new() -> Self {
+        Self {
+            responses: Arc::new(Mutex::new(HashMap::new())),
+            calls: Arc::new(AtomicUsize::new(0)),
+            last_cwd: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn add_success(&self, args: Vec<&str>, output: GhOutput) {
+        let key: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        self.responses.lock().unwrap().insert(key, output);
+    }
+
+    fn call_count(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+
+    fn last_cwd(&self) -> Option<std::path::PathBuf> {
+        self.last_cwd.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl GitRunner for MockGitRunner {
+    async fn run(&self, args: &[&str], cwd: &std::path::Path) -> Result<GhOutput, AppError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        *self.last_cwd.lock().unwrap() = Some(cwd.to_path_buf());
+        let key: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let responses = self.responses.lock().unwrap();
+        match responses.get(&key) {
+            Some(output) => Ok(output.clone()),
+            None => Err(AppError::new(
+                ErrorCategory::ToolExecutionError,
+                format!("mock git: no response for {:?}", key),
+            )
+            .with_code("WFG-GH-011")),
+        }
+    }
+}
+
+fn build_registry_with_git_runner(
+    workspace: std::path::PathBuf,
+    git_runner: Arc<dyn GitRunner>,
+) -> OperatorRegistry {
+    let mut builder = OperatorRegistry::builder();
+    let deps = BuiltinOperatorDeps {
+        interviewer: None,
+        command_runner: None,
+        gh_runner: None,
+        child_workflow_runner: None,
+        gh_approver: None,
+        git_runner: Some(git_runner),
+    };
+    operators::register_builtins_with_deps(&mut builder, workspace, Default::default(), deps);
+    builder.build()
+}
+
 fn build_registry_with_gh_runner(
     workspace: std::path::PathBuf,
     runner: Arc<dyn GhRunner>,
@@ -66,6 +133,7 @@ fn build_registry_with_gh_runner(
         gh_runner: Some(runner),
         child_workflow_runner: None,
         gh_approver: None,
+        git_runner: None,
     };
     operators::register_builtins_with_deps(&mut builder, workspace, Default::default(), deps);
     builder.build()
@@ -1777,4 +1845,520 @@ fn validate_pr_create_rejects_bad_retry_multiplier() {
         "retry_jitter_ms": -1
     });
     assert!(GhOperator::new().validate_params(&params).is_err());
+}
+
+// ─── FlakyGitRunner ──────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct FlakyGitRunner {
+    fail_count: Arc<AtomicUsize>,
+    success_output: GhOutput,
+    error_message: String,
+    error_code: String,
+    calls: Arc<AtomicUsize>,
+}
+
+impl FlakyGitRunner {
+    fn new(
+        fail_count: usize,
+        success_output: GhOutput,
+        error_message: &str,
+        error_code: &str,
+    ) -> Self {
+        Self {
+            fail_count: Arc::new(AtomicUsize::new(fail_count)),
+            success_output,
+            error_message: error_message.to_string(),
+            error_code: error_code.to_string(),
+            calls: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+    fn call_count(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl GitRunner for FlakyGitRunner {
+    async fn run(&self, _args: &[&str], _cwd: &std::path::Path) -> Result<GhOutput, AppError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let remaining = self.fail_count.load(Ordering::SeqCst);
+        if remaining > 0 {
+            self.fail_count.fetch_sub(1, Ordering::SeqCst);
+            return Err(AppError::new(
+                ErrorCategory::ToolExecutionError,
+                self.error_message.clone(),
+            )
+            .with_code(&self.error_code));
+        }
+        Ok(self.success_output.clone())
+    }
+}
+
+fn make_exec_ctx(workspace: &std::path::Path) -> ExecutionContext {
+    let registry = OperatorRegistry::builder().build();
+    ExecutionContext {
+        workspace_path: workspace.to_path_buf(),
+        execution_id: "exec".to_string(),
+        task_id: "push".to_string(),
+        iteration: 0,
+        state_view: StateView::new(json!({}), json!({}), json!({})),
+        graph: GraphHandle::new(HashMap::new()),
+        workflow_file: workspace.join("wf.yaml"),
+        nesting_depth: 0,
+        execution_overrides: ExecutionOverrides {
+            parallel_limit: None,
+            max_time_seconds: None,
+            checkpoint_base_path: None,
+            artifact_base_path: None,
+            max_nesting_depth: None,
+            verbose: false,
+            server_notifier: None,
+            pre_seed_nodes: true,
+        },
+        operator_registry: registry,
+    }
+}
+
+// ─── AC 1: all optional params → Ok ─────────────────────────────────────────
+#[test]
+fn branch_push_validate_no_params_ok() {
+    let params = json!({ "operation": "branch_push" });
+    assert!(GhOperator::new().validate_params(&params).is_ok());
+}
+
+// ─── AC 2: explicit params → Ok ─────────────────────────────────────────────
+#[test]
+fn branch_push_validate_explicit_params_ok() {
+    let params = json!({
+        "operation": "branch_push",
+        "remote": "upstream",
+        "branch": "feature/x",
+        "set_upstream": false
+    });
+    assert!(GhOperator::new().validate_params(&params).is_ok());
+}
+
+// ─── AC 3: empty remote → WFG-GH-009 ────────────────────────────────────────
+#[test]
+fn branch_push_validate_empty_remote_err() {
+    let params = json!({ "operation": "branch_push", "remote": "" });
+    let err = GhOperator::new()
+        .validate_params(&params)
+        .expect_err("must fail");
+    assert_eq!(err.code, "WFG-GH-009");
+}
+
+// ─── AC 4: empty branch → WFG-GH-009 ────────────────────────────────────────
+#[test]
+fn branch_push_validate_empty_branch_err() {
+    let params = json!({ "operation": "branch_push", "branch": "" });
+    let err = GhOperator::new()
+        .validate_params(&params)
+        .expect_err("must fail");
+    assert_eq!(err.code, "WFG-GH-009");
+}
+
+// ─── AC 5: remote with space → WFG-GH-009 ───────────────────────────────────
+#[test]
+fn branch_push_validate_remote_with_space_err() {
+    let params = json!({ "operation": "branch_push", "remote": "bad remote" });
+    let err = GhOperator::new()
+        .validate_params(&params)
+        .expect_err("must fail");
+    assert_eq!(err.code, "WFG-GH-009");
+}
+
+// ─── AC 6: remote starting with '-' → WFG-GH-009 ────────────────────────────
+#[test]
+fn branch_push_validate_remote_starts_with_dash_err() {
+    let params = json!({ "operation": "branch_push", "remote": "-origin" });
+    let err = GhOperator::new()
+        .validate_params(&params)
+        .expect_err("must fail");
+    assert_eq!(err.code, "WFG-GH-009");
+}
+
+// ─── AC 7: retry_count: 0 → Err ─────────────────────────────────────────────
+#[test]
+fn branch_push_validate_retry_count_zero_err() {
+    let params = json!({ "operation": "branch_push", "retry_count": 0 });
+    assert!(GhOperator::new().validate_params(&params).is_err());
+}
+
+// ─── AC 8: retry_multiplier: 0.5 → Err ──────────────────────────────────────
+#[test]
+fn branch_push_validate_retry_multiplier_err() {
+    let params = json!({ "operation": "branch_push", "retry_multiplier": 0.5 });
+    assert!(GhOperator::new().validate_params(&params).is_err());
+}
+
+// ─── AC 9: retry_delay_ms: -1 → Err ─────────────────────────────────────────
+#[test]
+fn branch_push_validate_retry_delay_negative_err() {
+    let params = json!({ "operation": "branch_push", "retry_delay_ms": -1 });
+    assert!(GhOperator::new().validate_params(&params).is_err());
+}
+
+// ─── AC 10: retry_jitter_ms: -1 → Err ───────────────────────────────────────
+#[test]
+fn branch_push_validate_retry_jitter_negative_err() {
+    let params = json!({ "operation": "branch_push", "retry_jitter_ms": -1 });
+    assert!(GhOperator::new().validate_params(&params).is_err());
+}
+
+// ─── AC 11: set_upstream: "yes" → Err ───────────────────────────────────────
+#[test]
+fn branch_push_validate_set_upstream_non_bool_err() {
+    let params = json!({ "operation": "branch_push", "set_upstream": "yes" });
+    assert!(GhOperator::new().validate_params(&params).is_err());
+}
+
+// ─── AC 12: unknown field → Ok ───────────────────────────────────────────────
+#[test]
+fn branch_push_validate_unknown_field_ok() {
+    let params = json!({ "operation": "branch_push", "color": "blue" });
+    assert!(GhOperator::new().validate_params(&params).is_ok());
+}
+
+// ─── AC 13: default args to git runner ───────────────────────────────────────
+#[tokio::test]
+async fn branch_push_default_args() {
+    let workspace = tempdir().expect("workspace");
+    let git_runner = Arc::new(MockGitRunner::new());
+    git_runner.add_success(
+        vec!["push", "--set-upstream", "origin", "HEAD"],
+        GhOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+    );
+
+    let op = GhOperator::with_all(
+        Arc::new(MockGhRunner::new()),
+        git_runner.clone(),
+        Arc::new(newton_core::workflow::operators::gh_authorization::NoopApprover),
+    );
+
+    let params = json!({ "operation": "branch_push" });
+    let ctx = make_exec_ctx(workspace.path());
+    let out = op.execute(params, ctx).await.expect("should succeed");
+    assert_eq!(out["pushed"], true);
+    assert_eq!(git_runner.call_count(), 1);
+}
+
+// ─── AC 14: explicit remote/branch/no-upstream ───────────────────────────────
+#[tokio::test]
+async fn branch_push_explicit_params_no_upstream() {
+    let workspace = tempdir().expect("workspace");
+    let git_runner = Arc::new(MockGitRunner::new());
+    git_runner.add_success(
+        vec!["push", "upstream", "feature/x"],
+        GhOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+    );
+
+    let op = GhOperator::with_all(
+        Arc::new(MockGhRunner::new()),
+        git_runner.clone(),
+        Arc::new(newton_core::workflow::operators::gh_authorization::NoopApprover),
+    );
+
+    let params = json!({
+        "operation": "branch_push",
+        "remote": "upstream",
+        "branch": "feature/x",
+        "set_upstream": false
+    });
+    let ctx = make_exec_ctx(workspace.path());
+    let out = op.execute(params, ctx).await.expect("should succeed");
+    assert_eq!(out["pushed"], true);
+    assert_eq!(out["remote"], "upstream");
+    assert_eq!(out["branch"], "feature/x");
+    assert_eq!(out["set_upstream"], false);
+}
+
+// ─── AC 15: cwd == workspace_path ────────────────────────────────────────────
+#[tokio::test]
+async fn branch_push_cwd_is_workspace_path() {
+    let workspace = tempdir().expect("workspace");
+    let git_runner = Arc::new(MockGitRunner::new());
+    git_runner.add_success(
+        vec!["push", "--set-upstream", "origin", "HEAD"],
+        GhOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+    );
+
+    let op = GhOperator::with_all(
+        Arc::new(MockGhRunner::new()),
+        git_runner.clone(),
+        Arc::new(newton_core::workflow::operators::gh_authorization::NoopApprover),
+    );
+
+    let params = json!({ "operation": "branch_push" });
+    let ctx = make_exec_ctx(workspace.path());
+    op.execute(params, ctx).await.expect("should succeed");
+
+    let cwd = git_runner.last_cwd().expect("cwd should be recorded");
+    assert_eq!(cwd, workspace.path());
+}
+
+// ─── AC 16: success output shape ─────────────────────────────────────────────
+#[tokio::test]
+async fn branch_push_success_output_shape() {
+    let workspace = tempdir().expect("workspace");
+    let git_runner = Arc::new(MockGitRunner::new());
+    git_runner.add_success(
+        vec!["push", "--set-upstream", "origin", "HEAD"],
+        GhOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+    );
+
+    let op = GhOperator::with_all(
+        Arc::new(MockGhRunner::new()),
+        git_runner,
+        Arc::new(newton_core::workflow::operators::gh_authorization::NoopApprover),
+    );
+
+    let params = json!({ "operation": "branch_push" });
+    let ctx = make_exec_ctx(workspace.path());
+    let out = op.execute(params, ctx).await.expect("should succeed");
+    assert_eq!(out["pushed"], true);
+    assert_eq!(out["remote"], "origin");
+    assert_eq!(out["branch"], "HEAD");
+    assert_eq!(out["set_upstream"], true);
+}
+
+// ─── AC 17: retry on first failure, succeed on second ────────────────────────
+#[tokio::test]
+async fn branch_push_retry_succeeds_on_second_attempt() {
+    let workspace = tempdir().expect("workspace");
+    let git_runner = Arc::new(FlakyGitRunner::new(
+        1,
+        GhOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+        "network error",
+        "WFG-GH-011",
+    ));
+
+    let op = GhOperator::with_all(
+        Arc::new(MockGhRunner::new()),
+        git_runner.clone(),
+        Arc::new(newton_core::workflow::operators::gh_authorization::NoopApprover),
+    );
+
+    let params = json!({
+        "operation": "branch_push",
+        "retry_count": 3,
+        "retry_delay_ms": 1,
+    });
+    let ctx = make_exec_ctx(workspace.path());
+    let out = op
+        .execute(params, ctx)
+        .await
+        .expect("should succeed on 2nd attempt");
+    assert_eq!(out["pushed"], true);
+    assert_eq!(git_runner.call_count(), 2);
+}
+
+// ─── AC 18: all 3 attempts fail → Err with WFG-GH-011 ───────────────────────
+#[tokio::test]
+async fn branch_push_all_attempts_fail_returns_err() {
+    let workspace = tempdir().expect("workspace");
+    let git_runner = Arc::new(FlakyGitRunner::new(
+        10,
+        GhOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+        "push rejected",
+        "WFG-GH-011",
+    ));
+
+    let op = GhOperator::with_all(
+        Arc::new(MockGhRunner::new()),
+        git_runner.clone(),
+        Arc::new(newton_core::workflow::operators::gh_authorization::NoopApprover),
+    );
+
+    let params = json!({
+        "operation": "branch_push",
+        "retry_count": 3,
+        "retry_delay_ms": 1,
+    });
+    let ctx = make_exec_ctx(workspace.path());
+    let err = op
+        .execute(params, ctx)
+        .await
+        .expect_err("should fail after all attempts");
+    assert_eq!(err.code, "WFG-GH-011");
+    assert_eq!(git_runner.call_count(), 3);
+}
+
+// ─── AC 19: spawn error propagated as WFG-GH-010 ────────────────────────────
+#[tokio::test]
+async fn branch_push_spawn_error_propagated() {
+    let workspace = tempdir().expect("workspace");
+    let git_runner = Arc::new(FlakyGitRunner::new(
+        10,
+        GhOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+        "failed to execute git: no such file",
+        "WFG-GH-010",
+    ));
+
+    let op = GhOperator::with_all(
+        Arc::new(MockGhRunner::new()),
+        git_runner.clone(),
+        Arc::new(newton_core::workflow::operators::gh_authorization::NoopApprover),
+    );
+
+    let params = json!({
+        "operation": "branch_push",
+        "retry_count": 3,
+        "retry_delay_ms": 1,
+    });
+    let ctx = make_exec_ctx(workspace.path());
+    let err = op.execute(params, ctx).await.expect_err("should fail");
+    assert_eq!(err.code, "WFG-GH-010");
+}
+
+// ─── AC 20: authorization denied → WFG-GH-AUTH-001, no git call ─────────────
+#[tokio::test]
+async fn branch_push_auth_denied_no_git_call() {
+    use newton_core::workflow::operators::gh_authorization::ApprovalOutcome;
+
+    struct DenyingApprover;
+    #[async_trait]
+    impl AiloopApprover for DenyingApprover {
+        async fn authorize(&self, _req: AuthorizationRequest) -> Result<ApprovalOutcome, AppError> {
+            Ok(ApprovalOutcome::Denied { reason: None })
+        }
+    }
+
+    let workspace = tempdir().expect("workspace");
+    let git_runner = Arc::new(MockGitRunner::new());
+
+    let op = GhOperator::with_all(
+        Arc::new(MockGhRunner::new()),
+        git_runner.clone(),
+        Arc::new(DenyingApprover),
+    );
+
+    let params = json!({
+        "operation": "branch_push",
+        "require_authorization": true,
+    });
+    let ctx = make_exec_ctx(workspace.path());
+    let err = op.execute(params, ctx).await.expect_err("should be denied");
+    assert_eq!(err.code, "WFG-GH-AUTH-001");
+    assert_eq!(git_runner.call_count(), 0, "git runner must not be called");
+}
+
+// ─── AC 21: authorization approved → push proceeds ───────────────────────────
+#[tokio::test]
+async fn branch_push_auth_approved_proceeds() {
+    use newton_core::workflow::operators::gh_authorization::ApprovalOutcome;
+
+    struct ApprovingApprover;
+    #[async_trait]
+    impl AiloopApprover for ApprovingApprover {
+        async fn authorize(&self, _req: AuthorizationRequest) -> Result<ApprovalOutcome, AppError> {
+            Ok(ApprovalOutcome::Approved)
+        }
+    }
+
+    let workspace = tempdir().expect("workspace");
+    let git_runner = Arc::new(MockGitRunner::new());
+    git_runner.add_success(
+        vec!["push", "--set-upstream", "origin", "HEAD"],
+        GhOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+    );
+
+    let op = GhOperator::with_all(
+        Arc::new(MockGhRunner::new()),
+        git_runner.clone(),
+        Arc::new(ApprovingApprover),
+    );
+
+    let params = json!({
+        "operation": "branch_push",
+        "require_authorization": true,
+    });
+    let ctx = make_exec_ctx(workspace.path());
+    let out = op.execute(params, ctx).await.expect("should succeed");
+    assert_eq!(out["pushed"], true);
+    assert_eq!(git_runner.call_count(), 1);
+}
+
+// ─── AC 22/25: fixture runs to terminal: success via MockGitRunner ────────────
+#[tokio::test]
+async fn branch_push_fixture_runs_to_success() {
+    let workspace = tempdir().expect("workspace");
+    let git_runner = Arc::new(MockGitRunner::new());
+    git_runner.add_success(
+        vec!["push", "--set-upstream", "origin", "HEAD"],
+        GhOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+    );
+
+    let yaml = include_str!("../fixtures/workflows/47_gh_operator_branch_push.yaml");
+
+    use std::io::Write as _;
+    let mut workflow_file = tempfile::NamedTempFile::new().expect("workflow temp file");
+    write!(workflow_file, "{yaml}").expect("write workflow");
+
+    let document =
+        newton_core::workflow::schema::load_workflow(workflow_file.path()).expect("load workflow");
+
+    let registry = build_registry_with_git_runner(workspace.path().to_path_buf(), git_runner);
+
+    let summary = newton_core::workflow::executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry,
+        workspace.path().to_path_buf(),
+        newton_core::workflow::executor::ExecutionOverrides {
+            parallel_limit: None,
+            max_time_seconds: None,
+            checkpoint_base_path: None,
+            artifact_base_path: None,
+            max_nesting_depth: None,
+            verbose: false,
+            server_notifier: None,
+            pre_seed_nodes: true,
+        },
+    )
+    .await
+    .expect("workflow should complete successfully");
+
+    assert!(summary.completed_tasks.contains_key("push_branch"));
+    assert_eq!(
+        summary.completed_tasks["push_branch"].output["pushed"],
+        true
+    );
 }

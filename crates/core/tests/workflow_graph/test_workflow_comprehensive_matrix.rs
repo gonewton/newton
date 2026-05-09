@@ -476,6 +476,7 @@ fn command_deps(plans: HashMap<String, VecDeque<MockCommandStep>>) -> BuiltinOpe
         gh_runner: None,
         child_workflow_runner: None,
         gh_approver: None,
+        git_runner: None,
     }
 }
 
@@ -740,6 +741,7 @@ async fn scenario_human_approval_and_decision_path() -> Result<(), String> {
         gh_runner: None,
         child_workflow_runner: None,
         gh_approver: None,
+        git_runner: None,
     };
     let summary = run_yaml_scenario(
         NAME,
@@ -809,6 +811,7 @@ async fn scenario_command_execution_error_fails_workflow() -> Result<(), String>
         gh_runner: None,
         child_workflow_runner: None,
         gh_approver: None,
+        git_runner: None,
     };
     let err = execute_yaml(
         workspace.path(),

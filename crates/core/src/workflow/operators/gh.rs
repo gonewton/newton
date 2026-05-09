@@ -24,6 +24,7 @@ const DEFAULT_AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 pub struct GhOperator {
     runner: Arc<dyn GhRunner>,
     approver: Arc<dyn AiloopApprover>,
+    git_runner: Arc<dyn GitRunner>,
 }
 
 impl GhOperator {
@@ -31,6 +32,7 @@ impl GhOperator {
         Self {
             runner: Arc::new(TokioGhRunner),
             approver: Arc::new(NoopApprover),
+            git_runner: Arc::new(TokioGitRunner),
         }
     }
 
@@ -38,6 +40,7 @@ impl GhOperator {
         Self {
             runner,
             approver: Arc::new(NoopApprover),
+            git_runner: Arc::new(TokioGitRunner),
         }
     }
 
@@ -45,7 +48,23 @@ impl GhOperator {
         runner: Arc<dyn GhRunner>,
         approver: Arc<dyn AiloopApprover>,
     ) -> Self {
-        Self { runner, approver }
+        Self {
+            runner,
+            approver,
+            git_runner: Arc::new(TokioGitRunner),
+        }
+    }
+
+    pub fn with_all(
+        runner: Arc<dyn GhRunner>,
+        git_runner: Arc<dyn GitRunner>,
+        approver: Arc<dyn AiloopApprover>,
+    ) -> Self {
+        Self {
+            runner,
+            approver,
+            git_runner,
+        }
     }
 }
 
@@ -89,6 +108,9 @@ impl Operator for GhOperator {
             "pr_approve" => {
                 validate_pr_approve(map)?;
             }
+            "branch_push" => {
+                validate_branch_push(map)?;
+            }
             _ => {
                 return Err(AppError::new(
                     ErrorCategory::ValidationError,
@@ -124,6 +146,7 @@ impl Operator for GhOperator {
             "pr_create" => self.execute_pr_create(map).await,
             "pr_view" => self.execute_pr_view(map).await,
             "pr_approve" => self.execute_pr_approve(map).await,
+            "branch_push" => self.execute_branch_push(map, &ctx.workspace_path).await,
             _ => Err(AppError::new(
                 ErrorCategory::ValidationError,
                 format!("unknown operation: {operation}"),
@@ -260,6 +283,14 @@ fn derive_default_prompt(operation: &str, map: &Map<String, Value>) -> String {
             } else {
                 format!("Authorize gh pr review --approve: pr={selector}, repository={repo}")
             }
+        }
+        "branch_push" => {
+            let remote = map
+                .get("remote")
+                .and_then(Value::as_str)
+                .unwrap_or("origin");
+            let branch = map.get("branch").and_then(Value::as_str).unwrap_or("HEAD");
+            format!("Authorize git push: remote={remote}, branch={branch}")
         }
         _ => format!("Authorize gh {operation}"),
     }
@@ -398,6 +429,94 @@ fn validate_pr_create(map: &Map<String, Value>) -> Result<(), AppError> {
             ));
         }
     }
+    Ok(())
+}
+
+fn validate_branch_push(map: &Map<String, Value>) -> Result<(), AppError> {
+    if let Some(remote) = map.get("remote").and_then(Value::as_str) {
+        let trimmed = remote.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "remote must not be empty after trimming",
+            )
+            .with_code("WFG-GH-009"));
+        }
+        if trimmed.chars().any(char::is_whitespace) {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "remote must not contain whitespace",
+            )
+            .with_code("WFG-GH-009"));
+        }
+        if trimmed.contains("..") {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "remote must not contain '..'",
+            )
+            .with_code("WFG-GH-009"));
+        }
+        if trimmed.starts_with('-') {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "remote must not start with '-'",
+            )
+            .with_code("WFG-GH-009"));
+        }
+    }
+
+    if let Some(branch) = map.get("branch").and_then(Value::as_str) {
+        if branch.trim().is_empty() {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "branch must not be empty after trimming",
+            )
+            .with_code("WFG-GH-009"));
+        }
+    }
+
+    if let Some(v) = map.get("set_upstream") {
+        if v.as_bool().is_none() {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "set_upstream must be a boolean",
+            ));
+        }
+    }
+
+    if let Some(retry_count) = map.get("retry_count").and_then(Value::as_i64) {
+        if retry_count < 1 {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "retry_count must be at least 1",
+            ));
+        }
+    }
+    if let Some(delay) = map.get("retry_delay_ms").and_then(Value::as_i64) {
+        if delay < 0 {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "retry_delay_ms must be non-negative",
+            ));
+        }
+    }
+    if let Some(mult) = map.get("retry_multiplier").and_then(Value::as_f64) {
+        if mult < 1.0 {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "retry_multiplier must be >= 1.0",
+            ));
+        }
+    }
+    if let Some(jitter) = map.get("retry_jitter_ms").and_then(Value::as_i64) {
+        if jitter < 0 {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                "retry_jitter_ms must be non-negative",
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -960,6 +1079,85 @@ impl GhOperator {
             "pr_number": pr_number
         }))
     }
+
+    async fn execute_branch_push(
+        &self,
+        map: &Map<String, Value>,
+        workspace: &std::path::Path,
+    ) -> Result<Value, AppError> {
+        use rand::Rng;
+        let remote = map
+            .get("remote")
+            .and_then(Value::as_str)
+            .unwrap_or("origin");
+        let branch = map.get("branch").and_then(Value::as_str).unwrap_or("HEAD");
+        let set_upstream = map
+            .get("set_upstream")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+
+        let retry_count = map.get("retry_count").and_then(Value::as_i64).unwrap_or(3) as usize;
+        let retry_delay_ms = map
+            .get("retry_delay_ms")
+            .and_then(Value::as_i64)
+            .unwrap_or(5000) as u64;
+        let multiplier = map
+            .get("retry_multiplier")
+            .and_then(Value::as_f64)
+            .unwrap_or(2.0) as f32;
+        let jitter_ms = map
+            .get("retry_jitter_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let mut delay_ms = retry_delay_ms.min(MAX_RETRY_DELAY_MS);
+
+        let mut args: Vec<&str> = vec!["push"];
+        if set_upstream {
+            args.push("--set-upstream");
+        }
+        args.push(remote);
+        args.push(branch);
+
+        let mut last_error: Option<AppError> = None;
+
+        for attempt in 1..=retry_count {
+            let result = self.git_runner.run(&args, workspace).await;
+
+            match result {
+                Ok(_output) => {
+                    return Ok(json!({
+                        "pushed": true,
+                        "remote": remote,
+                        "branch": branch,
+                        "set_upstream": set_upstream,
+                    }));
+                }
+                Err(e) => {
+                    last_error = Some(e);
+                }
+            }
+
+            if attempt < retry_count {
+                let jitter = if jitter_ms > 0 {
+                    rand::thread_rng().gen_range(0..=jitter_ms)
+                } else {
+                    0
+                };
+                let sleep_ms = delay_ms.saturating_add(jitter).min(MAX_RETRY_DELAY_MS);
+                tracing::warn!(
+                    attempt,
+                    max_attempts = retry_count,
+                    delay_ms = sleep_ms,
+                    "git push failed, retrying after delay"
+                );
+                sleep(Duration::from_millis(sleep_ms)).await;
+                delay_ms = ((delay_ms as f32) * multiplier).min(MAX_RETRY_DELAY_MS as f32) as u64;
+            }
+        }
+
+        Err(last_error
+            .unwrap_or_else(|| AppError::new(ErrorCategory::ToolExecutionError, "git push failed")))
+    }
 }
 
 fn resolve_option_id(board: &Map<String, Value>, status: &str) -> Result<String, AppError> {
@@ -1077,6 +1275,57 @@ impl GhRunner for TokioGhRunner {
                 format!("gh command failed with exit code {exit_code}: {stderr}"),
             )
             .with_code("WFG-GH-004"));
+        }
+
+        Ok(GhOutput {
+            stdout,
+            stderr,
+            exit_code,
+        })
+    }
+}
+
+#[async_trait]
+pub trait GitRunner: Send + Sync + 'static {
+    async fn run(&self, args: &[&str], cwd: &std::path::Path) -> Result<GhOutput, AppError>;
+}
+
+pub struct TokioGitRunner;
+
+pub fn default_git_runner() -> TokioGitRunner {
+    TokioGitRunner
+}
+
+#[async_trait]
+impl GitRunner for TokioGitRunner {
+    async fn run(&self, args: &[&str], cwd: &std::path::Path) -> Result<GhOutput, AppError> {
+        let mut cmd = Command::new("git");
+        for arg in args {
+            cmd.arg(arg);
+        }
+        cmd.current_dir(cwd)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null());
+
+        let output = cmd.output().await.map_err(|e| {
+            AppError::new(
+                ErrorCategory::ToolExecutionError,
+                format!("failed to execute git: {e}"),
+            )
+            .with_code("WFG-GH-010")
+        })?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        if exit_code != 0 {
+            return Err(AppError::new(
+                ErrorCategory::ToolExecutionError,
+                format!("git command failed with exit code {exit_code}: {stderr}"),
+            )
+            .with_code("WFG-GH-011"));
         }
 
         Ok(GhOutput {
