@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Remove `newton monitor` subcommand (issue #303) — BREAKING CHANGE
+
+The `newton monitor` CLI subcommand and its TUI implementation have been removed. Users who relied on `newton monitor` to interact with ailoop channels should use ailoop's own clients directly (for example `ailoop serve`, `ailoop ask`, and `ailoop say`). The `HumanApprovalOperator` and `HumanDecisionOperator` workflow operators continue to integrate with ailoop for in-workflow human gates.
+
 ### Align monitor docs with ailoop unified-port endpoint and migrate Newton skill in-tree (issue #298)
 
 - Documentation, `newton monitor --help`, and monitor config-error messages now use the unified-port topology (`http://127.0.0.1:8080` and `ws://127.0.0.1:8080`) to match upstream ailoop's single-listener default.

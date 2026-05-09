@@ -14,7 +14,6 @@ pub fn kind_for_command(name: &str) -> LogInvocationKind {
         "init" => Init,
         "batch" => Batch,
         "serve" => Serve,
-        "monitor" => Monitor,
         "workflow" => Workflow,
         "runs" => Runs,
         "checkpoint" => Checkpoint,

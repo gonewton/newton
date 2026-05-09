@@ -9,7 +9,6 @@ static ALL_MAIN_COMMANDS: &[&[&str]] = &[
     &["run"],
     &["init"],
     &["batch"],
-    &["monitor"],
     &["workflow"],
     &["resume"],
     &["checkpoint"],
@@ -114,25 +113,6 @@ fn batch_help_documents_poll_interval_not_sleep() {
     let stdout = get_help_output(&["batch"]);
     assert!(stdout.contains("--poll-interval"));
     assert!(!stdout.contains("--sleep "));
-}
-
-#[test]
-fn monitor_help_documents_target_flags() {
-    let stdout = get_help_output(&["monitor"]);
-    for required in ["--ailoop-http", "--ailoop-ws", "--with-api"] {
-        assert!(
-            stdout.contains(required),
-            "monitor help missing {}",
-            required
-        );
-    }
-    for forbidden in ["--http-url", "--ws-url", "--backend"] {
-        assert!(
-            !stdout.contains(forbidden),
-            "monitor help still mentions {}",
-            forbidden
-        );
-    }
 }
 
 #[test]

@@ -23,6 +23,5 @@ WORKFLOW COMMANDS:
   status    Inspect progress of an execution
   report    Summarize learnings from an execution
   error     Diagnose failures during optimization
-  monitor   Monitor live ailoop channels via a terminal UI
   workflow  Operate workflow graphs via deterministic runner
   help      Print this message or the help of the given subcommand(s)

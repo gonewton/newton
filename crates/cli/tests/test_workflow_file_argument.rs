@@ -68,9 +68,6 @@ fn legacy_resume_execution_id_rejected() {
 #[test]
 fn legacy_misc_flags_rejected() {
     assert_unrecognized(&["serve", "--ui-dir", "./ui"]);
-    assert_unrecognized(&["monitor", "--http-url", "http://x"]);
-    assert_unrecognized(&["monitor", "--ws-url", "ws://x"]);
-    assert_unrecognized(&["monitor", "--backend"]);
     assert_unrecognized(&["batch", "p", "--sleep", "30"]);
     assert_unrecognized(&["init", "--template-source", "x/y"]);
     assert_unrecognized(&["checkpoint", "list", "--workspace", ".", "--format-json"]);

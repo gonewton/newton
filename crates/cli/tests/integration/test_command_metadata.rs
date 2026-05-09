@@ -32,7 +32,6 @@ fn category_bindings_match_spec_4_1() {
         ("resume", categories::WORKFLOW),
         ("workflow", categories::WORKFLOW),
         ("serve", categories::OPS),
-        ("monitor", categories::OPS),
         ("batch", categories::OPS),
         ("webhook", categories::OPS),
         ("checkpoint", categories::MAINTENANCE),

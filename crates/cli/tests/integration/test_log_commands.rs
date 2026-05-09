@@ -889,7 +889,6 @@ fn kind_for_command_maps_every_top_level_command() {
     assert_eq!(kind_for_command("init"), LogInvocationKind::Init);
     assert_eq!(kind_for_command("batch"), LogInvocationKind::Batch);
     assert_eq!(kind_for_command("serve"), LogInvocationKind::Serve);
-    assert_eq!(kind_for_command("monitor"), LogInvocationKind::Monitor);
     assert_eq!(kind_for_command("workflow"), LogInvocationKind::Workflow);
     assert_eq!(kind_for_command("runs"), LogInvocationKind::Runs);
     assert_eq!(

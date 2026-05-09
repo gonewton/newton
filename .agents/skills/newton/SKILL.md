@@ -1,8 +1,8 @@
 ---
 name: newton
-description: Newton CLI for workflow YAML graphs (operators, checkpoints, goal gates), batch plan queues, ailoop human-in-the-loop via monitor, and HTTP APIs via serve. Use when running or resuming workflows, validating or linting workflow files, managing checkpoints or artifacts, configuring .newton/configs, or using `workflow validate`, `workflow lint`, `workflow preview`, `workflow graph`, resume, runs, checkpoint, artifact, webhook, monitor, or batch.
+description: Newton CLI for workflow YAML graphs (operators, checkpoints, goal gates), batch plan queues, ailoop human-in-the-loop via HumanApprovalOperator/HumanDecisionOperator, and HTTP APIs via serve. Use when running or resuming workflows, validating or linting workflow files, managing checkpoints or artifacts, configuring .newton/configs, or using `workflow validate`, `workflow lint`, `workflow preview`, `workflow graph`, resume, runs, checkpoint, artifact, webhook, or batch.
 license: Apache-2.0
-compatibility: Requires the newton binary on PATH. newton init requires aikit on PATH for templates. newton monitor requires a running ailoop server unless your workflow docs say otherwise.
+compatibility: Requires the newton binary on PATH. newton init requires aikit on PATH for templates.
 ---
 
 # Newton
@@ -14,7 +14,7 @@ Newton is a **workflow-first** CLI: YAML workflow graphs with operators, checkpo
 - Running or resuming workflows (including graphs that call nested workflows via `WorkflowOperator`), batch plan queues, or webhook-driven runs.
 - Initializing a workspace (`newton init`) and editing `.newton/configs/*.conf`.
 - Validating or explaining workflow YAML; cleaning checkpoints or artifacts.
-- Operating `newton monitor` against ailoop, or `newton serve` for HTTP or WebSocket APIs.
+- Operating `newton serve` for HTTP or WebSocket APIs.
 
 ## Installation
 
@@ -44,7 +44,6 @@ These subcommands match the current CLI (confirm with `newton --help` on your bu
 | `init` | Create `.newton/` and install the default template |
 | `batch` | Process queued plans under `.newton/plan/<project_id>/` |
 | `serve` | HTTP/WebSocket API for workflow state and streaming |
-| `monitor` | Terminal UI for ailoop HIL channels |
 | `workflow validate` | Validate workflow YAML before run |
 | `workflow graph` | Emit Graphviz DOT for the workflow graph (`--format dot --output <PATH>`) |
 | `workflow lint` | Best-practice checks on a workflow file |
@@ -63,7 +62,7 @@ There is **no** `step`, `status`, `report`, or `error` subcommand in current rel
 
 1. **New workspace**: `newton init .` then set `workflow_file` in `.newton/configs/default.conf` when using batch; run workflows with `newton run path/to/workflow.yaml --workspace .`.
 2. **Queue of plans**: Configure `.newton/configs/<project_id>.conf` with `project_root` and `workflow_file`; place plans in `.newton/plan/<project_id>/todo/`; run `newton batch <project_id>`.
-3. **Live HIL**: Start [ailoop](https://github.com/goailoop/ailoop), point `.newton/configs/monitor.conf` at HTTP and WebSocket URLs (or pass `--ailoop-http` / `--ailoop-ws`), then `newton monitor`.
+3. **Live HIL**: Use `HumanApprovalOperator` or `HumanDecisionOperator` in your workflow YAML to pause for human input via [ailoop](https://github.com/goailoop/ailoop). Interact with ailoop channels using ailoop's own clients.
 4. **API / dashboards**: `newton serve` exposes REST, WebSocket, and SSE endpoints for workflow instances and streams (see `newton serve --help` and the Newton repository `README.md` when updated).
 
 ## Usage notes
@@ -82,7 +81,6 @@ newton workflow validate workflow.yaml
 newton workflow lint workflow.yaml
 newton workflow preview workflow.yaml
 newton resume --run-id <uuid> --workspace .
-newton monitor
 ```
 
 ## MCP Server Mode
@@ -153,7 +151,7 @@ newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
 
 ### Tool surface
 
-Tools are derived from the cli-framework `Command` registry (`build_app`) — every command in `REGISTERED_COMMAND_IDS` becomes an MCP tool with name = command id verbatim (e.g. `run`, `init`, `serve`, `health`, `workflow`, `resume`, `checkpoint`, `artifact`, `webhook`, `monitor`, `batch`, `config`, `doctor`, `runs`, `version`). Argument schemas come from each `CommandSpec.args`. Adding a new Newton command auto-publishes a new MCP tool — there is no per-command MCP wiring.
+Tools are derived from the cli-framework `Command` registry (`build_app`) — every command in `REGISTERED_COMMAND_IDS` becomes an MCP tool with name = command id verbatim (e.g. `run`, `init`, `serve`, `health`, `workflow`, `resume`, `checkpoint`, `artifact`, `webhook`, `batch`, `config`, `doctor`, `runs`, `version`). Argument schemas come from each `CommandSpec.args`. Adding a new Newton command auto-publishes a new MCP tool — there is no per-command MCP wiring.
 
 ### Port-conflict policy
 
@@ -169,11 +167,10 @@ A successful bind emits one structured `tracing::info!` event with fields `event
 
 ## References
 
-- [references/configuration.md](references/configuration.md) — `.newton/configs` keys read by Newton (`batch`, `monitor`, `init` stub)
+- [references/configuration.md](references/configuration.md) — `.newton/configs` keys read by Newton (`batch`, `init` stub)
 - [references/init.md](references/init.md)
 - [references/run.md](references/run.md)
 - [references/batch.md](references/batch.md)
-- [references/monitor.md](references/monitor.md)
 
 **Canonical skill:** agent instructions for Newton CLI are maintained in [gonewton/skill](https://github.com/gonewton/skill) (`newton/`). Prefer `newton <cmd> --help` when behavior differs by version.
 

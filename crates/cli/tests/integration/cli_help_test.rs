@@ -109,7 +109,6 @@ fn all_main_commands_have_examples() {
         &["checkpoint"],
         &["artifact"],
         &["webhook"],
-        &["monitor"],
         &["runs"],
     ];
     for command in commands {

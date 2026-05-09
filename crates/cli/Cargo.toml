@@ -24,8 +24,6 @@ newton-core = { path = "../core" }
 newton-types = { path = "../types" }
 newton-backend = { path = "../backend" }
 clap = { workspace = true }
-ratatui = { workspace = true }
-crossterm = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
@@ -39,8 +37,6 @@ reqwest = { workspace = true }
 url = { workspace = true }
 futures = { workspace = true }
 tokio-stream = { workspace = true }
-tokio-tungstenite = { workspace = true }
-tungstenite = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
 tempfile = { workspace = true }
@@ -187,10 +183,6 @@ path = "tests/integration/test_e2e_batch.rs"
 [[test]]
 name = "test_e2e_ops"
 path = "tests/integration/test_e2e_ops.rs"
-
-[[test]]
-name = "test_e2e_serve_monitor"
-path = "tests/integration/test_e2e_serve_monitor.rs"
 
 [[test]]
 name = "test_e2e_webhook"

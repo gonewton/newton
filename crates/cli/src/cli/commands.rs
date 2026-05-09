@@ -2,11 +2,9 @@
 
 use crate::cli::args::{
     ArtifactArgs, ArtifactCommand, BatchArgs, CheckpointArgs, CheckpointCommand, DotArgs,
-    ExplainArgs, KeyValuePair, LintArgs, MonitorArgs, OutputFormat, ResumeArgs, RunArgs, RunsArgs,
-    RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
-    WebhookStatusArgs,
+    ExplainArgs, KeyValuePair, LintArgs, OutputFormat, ResumeArgs, RunArgs, RunsArgs, RunsCommand,
+    ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
 };
-use crate::monitor;
 use crate::Result;
 use anyhow::anyhow;
 use humantime::{format_duration, parse_duration};
@@ -1895,12 +1893,6 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         })?;
 
     Ok(())
-}
-
-/// Launch the interactive Newton monitor TUI that watches ailoop channels.
-pub async fn monitor(args: MonitorArgs) -> Result<()> {
-    tracing::info!("Starting Newton monitor TUI");
-    monitor::run(args).await
 }
 
 async fn sleep_if_needed(duration_secs: u64) {
