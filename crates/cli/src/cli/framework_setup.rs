@@ -8,16 +8,17 @@
 //! Newton uses `McpToolExportPolicy::ExposeMcpOnly` for both MCP entry points
 //! (`newton --mcp-serve` and `newton serve --with-mcp`). Only commands with
 //! `expose_mcp: true` appear in `tools/list`. The curated allowlist is:
-//! `config`, `health`, `resume`, `run`, `runs`, `workflow`.
+//! `config`, `health`, `run`, `workflow`.
 //! All other commands (`init`, `batch`, `serve`, `checkpoint`, `artifact`,
 //! `webhook`, `doctor`, `completion`, `ask`) are excluded from the MCP surface.
+//! `resume` and `runs` are now subcommands of `workflow` (issue #305).
 //!
 //! ## Nested-command note
 //! The framework routes via its root-level `commands` map; nested paths in
 //! `tree_commands` are not yet dispatched by the clap adapter.  Group
-//! commands (workflow, runs, checkpoint, artifact, webhook) are therefore
-//! registered at root level and dispatch internally via their first
-//! positional arg (subcommand).
+//! commands (workflow, webhook) are therefore registered at root level and
+//! dispatch internally via their first positional arg (subcommand).
+//! `workflow` now handles validate/lint/preview/graph/resume/runs/checkpoint/artifact.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -131,60 +132,35 @@ EXAMPLES:
     newton serve --static-ui ./ui/dist";
 
 const WORKFLOW_LONG_ABOUT: &str = "\
-Workflow groups commands that operate on a workflow YAML file: validate, \
-lint, preview, and graph.
+Workflow groups all commands for operating on workflow YAML files and managing \
+the execution lifecycle: validate, lint, preview, graph, resume, runs, \
+checkpoint, and artifact.
 
-Subcommands:
+Subcommands (file-oriented):
   validate <FILE>    Validate a workflow graph definition
   lint <FILE>        Check workflow for best practices and issues
   preview <FILE>     Preview what running the workflow would do
   graph <FILE>       Render the workflow graph (default --format dot)
 
+Subcommands (execution-lifecycle):
+  resume             Continue a workflow from its last checkpoint (--run-id)
+  runs list          List workflow execution history
+  runs show          Show task-by-task detail for a specific run (--run-id)
+  checkpoint list    Display available executions and checkpoint details
+  checkpoint clean   Remove old checkpoint files (--older-than)
+  artifact clean     Remove old execution artifact files (--older-than)
+
 EXAMPLES:
   newton workflow validate workflow.yaml
   newton workflow lint workflow.yaml --format json
   newton workflow preview workflow.yaml --trigger env=prod --format prose
-  newton workflow graph workflow.yaml --output graph.dot";
-
-const RESUME_LONG_ABOUT: &str = "\
-Resume restarts a workflow execution from its last saved checkpoint.
-
-EXAMPLES:
-  Resume a specific run:
-    newton resume --run-id 12345678-1234-1234-1234-123456789abc
-
-  Resume with custom workspace:
-    newton resume --run-id abcdef01-2345-6789-abcd-ef0123456789 --workspace ./project
-
-  Resume and allow workflow definition changes:
-    newton resume --run-id 12345678-1234-1234-1234-123456789abc --allow-workflow-change
-
-FINDING RUN IDs:
-  newton checkpoint list --workspace ./workspace";
-
-const CHECKPOINT_LONG_ABOUT: &str = "\
-Checkpoint provides tools to manage the saved states that allow workflow \
-resumption after interruption.
-
-Subcommands:
-  list   Display available workflow executions and their checkpoint details
-  clean  Remove old checkpoint files to free up disk space
-
-EXAMPLES:
-  newton checkpoint list --workspace ./workspace
-  newton checkpoint list --workspace ./workspace --json
-  newton checkpoint clean --workspace ./workspace --older-than 7d";
-
-const ARTIFACT_LONG_ABOUT: &str = "\
-Artifact provides tools to manage the output files, logs, and execution data \
-generated during workflow execution.
-
-Subcommands:
-  clean  Remove old workflow output files and execution artifacts
-
-EXAMPLES:
-  newton artifact clean --workspace ./workspace --older-than 7d
-  newton artifact clean --workspace ./workspace --older-than 30d";
+  newton workflow graph workflow.yaml --output graph.dot
+  newton workflow resume --run-id 12345678-1234-1234-1234-123456789abc
+  newton workflow runs list --workspace ./workspace
+  newton workflow runs show --run-id <RUN_ID> --task my-task --verbose
+  newton workflow checkpoint list --workspace ./workspace --json
+  newton workflow checkpoint clean --workspace ./workspace --older-than 7d
+  newton workflow artifact clean --workspace ./workspace --older-than 30d";
 
 const WEBHOOK_LONG_ABOUT: &str = "\
 Webhook provides HTTP endpoints that can trigger workflow executions in \
@@ -197,19 +173,6 @@ Subcommands:
 EXAMPLES:
   newton webhook serve --workflow workflow.yaml --workspace ./workspace
   newton webhook status --workflow workflow.yaml --workspace ./workspace";
-
-const RUNS_LONG_ABOUT: &str = "\
-Runs provides access to the per-task execution history stored in .newton/state/workflows/.
-
-Subcommands:
-  list   Enumerate workflow execution history
-  show   Replay task-by-task detail for a specific run
-
-EXAMPLES:
-  newton runs list --last 10
-  newton runs list --workspace ./workspace
-  newton runs show <run-id>
-  newton runs show <run-id> --task <task-id> --verbose";
 
 // ── shared helpers ────────────────────────────────────────────────────────────
 
@@ -646,43 +609,55 @@ fn serve_command() -> Command {
 fn workflow_command() -> Command {
     Command {
         id: "workflow",
-        summary: "Operate on a workflow YAML file (validate/lint/preview/graph)",
-        syntax: Some("<validate|lint|preview|graph> <FILE> [OPTIONS]"),
+        summary: "Operate on workflow YAML files or manage execution lifecycle (validate/lint/preview/graph/resume/runs/checkpoint/artifact)",
+        syntax: Some("<validate|lint|preview|graph|resume|runs|checkpoint|artifact> [SUBCOMMAND] [FILE] [OPTIONS]"),
         category: Some(categories::WORKFLOW),
         spec: Some(Arc::new(CommandSpec {
-            summary: "Operate on a workflow YAML file (validate/lint/preview/graph)",
+            summary: "Operate on workflow YAML files or manage execution lifecycle (validate/lint/preview/graph/resume/runs/checkpoint/artifact)",
             long_about: Some(WORKFLOW_LONG_ABOUT),
             examples: vec![
                 "newton workflow validate workflow.yaml",
                 "newton workflow lint workflow.yaml --format json",
                 "newton workflow preview workflow.yaml --trigger env=prod --format prose",
                 "newton workflow graph workflow.yaml --output graph.dot",
+                "newton workflow resume --run-id 12345678-1234-1234-1234-123456789abc",
+                "newton workflow runs list --workspace ./workspace",
+                "newton workflow runs show --run-id <RUN_ID> --task my-task --verbose",
+                "newton workflow checkpoint list --workspace ./workspace --json",
+                "newton workflow checkpoint clean --workspace ./workspace --older-than 7d",
+                "newton workflow artifact clean --workspace ./workspace --older-than 30d",
             ],
             args: vec![
+                // Positional 1: required first-level subcommand
                 ArgSpec {
                     name: "subcommand",
                     kind: ArgKind::Positional,
                     short: None,
                     long: None,
-                    value_type: ArgValueType::Enum(vec!["validate", "lint", "preview", "graph"]),
+                    value_type: ArgValueType::Enum(vec![
+                        "validate", "lint", "preview", "graph",
+                        "resume", "runs", "checkpoint", "artifact",
+                    ]),
                     cardinality: Cardinality::Required,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Subcommand: validate | lint | preview | graph",
+                    help: "Subcommand: validate | lint | preview | graph | resume | runs | checkpoint | artifact",
                 },
+                // Positional 2: second-level subcommand (runs/checkpoint/artifact) or file path (validate/lint/preview/graph)
                 ArgSpec {
-                    name: "workflow",
+                    name: "subcommand2",
                     kind: ArgKind::Positional,
                     short: None,
                     long: None,
                     value_type: ArgValueType::String,
-                    cardinality: Cardinality::Required,
+                    cardinality: Cardinality::Optional,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Path to the workflow YAML file",
+                    help: "Second-level subcommand (runs: list|show; checkpoint: list|clean; artifact: clean) or workflow file path (validate/lint/preview/graph)",
                 },
+                // Named options — pre-existing
                 ArgSpec {
                     name: "format",
                     kind: ArgKind::Option,
@@ -705,7 +680,7 @@ fn workflow_command() -> Command {
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Workspace root directory (preview)",
+                    help: "Workspace root directory",
                 },
                 ArgSpec {
                     name: "context",
@@ -755,6 +730,91 @@ fn workflow_command() -> Command {
                     requires: vec![],
                     help: "Output destination file (graph)",
                 },
+                // New named options from relocated commands
+                ArgSpec {
+                    name: "run-id",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("run-id"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "UUID of the workflow run to resume (resume) or inspect (runs show)",
+                },
+                ArgSpec {
+                    name: "allow-workflow-change",
+                    kind: ArgKind::Flag,
+                    short: None,
+                    long: Some("allow-workflow-change"),
+                    value_type: ArgValueType::Bool,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Allow resuming even if the workflow definition changed since checkpoint",
+                },
+                ArgSpec {
+                    name: "json",
+                    kind: ArgKind::Flag,
+                    short: None,
+                    long: Some("json"),
+                    value_type: ArgValueType::Bool,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Emit machine-readable JSON (checkpoint list, runs list)",
+                },
+                ArgSpec {
+                    name: "older-than",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("older-than"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Duration threshold for clean (e.g. 7d, 1w, 24h)",
+                },
+                ArgSpec {
+                    name: "last",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("last"),
+                    value_type: ArgValueType::Int,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Limit list to N most recent executions (runs list)",
+                },
+                ArgSpec {
+                    name: "task",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("task"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Filter output to a single task ID (runs show)",
+                },
+                ArgSpec {
+                    name: "verbose",
+                    kind: ArgKind::Flag,
+                    short: Some('v'),
+                    long: Some("verbose"),
+                    value_type: ArgValueType::Bool,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Expand single-task output for debugging (runs show)",
+                },
             ],
             ..Default::default()
         })),
@@ -769,11 +829,21 @@ fn workflow_command() -> Command {
                     .to_string();
                 match subcmd.as_str() {
                     "validate" => {
-                        let workflow = require_workflow_path(&args, "workflow validate")?;
+                        let workflow = get_opt_path(&args, "subcommand2").ok_or_else(|| {
+                            anyhow!(
+                                "{}: workflow file is required for workflow validate",
+                                error_codes::CLI_MIG_002
+                            )
+                        })?;
                         commands::validate(ValidateArgs { workflow }).map_err(anyhow::Error::from)
                     }
                     "lint" => {
-                        let workflow = require_workflow_path(&args, "workflow lint")?;
+                        let workflow = get_opt_path(&args, "subcommand2").ok_or_else(|| {
+                            anyhow!(
+                                "{}: workflow file is required for workflow lint",
+                                error_codes::CLI_MIG_002
+                            )
+                        })?;
                         commands::lint(LintArgs {
                             workflow,
                             format: parse_output_format(&args),
@@ -781,7 +851,12 @@ fn workflow_command() -> Command {
                         .map_err(anyhow::Error::from)
                     }
                     "preview" => {
-                        let workflow = require_workflow_path(&args, "workflow preview")?;
+                        let workflow = get_opt_path(&args, "subcommand2").ok_or_else(|| {
+                            anyhow!(
+                                "{}: workflow file is required for workflow preview",
+                                error_codes::CLI_MIG_002
+                            )
+                        })?;
                         let context = parse_kvp_list(
                             args.named.get("context").map(String::as_str).unwrap_or(""),
                         )?;
@@ -799,7 +874,12 @@ fn workflow_command() -> Command {
                         .map_err(anyhow::Error::from)
                     }
                     "graph" => {
-                        let workflow = require_workflow_path(&args, "workflow graph")?;
+                        let workflow = get_opt_path(&args, "subcommand2").ok_or_else(|| {
+                            anyhow!(
+                                "{}: workflow file is required for workflow graph",
+                                error_codes::CLI_MIG_002
+                            )
+                        })?;
                         let format = match args.named.get("format").map(String::as_str) {
                             Some("dot") | None => GraphFormat::Dot,
                             Some(other) => {
@@ -817,6 +897,147 @@ fn workflow_command() -> Command {
                         })
                         .map_err(anyhow::Error::from)
                     }
+                    "resume" => {
+                        let dto = ResumeArgs::try_from(args)?;
+                        commands::resume(dto).await.map_err(anyhow::Error::from)
+                    }
+                    "checkpoint" => {
+                        let subcmd2 = args
+                            .named
+                            .get("subcommand2")
+                            .map(String::as_str)
+                            .unwrap_or("");
+                        match subcmd2 {
+                            "list" => {
+                                let dto = CheckpointArgs {
+                                    command: CheckpointCommand::List {
+                                        workspace: get_opt_path(&args, "workspace"),
+                                        json: get_bool(&args, "json"),
+                                    },
+                                };
+                                commands::checkpoints(dto).map_err(anyhow::Error::from)
+                            }
+                            "clean" => {
+                                let older_than =
+                                    args.named.get("older-than").cloned().ok_or_else(|| {
+                                        anyhow!(
+                                            "{}: --older-than is required for checkpoint clean",
+                                            error_codes::CLI_MIG_002
+                                        )
+                                    })?;
+                                let dto = CheckpointArgs {
+                                    command: CheckpointCommand::Clean {
+                                        workspace: get_opt_path(&args, "workspace"),
+                                        older_than,
+                                    },
+                                };
+                                commands::checkpoints(dto).map_err(anyhow::Error::from)
+                            }
+                            _ => Err(anyhow!(
+                                "{}: unknown checkpoint subcommand '{}'",
+                                error_codes::CLI_MIG_005,
+                                subcmd2
+                            )),
+                        }
+                    }
+                    "artifact" => {
+                        let subcmd2 = args
+                            .named
+                            .get("subcommand2")
+                            .map(String::as_str)
+                            .unwrap_or("");
+                        match subcmd2 {
+                            "clean" => {
+                                let older_than =
+                                    args.named.get("older-than").cloned().ok_or_else(|| {
+                                        anyhow!(
+                                            "{}: --older-than is required for artifact clean",
+                                            error_codes::CLI_MIG_002
+                                        )
+                                    })?;
+                                let dto = ArtifactArgs {
+                                    command: ArtifactCommand::Clean {
+                                        workspace: get_opt_path(&args, "workspace"),
+                                        older_than,
+                                    },
+                                };
+                                commands::artifacts(dto).map_err(anyhow::Error::from)
+                            }
+                            _ => Err(anyhow!(
+                                "{}: unknown artifact subcommand '{}'",
+                                error_codes::CLI_MIG_005,
+                                subcmd2
+                            )),
+                        }
+                    }
+                    "runs" => {
+                        let subcmd2 = args
+                            .named
+                            .get("subcommand2")
+                            .map(String::as_str)
+                            .unwrap_or("")
+                            .to_string();
+                        match subcmd2.as_str() {
+                            "list" => {
+                                let last = args
+                                    .named
+                                    .get("last")
+                                    .map(|s| {
+                                        let n: usize = s.parse().map_err(|_| {
+                                            anyhow!(
+                                                "LOG-003: runs list --last must be a positive integer"
+                                            )
+                                        })?;
+                                        if n == 0 {
+                                            return Err(anyhow!(
+                                                "LOG-003: runs list --last must be a positive integer"
+                                            ));
+                                        }
+                                        Ok(n)
+                                    })
+                                    .transpose()?;
+                                let dto = RunsArgs {
+                                    command: RunsCommand::List {
+                                        workspace: get_opt_path(&args, "workspace"),
+                                        last,
+                                        json: get_bool(&args, "json"),
+                                    },
+                                };
+                                commands::log(dto).map_err(anyhow::Error::from)
+                            }
+                            "show" => {
+                                let run_id_str =
+                                    args.named.get("run-id").cloned().ok_or_else(|| {
+                                        anyhow!(
+                                            "{}: <RUN_ID> is required for `runs show`",
+                                            error_codes::CLI_MIG_002
+                                        )
+                                    })?;
+                                let run_id = Uuid::parse_str(&run_id_str).map_err(|e| {
+                                    anyhow!(
+                                        "{}: invalid run-id UUID: {}",
+                                        error_codes::CLI_MIG_002,
+                                        e
+                                    )
+                                })?;
+                                let dto = RunsArgs {
+                                    command: RunsCommand::Show {
+                                        run_id,
+                                        workspace: get_opt_path(&args, "workspace"),
+                                        task: get_opt_str(&args, "task"),
+                                        verbose: get_bool(&args, "verbose"),
+                                        json: get_bool(&args, "json"),
+                                    },
+                                };
+                                commands::log(dto).map_err(anyhow::Error::from)
+                            }
+                            _ => Err(anyhow!(
+                                "{}: unknown runs subcommand '{}'",
+                                error_codes::CLI_MIG_005,
+                                subcmd2
+                            )),
+                        }
+                    }
                     _ => Err(anyhow!(
                         "{}: unknown workflow subcommand '{}'",
                         error_codes::CLI_MIG_005,
@@ -826,273 +1047,6 @@ fn workflow_command() -> Command {
             })
         }),
         expose_mcp: true,
-    }
-}
-
-fn resume_command() -> Command {
-    Command {
-        id: "resume",
-        summary: "Continue a workflow that was interrupted or stopped",
-        syntax: Some("--run-id <UUID> [OPTIONS]"),
-        category: Some(categories::WORKFLOW),
-        spec: Some(Arc::new(CommandSpec {
-            summary: "Continue a workflow that was interrupted or stopped",
-            long_about: Some(RESUME_LONG_ABOUT),
-            examples: vec![
-                "newton resume --run-id 12345678-1234-1234-1234-123456789abc",
-                "newton resume --run-id abcdef01-2345-6789-abcd-ef0123456789 --workspace ./project",
-                "newton resume --run-id 12345678-1234-1234-1234-123456789abc --allow-workflow-change",
-            ],
-            args: vec![
-                ArgSpec {
-                    name: "run-id",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("run-id"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Required,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "UUID of the workflow run to resume",
-                },
-                ArgSpec {
-                    name: "workspace",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("workspace"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Workspace root directory",
-                },
-                ArgSpec {
-                    name: "allow-workflow-change",
-                    kind: ArgKind::Flag,
-                    short: None,
-                    long: Some("allow-workflow-change"),
-                    value_type: ArgValueType::Bool,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Allow resuming even if the workflow definition changed since checkpoint",
-                },
-            ],
-            ..Default::default()
-        })),
-        validator: None,
-        execute: Arc::new(|_ctx, args| {
-            Box::pin(async move {
-                let dto = ResumeArgs::try_from(args)?;
-                commands::resume(dto).await.map_err(anyhow::Error::from)
-            })
-        }),
-        expose_mcp: true,
-    }
-}
-
-fn checkpoint_command() -> Command {
-    Command {
-        id: "checkpoint",
-        summary: "Manage and inspect workflow execution checkpoints",
-        syntax: Some("<list|clean> [OPTIONS]"),
-        category: Some(categories::MAINTENANCE),
-        spec: Some(Arc::new(CommandSpec {
-            summary: "Manage and inspect workflow execution checkpoints",
-            long_about: Some(CHECKPOINT_LONG_ABOUT),
-            examples: vec![
-                "newton checkpoint list --workspace ./workspace",
-                "newton checkpoint list --workspace ./workspace --json",
-                "newton checkpoint clean --workspace ./workspace --older-than 7d",
-            ],
-            args: vec![
-                ArgSpec {
-                    name: "subcommand",
-                    kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
-                    value_type: ArgValueType::Enum(vec!["list", "clean"]),
-                    cardinality: Cardinality::Required,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Subcommand: list or clean",
-                },
-                ArgSpec {
-                    name: "workspace",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("workspace"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Workspace path",
-                },
-                ArgSpec {
-                    name: "json",
-                    kind: ArgKind::Flag,
-                    short: None,
-                    long: Some("json"),
-                    value_type: ArgValueType::Bool,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Output as JSON (list only)",
-                },
-                ArgSpec {
-                    name: "older-than",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("older-than"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Duration threshold for clean (e.g. 7d, 1w, 24h); required for clean",
-                },
-            ],
-            ..Default::default()
-        })),
-        validator: None,
-        execute: Arc::new(|_ctx, args| {
-            Box::pin(async move {
-                let subcmd = args
-                    .named
-                    .get("subcommand")
-                    .map(String::as_str)
-                    .unwrap_or("");
-                match subcmd {
-                    "list" => {
-                        let dto = CheckpointArgs {
-                            command: CheckpointCommand::List {
-                                workspace: get_opt_path(&args, "workspace"),
-                                json: get_bool(&args, "json"),
-                            },
-                        };
-                        commands::checkpoints(dto).map_err(anyhow::Error::from)
-                    }
-                    "clean" => {
-                        let older_than =
-                            args.named.get("older-than").cloned().ok_or_else(|| {
-                                anyhow!(
-                                    "{}: --older-than is required for checkpoint clean",
-                                    error_codes::CLI_MIG_002
-                                )
-                            })?;
-                        let dto = CheckpointArgs {
-                            command: CheckpointCommand::Clean {
-                                workspace: get_opt_path(&args, "workspace"),
-                                older_than,
-                            },
-                        };
-                        commands::checkpoints(dto).map_err(anyhow::Error::from)
-                    }
-                    _ => Err(anyhow!(
-                        "{}: unknown checkpoint subcommand '{}'",
-                        error_codes::CLI_MIG_005,
-                        subcmd
-                    )),
-                }
-            })
-        }),
-        expose_mcp: false,
-    }
-}
-
-fn artifact_command() -> Command {
-    Command {
-        id: "artifact",
-        summary: "Manage workflow output files and execution artifacts",
-        syntax: Some("<clean> [OPTIONS]"),
-        category: Some(categories::MAINTENANCE),
-        spec: Some(Arc::new(CommandSpec {
-            summary: "Manage workflow output files and execution artifacts",
-            long_about: Some(ARTIFACT_LONG_ABOUT),
-            examples: vec![
-                "newton artifact clean --workspace ./workspace --older-than 7d",
-                "newton artifact clean --workspace ./workspace --older-than 30d",
-            ],
-            args: vec![
-                ArgSpec {
-                    name: "subcommand",
-                    kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
-                    value_type: ArgValueType::Enum(vec!["clean"]),
-                    cardinality: Cardinality::Required,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Subcommand: clean",
-                },
-                ArgSpec {
-                    name: "workspace",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("workspace"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Workspace path",
-                },
-                ArgSpec {
-                    name: "older-than",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("older-than"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Duration threshold (e.g. 7d, 30d, 1w); required for clean",
-                },
-            ],
-            ..Default::default()
-        })),
-        validator: None,
-        execute: Arc::new(|_ctx, args| {
-            Box::pin(async move {
-                let subcmd = args
-                    .named
-                    .get("subcommand")
-                    .map(String::as_str)
-                    .unwrap_or("");
-                match subcmd {
-                    "clean" => {
-                        let older_than =
-                            args.named.get("older-than").cloned().ok_or_else(|| {
-                                anyhow!(
-                                    "{}: --older-than is required for artifact clean",
-                                    error_codes::CLI_MIG_002
-                                )
-                            })?;
-                        let dto = ArtifactArgs {
-                            command: ArtifactCommand::Clean {
-                                workspace: get_opt_path(&args, "workspace"),
-                                older_than,
-                            },
-                        };
-                        commands::artifacts(dto).map_err(anyhow::Error::from)
-                    }
-                    _ => Err(anyhow!(
-                        "{}: unknown artifact subcommand '{}'",
-                        error_codes::CLI_MIG_005,
-                        subcmd
-                    )),
-                }
-            })
-        }),
-        expose_mcp: false,
     }
 }
 
@@ -1201,177 +1155,6 @@ fn webhook_command() -> Command {
             })
         }),
         expose_mcp: false,
-    }
-}
-
-fn runs_command() -> Command {
-    Command {
-        id: "runs",
-        summary: "List and replay workflow execution history",
-        syntax: Some("<list|show> [OPTIONS]"),
-        category: Some(categories::MAINTENANCE),
-        spec: Some(Arc::new(CommandSpec {
-            summary: "List and replay workflow execution history",
-            long_about: Some(RUNS_LONG_ABOUT),
-            examples: vec![
-                "newton runs list --workspace ./workspace",
-                "newton runs list --last 10 --json",
-                "newton runs show <run-id> --workspace ./workspace",
-                "newton runs show <run-id> --task my-task --verbose",
-            ],
-            args: vec![
-                ArgSpec {
-                    name: "subcommand",
-                    kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
-                    value_type: ArgValueType::Enum(vec!["list", "show"]),
-                    cardinality: Cardinality::Required,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Subcommand: list or show",
-                },
-                ArgSpec {
-                    name: "run-id",
-                    kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Run UUID (required for `runs show`)",
-                },
-                ArgSpec {
-                    name: "workspace",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("workspace"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Workspace path",
-                },
-                ArgSpec {
-                    name: "last",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("last"),
-                    value_type: ArgValueType::Int,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Only list the N most recent executions (list only)",
-                },
-                ArgSpec {
-                    name: "json",
-                    kind: ArgKind::Flag,
-                    short: None,
-                    long: Some("json"),
-                    value_type: ArgValueType::Bool,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Emit machine-readable JSON",
-                },
-                ArgSpec {
-                    name: "task",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("task"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Filter output to a single task ID (show only)",
-                },
-                ArgSpec {
-                    name: "verbose",
-                    kind: ArgKind::Flag,
-                    short: Some('v'),
-                    long: Some("verbose"),
-                    value_type: ArgValueType::Bool,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Expand single-task output for debugging (show only)",
-                },
-            ],
-            ..Default::default()
-        })),
-        validator: None,
-        execute: Arc::new(|_ctx, args| {
-            Box::pin(async move {
-                let subcmd = args
-                    .named
-                    .get("subcommand")
-                    .map(String::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                match subcmd.as_str() {
-                    "list" => {
-                        let last = args
-                            .named
-                            .get("last")
-                            .map(|s| {
-                                let n: usize = s.parse().map_err(|_| {
-                                    anyhow!("LOG-003: runs list --last must be a positive integer")
-                                })?;
-                                if n == 0 {
-                                    return Err(anyhow!(
-                                        "LOG-003: runs list --last must be a positive integer"
-                                    ));
-                                }
-                                Ok(n)
-                            })
-                            .transpose()?;
-                        let dto = RunsArgs {
-                            command: RunsCommand::List {
-                                workspace: get_opt_path(&args, "workspace"),
-                                last,
-                                json: get_bool(&args, "json"),
-                            },
-                        };
-                        commands::log(dto).map_err(anyhow::Error::from)
-                    }
-                    "show" => {
-                        let run_id_str = args.named.get("run-id").cloned().ok_or_else(|| {
-                            anyhow!(
-                                "{}: <RUN_ID> is required for `runs show`",
-                                error_codes::CLI_MIG_002
-                            )
-                        })?;
-                        let run_id = Uuid::parse_str(&run_id_str).map_err(|e| {
-                            anyhow!("{}: invalid run-id UUID: {}", error_codes::CLI_MIG_002, e)
-                        })?;
-                        let dto = RunsArgs {
-                            command: RunsCommand::Show {
-                                run_id,
-                                workspace: get_opt_path(&args, "workspace"),
-                                task: get_opt_str(&args, "task"),
-                                verbose: get_bool(&args, "verbose"),
-                                json: get_bool(&args, "json"),
-                            },
-                        };
-                        commands::log(dto).map_err(anyhow::Error::from)
-                    }
-                    _ => Err(anyhow!(
-                        "{}: unknown runs subcommand '{}'",
-                        error_codes::CLI_MIG_005,
-                        subcmd
-                    )),
-                }
-            })
-        }),
-        expose_mcp: true,
     }
 }
 
@@ -1627,11 +1410,7 @@ fn ask_summaries() -> Vec<ask::CommandSummary> {
         batch_command(),
         serve_command(),
         workflow_command(),
-        resume_command(),
-        checkpoint_command(),
-        artifact_command(),
         webhook_command(),
-        runs_command(),
         health_command(),
         doctor_command(),
         config_command(),
@@ -1724,11 +1503,7 @@ pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
         .register_command(batch_command())?
         .register_command(serve_command())?
         .register_command(workflow_command())?
-        .register_command(resume_command())?
-        .register_command(checkpoint_command())?
-        .register_command(artifact_command())?
         .register_command(webhook_command())?
-        .register_command(runs_command())?
         .register_command(health_command())?
         .register_command(doctor_command())?
         .register_command(config_command())?
@@ -1744,17 +1519,14 @@ pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
 }
 
 /// Stable list of command ids registered by [`build_app`].
+/// `resume`, `runs`, `checkpoint`, and `artifact` are now subcommands of `workflow` (issue #305).
 pub const REGISTERED_COMMAND_IDS: &[&str] = &[
     "run",
     "init",
     "batch",
     "serve",
     "workflow",
-    "resume",
-    "checkpoint",
-    "artifact",
     "webhook",
-    "runs",
     "health",
     "doctor",
     "config",
@@ -1762,9 +1534,9 @@ pub const REGISTERED_COMMAND_IDS: &[&str] = &[
 ];
 
 /// Commands exposed as MCP tools under the ExposeMcpOnly policy (issue #309).
+/// `resume` and `runs` were removed; they are now subcommands of `workflow` (issue #305).
 /// The order is alphabetical for readability; it does not affect registration order.
-pub const MCP_EXPOSED_COMMAND_IDS: &[&str] =
-    &["config", "health", "resume", "run", "runs", "workflow"];
+pub const MCP_EXPOSED_COMMAND_IDS: &[&str] = &["config", "health", "run", "workflow"];
 
 /// Returns every `Command` registered by `build_app`, in registration order.
 pub fn enumerate_commands() -> Vec<Command> {
@@ -1775,11 +1547,7 @@ pub fn enumerate_commands() -> Vec<Command> {
         batch_command(),
         serve_command(),
         workflow_command(),
-        resume_command(),
-        checkpoint_command(),
-        artifact_command(),
         webhook_command(),
-        runs_command(),
         health_command(),
         doctor_command(),
         config_command(),

@@ -19,6 +19,7 @@ fn integ_artifact_clean_removes_old() {
 
     newton()
         .args([
+            "workflow",
             "artifact",
             "clean",
             "--workspace",

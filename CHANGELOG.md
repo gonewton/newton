@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Nest `resume`, `runs`, `checkpoint`, and `artifact` under `workflow` (issue #305) — BREAKING CHANGE
+
+`resume`, `runs`, `checkpoint`, and `artifact` are no longer top-level commands. They are now subcommands of `workflow`. The `MCP_EXPOSED_COMMAND_IDS` list shrinks from 6 to 4 entries (`resume` and `runs` removed; use the `workflow` MCP tool instead). Scripts and MCP callers must be updated in lockstep with the binary — no aliases or deprecation period.
+
+**Migration table**
+
+| Old command | New command |
+|---|---|
+| `newton resume --run-id <UUID>` | `newton workflow resume --run-id <UUID>` |
+| `newton runs list` | `newton workflow runs list` |
+| `newton runs show <RUN_ID>` | `newton workflow runs show --run-id <RUN_ID>` |
+| `newton checkpoint list` | `newton workflow checkpoint list` |
+| `newton checkpoint clean --older-than <D>` | `newton workflow checkpoint clean --older-than <D>` |
+| `newton artifact clean --older-than <D>` | `newton workflow artifact clean --older-than <D>` |
+
+Note: `runs show <RUN_ID>` (positional RUN_ID) is now `runs show --run-id <RUN_ID>` (named option).
+
+**MCP callers:** tool IDs `resume` and `runs` no longer exist. Use the `workflow` tool with `subcommand=resume` or `subcommand=runs` and `subcommand2=list|show`.
+
 ### Remove `newton monitor` subcommand (issue #303) — BREAKING CHANGE
 
 The `newton monitor` CLI subcommand and its TUI implementation have been removed. Users who relied on `newton monitor` to interact with ailoop channels should use ailoop's own clients directly (for example `ailoop serve`, `ailoop ask`, and `ailoop say`). The `HumanApprovalOperator` and `HumanDecisionOperator` workflow operators continue to integrate with ailoop for in-workflow human gates.

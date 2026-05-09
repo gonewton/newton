@@ -14,6 +14,7 @@ fn integ_checkpoint_list_json_two_runs() {
 
     let out = newton()
         .args([
+            "workflow",
             "checkpoint",
             "list",
             "--json",
@@ -63,6 +64,7 @@ fn integ_checkpoint_clean_older_than() {
 
     newton()
         .args([
+            "workflow",
             "checkpoint",
             "clean",
             "--workspace",
