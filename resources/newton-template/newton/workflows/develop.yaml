@@ -446,6 +446,15 @@ workflow:
         status: "In review"
         on_error: warn
       transitions:
+        - to: gh_approve_pr
+
+    - id: gh_approve_pr
+      operator: GhOperator
+      params:
+        operation: pr_approve
+        pr_number:
+          $expr: 'tasks.gh_create_pr.output.pr_number'
+      transitions:
         - to: poll_pr
 
     - id: poll_pr
