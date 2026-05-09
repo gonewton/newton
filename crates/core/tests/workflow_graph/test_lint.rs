@@ -171,3 +171,208 @@ fn severity_rank(severity: LintSeverity) -> u8 {
         LintSeverity::Info => 1,
     }
 }
+
+#[test]
+fn lint_120_result_map_references_undeclared_task() {
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: start
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    io:
+      result_map:
+        status: "$expr: tasks['nonexistent'].output.status"
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+    let file = NamedTempFile::new().expect("temp file");
+    fs::write(file.path(), workflow).expect("write workflow");
+    let document = schema::parse_workflow(file.path()).expect("parse workflow");
+    let results = LintRegistry::new().run(&document);
+    assert!(
+        results.iter().any(|r| r.code == "WFG-LINT-120"),
+        "expected WFG-LINT-120 for result_map referencing undeclared task, got: {results:?}"
+    );
+}
+
+#[test]
+fn lint_120_no_false_positive_for_declared_task() {
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: start
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    io:
+      result_map:
+        status: "$expr: tasks['start'].output.status"
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+    let file = NamedTempFile::new().expect("temp file");
+    fs::write(file.path(), workflow).expect("write workflow");
+    let document = schema::parse_workflow(file.path()).expect("parse workflow");
+    let results = LintRegistry::new().run(&document);
+    assert!(
+        !results.iter().any(|r| r.code == "WFG-LINT-120"),
+        "expected no WFG-LINT-120 for declared task reference, got: {results:?}"
+    );
+}
+
+#[test]
+fn lint_121_input_schema_missing_type_object() {
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: start
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    io:
+      input_schema:
+        properties:
+          repo:
+            type: string
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+    let file = NamedTempFile::new().expect("temp file");
+    fs::write(file.path(), workflow).expect("write workflow");
+    let document = schema::parse_workflow(file.path()).expect("parse workflow");
+    let results = LintRegistry::new().run(&document);
+    assert!(
+        results.iter().any(|r| r.code == "WFG-LINT-121"),
+        "expected WFG-LINT-121 for input_schema without type:object, got: {results:?}"
+    );
+}
+
+#[test]
+fn lint_121_no_false_positive_with_type_object() {
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: start
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    io:
+      input_schema:
+        type: object
+        properties:
+          repo:
+            type: string
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+    let file = NamedTempFile::new().expect("temp file");
+    fs::write(file.path(), workflow).expect("write workflow");
+    let document = schema::parse_workflow(file.path()).expect("parse workflow");
+    let results = LintRegistry::new().run(&document);
+    assert!(
+        !results.iter().any(|r| r.code == "WFG-LINT-121"),
+        "expected no WFG-LINT-121 for schema with type:object, got: {results:?}"
+    );
+}
+
+#[test]
+fn lint_122_output_schema_without_result_map() {
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: start
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    io:
+      output_schema:
+        type: object
+        properties:
+          status:
+            type: string
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+    let file = NamedTempFile::new().expect("temp file");
+    fs::write(file.path(), workflow).expect("write workflow");
+    let document = schema::parse_workflow(file.path()).expect("parse workflow");
+    let results = LintRegistry::new().run(&document);
+    assert!(
+        results.iter().any(|r| r.code == "WFG-LINT-122"),
+        "expected WFG-LINT-122 for output_schema without result_map, got: {results:?}"
+    );
+}
+
+#[test]
+fn lint_122_no_false_positive_when_result_map_present() {
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: start
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    io:
+      output_schema:
+        type: object
+        properties:
+          status:
+            type: string
+      result_map:
+        status: ok
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+    let file = NamedTempFile::new().expect("temp file");
+    fs::write(file.path(), workflow).expect("write workflow");
+    let document = schema::parse_workflow(file.path()).expect("parse workflow");
+    let results = LintRegistry::new().run(&document);
+    assert!(
+        !results.iter().any(|r| r.code == "WFG-LINT-122"),
+        "expected no WFG-LINT-122 when result_map is present, got: {results:?}"
+    );
+}

@@ -89,7 +89,7 @@ dependencies = [
  "dirs",
  "fs2",
  "futures-util",
- "jsonschema",
+ "jsonschema 0.17.1",
  "reqwest 0.11.27",
  "serde",
  "serde_json",
@@ -1225,6 +1225,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fancy-regex"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "531e46835a22af56d1e3b66f04844bed63158bc094a628bec1d321d9b4c44bf2"
+dependencies = [
+ "bit-set",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1313,6 +1324,16 @@ name = "fraction"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3027ae1df8d41b4bed2241c8fdad4acc1e7af60c8e17743534b545e77182d678"
+dependencies = [
+ "lazy_static",
+ "num",
+]
+
+[[package]]
+name = "fraction"
+version = "0.15.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e076045bb43dac435333ed5f04caf35c7463631d0dae2deb2638d94dd0a5b872"
 dependencies = [
  "lazy_static",
  "num",
@@ -2125,8 +2146,8 @@ dependencies = [
  "base64 0.21.7",
  "bytecount",
  "clap",
- "fancy-regex",
- "fraction",
+ "fancy-regex 0.11.0",
+ "fraction 0.13.1",
  "getrandom 0.2.17",
  "iso8601",
  "itoa",
@@ -2137,6 +2158,34 @@ dependencies = [
  "percent-encoding",
  "regex",
  "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "time",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "jsonschema"
+version = "0.18.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa0f4bea31643be4c6a678e9aa4ae44f0db9e5609d5ca9dc9083d06eb3e9a27a"
+dependencies = [
+ "ahash",
+ "anyhow",
+ "base64 0.22.1",
+ "bytecount",
+ "fancy-regex 0.13.0",
+ "fraction 0.15.4",
+ "getrandom 0.2.17",
+ "iso8601",
+ "itoa",
+ "memchr",
+ "num-cmp",
+ "once_cell",
+ "parking_lot",
+ "percent-encoding",
+ "regex",
  "serde",
  "serde_json",
  "time",
@@ -2463,6 +2512,7 @@ dependencies = [
  "humantime",
  "indexmap",
  "insta",
+ "jsonschema 0.18.3",
  "newton-backend",
  "newton-types",
  "opentelemetry",

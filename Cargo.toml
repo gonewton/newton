@@ -67,3 +67,4 @@ predicates = "3.1"
 tokio-test = "0.4.5"
 wiremock = "0.6"
 predicates-core = "1"
+jsonschema = { version = "0.18", default-features = false }

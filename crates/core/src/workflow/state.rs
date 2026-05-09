@@ -191,6 +191,9 @@ pub struct WorkflowCheckpoint {
     #[serde(default)]
     pub version: u32,
     pub runtime_tasks: Option<Vec<WorkflowTask>>,
+    /// Serialized IoBlock at the time of the original run; used for resume guard.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub io_snapshot: Option<Value>,
 }
 
 impl WorkflowCheckpoint {
@@ -218,6 +221,7 @@ impl WorkflowCheckpoint {
             completed,
             version: 1,          // defaults to 1 for backward compatibility
             runtime_tasks: None, // not provided in the existing new method
+            io_snapshot: None,
         }
     }
 
@@ -246,6 +250,7 @@ impl WorkflowCheckpoint {
             completed,
             version: 2,
             runtime_tasks: Some(runtime_tasks),
+            io_snapshot: None,
         }
     }
 }

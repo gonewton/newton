@@ -4,6 +4,7 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::expression::ExpressionEngine;
 use crate::workflow::transform;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -65,6 +66,43 @@ pub struct WorkflowDefinition {
     pub tasks: Vec<TaskOrMacro>,
 }
 
+/// Sub-settings for workflow I/O contract.
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+pub struct IoSettings {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_input_bytes: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_bytes: Option<usize>,
+}
+
+impl IoSettings {
+    fn is_empty(&self) -> bool {
+        self.max_input_bytes.is_none() && self.max_output_bytes.is_none()
+    }
+}
+
+/// Workflow-level I/O contract block (optional).
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+pub struct IoBlock {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_map: Option<IndexMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_schema: Option<Value>,
+}
+
+impl IoBlock {
+    fn is_empty(&self) -> bool {
+        self.input_schema.is_none()
+            && self.output_schema.is_none()
+            && self.result_map.is_none()
+            && self.error_schema.is_none()
+    }
+}
+
 /// Execution settings for a workflow graph.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -102,6 +140,12 @@ pub struct WorkflowSettings {
     /// Individual agent tasks can override this setting.
     #[serde(default)]
     pub stream_agent_stdout: bool,
+    /// Workflow I/O contract: input/output schemas and result mapping.
+    #[serde(default, skip_serializing_if = "IoBlock::is_empty")]
+    pub io: IoBlock,
+    /// Workflow I/O size limits.
+    #[serde(default, skip_serializing_if = "IoSettings::is_empty")]
+    pub io_settings: IoSettings,
 }
 
 impl Default for WorkflowSettings {
@@ -124,6 +168,8 @@ impl Default for WorkflowSettings {
             default_engine: None,
             model_stylesheet: None,
             stream_agent_stdout: false,
+            io: IoBlock::default(),
+            io_settings: IoSettings::default(),
         }
     }
 }

@@ -74,7 +74,7 @@ EXAMPLES:
     newton run workflow.yaml input.txt --workspace ./workspace --verbose
 
   With base trigger payload from a JSON file:
-    newton run workflow.yaml --trigger-file payload.json --trigger override=1";
+    newton run workflow.yaml --parameters-json payload.json --trigger override=1";
 
 const INIT_LONG_ABOUT: &str = "\
 Init creates the .newton workspace layout, installs the Newton template with \
@@ -342,16 +342,28 @@ fn run_command() -> Command {
                     help: "Merge KEY=VALUE into workflow.context at runtime (repeatable)",
                 },
                 ArgSpec {
-                    name: "trigger-file",
+                    name: "parameters-json",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("trigger-file"),
+                    long: Some("parameters-json"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Load JSON object as base trigger payload before --trigger overrides",
+                    help: "Load JSON object as base parameters before --trigger overrides. Accepts a bare path or @path syntax.",
+                },
+                ArgSpec {
+                    name: "emit-completion-json",
+                    kind: ArgKind::Flag,
+                    short: None,
+                    long: Some("emit-completion-json"),
+                    value_type: ArgValueType::Bool,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Write structured completion envelope to stdout as JSON",
                 },
                 ArgSpec {
                     name: "parallel-limit",
@@ -795,16 +807,16 @@ fn workflow_command() -> Command {
                     help: "Trigger payload override KEY=VALUE (preview)",
                 },
                 ArgSpec {
-                    name: "trigger-file",
+                    name: "parameters-json",
                     kind: ArgKind::Option,
                     short: None,
-                    long: Some("trigger-file"),
+                    long: Some("parameters-json"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "JSON file with base trigger payload (preview)",
+                    help: "JSON file with base trigger payload (preview). Accepts a bare path or @path syntax.",
                 },
                 ArgSpec {
                     name: "output",
@@ -857,7 +869,7 @@ fn workflow_command() -> Command {
                             context,
                             trigger,
                             format: parse_output_format(&args),
-                            trigger_file: get_opt_path(&args, "trigger-file"),
+                            parameters_json: get_opt_path(&args, "parameters-json"),
                         })
                         .map_err(anyhow::Error::from)
                     }
@@ -1860,7 +1872,8 @@ impl TryFrom<CommandArgs> for RunArgs {
         let workspace = get_opt_path(&args, "workspace");
         let trigger = parse_kvp_list(args.named.get("trigger").map(String::as_str).unwrap_or(""))?;
         let context = parse_kvp_list(args.named.get("context").map(String::as_str).unwrap_or(""))?;
-        let trigger_file = get_opt_path(&args, "trigger-file");
+        let parameters_json = get_opt_path(&args, "parameters-json");
+        let emit_completion_json = get_bool(&args, "emit-completion-json");
         let parallel_limit = args
             .named
             .get("parallel-limit")
@@ -1893,7 +1906,8 @@ impl TryFrom<CommandArgs> for RunArgs {
             workspace,
             trigger,
             context,
-            trigger_file,
+            parameters_json,
+            emit_completion_json,
             parallel_limit,
             timeout_seconds,
             verbose,

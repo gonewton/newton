@@ -84,9 +84,14 @@ pub struct RunArgs {
     #[arg(long = "context", value_name = "KEY=VALUE")]
     pub context: Vec<KeyValuePair>,
 
-    /// Load JSON object as base trigger payload before --trigger overrides
-    #[arg(long = "trigger-file", value_name = "PATH")]
-    pub trigger_file: Option<PathBuf>,
+    /// Load JSON object as base parameters before --trigger overrides.
+    /// Accepts a bare path or @path syntax.
+    #[arg(long = "parameters-json", value_name = "PATH")]
+    pub parameters_json: Option<PathBuf>,
+
+    /// Write structured completion envelope to stdout as JSON.
+    #[arg(long = "emit-completion-json")]
+    pub emit_completion_json: bool,
 
     /// Runtime override for bounded task concurrency
     #[arg(long, value_name = "N")]
@@ -213,9 +218,10 @@ pub struct ExplainArgs {
     #[arg(long, value_enum, default_value = "text")]
     pub format: OutputFormat,
 
-    /// Path to JSON file containing manual trigger payload (base)
-    #[arg(long = "trigger-file", value_name = "PATH")]
-    pub trigger_file: Option<PathBuf>,
+    /// Path to JSON file containing manual trigger payload (base).
+    /// Accepts a bare path or @path syntax.
+    #[arg(long = "parameters-json", value_name = "PATH")]
+    pub parameters_json: Option<PathBuf>,
 }
 
 #[derive(Args, Clone)]

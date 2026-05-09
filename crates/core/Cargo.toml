@@ -62,6 +62,7 @@ subtle = { workspace = true }
 dashmap = { workspace = true }
 async-stream = { workspace = true }
 tokio-stream = { workspace = true }
+jsonschema = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
@@ -173,3 +174,7 @@ path = "tests/unit/test_engine_map_run_error.rs"
 [[test]]
 name = "test_lints_no_wildcard_payload_match"
 path = "tests/lints/no_wildcard_payload_match.rs"
+
+[[test]]
+name = "test_workflow_io_contract"
+path = "tests/workflow_graph/test_io_contract.rs"

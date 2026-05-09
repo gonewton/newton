@@ -64,7 +64,7 @@ fn run_help_documents_target_flags_only() {
     for required in [
         "--trigger",
         "--context",
-        "--trigger-file",
+        "--parameters-json",
         "--timeout",
         "--workspace",
     ] {
