@@ -10,11 +10,7 @@ static ALL_MAIN_COMMANDS: &[&[&str]] = &[
     &["init"],
     &["batch"],
     &["workflow"],
-    &["resume"],
-    &["checkpoint"],
-    &["artifact"],
     &["webhook"],
-    &["runs"],
     &["serve"],
 ];
 
@@ -103,7 +99,7 @@ fn workflow_subcommand_help_works() {
 
 #[test]
 fn resume_help_documents_run_id_flag() {
-    let stdout = get_help_output(&["resume"]);
+    let stdout = get_help_output(&["workflow"]);
     assert!(stdout.contains("--run-id"));
     assert!(!stdout.contains("--execution-id"));
 }

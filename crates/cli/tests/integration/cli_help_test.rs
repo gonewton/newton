@@ -105,11 +105,7 @@ fn all_main_commands_have_examples() {
         &["batch"],
         &["serve"],
         &["workflow"],
-        &["resume"],
-        &["checkpoint"],
-        &["artifact"],
         &["webhook"],
-        &["runs"],
     ];
     for command in commands {
         let stdout = help_output(command);

@@ -13,7 +13,7 @@ You can still think in terms of **evaluate → advise → act** when designing w
 
 Newton includes a production workflow runner with YAML-defined tasks and deterministic execution semantics:
 
-- Workflow commands: `newton run`, `newton workflow {validate|lint|preview|graph}`, `newton resume`, `newton runs {list|show}`, `newton checkpoint {list|clean}`, `newton artifact clean`, `newton webhook {serve|status}`
+- Workflow commands: `newton run`, `newton workflow {validate|lint|preview|graph|resume|runs list|runs show|checkpoint list|checkpoint clean|artifact clean}`, `newton webhook {serve|status}`
 - Safety checks: workflow lint, early validation of expressions, guarded shell usage, reachability checks
 - Deterministic completion: goal gates, terminal tasks, explicit completion policy, stable error codes
 - Runtime durability: checkpoint persistence, resume support, artifact routing/cleanup, execution warnings
@@ -300,25 +300,25 @@ Analyzes a workflow against Newton's best-practice rules — performance anti-pa
 
 Produces detailed, human-readable documentation about what the workflow does and how it will execute, covering step-by-step flow, dependencies, configuration effects, resource constraints, and expected inputs/outputs. Accepts `--trigger`, `--trigger-file`, `--context`, and `--workspace` to mirror the `run` invocation. Output formats: `text` (default), `prose`, and `json`.
 
-### `resume`
+### `workflow resume`
 
-Restarts a workflow execution from its last saved checkpoint, useful after interruptions, parameter changes, or maintenance windows. Requires `--run-id <UUID>`; pass `--allow-workflow-change` to override the default safety check that the workflow definition is unchanged since the checkpoint.
+Restarts a workflow execution from its last saved checkpoint, useful after interruptions, parameter changes, or maintenance windows. Requires `--run-id <UUID>`; pass `--allow-workflow-change` to override the default safety check that the workflow definition is unchanged since the checkpoint. Example: `newton workflow resume --run-id <UUID> --workspace .`.
 
-### `checkpoint`
+### `workflow checkpoint`
 
-`checkpoint list` and `checkpoint clean` manage saved workflow states that allow resumption after interruption. Use `newton checkpoint list --workspace ./workspace --json` for a machine-readable list and `newton checkpoint clean --workspace ./workspace --older-than 7d` to remove old checkpoints. Checkpoints live under `.newton/checkpoints/` in the workspace.
+`checkpoint list` and `checkpoint clean` manage saved workflow states that allow resumption after interruption. Use `newton workflow checkpoint list --workspace ./workspace --json` for a machine-readable list and `newton workflow checkpoint clean --workspace ./workspace --older-than 7d` to remove old checkpoints. Checkpoints live under `.newton/checkpoints/` in the workspace.
 
-### `artifact`
+### `workflow artifact`
 
-`artifact clean` removes the files, logs, and output data generated during workflow execution. Use `newton artifact clean --workspace ./workspace --older-than 7d` to reclaim disk space; retention strings accept days (`7d`), weeks (`1w`), or hours (`24h`). Artifacts live under `.newton/artifacts/`.
+`artifact clean` removes the files, logs, and output data generated during workflow execution. Use `newton workflow artifact clean --workspace ./workspace --older-than 7d` to reclaim disk space; retention strings accept days (`7d`), weeks (`1w`), or hours (`24h`). Artifacts live under `.newton/artifacts/`.
 
 ### `webhook`
 
 Webhook exposes HTTP endpoints that trigger workflow executions in response to external events (Git hosting services, CI/CD platforms, monitoring/alerting systems, and custom integrations). Use `newton webhook serve --workflow <PATH> --workspace <PATH>` to start the server and `newton webhook status --workflow <PATH> --workspace <PATH>` to inspect configuration.
 
-### `runs`
+### `workflow runs`
 
-`runs list` and `runs show` provide access to per-task execution history stored in `.newton/state/workflows/`. Use `newton runs list` to enumerate runs and `newton runs show <RUN_ID>` to display resolved inputs, operators, and outputs for every task. See **Logging → Reviewing execution history** for examples.
+`runs list` and `runs show` provide access to per-task execution history stored in `.newton/state/workflows/`. Use `newton workflow runs list` to enumerate runs and `newton workflow runs show --run-id <RUN_ID>` to display resolved inputs, operators, and outputs for every task. See **Logging → Reviewing execution history** for examples.
 
 ### Plans and the batch queue
 
@@ -416,29 +416,29 @@ Newton records each workflow run to `.newton/state/workflows/<execution-id>/`. U
 
 ```bash
 # List recent runs in the current workspace (newest first)
-newton runs list
+newton workflow runs list
 
 # Limit output to the last 5 runs
-newton runs list --last 5
+newton workflow runs list --last 5
 
 # Show task-by-task replay for a specific run
-newton runs show <RUN_ID>
+newton workflow runs show --run-id <RUN_ID>
 
 # Filter to a single task and show resolved parameters
-newton runs show <RUN_ID> --task my-task-id --verbose
+newton workflow runs show --run-id <RUN_ID> --task my-task-id --verbose
 
 # Output as JSON (for scripting)
-newton runs list --json
-newton runs show <RUN_ID> --json
+newton workflow runs list --json
+newton workflow runs show --run-id <RUN_ID> --json
 ```
 
 When a task fails, Newton prints a hint to stdout:
 
 ```
-newton: task failed run_id=<UUID> task_id=<TASK_ID> inspect: newton runs show <UUID> --task <TASK_ID>
+newton: task failed run_id=<UUID> task_id=<TASK_ID> inspect: newton workflow runs show --run-id <UUID> --task <TASK_ID>
 ```
 
-If you invoke `newton runs show` from a directory other than the workspace root, pass `--workspace <path>` so Newton can locate the execution state (e.g. `newton runs show <UUID> --task <TASK_ID> --workspace /path/to/workspace`).
+If you invoke `newton workflow runs show` from a directory other than the workspace root, pass `--workspace <path>` so Newton can locate the execution state (e.g. `newton workflow runs show --run-id <UUID> --task <TASK_ID> --workspace /path/to/workspace`).
 
 ### Troubleshooting logging
 

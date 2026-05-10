@@ -36,5 +36,5 @@ newton run workflow.yaml --server http://127.0.0.1:8080 --workspace .
 ## Notes
 
 - Use `newton validate`, `newton lint`, and `newton explain` on the same file to check or document behavior before running.
-- Resume after interruption with `newton resume --execution-id <uuid>` once checkpoints exist for that execution.
+- Resume after interruption with `newton workflow resume --run-id <uuid>` once checkpoints exist for that execution.
 - The classic evaluator-only or advisor-only loop without workflow YAML is not the current execution model; express control flow in workflow YAML instead.

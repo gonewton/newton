@@ -68,6 +68,7 @@ fn integ_resume_run_id() {
 
     let out = newton()
         .args([
+            "workflow",
             "resume",
             "--run-id",
             RESUME_RUN_ID,
@@ -76,13 +77,13 @@ fn integ_resume_run_id() {
             "--allow-workflow-change",
         ])
         .output()
-        .expect("newton resume should execute");
+        .expect("newton workflow resume should execute");
 
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         out.status.success(),
-        "newton resume should succeed; stdout={stdout}, stderr={stderr}"
+        "newton workflow resume should succeed; stdout={stdout}, stderr={stderr}"
     );
     assert!(
         stdout.contains(RESUME_RUN_ID),

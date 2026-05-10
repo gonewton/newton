@@ -1,6 +1,6 @@
 ---
 name: newton
-description: Newton CLI for workflow YAML graphs (operators, checkpoints, goal gates), batch plan queues, ailoop human-in-the-loop via HumanApprovalOperator/HumanDecisionOperator, and HTTP APIs via serve. Use when running or resuming workflows, validating or linting workflow files, managing checkpoints or artifacts, configuring .newton/configs, or using `workflow validate`, `workflow lint`, `workflow preview`, `workflow graph`, resume, runs, checkpoint, artifact, webhook, or batch.
+description: Newton CLI for workflow YAML graphs (operators, checkpoints, goal gates), batch plan queues, ailoop human-in-the-loop via HumanApprovalOperator/HumanDecisionOperator, and HTTP APIs via serve. Use when running or resuming workflows, validating or linting workflow files, managing checkpoints or artifacts, configuring .newton/configs, or using `workflow validate`, `workflow lint`, `workflow preview`, `workflow graph`, `workflow resume`, `workflow runs`, `workflow checkpoint`, `workflow artifact`, webhook, or batch.
 license: Apache-2.0
 compatibility: Requires the newton binary on PATH. newton init requires aikit on PATH for templates.
 ---
@@ -48,10 +48,10 @@ These subcommands match the current CLI (confirm with `newton --help` on your bu
 | `workflow graph` | Emit Graphviz DOT for the workflow graph (`--format dot --output <PATH>`) |
 | `workflow lint` | Best-practice checks on a workflow file |
 | `workflow preview` | Human-readable description of workflow behavior |
-| `resume` | Continue from a checkpoint (`--run-id`) |
-| `runs` | `list` past runs / `show <RUN_ID>` task replay |
-| `checkpoint` | `list` / `clean` checkpoint data |
-| `artifact` | `clean` old execution artifacts |
+| `workflow resume` | Continue from a checkpoint (`--run-id`) |
+| `workflow runs` | `list` past runs / `show --run-id <RUN_ID>` task replay |
+| `workflow checkpoint` | `list` / `clean` checkpoint data |
+| `workflow artifact` | `clean` old execution artifacts |
 | `webhook` | `serve` or `status` for webhook-triggered runs (`--workflow <PATH>`) |
 
 For commands without a dedicated reference file below, use `newton <cmd> --help` as the source of truth for flags and examples.
@@ -80,7 +80,7 @@ newton batch my-project --workspace ~/ws --once
 newton workflow validate workflow.yaml
 newton workflow lint workflow.yaml
 newton workflow preview workflow.yaml
-newton resume --run-id <uuid> --workspace .
+newton workflow resume --run-id <uuid> --workspace .
 ```
 
 ## MCP Server Mode
@@ -151,18 +151,16 @@ newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
 
 ### Tool surface
 
-Newton uses `McpToolExportPolicy::ExposeMcpOnly` for both MCP entry points. Only the following six commands are exposed as MCP tools (issue #309):
+Newton uses `McpToolExportPolicy::ExposeMcpOnly` for both MCP entry points. Only the following four commands are exposed as MCP tools (issues #309, #305):
 
 | MCP tool name | Command | Notes |
 | --- | --- | --- |
 | `newton.run` | `run` | Execute a workflow graph from YAML |
-| `newton.workflow` | `workflow` | validate / lint / preview / graph via positional `subcommand` |
-| `newton.resume` | `resume` | Resume interrupted runs by UUID |
-| `newton.runs` | `runs` | List and replay execution history via positional `subcommand` |
+| `newton.workflow` | `workflow` | validate / lint / preview / graph / resume / runs / checkpoint / artifact via positional `subcommand` |
 | `newton.health` | `health` | Liveness probe |
 | `newton.config` | `config` | Redacted configuration inspection |
 
-The following commands are **NOT** available as MCP tools: `newton.init`, `newton.batch`, `newton.serve`, `newton.checkpoint`, `newton.artifact`, `newton.webhook`, `newton.doctor`, `newton.completion`. Adding a new Newton command does **not** automatically expose it as an MCP tool — it must have `expose_mcp: true` set in its `Command` definition.
+The following commands are **NOT** available as MCP tools: `newton.init`, `newton.batch`, `newton.serve`, `newton.webhook`, `newton.doctor`, `newton.completion`. Adding a new Newton command does **not** automatically expose it as an MCP tool — it must have `expose_mcp: true` set in its `Command` definition.
 
 ### Port-conflict policy
 

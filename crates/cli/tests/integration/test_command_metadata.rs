@@ -29,14 +29,10 @@ fn category_bindings_match_spec_4_1() {
     // accidental category drift should fail this test loudly.
     let expected: &[(&str, &str)] = &[
         ("run", categories::WORKFLOW),
-        ("resume", categories::WORKFLOW),
         ("workflow", categories::WORKFLOW),
         ("serve", categories::OPS),
         ("batch", categories::OPS),
         ("webhook", categories::OPS),
-        ("checkpoint", categories::MAINTENANCE),
-        ("artifact", categories::MAINTENANCE),
-        ("runs", categories::MAINTENANCE),
         ("init", categories::WORKSPACE),
         ("health", categories::OPERATIONAL),
         ("doctor", categories::OPERATIONAL),

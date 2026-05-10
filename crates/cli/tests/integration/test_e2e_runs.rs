@@ -11,7 +11,13 @@ fn integ_runs_list_seeded_workspace() {
     ws.seed_run(RUN_ID_A, RunStatus::Completed);
 
     let out = newton()
-        .args(["runs", "list", "--workspace", &ws.path().to_string_lossy()])
+        .args([
+            "workflow",
+            "runs",
+            "list",
+            "--workspace",
+            &ws.path().to_string_lossy(),
+        ])
         .assert()
         .success()
         .get_output()
@@ -31,6 +37,7 @@ fn integ_runs_list_json() {
 
     let out = newton()
         .args([
+            "workflow",
             "runs",
             "list",
             "--workspace",
@@ -67,8 +74,10 @@ fn integ_runs_show_seeded_run() {
 
     let out = newton()
         .args([
+            "workflow",
             "runs",
             "show",
+            "--run-id",
             RUN_ID_A,
             "--workspace",
             &ws.path().to_string_lossy(),
