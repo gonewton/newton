@@ -318,6 +318,65 @@ async fn test_delete_component_conflict_has_repos() {
     assert_eq!(err["code"], "ERR_CONFLICT");
 }
 
+#[tokio::test]
+async fn test_delete_component_success() {
+    let state = create_catalog_test_state().await;
+    let app = newton_core::api::create_router(state, None);
+    // Create a standalone product, then a component with no repos
+    let prod_body = json!({"name": "Orphan Product For Comp"});
+    let prod_req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/products")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&prod_body).unwrap()))
+        .unwrap();
+    let prod_resp = app.clone().oneshot(prod_req).await.unwrap();
+    assert_eq!(prod_resp.status(), StatusCode::CREATED);
+    let prod_bytes = axum::body::to_bytes(prod_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let prod: serde_json::Value = serde_json::from_slice(&prod_bytes).unwrap();
+    let pid = prod["id"].as_str().unwrap().to_string();
+
+    let comp_body = json!({
+        "name": "Orphan Comp",
+        "productId": pid,
+        "domain": "d",
+        "owner": "o",
+        "criticality": "low",
+        "autonomy": "low",
+        "health": 0,
+        "trend": 0,
+        "lastEval": "2026-01-01T00:00:00Z"
+    });
+    let comp_req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/components")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&comp_body).unwrap()))
+        .unwrap();
+    let comp_resp = app.clone().oneshot(comp_req).await.unwrap();
+    assert_eq!(comp_resp.status(), StatusCode::CREATED);
+    let comp_bytes = axum::body::to_bytes(comp_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let comp: serde_json::Value = serde_json::from_slice(&comp_bytes).unwrap();
+    let cid = comp["id"].as_str().unwrap().to_string();
+
+    let del_req = Request::builder()
+        .method(Method::DELETE)
+        .uri(format!("/api/components/{cid}"))
+        .body(Body::empty())
+        .unwrap();
+    let del_resp = app.oneshot(del_req).await.unwrap();
+    assert_eq!(del_resp.status(), StatusCode::OK);
+    let del_body = axum::body::to_bytes(del_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let deleted: serde_json::Value = serde_json::from_slice(&del_body).unwrap();
+    assert_eq!(deleted["id"], cid);
+}
+
 // ── Repo ──────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -451,6 +510,51 @@ async fn test_delete_repo_conflict_has_modules() {
         .unwrap();
     let err: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(err["code"], "ERR_CONFLICT");
+}
+
+#[tokio::test]
+async fn test_delete_repo_success() {
+    let state = create_catalog_test_state().await;
+    let app = newton_core::api::create_router(state, None);
+    // Create a repo with no modules under comp-1
+    let body = json!({
+        "name": "orphan-repo-for-delete",
+        "componentId": "comp-1",
+        "owner": "team-a",
+        "criticality": "low",
+        "autonomy": "full",
+        "qualityScore": 70,
+        "coverage": 60,
+        "secScore": 75,
+        "execStatus": "idle",
+        "lastEval": "2026-01-01T00:00:00Z"
+    });
+    let create_req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/repos")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let create_resp = app.clone().oneshot(create_req).await.unwrap();
+    assert_eq!(create_resp.status(), StatusCode::CREATED);
+    let create_bytes = axum::body::to_bytes(create_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let created: serde_json::Value = serde_json::from_slice(&create_bytes).unwrap();
+    let new_id = created["id"].as_str().unwrap().to_string();
+
+    let del_req = Request::builder()
+        .method(Method::DELETE)
+        .uri(format!("/api/repos/{new_id}"))
+        .body(Body::empty())
+        .unwrap();
+    let del_resp = app.oneshot(del_req).await.unwrap();
+    assert_eq!(del_resp.status(), StatusCode::OK);
+    let del_body = axum::body::to_bytes(del_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let deleted: serde_json::Value = serde_json::from_slice(&del_body).unwrap();
+    assert_eq!(deleted["id"], new_id);
 }
 
 // ── Module ────────────────────────────────────────────────────────────────────

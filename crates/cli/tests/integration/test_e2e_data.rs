@@ -255,6 +255,37 @@ fn data_dry_run_does_not_create() {
 }
 
 #[test]
+fn data_post_product_with_file() {
+    let dir = setup_workspace_with_db();
+    let body_file = dir.path().join("product_body.json");
+    fs::write(&body_file, r#"{"name":"FileProduct"}"#).unwrap();
+
+    let out = newton()
+        .args([
+            "data",
+            "post",
+            "product",
+            "--workspace",
+            &dir.path().to_string_lossy(),
+            "--file",
+            &body_file.to_string_lossy(),
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let created: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout))
+        .expect("post product with -f must emit JSON");
+    assert_eq!(
+        created["name"].as_str().unwrap(),
+        "FileProduct",
+        "created product name should match file body"
+    );
+    assert!(created["id"].is_string(), "created product must have an id");
+}
+
+#[test]
 fn data_error_both_file_and_body() {
     let dir = setup_workspace_with_db();
     let tmp_file = dir.path().join("body.json");
