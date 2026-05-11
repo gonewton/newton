@@ -154,14 +154,15 @@ impl WorkflowEmitter {
         context: &AiloopContext,
         event: &WorkflowEvent,
     ) -> Result<(), EmitError> {
-        use ailoop_core::models::{Message, MessageContent, SenderType};
+        use ailoop_core::models::{Message, MessageContent, NotificationPriority, SenderType};
 
-        let content = MessageContent::WorkflowProgress {
-            execution_id: event.execution_id.to_string(),
-            workflow_name: event.phase.clone(),
-            current_state: event.status.clone(),
-            status: event.status.clone(),
-            progress_percentage: event.progress,
+        let text = format!(
+            "[workflow] exec={} phase={} status={} progress={:?}",
+            event.execution_id, event.phase, event.status, event.progress
+        );
+        let content = MessageContent::Notification {
+            text,
+            priority: NotificationPriority::Normal,
         };
 
         let ws_message = Message::new(context.channel().to_string(), SenderType::Agent, content);

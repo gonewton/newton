@@ -5,7 +5,10 @@ use crate::core::types::ErrorCategory;
 use crate::workflow::human::{
     ApprovalDefault, ApprovalResult, DecisionContent, DecisionResult, Interviewer,
 };
-use ailoop_core::models::{MessageContent, ResponseType};
+use ailoop_core::models::{
+    DecisionOption as AiloopDecisionOption, DecisionRecommendation as AiloopDecisionRecommendation,
+    MessageContent, ResponseType,
+};
 use async_trait::async_trait;
 use chrono::Utc;
 use std::time::Duration;
@@ -120,20 +123,24 @@ impl Interviewer for AiloopInterviewer {
     ) -> Result<DecisionResult, AppError> {
         let effective_timeout = self.resolve_timeout(timeout);
 
-        let mut question = String::from(prompt);
-        if !choices.is_empty() {
-            question.push_str("\nChoices:");
-            for (idx, choice) in choices.iter().enumerate() {
-                question.push_str(&format!("\n  {}: {}", idx + 1, choice));
-            }
-        }
+        let ailoop_options: Vec<AiloopDecisionOption> = choices
+            .iter()
+            .map(|c| AiloopDecisionOption {
+                id: c.clone(),
+                label: c.clone(),
+                detail_markdown: None,
+            })
+            .collect();
 
-        let result = ailoop_core::client::ask(
+        let result = ailoop_core::client::ask_decision(
             &self.ws_url,
             &self.channel,
-            &question,
+            uuid::Uuid::new_v4().to_string(),
+            prompt.to_string(),
+            None,
+            ailoop_options,
+            None,
             to_timeout_secs(effective_timeout),
-            Some(choices.to_vec()),
         )
         .await;
 
@@ -210,31 +217,32 @@ impl Interviewer for AiloopInterviewer {
         let effective_timeout = self.resolve_timeout(timeout);
         let option_ids: Vec<String> = content.options.iter().map(|o| o.id.clone()).collect();
 
-        let mut question = content.summary.clone();
-        if let Some(ctx_md) = &content.context_markdown {
-            question.push_str("\n\n");
-            question.push_str(ctx_md);
-        }
-        question.push_str("\n\nOptions:");
-        for opt in &content.options {
-            question.push_str(&format!("\n  [{}] {}", opt.id, opt.label));
-            if let Some(detail) = &opt.detail_markdown {
-                question.push_str(&format!("\n    {detail}"));
-            }
-        }
-        if let Some(rec) = &content.recommendation {
-            question.push_str(&format!("\n\nRecommendation: {}", rec.option_id));
-            if let Some(rationale) = &rec.rationale_markdown {
-                question.push_str(&format!(" — {rationale}"));
-            }
-        }
+        let ailoop_options: Vec<AiloopDecisionOption> = content
+            .options
+            .into_iter()
+            .map(|o| AiloopDecisionOption {
+                id: o.id,
+                label: o.label,
+                detail_markdown: o.detail_markdown,
+            })
+            .collect();
 
-        let result = ailoop_core::client::ask(
+        let ailoop_recommendation: Option<AiloopDecisionRecommendation> = content
+            .recommendation
+            .map(|r| AiloopDecisionRecommendation {
+                option_id: r.option_id,
+                rationale_markdown: r.rationale_markdown,
+            });
+
+        let result = ailoop_core::client::ask_decision(
             &self.ws_url,
             &self.channel,
-            &question,
+            content.decision_id,
+            content.summary,
+            content.context_markdown,
+            ailoop_options,
+            ailoop_recommendation,
             to_timeout_secs(effective_timeout),
-            Some(option_ids.clone()),
         )
         .await;
 

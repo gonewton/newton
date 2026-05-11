@@ -136,20 +136,15 @@ impl OutputForwarder {
             .map(|id| id.to_string())
             .unwrap_or_default();
 
-        let content = match message.priority {
-            MessagePriority::Normal => MessageContent::Stdout {
-                execution_id,
-                state_name: message.source.clone(),
-                content: message.content.clone(),
-                sequence: 0,
-            },
-            MessagePriority::High => MessageContent::Stderr {
-                execution_id,
-                state_name: message.source.clone(),
-                content: message.content.clone(),
-                sequence: 0,
-            },
+        let priority = match message.priority {
+            MessagePriority::Normal => ailoop_core::models::NotificationPriority::Normal,
+            MessagePriority::High => ailoop_core::models::NotificationPriority::High,
         };
+        let text = format!(
+            "[{}] [{}] {}",
+            message.source, execution_id, message.content
+        );
+        let content = MessageContent::Notification { text, priority };
 
         let ws_message = Message::new(context.channel().to_string(), SenderType::Agent, content);
 
