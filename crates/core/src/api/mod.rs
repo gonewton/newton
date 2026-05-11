@@ -1,3 +1,4 @@
+pub mod catalog;
 pub mod dashboard;
 pub mod hil;
 pub mod openapi;
@@ -35,6 +36,7 @@ pub fn create_router(state: AppState, ui_dir: Option<PathBuf>) -> Router {
         .merge(requests::routes(arc_state.clone()))
         .merge(plans::routes(arc_state.clone()))
         .merge(persistence::routes(arc_state.clone()))
+        .merge(catalog::routes(arc_state.clone()))
         .merge(testing_reset::routes(arc_state.clone()))
         .route("/health", get(health_check))
         .layer(CorsLayer::permissive());

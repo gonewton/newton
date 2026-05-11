@@ -203,3 +203,7 @@ path = "tests/integration/test_e2e_negative.rs"
 [[test]]
 name = "test_e2e_io_contract"
 path = "tests/integration/test_e2e_io_contract.rs"
+
+[[test]]
+name = "test_e2e_data"
+path = "tests/integration/test_e2e_data.rs"

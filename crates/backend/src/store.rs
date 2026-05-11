@@ -162,6 +162,14 @@ struct ModuleDepRow {
 }
 
 #[derive(Debug, FromRow)]
+struct ModuleRow {
+    id: String,
+    name: String,
+    kind: String,
+    repo_id: String,
+}
+
+#[derive(Debug, FromRow)]
 struct SavedViewRow {
     id: String,
     label: String,
@@ -1307,6 +1315,542 @@ impl BackendStore for SqliteBackendStore {
 
         Ok(())
     }
+
+    async fn get_product(&self, id: &str) -> Result<ProductItem, ApiError> {
+        self.fetch_product_item(id).await
+    }
+
+    async fn create_product(&self, body: CreateProductBody) -> Result<ProductItem, ApiError> {
+        let id = Uuid::new_v4().to_string();
+        let now = Self::now_iso();
+        sqlx::query("INSERT INTO Product (id, name, createdAt, updatedAt) VALUES (?, ?, ?, ?)")
+            .bind(&id)
+            .bind(&body.name)
+            .bind(&now)
+            .bind(&now)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("UNIQUE constraint failed") {
+                    err_conflict("name already exists")
+                } else {
+                    err_internal(&format!("insert error: {e}"))
+                }
+            })?;
+        self.fetch_product_item(&id).await
+    }
+
+    async fn put_product(&self, id: &str, body: PutProductBody) -> Result<ProductItem, ApiError> {
+        let now = Self::now_iso();
+        let affected = sqlx::query("UPDATE Product SET name = ?, updatedAt = ? WHERE id = ?")
+            .bind(&body.name)
+            .bind(&now)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("UNIQUE constraint failed") {
+                    err_conflict("name already exists")
+                } else {
+                    err_internal(&format!("update error: {e}"))
+                }
+            })?;
+        if affected.rows_affected() == 0 {
+            return Err(err_not_found("Product not found"));
+        }
+        self.fetch_product_item(id).await
+    }
+
+    async fn patch_product(
+        &self,
+        id: &str,
+        body: PatchProductBody,
+    ) -> Result<ProductItem, ApiError> {
+        let existing = self.fetch_product_item(id).await?;
+        let name = body.name.unwrap_or(existing.name);
+        let now = Self::now_iso();
+        sqlx::query("UPDATE Product SET name = ?, updatedAt = ? WHERE id = ?")
+            .bind(&name)
+            .bind(&now)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("UNIQUE constraint failed") {
+                    err_conflict("name already exists")
+                } else {
+                    err_internal(&format!("update error: {e}"))
+                }
+            })?;
+        self.fetch_product_item(id).await
+    }
+
+    async fn delete_product(&self, id: &str) -> Result<String, ApiError> {
+        let count: Option<CountRow> = sqlx::query_as::<_, CountRow>(
+            "SELECT COUNT(*) as count FROM Component WHERE productId = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        if count.map(|c| c.count).unwrap_or(0) > 0 {
+            return Err(err_conflict(
+                "cannot delete product: it has dependent components; remove them first",
+            ));
+        }
+        let affected = sqlx::query("DELETE FROM Product WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("delete error: {e}")))?;
+        if affected.rows_affected() == 0 {
+            return Err(err_not_found("Product not found"));
+        }
+        Ok(id.to_string())
+    }
+
+    async fn get_component(&self, id: &str) -> Result<ComponentItem, ApiError> {
+        self.fetch_component_item(id).await
+    }
+
+    async fn create_component(&self, body: CreateComponentBody) -> Result<ComponentItem, ApiError> {
+        let count: Option<CountRow> =
+            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Product WHERE id = ?")
+                .bind(&body.product_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        if count.map(|c| c.count).unwrap_or(0) == 0 {
+            return Err(err_not_found("referenced product not found"));
+        }
+        let id = Uuid::new_v4().to_string();
+        let now = Self::now_iso();
+        sqlx::query(
+            "INSERT INTO Component (id, name, domain, repos, modules, health, trend, owner, criticality, autonomy, openPlans, openRequests, lastEval, productId, createdAt, updatedAt) VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)"
+        )
+        .bind(&id).bind(&body.name).bind(&body.domain)
+        .bind(body.health).bind(body.trend)
+        .bind(&body.owner).bind(&body.criticality).bind(&body.autonomy)
+        .bind(&body.last_eval).bind(&body.product_id)
+        .bind(&now).bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("insert error: {e}")))?;
+        self.fetch_component_item(&id).await
+    }
+
+    async fn put_component(
+        &self,
+        id: &str,
+        body: PutComponentBody,
+    ) -> Result<ComponentItem, ApiError> {
+        let count: Option<CountRow> =
+            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Component WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        if count.map(|c| c.count).unwrap_or(0) == 0 {
+            return Err(err_not_found("Component not found"));
+        }
+        let pcount: Option<CountRow> =
+            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Product WHERE id = ?")
+                .bind(&body.product_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        if pcount.map(|c| c.count).unwrap_or(0) == 0 {
+            return Err(err_not_found("referenced product not found"));
+        }
+        let now = Self::now_iso();
+        sqlx::query(
+            "UPDATE Component SET name = ?, domain = ?, repos = 0, modules = 0, health = ?, trend = ?, owner = ?, criticality = ?, autonomy = ?, openPlans = 0, openRequests = 0, lastEval = ?, productId = ?, updatedAt = ? WHERE id = ?"
+        )
+        .bind(&body.name).bind(&body.domain)
+        .bind(body.health).bind(body.trend)
+        .bind(&body.owner).bind(&body.criticality).bind(&body.autonomy)
+        .bind(&body.last_eval).bind(&body.product_id)
+        .bind(&now).bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("update error: {e}")))?;
+        self.fetch_component_item(id).await
+    }
+
+    async fn patch_component(
+        &self,
+        id: &str,
+        body: PatchComponentBody,
+    ) -> Result<ComponentItem, ApiError> {
+        let existing = self.fetch_component_item(id).await?;
+        if let Some(ref pid) = body.product_id {
+            let pcount: Option<CountRow> =
+                sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Product WHERE id = ?")
+                    .bind(pid)
+                    .fetch_optional(&self.pool)
+                    .await
+                    .map_err(|e| err_internal(&format!("query error: {e}")))?;
+            if pcount.map(|c| c.count).unwrap_or(0) == 0 {
+                return Err(err_not_found("referenced product not found"));
+            }
+        }
+        let name = body.name.unwrap_or(existing.name);
+        let product_id = body.product_id.unwrap_or(existing.product_id);
+        let domain = body.domain.unwrap_or(existing.domain);
+        let owner = body.owner.unwrap_or(existing.owner);
+        let criticality = body.criticality.unwrap_or(existing.criticality);
+        let autonomy = body.autonomy.unwrap_or(existing.autonomy);
+        let health = body.health.unwrap_or(existing.health);
+        let trend = body.trend.unwrap_or(existing.trend);
+        let last_eval = body.last_eval.unwrap_or(existing.last_eval);
+        let now = Self::now_iso();
+        sqlx::query(
+            "UPDATE Component SET name = ?, domain = ?, health = ?, trend = ?, owner = ?, criticality = ?, autonomy = ?, lastEval = ?, productId = ?, updatedAt = ? WHERE id = ?"
+        )
+        .bind(&name).bind(&domain).bind(health).bind(trend)
+        .bind(&owner).bind(&criticality).bind(&autonomy)
+        .bind(&last_eval).bind(&product_id)
+        .bind(&now).bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("update error: {e}")))?;
+        self.fetch_component_item(id).await
+    }
+
+    async fn delete_component(&self, id: &str) -> Result<String, ApiError> {
+        let count: Option<CountRow> = sqlx::query_as::<_, CountRow>(
+            "SELECT COUNT(*) as count FROM Repo WHERE componentId = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        if count.map(|c| c.count).unwrap_or(0) > 0 {
+            return Err(err_conflict(
+                "cannot delete component: it has dependent repos; remove them first",
+            ));
+        }
+        let affected = sqlx::query("DELETE FROM Component WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("delete error: {e}")))?;
+        if affected.rows_affected() == 0 {
+            return Err(err_not_found("Component not found"));
+        }
+        Ok(id.to_string())
+    }
+
+    async fn get_repo(&self, id: &str) -> Result<RepoItem, ApiError> {
+        self.fetch_repo_item(id).await
+    }
+
+    async fn create_repo(&self, body: CreateRepoBody) -> Result<RepoItem, ApiError> {
+        let count: Option<CountRow> =
+            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Component WHERE id = ?")
+                .bind(&body.component_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        if count.map(|c| c.count).unwrap_or(0) == 0 {
+            return Err(err_not_found("referenced component not found"));
+        }
+        let id = Uuid::new_v4().to_string();
+        let now = Self::now_iso();
+        sqlx::query(
+            "INSERT INTO Repo (id, name, componentId, owner, criticality, autonomy, qualityScore, regressions, openPlans, execStatus, lastEval, coverage, secScore, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(&id).bind(&body.name).bind(&body.component_id)
+        .bind(&body.owner).bind(&body.criticality).bind(&body.autonomy)
+        .bind(body.quality_score).bind(&body.exec_status)
+        .bind(&body.last_eval).bind(body.coverage).bind(body.sec_score)
+        .bind(&now).bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("UNIQUE constraint failed") {
+                err_conflict("name already exists")
+            } else {
+                err_internal(&format!("insert error: {e}"))
+            }
+        })?;
+        self.fetch_repo_item(&id).await
+    }
+
+    async fn put_repo(&self, id: &str, body: PutRepoBody) -> Result<RepoItem, ApiError> {
+        let count: Option<CountRow> =
+            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Repo WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        if count.map(|c| c.count).unwrap_or(0) == 0 {
+            return Err(err_not_found("Repo not found"));
+        }
+        let ccount: Option<CountRow> =
+            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Component WHERE id = ?")
+                .bind(&body.component_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        if ccount.map(|c| c.count).unwrap_or(0) == 0 {
+            return Err(err_not_found("referenced component not found"));
+        }
+        let now = Self::now_iso();
+        sqlx::query(
+            "UPDATE Repo SET name = ?, componentId = ?, owner = ?, criticality = ?, autonomy = ?, qualityScore = ?, regressions = 0, openPlans = 0, execStatus = ?, lastEval = ?, coverage = ?, secScore = ?, updatedAt = ? WHERE id = ?"
+        )
+        .bind(&body.name).bind(&body.component_id)
+        .bind(&body.owner).bind(&body.criticality).bind(&body.autonomy)
+        .bind(body.quality_score).bind(&body.exec_status)
+        .bind(&body.last_eval).bind(body.coverage).bind(body.sec_score)
+        .bind(&now).bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("UNIQUE constraint failed") {
+                err_conflict("name already exists")
+            } else {
+                err_internal(&format!("update error: {e}"))
+            }
+        })?;
+        self.fetch_repo_item(id).await
+    }
+
+    async fn patch_repo(&self, id: &str, body: PatchRepoBody) -> Result<RepoItem, ApiError> {
+        let existing = self.fetch_repo_item(id).await?;
+        if let Some(ref cid) = body.component_id {
+            let ccount: Option<CountRow> = sqlx::query_as::<_, CountRow>(
+                "SELECT COUNT(*) as count FROM Component WHERE id = ?",
+            )
+            .bind(cid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("query error: {e}")))?;
+            if ccount.map(|c| c.count).unwrap_or(0) == 0 {
+                return Err(err_not_found("referenced component not found"));
+            }
+        }
+        // Get current component_id from DB since RepoItem.component is the name, not id
+        let current_component_row: Option<ComponentIdRow> = sqlx::query_as::<_, ComponentIdRow>(
+            "SELECT componentId as component_id FROM Repo WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        let current_component_id = current_component_row
+            .and_then(|c| c.component_id)
+            .unwrap_or_default();
+        let component_id = body.component_id.unwrap_or(current_component_id);
+        let name = body.name.unwrap_or(existing.name);
+        let owner = body.owner.unwrap_or(existing.owner);
+        let criticality = body.criticality.unwrap_or(existing.criticality);
+        let autonomy = body.autonomy.unwrap_or(existing.autonomy);
+        let quality_score = body.quality_score.unwrap_or(existing.quality_score);
+        let coverage = body.coverage.unwrap_or(existing.coverage);
+        let sec_score = body.sec_score.unwrap_or(existing.sec_score);
+        let exec_status = body.exec_status.unwrap_or(existing.exec_status);
+        let last_eval = body.last_eval.unwrap_or(existing.last_eval);
+        let now = Self::now_iso();
+        sqlx::query(
+            "UPDATE Repo SET name = ?, componentId = ?, owner = ?, criticality = ?, autonomy = ?, qualityScore = ?, execStatus = ?, lastEval = ?, coverage = ?, secScore = ?, updatedAt = ? WHERE id = ?"
+        )
+        .bind(&name).bind(&component_id)
+        .bind(&owner).bind(&criticality).bind(&autonomy)
+        .bind(quality_score).bind(&exec_status)
+        .bind(&last_eval).bind(coverage).bind(sec_score)
+        .bind(&now).bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("UNIQUE constraint failed") {
+                err_conflict("name already exists")
+            } else {
+                err_internal(&format!("update error: {e}"))
+            }
+        })?;
+        self.fetch_repo_item(id).await
+    }
+
+    async fn delete_repo(&self, id: &str) -> Result<String, ApiError> {
+        let count: Option<CountRow> =
+            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Module WHERE repoId = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        if count.map(|c| c.count).unwrap_or(0) > 0 {
+            return Err(err_conflict(
+                "cannot delete repo: it has dependent modules; remove them first",
+            ));
+        }
+        let affected = sqlx::query("DELETE FROM Repo WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("delete error: {e}")))?;
+        if affected.rows_affected() == 0 {
+            return Err(err_not_found("Repo not found"));
+        }
+        Ok(id.to_string())
+    }
+
+    async fn list_modules(&self) -> Result<Vec<ModuleItem>, ApiError> {
+        let rows = sqlx::query_as::<_, ModuleRow>(
+            "SELECT id, name, kind, repoId as repo_id FROM Module ORDER BY id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(self.module_row_to_item(row).await?);
+        }
+        Ok(result)
+    }
+
+    async fn get_module(&self, id: &str) -> Result<ModuleItem, ApiError> {
+        self.fetch_module_item(id).await
+    }
+
+    async fn create_module(&self, body: CreateModuleBody) -> Result<ModuleItem, ApiError> {
+        let count: Option<CountRow> =
+            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Repo WHERE id = ?")
+                .bind(&body.repo_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        if count.map(|c| c.count).unwrap_or(0) == 0 {
+            return Err(err_not_found("referenced repo not found"));
+        }
+        let id = Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO Module (id, name, kind, repoId) VALUES (?, ?, ?, ?)")
+            .bind(&id)
+            .bind(&body.name)
+            .bind(&body.kind)
+            .bind(&body.repo_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("insert error: {e}")))?;
+        self.fetch_module_item(&id).await
+    }
+
+    async fn put_module(&self, id: &str, body: PutModuleBody) -> Result<ModuleItem, ApiError> {
+        let count: Option<CountRow> =
+            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Module WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        if count.map(|c| c.count).unwrap_or(0) == 0 {
+            return Err(err_not_found("Module not found"));
+        }
+        let rcount: Option<CountRow> =
+            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Repo WHERE id = ?")
+                .bind(&body.repo_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        if rcount.map(|c| c.count).unwrap_or(0) == 0 {
+            return Err(err_not_found("referenced repo not found"));
+        }
+        sqlx::query("UPDATE Module SET name = ?, kind = ?, repoId = ? WHERE id = ?")
+            .bind(&body.name)
+            .bind(&body.kind)
+            .bind(&body.repo_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("update error: {e}")))?;
+        self.fetch_module_item(id).await
+    }
+
+    async fn patch_module(&self, id: &str, body: PatchModuleBody) -> Result<ModuleItem, ApiError> {
+        let existing = self.fetch_module_item(id).await?;
+        if let Some(ref rid) = body.repo_id {
+            let rcount: Option<CountRow> =
+                sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Repo WHERE id = ?")
+                    .bind(rid)
+                    .fetch_optional(&self.pool)
+                    .await
+                    .map_err(|e| err_internal(&format!("query error: {e}")))?;
+            if rcount.map(|c| c.count).unwrap_or(0) == 0 {
+                return Err(err_not_found("referenced repo not found"));
+            }
+        }
+        let name = body.name.unwrap_or(existing.name);
+        let kind = body.kind.unwrap_or(existing.kind);
+        let repo_id = body.repo_id.unwrap_or(existing.repo_id);
+        sqlx::query("UPDATE Module SET name = ?, kind = ?, repoId = ? WHERE id = ?")
+            .bind(&name)
+            .bind(&kind)
+            .bind(&repo_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("update error: {e}")))?;
+        self.fetch_module_item(id).await
+    }
+
+    async fn delete_module(&self, id: &str) -> Result<String, ApiError> {
+        let count: Option<CountRow> = sqlx::query_as::<_, CountRow>(
+            "SELECT COUNT(*) as count FROM ModuleDependency WHERE fromModuleId = ? OR toModuleId = ?"
+        )
+        .bind(id).bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        if count.map(|c| c.count).unwrap_or(0) > 0 {
+            return Err(err_conflict(
+                "cannot delete module: it has dependent module-dependencies; remove them first",
+            ));
+        }
+        let affected = sqlx::query("DELETE FROM Module WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("delete error: {e}")))?;
+        if affected.rows_affected() == 0 {
+            return Err(err_not_found("Module not found"));
+        }
+        Ok(id.to_string())
+    }
+
+    async fn get_module_dependency(&self, id: &str) -> Result<ModuleDependencyItem, ApiError> {
+        self.fetch_module_dependency_item(id).await
+    }
+
+    async fn patch_module_dependency(
+        &self,
+        id: &str,
+        body: PatchModuleDependencyBody,
+    ) -> Result<ModuleDependencyItem, ApiError> {
+        let existing = self.fetch_module_dependency_item(id).await?;
+        let dep_type = body.dep_type.unwrap_or(existing.dep_type);
+        let label = body.label.unwrap_or(existing.label);
+        sqlx::query("UPDATE ModuleDependency SET type = ?, label = ? WHERE id = ?")
+            .bind(&dep_type)
+            .bind(&label)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("update error: {e}")))?;
+        self.fetch_module_dependency_item(id).await
+    }
+
+    async fn delete_module_dependency(&self, id: &str) -> Result<String, ApiError> {
+        let affected = sqlx::query("DELETE FROM ModuleDependency WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("delete error: {e}")))?;
+        if affected.rows_affected() == 0 {
+            return Err(err_not_found("ModuleDependency not found"));
+        }
+        Ok(id.to_string())
+    }
 }
 
 impl SqliteBackendStore {
@@ -1408,6 +1952,153 @@ impl SqliteBackendStore {
             }
         }
         Ok(false)
+    }
+
+    async fn fetch_module_item(&self, id: &str) -> Result<ModuleItem, ApiError> {
+        let row: Option<ModuleRow> = sqlx::query_as::<_, ModuleRow>(
+            "SELECT id, name, kind, repoId as repo_id FROM Module WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        let row = row.ok_or_else(|| err_not_found("Module not found"))?;
+        self.module_row_to_item(row).await
+    }
+
+    async fn module_row_to_item(&self, row: ModuleRow) -> Result<ModuleItem, ApiError> {
+        let repo_name = get_repo_name(&self.pool, &row.repo_id).await?;
+        let component_id: Option<ComponentIdRow> = sqlx::query_as::<_, ComponentIdRow>(
+            "SELECT componentId as component_id FROM Repo WHERE id = ?",
+        )
+        .bind(&row.repo_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        let component_id_str = component_id
+            .and_then(|c| c.component_id)
+            .unwrap_or_default();
+        let component_name = if component_id_str.is_empty() {
+            String::new()
+        } else {
+            let cn: Option<NameRow> =
+                sqlx::query_as::<_, NameRow>("SELECT name FROM Component WHERE id = ?")
+                    .bind(&component_id_str)
+                    .fetch_optional(&self.pool)
+                    .await
+                    .map_err(|e| err_internal(&format!("query error: {e}")))?;
+            cn.map(|c| c.name).unwrap_or_default()
+        };
+        Ok(ModuleItem {
+            id: row.id,
+            name: row.name,
+            kind: row.kind,
+            repo_id: row.repo_id,
+            repo_name,
+            component_id: component_id_str,
+            component_name,
+        })
+    }
+
+    async fn fetch_product_item(&self, id: &str) -> Result<ProductItem, ApiError> {
+        let row: Option<ProductRow> = sqlx::query_as::<_, ProductRow>(
+            "SELECT p.id, p.name, COUNT(c.id) as component_count FROM Product p LEFT JOIN Component c ON c.productId = p.id WHERE p.id = ? GROUP BY p.id"
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        row.map(|r| ProductItem {
+            id: r.id,
+            name: r.name,
+            component_count: r.component_count,
+        })
+        .ok_or_else(|| err_not_found("Product not found"))
+    }
+
+    async fn fetch_component_item(&self, id: &str) -> Result<ComponentItem, ApiError> {
+        let row: Option<ComponentRow> = sqlx::query_as::<_, ComponentRow>(
+            "SELECT id, name, domain, repos, modules, health, trend, owner, criticality, autonomy, openPlans as open_plans, openRequests as open_requests, lastEval as last_eval, productId as product_id FROM Component WHERE id = ?"
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        let row = row.ok_or_else(|| err_not_found("Component not found"))?;
+        let product_name: Option<NameRow> =
+            sqlx::query_as::<_, NameRow>("SELECT name FROM Product WHERE id = ?")
+                .bind(&row.product_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        Ok(ComponentItem {
+            id: row.id,
+            name: row.name,
+            product_id: row.product_id,
+            product_name: product_name.map(|p| p.name).unwrap_or_default(),
+            domain: row.domain,
+            repos: row.repos,
+            modules: row.modules,
+            health: row.health,
+            trend: row.trend,
+            owner: row.owner,
+            criticality: row.criticality,
+            autonomy: row.autonomy,
+            open_plans: row.open_plans,
+            open_requests: row.open_requests,
+            last_eval: row.last_eval,
+        })
+    }
+
+    async fn fetch_repo_item(&self, id: &str) -> Result<RepoItem, ApiError> {
+        let row: Option<RepoRow> = sqlx::query_as::<_, RepoRow>(
+            "SELECT r.id, r.name, r.componentId as component_id, r.owner, r.criticality, r.autonomy, r.qualityScore as quality_score, r.regressions, r.openPlans as open_plans, r.execStatus as exec_status, r.lastEval as last_eval, r.coverage, r.secScore as sec_score FROM Repo r WHERE r.id = ?"
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        let row = row.ok_or_else(|| err_not_found("Repo not found"))?;
+        let component: Option<NameRow> =
+            sqlx::query_as::<_, NameRow>("SELECT name FROM Component WHERE id = ?")
+                .bind(&row.component_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        let depends_on = compute_repo_depends_on(&self.pool, &row.name).await?;
+        let depended_on_by = compute_repo_depended_on_by(&self.pool, &row.name).await?;
+        Ok(RepoItem {
+            id: row.id,
+            name: row.name,
+            component: component.map(|c| c.name).unwrap_or_default(),
+            owner: row.owner,
+            criticality: row.criticality,
+            autonomy: row.autonomy,
+            quality_score: row.quality_score,
+            regressions: row.regressions,
+            open_plans: row.open_plans,
+            exec_status: row.exec_status,
+            last_eval: row.last_eval,
+            coverage: row.coverage,
+            sec_score: row.sec_score,
+            depends_on,
+            depended_on_by,
+        })
+    }
+
+    async fn fetch_module_dependency_item(
+        &self,
+        id: &str,
+    ) -> Result<ModuleDependencyItem, ApiError> {
+        self.list_module_dependencies()
+            .await?
+            .into_iter()
+            .find(|d| d.id == id)
+            .ok_or_else(|| err_not_found("ModuleDependency not found"))
     }
 }
 

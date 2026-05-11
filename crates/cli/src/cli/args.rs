@@ -392,3 +392,38 @@ pub struct ServeArgs {
     #[arg(long = "mcp-path", default_value = "/mcp")]
     pub mcp_path: String,
 }
+
+// ── Data ─────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DataVerb {
+    Get,
+    Post,
+    Put,
+    Patch,
+    Delete,
+}
+
+impl std::fmt::Display for DataVerb {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DataVerb::Get => write!(f, "get"),
+            DataVerb::Post => write!(f, "post"),
+            DataVerb::Put => write!(f, "put"),
+            DataVerb::Patch => write!(f, "patch"),
+            DataVerb::Delete => write!(f, "delete"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DataArgs {
+    pub verb: DataVerb,
+    pub resource: String,
+    pub id: Option<String>,
+    pub file: Option<PathBuf>,
+    pub body: Option<String>,
+    pub json: bool,
+    pub dry_run: bool,
+    pub workspace: Option<PathBuf>,
+}

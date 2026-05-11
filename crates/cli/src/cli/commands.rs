@@ -1,13 +1,15 @@
 #![allow(clippy::result_large_err)] // CLI command handlers return AppError directly to preserve diagnostic context without boxing.
 
 use crate::cli::args::{
-    ArtifactArgs, ArtifactCommand, BatchArgs, CheckpointArgs, CheckpointCommand, DotArgs,
-    ExplainArgs, KeyValuePair, LintArgs, OutputFormat, ResumeArgs, RunArgs, RunsArgs, RunsCommand,
-    ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
+    ArtifactArgs, ArtifactCommand, BatchArgs, CheckpointArgs, CheckpointCommand, DataArgs,
+    DataVerb, DotArgs, ExplainArgs, KeyValuePair, LintArgs, OutputFormat, ResumeArgs, RunArgs,
+    RunsArgs, RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
+    WebhookStatusArgs,
 };
 use crate::Result;
 use anyhow::anyhow;
 use humantime::{format_duration, parse_duration};
+use newton_backend::BackendStore;
 use newton_core::core::batch_config::BatchProjectConfig;
 use newton_core::core::error::AppError;
 use newton_core::core::types::ErrorCategory;
@@ -2299,5 +2301,375 @@ mod duration_formatting_tests {
     fn format_duration_short_two_units_max() {
         let duration = Duration::from_secs(93784);
         assert_eq!(format_duration_short(duration), "1d 2h");
+    }
+}
+
+pub async fn data(args: DataArgs) -> anyhow::Result<()> {
+    // DATA-001: mutually exclusive --file and --body
+    if args.file.is_some() && args.body.is_some() {
+        eprintln!("DATA-001: --file and --body are mutually exclusive; provide at most one");
+        std::process::exit(1);
+    }
+
+    // Resolve workspace and open store
+    let workspace = match args.workspace {
+        Some(ref p) => p.clone(),
+        None => std::env::current_dir()?,
+    };
+    let db_path = workspace
+        .join(".newton")
+        .join("state")
+        .join("backend.sqlite");
+    let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
+    let store = match newton_backend::SqliteBackendStore::new(&db_url).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Failed to open backend store: {}", e.message);
+            std::process::exit(1);
+        }
+    };
+
+    // Parse body if provided
+    let body_value: Option<serde_json::Value> = if let Some(ref path) = args.file {
+        let raw = if path.to_string_lossy() == "-" {
+            use std::io::Read;
+            let mut s = String::new();
+            std::io::stdin().read_to_string(&mut s)?;
+            s
+        } else {
+            fs::read_to_string(path)?
+        };
+        match serde_json::from_str::<serde_json::Value>(&raw) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!("DATA-004: invalid JSON in body: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else if let Some(ref s) = args.body {
+        match serde_json::from_str::<serde_json::Value>(s) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!("DATA-004: invalid JSON in --body: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
+    // Normalize resource token (plural -> singular for mutations)
+    let resource = args.resource.as_str();
+
+    // Validate resource
+    let valid_resources = [
+        "product",
+        "products",
+        "component",
+        "components",
+        "repo",
+        "repos",
+        "module",
+        "modules",
+        "module-dependency",
+        "module-dependencies",
+    ];
+    if !valid_resources.contains(&resource) {
+        eprintln!("DATA-003: unknown resource '{resource}'; must be one of: product, products, component, components, repo, repos, module, modules, module-dependency, module-dependencies");
+        std::process::exit(1);
+    }
+
+    // Require body for POST/PUT/PATCH
+    if matches!(args.verb, DataVerb::Post | DataVerb::Put | DataVerb::Patch) && body_value.is_none()
+    {
+        eprintln!("DATA-005: --file or --body is required for {}", args.verb);
+        std::process::exit(1);
+    }
+
+    // Require id for single-item GET and all mutations except POST
+    let needs_id = match args.verb {
+        DataVerb::Get => !matches!(
+            resource,
+            "products" | "components" | "repos" | "modules" | "module-dependencies"
+        ),
+        DataVerb::Post => false,
+        DataVerb::Put | DataVerb::Patch | DataVerb::Delete => true,
+    };
+    if needs_id && args.id.is_none() {
+        eprintln!("DATA-002: ID is required for {} {}", args.verb, resource);
+        std::process::exit(1);
+    }
+
+    // Dry-run mode: validate body (including FK references) without writing to DB
+    if args.dry_run {
+        if matches!(args.verb, DataVerb::Post | DataVerb::Put | DataVerb::Patch) {
+            if let Some(ref v) = body_value {
+                // FK validation per resource type
+                match resource {
+                    "component" | "components" => {
+                        if let Some(product_id) = v.get("productId").and_then(|p| p.as_str()) {
+                            if let Err(e) = store.get_product(product_id).await {
+                                eprintln!(
+                                    "[dry-run] FK validation failed: productId '{}' not found: {}",
+                                    product_id, e.message
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    "repo" | "repos" => {
+                        if let Some(component_id) = v.get("componentId").and_then(|c| c.as_str()) {
+                            if let Err(e) = store.get_component(component_id).await {
+                                eprintln!("[dry-run] FK validation failed: componentId '{}' not found: {}", component_id, e.message);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    "module" | "modules" => {
+                        if let Some(repo_id) = v.get("repoId").and_then(|r| r.as_str()) {
+                            if let Err(e) = store.get_repo(repo_id).await {
+                                eprintln!(
+                                    "[dry-run] FK validation failed: repoId '{}' not found: {}",
+                                    repo_id, e.message
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                eprintln!("[dry-run] validated payload (no DB write):");
+                println!("{}", serde_json::to_string_pretty(v)?);
+            } else {
+                eprintln!("[dry-run] no body to validate");
+            }
+        } else {
+            eprintln!(
+                "[dry-run] no-op for {} (only POST/PUT/PATCH validate body)",
+                args.verb
+            );
+        }
+        return Ok(());
+    }
+
+    // Dispatch
+    match dispatch_data(&store, &args.verb, resource, args.id.as_deref(), body_value).await {
+        Ok(value) => {
+            println!("{}", serde_json::to_string_pretty(&value)?);
+            Ok(())
+        }
+        Err(msg) => {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn dispatch_data(
+    store: &newton_backend::SqliteBackendStore,
+    verb: &DataVerb,
+    resource: &str,
+    id: Option<&str>,
+    body: Option<serde_json::Value>,
+) -> std::result::Result<serde_json::Value, String> {
+    fn api_err(e: newton_types::ApiError) -> String {
+        format!("{}: {}", e.code, e.message)
+    }
+
+    fn to_json<T: serde::Serialize>(v: T) -> std::result::Result<serde_json::Value, String> {
+        serde_json::to_value(v).map_err(|e| format!("serialize error: {e}"))
+    }
+
+    fn parse_body<T: serde::de::DeserializeOwned>(
+        body: Option<serde_json::Value>,
+    ) -> std::result::Result<T, String> {
+        match body {
+            None => Err("body required".to_string()),
+            Some(v) => {
+                serde_json::from_value(v).map_err(|e| format!("DATA-004: body parse error: {e}"))
+            }
+        }
+    }
+
+    let id = id.unwrap_or("");
+
+    match (verb, resource) {
+        // -- Product -----------------------------------------------------------
+        (DataVerb::Get, "products") => store
+            .list_products()
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Get, "product") => store
+            .get_product(id)
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Post, "product" | "products") => {
+            let b = parse_body::<newton_backend::CreateProductBody>(body)?;
+            store
+                .create_product(b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Put, "product" | "products") => {
+            let b = parse_body::<newton_backend::PutProductBody>(body)?;
+            store
+                .put_product(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Patch, "product" | "products") => {
+            let b = parse_body::<newton_backend::PatchProductBody>(body)?;
+            store
+                .patch_product(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Delete, "product" | "products") => store
+            .delete_product(id)
+            .await
+            .map_err(api_err)
+            .and_then(|deleted_id| to_json(serde_json::json!({"id": deleted_id}))),
+        // -- Component ---------------------------------------------------------
+        (DataVerb::Get, "components") => store
+            .list_components()
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Get, "component") => store
+            .get_component(id)
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Post, "component" | "components") => {
+            let b = parse_body::<newton_backend::CreateComponentBody>(body)?;
+            store
+                .create_component(b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Put, "component" | "components") => {
+            let b = parse_body::<newton_backend::PutComponentBody>(body)?;
+            store
+                .put_component(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Patch, "component" | "components") => {
+            let b = parse_body::<newton_backend::PatchComponentBody>(body)?;
+            store
+                .patch_component(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Delete, "component" | "components") => store
+            .delete_component(id)
+            .await
+            .map_err(api_err)
+            .and_then(|deleted_id| to_json(serde_json::json!({"id": deleted_id}))),
+        // -- Repo --------------------------------------------------------------
+        (DataVerb::Get, "repos") => store.list_repos().await.map_err(api_err).and_then(to_json),
+        (DataVerb::Get, "repo") => store.get_repo(id).await.map_err(api_err).and_then(to_json),
+        (DataVerb::Post, "repo" | "repos") => {
+            let b = parse_body::<newton_backend::CreateRepoBody>(body)?;
+            store
+                .create_repo(b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Put, "repo" | "repos") => {
+            let b = parse_body::<newton_backend::PutRepoBody>(body)?;
+            store
+                .put_repo(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Patch, "repo" | "repos") => {
+            let b = parse_body::<newton_backend::PatchRepoBody>(body)?;
+            store
+                .patch_repo(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Delete, "repo" | "repos") => store
+            .delete_repo(id)
+            .await
+            .map_err(api_err)
+            .and_then(|deleted_id| to_json(serde_json::json!({"id": deleted_id}))),
+        // -- Module ------------------------------------------------------------
+        (DataVerb::Get, "modules") => store
+            .list_modules()
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Get, "module") => store
+            .get_module(id)
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Post, "module" | "modules") => {
+            let b = parse_body::<newton_backend::CreateModuleBody>(body)?;
+            store
+                .create_module(b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Put, "module" | "modules") => {
+            let b = parse_body::<newton_backend::PutModuleBody>(body)?;
+            store
+                .put_module(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Patch, "module" | "modules") => {
+            let b = parse_body::<newton_backend::PatchModuleBody>(body)?;
+            store
+                .patch_module(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Delete, "module" | "modules") => store
+            .delete_module(id)
+            .await
+            .map_err(api_err)
+            .and_then(|deleted_id| to_json(serde_json::json!({"id": deleted_id}))),
+        // -- ModuleDependency --------------------------------------------------
+        (DataVerb::Get, "module-dependencies") => store
+            .list_module_dependencies()
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Get, "module-dependency") => store
+            .get_module_dependency(id)
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Patch, "module-dependency" | "module-dependencies") => {
+            let b = parse_body::<newton_backend::PatchModuleDependencyBody>(body)?;
+            store
+                .patch_module_dependency(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Delete, "module-dependency" | "module-dependencies") => store
+            .delete_module_dependency(id)
+            .await
+            .map_err(api_err)
+            .and_then(|deleted_id| to_json(serde_json::json!({"id": deleted_id}))),
+        (v, r) => Err(format!("unsupported combination: {v} {r}")),
     }
 }

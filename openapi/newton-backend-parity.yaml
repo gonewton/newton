@@ -28,6 +28,174 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+      - catalog
+      operationId: create_component
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateComponentBody'
+        required: true
+      responses:
+        '201':
+          description: Created component
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComponentItem'
+        '404':
+          description: Referenced product not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/components/{id}:
+    get:
+      tags:
+      - catalog
+      operationId: get_component
+      parameters:
+      - name: id
+        in: path
+        description: Component ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Component
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComponentItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    put:
+      tags:
+      - catalog
+      operationId: put_component
+      parameters:
+      - name: id
+        in: path
+        description: Component ID
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutComponentBody'
+        required: true
+      responses:
+        '200':
+          description: Updated component
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComponentItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      tags:
+      - catalog
+      operationId: delete_component
+      parameters:
+      - name: id
+        in: path
+        description: Component ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      tags:
+      - catalog
+      operationId: patch_component
+      parameters:
+      - name: id
+        in: path
+        description: Component ID
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchComponentBody'
+        required: true
+      responses:
+        '200':
+          description: Patched component
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComponentItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /api/executions:
     get:
       tags:
@@ -205,6 +373,291 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '422':
           description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/module-dependencies/{id}:
+    get:
+      tags:
+      - catalog
+      operationId: get_module_dependency
+      parameters:
+      - name: id
+        in: path
+        description: ModuleDependency ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ModuleDependency
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleDependencyItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      tags:
+      - catalog
+      operationId: delete_module_dependency
+      parameters:
+      - name: id
+        in: path
+        description: ModuleDependency ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      tags:
+      - catalog
+      operationId: patch_module_dependency
+      parameters:
+      - name: id
+        in: path
+        description: ModuleDependency ID
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchModuleDependencyBody'
+        required: true
+      responses:
+        '200':
+          description: Patched module dependency
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleDependencyItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/modules:
+    get:
+      tags:
+      - catalog
+      operationId: list_modules
+      responses:
+        '200':
+          description: Module list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModuleItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+      - catalog
+      operationId: create_module
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateModuleBody'
+        required: true
+      responses:
+        '201':
+          description: Created module
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleItem'
+        '404':
+          description: Referenced repo not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/modules/{id}:
+    get:
+      tags:
+      - catalog
+      operationId: get_module
+      parameters:
+      - name: id
+        in: path
+        description: Module ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Module
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    put:
+      tags:
+      - catalog
+      operationId: put_module
+      parameters:
+      - name: id
+        in: path
+        description: Module ID
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutModuleBody'
+        required: true
+      responses:
+        '200':
+          description: Updated module
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      tags:
+      - catalog
+      operationId: delete_module
+      parameters:
+      - name: id
+        in: path
+        description: Module ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      tags:
+      - catalog
+      operationId: patch_module
+      parameters:
+      - name: id
+        in: path
+        description: Module ID
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchModuleBody'
+        required: true
+      responses:
+        '200':
+          description: Patched module
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleItem'
+        '404':
+          description: Not found
           content:
             application/json:
               schema:
@@ -564,6 +1017,180 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+      - catalog
+      operationId: create_product
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductBody'
+        required: true
+      responses:
+        '201':
+          description: Created product
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductItem'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/products/{id}:
+    get:
+      tags:
+      - catalog
+      operationId: get_product
+      parameters:
+      - name: id
+        in: path
+        description: Product ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Product
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    put:
+      tags:
+      - catalog
+      operationId: put_product
+      parameters:
+      - name: id
+        in: path
+        description: Product ID
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutProductBody'
+        required: true
+      responses:
+        '200':
+          description: Updated product
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      tags:
+      - catalog
+      operationId: delete_product
+      parameters:
+      - name: id
+        in: path
+        description: Product ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      tags:
+      - catalog
+      operationId: patch_product
+      parameters:
+      - name: id
+        in: path
+        description: Product ID
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchProductBody'
+        required: true
+      responses:
+        '200':
+          description: Patched product
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /api/recent-actions:
     get:
       tags:
@@ -647,6 +1274,180 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/RepoItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+      - catalog
+      operationId: create_repo
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRepoBody'
+        required: true
+      responses:
+        '201':
+          description: Created repo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepoItem'
+        '404':
+          description: Referenced component not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/repos/{id}:
+    get:
+      tags:
+      - catalog
+      operationId: get_repo
+      parameters:
+      - name: id
+        in: path
+        description: Repo ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Repo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepoItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    put:
+      tags:
+      - catalog
+      operationId: put_repo
+      parameters:
+      - name: id
+        in: path
+        description: Repo ID
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutRepoBody'
+        required: true
+      responses:
+        '200':
+          description: Updated repo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepoItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      tags:
+      - catalog
+      operationId: delete_repo
+      parameters:
+      - name: id
+        in: path
+        description: Repo ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      tags:
+      - catalog
+      operationId: patch_repo
+      parameters:
+      - name: id
+        in: path
+        description: Repo ID
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchRepoBody'
+        required: true
+      responses:
+        '200':
+          description: Patched repo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepoItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Internal error
           content:
@@ -1000,6 +1801,50 @@ components:
         trend:
           type: integer
           format: int64
+    CreateComponentBody:
+      type: object
+      required:
+      - name
+      - productId
+      - domain
+      - owner
+      - criticality
+      - autonomy
+      - lastEval
+      properties:
+        autonomy:
+          type: string
+        criticality:
+          type: string
+        domain:
+          type: string
+        health:
+          type: integer
+          format: int64
+        lastEval:
+          type: string
+        name:
+          type: string
+        owner:
+          type: string
+        productId:
+          type: string
+        trend:
+          type: integer
+          format: int64
+    CreateModuleBody:
+      type: object
+      required:
+      - name
+      - kind
+      - repoId
+      properties:
+        kind:
+          type: string
+        name:
+          type: string
+        repoId:
+          type: string
     CreateModuleDependencyBody:
       type: object
       required:
@@ -1016,6 +1861,50 @@ components:
           type: string
         type:
           type: string
+    CreateProductBody:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+    CreateRepoBody:
+      type: object
+      required:
+      - name
+      - componentId
+      - owner
+      - criticality
+      - autonomy
+      - qualityScore
+      - coverage
+      - secScore
+      - execStatus
+      - lastEval
+      properties:
+        autonomy:
+          type: string
+        componentId:
+          type: string
+        coverage:
+          type: integer
+          format: int64
+        criticality:
+          type: string
+        execStatus:
+          type: string
+        lastEval:
+          type: string
+        name:
+          type: string
+        owner:
+          type: string
+        qualityScore:
+          type: integer
+          format: int64
+        secScore:
+          type: integer
+          format: int64
     CreateRequestBody:
       type: object
       required:
@@ -1041,6 +1930,13 @@ components:
         requestedBy:
           type: string
         title:
+          type: string
+    DeletedItem:
+      type: object
+      required:
+      - id
+      properties:
+        id:
           type: string
     ExecutionItem:
       type: object
@@ -1255,6 +2151,31 @@ components:
           $ref: '#/components/schemas/ModuleRef'
         type:
           type: string
+    ModuleItem:
+      type: object
+      required:
+      - id
+      - name
+      - kind
+      - repoId
+      - repoName
+      - componentId
+      - componentName
+      properties:
+        componentId:
+          type: string
+        componentName:
+          type: string
+        id:
+          type: string
+        kind:
+          type: string
+        name:
+          type: string
+        repoId:
+          type: string
+        repoName:
+          type: string
     ModuleRef:
       type: object
       required:
@@ -1421,6 +2342,73 @@ components:
           type: string
         title:
           type: string
+    PatchComponentBody:
+      type: object
+      properties:
+        autonomy:
+          type:
+          - string
+          - 'null'
+        criticality:
+          type:
+          - string
+          - 'null'
+        domain:
+          type:
+          - string
+          - 'null'
+        health:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        lastEval:
+          type:
+          - string
+          - 'null'
+        name:
+          type:
+          - string
+          - 'null'
+        owner:
+          type:
+          - string
+          - 'null'
+        productId:
+          type:
+          - string
+          - 'null'
+        trend:
+          type:
+          - integer
+          - 'null'
+          format: int64
+    PatchModuleBody:
+      type: object
+      properties:
+        kind:
+          type:
+          - string
+          - 'null'
+        name:
+          type:
+          - string
+          - 'null'
+        repoId:
+          type:
+          - string
+          - 'null'
+    PatchModuleDependencyBody:
+      type: object
+      properties:
+        label:
+          type:
+          - string
+          - 'null'
+        type:
+          type:
+          - string
+          - 'null'
     PatchOpportunityBody:
       type: object
       required:
@@ -1428,6 +2416,59 @@ components:
       properties:
         status:
           type: string
+    PatchProductBody:
+      type: object
+      properties:
+        name:
+          type:
+          - string
+          - 'null'
+    PatchRepoBody:
+      type: object
+      properties:
+        autonomy:
+          type:
+          - string
+          - 'null'
+        componentId:
+          type:
+          - string
+          - 'null'
+        coverage:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        criticality:
+          type:
+          - string
+          - 'null'
+        execStatus:
+          type:
+          - string
+          - 'null'
+        lastEval:
+          type:
+          - string
+          - 'null'
+        name:
+          type:
+          - string
+          - 'null'
+        owner:
+          type:
+          - string
+          - 'null'
+        qualityScore:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        secScore:
+          type:
+          - integer
+          - 'null'
+          format: int64
     PendingApprovalItem:
       type: object
       required:
@@ -1596,6 +2637,96 @@ components:
           type: string
         name:
           type: string
+    PutComponentBody:
+      type: object
+      required:
+      - name
+      - productId
+      - domain
+      - owner
+      - criticality
+      - autonomy
+      - health
+      - trend
+      - lastEval
+      properties:
+        autonomy:
+          type: string
+        criticality:
+          type: string
+        domain:
+          type: string
+        health:
+          type: integer
+          format: int64
+        lastEval:
+          type: string
+        name:
+          type: string
+        owner:
+          type: string
+        productId:
+          type: string
+        trend:
+          type: integer
+          format: int64
+    PutModuleBody:
+      type: object
+      required:
+      - name
+      - kind
+      - repoId
+      properties:
+        kind:
+          type: string
+        name:
+          type: string
+        repoId:
+          type: string
+    PutProductBody:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+    PutRepoBody:
+      type: object
+      required:
+      - name
+      - componentId
+      - owner
+      - criticality
+      - autonomy
+      - qualityScore
+      - coverage
+      - secScore
+      - execStatus
+      - lastEval
+      properties:
+        autonomy:
+          type: string
+        componentId:
+          type: string
+        coverage:
+          type: integer
+          format: int64
+        criticality:
+          type: string
+        execStatus:
+          type: string
+        lastEval:
+          type: string
+        name:
+          type: string
+        owner:
+          type: string
+        qualityScore:
+          type: integer
+          format: int64
+        secScore:
+          type: integer
+          format: int64
     RecentActionItem:
       type: object
       required:
@@ -1844,5 +2975,7 @@ tags:
   description: Operator catalog endpoint
 - name: persistence
   description: Key-value persistence endpoints
+- name: catalog
+  description: Catalog entity CRUD endpoints
 - name: testing
   description: Test-only maintenance endpoints
