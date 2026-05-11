@@ -240,6 +240,95 @@ fn data_delete_product_with_child_exits_1() {
 }
 
 #[test]
+fn data_delete_product_not_found_exits_1() {
+    let dir = setup_workspace_with_db();
+    let out = newton()
+        .args([
+            "data",
+            "delete",
+            "product",
+            "nonexistent-id-for-delete",
+            "--workspace",
+            &dir.path().to_string_lossy(),
+        ])
+        .output()
+        .expect("newton should execute");
+    assert_ne!(
+        out.status.code(),
+        Some(0),
+        "deleting nonexistent product should exit 1"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.is_empty() || !String::from_utf8_lossy(&out.stdout).is_empty(),
+        "should print error for nonexistent delete"
+    );
+}
+
+#[test]
+fn data_dry_run_component_does_not_create() {
+    let dir = setup_workspace_with_db();
+
+    // Create a product to satisfy FK reference
+    let out = newton()
+        .args([
+            "data",
+            "post",
+            "product",
+            "--workspace",
+            &dir.path().to_string_lossy(),
+            "--body",
+            r#"{"name":"DryRunParent"}"#,
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let product: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    let pid = product["id"].as_str().unwrap().to_string();
+
+    // Dry-run a component post (FK ref to product)
+    let comp_body = serde_json::json!({"name":"DryComp","productId":pid,"domain":"d","owner":"o","criticality":"low","autonomy":"low","lastEval":"2024-01-01T00:00:00Z"});
+    newton()
+        .args([
+            "data",
+            "post",
+            "component",
+            "--workspace",
+            &dir.path().to_string_lossy(),
+            "--body",
+            &serde_json::to_string(&comp_body).unwrap(),
+            "--dry-run",
+        ])
+        .assert()
+        .success();
+
+    // Verify no component was created
+    let out2 = newton()
+        .args([
+            "data",
+            "get",
+            "components",
+            "--workspace",
+            &dir.path().to_string_lossy(),
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let list: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out2.stdout)).unwrap();
+    assert_eq!(
+        list.as_array().unwrap().len(),
+        0,
+        "dry-run component post should not persist any component"
+    );
+}
+
+#[test]
 fn data_dry_run_does_not_create() {
     let dir = setup_workspace_with_db();
     // Dry-run a post
