@@ -26,3 +26,6 @@ auto_release_trigger.txt
 
 # Newton planner scratch (planner.sh ./tmp)
 /tmp/
+
+# insta pending snapshots (generated during test runs, never committed)
+*.pending-snap
