@@ -1726,7 +1726,7 @@ async fn test_scenario_46_planner_short_circuit_on_enrich_failure() {
     // aikit-sdk's extract_agent_quota_signal recognizes (type=="error" with quota exceeded message).
     write_agent_stub(
         harness.temp_dir.path(),
-        "echo '{\"type\":\"error\",\"message\":\"hourly quota exceeded\"}'\nexit 0\n",
+        "echo '{\"type\":\"error\",\"message\":\"hourly quota exceeded\"}'\nwhile read -r _line; do :; done\nexit 0\n",
     );
     let _path = PathGuard::prepend(harness.temp_dir.path());
 
