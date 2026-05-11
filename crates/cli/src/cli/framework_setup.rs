@@ -725,10 +725,10 @@ fn data_command() -> Command {
                     help: "Output format: text (default) or json (alias for --json)",
                 },
                 ArgSpec {
-                    name: "dry_run",
+                    name: "dry-run",
                     kind: ArgKind::Flag,
                     short: None,
-                    long: Some("dry_run"),
+                    long: Some("dry-run"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
                     default: None,
@@ -1935,7 +1935,7 @@ impl TryFrom<CommandArgs> for DataArgs {
                 .get("output-format")
                 .map(|s| s == "json")
                 .unwrap_or(false);
-        let dry_run = get_bool(&args, "dry_run");
+        let dry_run = get_bool(&args, "dry-run");
         let workspace = get_opt_path(&args, "workspace");
         Ok(DataArgs {
             verb,

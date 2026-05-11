@@ -2400,13 +2400,54 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
         std::process::exit(1);
     }
 
-    // Dry-run mode: parse body and print, no DB write
+    // Dry-run mode: validate body (including FK references) without writing to DB
     if args.dry_run {
-        if let Some(ref v) = body_value {
-            eprintln!("[dry-run] validated payload (no DB write):");
-            println!("{}", serde_json::to_string_pretty(v)?);
+        if matches!(args.verb, DataVerb::Post | DataVerb::Put | DataVerb::Patch) {
+            if let Some(ref v) = body_value {
+                // FK validation per resource type
+                match resource {
+                    "component" | "components" => {
+                        if let Some(product_id) = v.get("productId").and_then(|p| p.as_str()) {
+                            if let Err(e) = store.get_product(product_id).await {
+                                eprintln!(
+                                    "[dry-run] FK validation failed: productId '{}' not found: {}",
+                                    product_id, e.message
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    "repo" | "repos" => {
+                        if let Some(component_id) = v.get("componentId").and_then(|c| c.as_str()) {
+                            if let Err(e) = store.get_component(component_id).await {
+                                eprintln!("[dry-run] FK validation failed: componentId '{}' not found: {}", component_id, e.message);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    "module" | "modules" => {
+                        if let Some(repo_id) = v.get("repoId").and_then(|r| r.as_str()) {
+                            if let Err(e) = store.get_repo(repo_id).await {
+                                eprintln!(
+                                    "[dry-run] FK validation failed: repoId '{}' not found: {}",
+                                    repo_id, e.message
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                eprintln!("[dry-run] validated payload (no DB write):");
+                println!("{}", serde_json::to_string_pretty(v)?);
+            } else {
+                eprintln!("[dry-run] no body to validate");
+            }
         } else {
-            eprintln!("[dry-run] no body to validate");
+            eprintln!(
+                "[dry-run] no-op for {} (only POST/PUT/PATCH validate body)",
+                args.verb
+            );
         }
         return Ok(());
     }

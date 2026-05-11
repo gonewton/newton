@@ -37,6 +37,32 @@ fn data_get_products_empty() {
 }
 
 #[test]
+fn data_get_products_empty_output_format_json() {
+    let dir = setup_workspace_with_db();
+    let out = newton()
+        .args([
+            "data",
+            "get",
+            "products",
+            "--workspace",
+            &dir.path().to_string_lossy(),
+            "--output-format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("--output-format json must emit JSON");
+    assert!(
+        parsed.is_array(),
+        "empty products with --output-format json should be array; got: {stdout}"
+    );
+}
+
+#[test]
 fn data_post_and_get_product() {
     let dir = setup_workspace_with_db();
     let body = serde_json::json!({"name": "TestProduct"});
