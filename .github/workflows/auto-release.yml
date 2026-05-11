@@ -132,28 +132,28 @@ jobs:
       - name: Create or update Pull Request
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           NEXT_VERSION="${{ steps.next-version.outputs.next_version }}"
           BRANCH_NAME="${{ steps.next-version.outputs.branch_name }}"
           PR_TITLE="chore: release v$NEXT_VERSION"
-          PR_BODY="Automated release for version $NEXT_VERSION
 
-          This PR was created by the auto-release workflow. Merging it brings
-          the bumped version back into \`main\`.
-
-          **What triggered this release:**
-          Commit: ${{ github.sha }}
-          Message: ${{ github.event.head_commit.message }}"
+          # Write body to a file so that COMMIT_MSG (which may contain backticks,
+          # dollar signs, or other shell metacharacters from a prior squash-merge)
+          # is never re-interpreted by bash.
+          printf 'Automated release for version %s\n\nThis PR was created by the auto-release workflow. Merging it brings\nthe bumped version back into `main`.\n\n**What triggered this release:**\nCommit: %s\nMessage: %s\n' \
+            "$NEXT_VERSION" "$COMMIT_SHA" "$COMMIT_MSG" > /tmp/pr_body.md
 
           EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number' || echo "")
           if [ -n "$EXISTING_PR" ]; then
             echo "Updating existing PR #$EXISTING_PR..."
-            gh pr edit "$EXISTING_PR" --title "$PR_TITLE" --body "$PR_BODY"
+            gh pr edit "$EXISTING_PR" --title "$PR_TITLE" --body-file /tmp/pr_body.md
           else
             echo "Creating PR for $BRANCH_NAME..."
             gh pr create \
               --title "$PR_TITLE" \
-              --body "$PR_BODY" \
+              --body-file /tmp/pr_body.md \
               --base main \
               --head "$BRANCH_NAME" \
               --label "auto-release" \
