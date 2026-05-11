@@ -6,7 +6,9 @@
 
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
-use crate::workflow::human::{ApprovalDefault, ApprovalResult, DecisionResult, Interviewer};
+use crate::workflow::human::{
+    ApprovalDefault, ApprovalResult, DecisionContent, DecisionResult, Interviewer,
+};
 use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -15,6 +17,7 @@ use std::time::Duration;
 pub struct MockAiloopInterviewer {
     approvals: Mutex<VecDeque<ApprovalResult>>,
     choices: Mutex<VecDeque<DecisionResult>>,
+    decisions: Mutex<VecDeque<DecisionResult>>,
 }
 
 impl MockAiloopInterviewer {
@@ -22,6 +25,7 @@ impl MockAiloopInterviewer {
         Self {
             approvals: Mutex::new(VecDeque::new()),
             choices: Mutex::new(VecDeque::new()),
+            decisions: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -31,6 +35,10 @@ impl MockAiloopInterviewer {
 
     pub fn push_choice(&self, result: DecisionResult) {
         self.choices.lock().unwrap().push_back(result);
+    }
+
+    pub fn push_decision(&self, result: DecisionResult) {
+        self.decisions.lock().unwrap().push_back(result);
     }
 }
 
@@ -71,6 +79,20 @@ impl Interviewer for MockAiloopInterviewer {
             AppError::new(
                 ErrorCategory::InternalError,
                 "MockAiloopInterviewer: no scripted choice available",
+            )
+        })
+    }
+
+    async fn ask_decision(
+        &self,
+        _content: DecisionContent,
+        _timeout: Option<Duration>,
+        _default_choice: Option<&str>,
+    ) -> Result<DecisionResult, AppError> {
+        self.decisions.lock().unwrap().pop_front().ok_or_else(|| {
+            AppError::new(
+                ErrorCategory::InternalError,
+                "MockAiloopInterviewer: no scripted decision available",
             )
         })
     }

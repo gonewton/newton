@@ -151,7 +151,7 @@ async fn human_decision_logs_choice() -> Result<()> {
         response_text: Some("2".to_string()),
     };
     let mock = Arc::new(MockAiloopInterviewer::new());
-    mock.push_choice(decision_result.clone());
+    mock.push_decision(decision_result.clone());
     let operator = HumanDecisionOperator::new(
         provider_from_mock(mock),
         HumanSettings::default(),

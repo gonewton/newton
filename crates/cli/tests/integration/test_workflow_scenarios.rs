@@ -4,7 +4,9 @@ use insta::assert_yaml_snapshot;
 use newton_core::core::error::AppError;
 use newton_core::core::types::ErrorCategory;
 use newton_core::workflow::executor::{resume_workflow, ExecutionOverrides, ExecutionSummary};
-use newton_core::workflow::human::{ApprovalDefault, ApprovalResult, DecisionResult, Interviewer};
+use newton_core::workflow::human::{
+    ApprovalDefault, ApprovalResult, DecisionContent, DecisionResult, Interviewer,
+};
 use newton_core::workflow::operator::{OperatorRegistry, OperatorRegistryBuilder};
 use newton_core::workflow::operators::command::{
     CommandExecutionOutput, CommandExecutionRequest, CommandRunner,
@@ -207,6 +209,15 @@ impl Interviewer for FakeInterviewer {
         &self,
         _prompt: &str,
         _choices: &[String],
+        _timeout: Option<Duration>,
+        _default_choice: Option<&str>,
+    ) -> Result<DecisionResult, AppError> {
+        Ok(self.decision_result.clone())
+    }
+
+    async fn ask_decision(
+        &self,
+        _content: DecisionContent,
         _timeout: Option<Duration>,
         _default_choice: Option<&str>,
     ) -> Result<DecisionResult, AppError> {
@@ -939,7 +950,7 @@ async fn test_scenario_17_checkpoint_resume() {
 async fn test_scenario_18_human_decision() {
     let mut interviewer = FakeInterviewer::new();
     interviewer.decision_result = DecisionResult {
-        choice: "yes".to_string(),
+        choice: "canary".to_string(),
         timestamp: Utc::now(),
         timeout_applied: false,
         default_used: false,
@@ -952,7 +963,7 @@ async fn test_scenario_18_human_decision() {
         .await
         .expect("workflow must succeed");
 
-    assert!(summary.completed_tasks.contains_key("deploy"));
+    assert!(summary.completed_tasks.contains_key("deploy_canary"));
 }
 
 // -----------------------------------------------------------------------------

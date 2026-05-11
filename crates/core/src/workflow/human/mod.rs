@@ -72,6 +72,33 @@ pub struct DecisionResult {
     pub response_text: Option<String>,
 }
 
+/// A single selectable option in a structured decision prompt.
+#[derive(Debug, Clone)]
+pub struct DecisionOption {
+    pub id: String,
+    pub label: String,
+    pub detail_markdown: Option<String>,
+}
+
+/// An optional recommendation attached to a structured decision prompt.
+#[derive(Debug, Clone)]
+pub struct DecisionRecommendation {
+    pub option_id: String,
+    pub rationale_markdown: Option<String>,
+}
+
+/// Newton-owned structured decision content, aligned with ailoop MessageContent::Decision.
+///
+/// Insulates the Interviewer trait from direct coupling to ailoop-core types.
+#[derive(Debug, Clone)]
+pub struct DecisionContent {
+    pub decision_id: String,
+    pub summary: String,
+    pub context_markdown: Option<String>,
+    pub options: Vec<DecisionOption>,
+    pub recommendation: Option<DecisionRecommendation>,
+}
+
 /// Interface for blocking human input flows within workflow operators.
 #[async_trait]
 pub trait Interviewer: Send + Sync + 'static {
@@ -85,10 +112,19 @@ pub trait Interviewer: Send + Sync + 'static {
         default_on_timeout: Option<ApprovalDefault>,
     ) -> Result<ApprovalResult, crate::core::error::AppError>;
 
+    /// Legacy flat-choice prompt. Retained for internal use by migration path.
     async fn ask_choice(
         &self,
         prompt: &str,
         choices: &[String],
+        timeout: Option<Duration>,
+        default_choice: Option<&str>,
+    ) -> Result<DecisionResult, crate::core::error::AppError>;
+
+    /// Structured Decision prompt aligned with ailoop MessageContent::Decision.
+    async fn ask_decision(
+        &self,
+        content: DecisionContent,
         timeout: Option<Duration>,
         default_choice: Option<&str>,
     ) -> Result<DecisionResult, crate::core::error::AppError>;

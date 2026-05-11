@@ -141,6 +141,7 @@ impl Operator for HumanApprovalOperator {
             response_text,
             timeout_applied: result.timeout_applied,
             default_used: result.default_used,
+            decision_id: None,
         };
         audit::append_entry(
             &ctx.workspace_path,
