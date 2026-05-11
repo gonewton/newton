@@ -100,4 +100,56 @@ pub trait BackendStore: Send + Sync {
     async fn delete_persistence(&self, key: &str) -> Result<(), ApiError>;
 
     async fn reset(&self) -> Result<(), ApiError>;
+
+    // ── Catalog CRUD ─────────────────────────────────────────────────────────
+
+    // Product
+    async fn get_product(&self, id: &str) -> Result<ProductItem, ApiError>;
+    async fn create_product(&self, body: CreateProductBody) -> Result<ProductItem, ApiError>;
+    async fn put_product(&self, id: &str, body: PutProductBody) -> Result<ProductItem, ApiError>;
+    async fn patch_product(
+        &self,
+        id: &str,
+        body: PatchProductBody,
+    ) -> Result<ProductItem, ApiError>;
+    async fn delete_product(&self, id: &str) -> Result<String, ApiError>;
+
+    // Component
+    async fn get_component(&self, id: &str) -> Result<ComponentItem, ApiError>;
+    async fn create_component(&self, body: CreateComponentBody) -> Result<ComponentItem, ApiError>;
+    async fn put_component(
+        &self,
+        id: &str,
+        body: PutComponentBody,
+    ) -> Result<ComponentItem, ApiError>;
+    async fn patch_component(
+        &self,
+        id: &str,
+        body: PatchComponentBody,
+    ) -> Result<ComponentItem, ApiError>;
+    async fn delete_component(&self, id: &str) -> Result<String, ApiError>;
+
+    // Repo
+    async fn get_repo(&self, id: &str) -> Result<RepoItem, ApiError>;
+    async fn create_repo(&self, body: CreateRepoBody) -> Result<RepoItem, ApiError>;
+    async fn put_repo(&self, id: &str, body: PutRepoBody) -> Result<RepoItem, ApiError>;
+    async fn patch_repo(&self, id: &str, body: PatchRepoBody) -> Result<RepoItem, ApiError>;
+    async fn delete_repo(&self, id: &str) -> Result<String, ApiError>;
+
+    // Module
+    async fn list_modules(&self) -> Result<Vec<ModuleItem>, ApiError>;
+    async fn get_module(&self, id: &str) -> Result<ModuleItem, ApiError>;
+    async fn create_module(&self, body: CreateModuleBody) -> Result<ModuleItem, ApiError>;
+    async fn put_module(&self, id: &str, body: PutModuleBody) -> Result<ModuleItem, ApiError>;
+    async fn patch_module(&self, id: &str, body: PatchModuleBody) -> Result<ModuleItem, ApiError>;
+    async fn delete_module(&self, id: &str) -> Result<String, ApiError>;
+
+    // ModuleDependency additions
+    async fn get_module_dependency(&self, id: &str) -> Result<ModuleDependencyItem, ApiError>;
+    async fn patch_module_dependency(
+        &self,
+        id: &str,
+        body: PatchModuleDependencyBody,
+    ) -> Result<ModuleDependencyItem, ApiError>;
+    async fn delete_module_dependency(&self, id: &str) -> Result<String, ApiError>;
 }

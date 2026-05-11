@@ -19,6 +19,21 @@
 //! commands (workflow, webhook) are therefore registered at root level and
 //! dispatch internally via their first positional arg (subcommand).
 //! `workflow` now handles validate/lint/preview/graph/resume/runs/checkpoint/artifact.
+//!
+//! ## CLI command naming patterns
+//!
+//! Newton supports two positional-dispatch patterns:
+//!
+//! **Group-first** (`workflow runs list`, `workflow checkpoint clean`): The first
+//! positional arg selects a subcommand group, the second selects the action.
+//! Use when the resource/group is the primary noun (workflow, webhook).
+//!
+//! **Verb-first** (`data get product <id>`, `data post product`): The first
+//! positional arg is the HTTP verb, the second is the resource token.
+//! Use when callers think in terms of operations (analogous to REST/MCP).
+//! The `data` command uses this pattern.
+//!
+//! Both patterns are supported in the framework and may be used for future commands.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,10 +46,10 @@ use cli_framework::spec::command_tree::CommandSpec;
 use uuid::Uuid;
 
 use crate::cli::args::{
-    ArtifactArgs, ArtifactCommand, BatchArgs, CheckpointArgs, CheckpointCommand, DotArgs,
-    ExplainArgs, GraphFormat, InitArgs, LintArgs, OutputFormat, ResumeArgs, RunArgs, RunsArgs,
-    RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
-    WebhookStatusArgs,
+    ArtifactArgs, ArtifactCommand, BatchArgs, CheckpointArgs, CheckpointCommand, DataArgs,
+    DataVerb, DotArgs, ExplainArgs, GraphFormat, InitArgs, LintArgs, OutputFormat, ResumeArgs,
+    RunArgs, RunsArgs, RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand,
+    WebhookServeArgs, WebhookStatusArgs,
 };
 use crate::cli::categories;
 use crate::cli::context::NewtonContext;
@@ -603,6 +618,147 @@ fn serve_command() -> Command {
             })
         }),
         expose_mcp: false,
+    }
+}
+
+fn data_command() -> Command {
+    Command {
+        id: "data",
+        summary: "Catalog CRUD via verb-first subcommands (get/post/put/patch/delete)",
+        syntax: Some("<get|post|put|patch|delete> <resource> [ID] [OPTIONS]"),
+        category: Some(categories::WORKFLOW),
+        spec: Some(Arc::new(CommandSpec {
+            summary: "Catalog CRUD via verb-first subcommands (get/post/put/patch/delete)",
+            long_about: Some("Manage catalog entities (Product, Component, Repo, Module, ModuleDependency) via HTTP-style verbs.\n\nEXAMPLES:\n  newton data get products\n  newton data get product <id>\n  newton data post product -f body.json\n  newton data put product <id> -f body.json\n  newton data patch product <id> --body '{\"name\":\"X\"}'\n  newton data delete product <id>"),
+            examples: vec![
+                "newton data get products",
+                "newton data get product <id> --json",
+                "newton data post product -f body.json",
+                "newton data put product <id> -f body.json",
+                "newton data patch product <id> --body '{\"name\":\"X\"}'",
+                "newton data delete product <id>",
+                "newton data post component -f body.json --dry-run",
+            ],
+            args: vec![
+                ArgSpec {
+                    name: "verb",
+                    kind: ArgKind::Positional,
+                    short: None,
+                    long: None,
+                    value_type: ArgValueType::Enum(vec!["get", "post", "put", "patch", "delete"]),
+                    cardinality: Cardinality::Required,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "HTTP verb: get | post | put | patch | delete",
+                },
+                ArgSpec {
+                    name: "resource",
+                    kind: ArgKind::Positional,
+                    short: None,
+                    long: None,
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Required,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Resource token (e.g. product, products, component, repo, module, module-dependency)",
+                },
+                ArgSpec {
+                    name: "id",
+                    kind: ArgKind::Positional,
+                    short: None,
+                    long: None,
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Entity ID (required for single-item GET and all mutating verbs except POST)",
+                },
+                ArgSpec {
+                    name: "file",
+                    kind: ArgKind::Option,
+                    short: Some('f'),
+                    long: Some("file"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec!["body"],
+                    requires: vec![],
+                    help: "Path to JSON body file for POST/PUT/PATCH; use - for stdin",
+                },
+                ArgSpec {
+                    name: "body",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("body"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec!["file"],
+                    requires: vec![],
+                    help: "Inline JSON body string for POST/PUT/PATCH (mutually exclusive with --file)",
+                },
+                ArgSpec {
+                    name: "json",
+                    kind: ArgKind::Flag,
+                    short: Some('j'),
+                    long: Some("json"),
+                    value_type: ArgValueType::Bool,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Emit machine-readable JSON to stdout",
+                },
+                ArgSpec {
+                    name: "output-format",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("output-format"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Output format: text (default) or json (alias for --json)",
+                },
+                ArgSpec {
+                    name: "dry-run",
+                    kind: ArgKind::Flag,
+                    short: None,
+                    long: Some("dry-run"),
+                    value_type: ArgValueType::Bool,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Parse and validate body without writing to DB",
+                },
+                ArgSpec {
+                    name: "workspace",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("workspace"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Workspace root containing .newton/state/backend.sqlite",
+                },
+            ],
+            ..Default::default()
+        })),
+        validator: None,
+        execute: Arc::new(|_ctx, args| {
+            Box::pin(async move {
+                let dto = DataArgs::try_from(args)?;
+                commands::data(dto).await
+            })
+        }),
+        expose_mcp: true,
     }
 }
 
@@ -1524,7 +1680,8 @@ pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
         .register_command(health_command())?
         .register_command(doctor_command())?
         .register_command(config_command())?
-        .register_command(completion_command())?;
+        .register_command(completion_command())?
+        .register_command(data_command())?;
     #[cfg(feature = "ask")]
     {
         builder = builder.register_command(ask_command())?;
@@ -1548,12 +1705,13 @@ pub const REGISTERED_COMMAND_IDS: &[&str] = &[
     "doctor",
     "config",
     "completion",
+    "data",
 ];
 
 /// Commands exposed as MCP tools under the ExposeMcpOnly policy (issue #309).
 /// `resume` and `runs` were removed; they are now subcommands of `workflow` (issue #305).
 /// The order is alphabetical for readability; it does not affect registration order.
-pub const MCP_EXPOSED_COMMAND_IDS: &[&str] = &["config", "health", "run", "workflow"];
+pub const MCP_EXPOSED_COMMAND_IDS: &[&str] = &["config", "data", "health", "run", "workflow"];
 
 /// Returns every `Command` registered by `build_app`, in registration order.
 pub fn enumerate_commands() -> Vec<Command> {
@@ -1569,6 +1727,7 @@ pub fn enumerate_commands() -> Vec<Command> {
         doctor_command(),
         config_command(),
         completion_command(),
+        data_command(),
     ];
     #[cfg(feature = "ask")]
     {
@@ -1737,6 +1896,56 @@ impl TryFrom<CommandArgs> for ResumeArgs {
             run_id,
             workspace: get_opt_path(&args, "workspace"),
             allow_workflow_change: get_bool(&args, "allow-workflow-change"),
+        })
+    }
+}
+
+impl TryFrom<CommandArgs> for DataArgs {
+    type Error = anyhow::Error;
+
+    fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
+        let verb_str = args
+            .named
+            .get("verb")
+            .cloned()
+            .ok_or_else(|| anyhow!("DATA-002: verb is required (get|post|put|patch|delete)"))?;
+        let verb = match verb_str.as_str() {
+            "get" => DataVerb::Get,
+            "post" => DataVerb::Post,
+            "put" => DataVerb::Put,
+            "patch" => DataVerb::Patch,
+            "delete" => DataVerb::Delete,
+            other => {
+                return Err(anyhow!(
+                "DATA-002: unknown verb '{other}'; must be one of: get, post, put, patch, delete"
+            ))
+            }
+        };
+        let resource = args
+            .named
+            .get("resource")
+            .cloned()
+            .ok_or_else(|| anyhow!("DATA-003: resource token is required"))?;
+        let id = args.named.get("id").cloned();
+        let file = args.named.get("file").map(PathBuf::from);
+        let body = args.named.get("body").cloned();
+        let json = get_bool(&args, "json")
+            || args
+                .named
+                .get("output-format")
+                .map(|s| s == "json")
+                .unwrap_or(false);
+        let dry_run = get_bool(&args, "dry-run");
+        let workspace = get_opt_path(&args, "workspace");
+        Ok(DataArgs {
+            verb,
+            resource,
+            id,
+            file,
+            body,
+            json,
+            dry_run,
+            workspace,
         })
     }
 }

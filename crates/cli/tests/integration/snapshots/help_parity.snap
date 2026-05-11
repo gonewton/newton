@@ -11,6 +11,7 @@ Commands:
   batch       Process queued work items for a project
   completion  Emit shell completion script
   config      Inspect resolved Newton configuration
+  data        Catalog CRUD via verb-first subcommands (get/post/put/patch/delete)
   doctor      Run local environment diagnostic probes
   health      Print a one-line liveness status
   help        Print this message or the help of the given subcommand(s)

@@ -1,0 +1,597 @@
+use crate::api::state::AppState;
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::{IntoResponse, Json, Response},
+    routing::{delete, get, patch, post, put},
+    Router,
+};
+use newton_backend::{
+    CreateComponentBody, CreateModuleBody, CreateProductBody, CreateRepoBody, DeletedItem,
+    PatchComponentBody, PatchModuleBody, PatchModuleDependencyBody, PatchProductBody,
+    PatchRepoBody, PutComponentBody, PutModuleBody, PutProductBody, PutRepoBody,
+};
+use newton_types::ApiError;
+use std::sync::Arc;
+
+fn status_from_error(e: &ApiError) -> StatusCode {
+    match e.code.as_str() {
+        "ERR_NOT_FOUND" => StatusCode::NOT_FOUND,
+        "ERR_CONFLICT" => StatusCode::CONFLICT,
+        "ERR_VALIDATION" => StatusCode::UNPROCESSABLE_ENTITY,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+pub fn routes(state: Arc<AppState>) -> Router {
+    Router::new()
+        // Product
+        .route("/api/products/{id}", get(get_product))
+        .route("/api/products", post(create_product))
+        .route("/api/products/{id}", put(put_product))
+        .route("/api/products/{id}", patch(patch_product))
+        .route("/api/products/{id}", delete(delete_product))
+        // Component
+        .route("/api/components/{id}", get(get_component))
+        .route("/api/components", post(create_component))
+        .route("/api/components/{id}", put(put_component))
+        .route("/api/components/{id}", patch(patch_component))
+        .route("/api/components/{id}", delete(delete_component))
+        // Repo
+        .route("/api/repos/{id}", get(get_repo))
+        .route("/api/repos", post(create_repo))
+        .route("/api/repos/{id}", put(put_repo))
+        .route("/api/repos/{id}", patch(patch_repo))
+        .route("/api/repos/{id}", delete(delete_repo))
+        // Module
+        .route("/api/modules", get(list_modules))
+        .route("/api/modules/{id}", get(get_module))
+        .route("/api/modules", post(create_module))
+        .route("/api/modules/{id}", put(put_module))
+        .route("/api/modules/{id}", patch(patch_module))
+        .route("/api/modules/{id}", delete(delete_module))
+        // ModuleDependency
+        .route("/api/module-dependencies/{id}", get(get_module_dependency))
+        .route(
+            "/api/module-dependencies/{id}",
+            patch(patch_module_dependency),
+        )
+        .route(
+            "/api/module-dependencies/{id}",
+            delete(delete_module_dependency),
+        )
+        .with_state(state)
+}
+
+// ── Product ───────────────────────────────────────────────────────────────────
+
+#[utoipa::path(
+    get,
+    path = "/api/products/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Product ID")),
+    responses(
+        (status = 200, description = "Product", body = newton_backend::ProductItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn get_product(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.get_product(&id).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/products",
+    tag = "catalog",
+    request_body = CreateProductBody,
+    responses(
+        (status = 201, description = "Created product", body = newton_backend::ProductItem),
+        (status = 409, description = "Conflict", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn create_product(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateProductBody>,
+) -> Response {
+    match state.backend.create_product(body).await {
+        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/products/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Product ID")),
+    request_body = PutProductBody,
+    responses(
+        (status = 200, description = "Updated product", body = newton_backend::ProductItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 409, description = "Conflict", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn put_product(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PutProductBody>,
+) -> Response {
+    match state.backend.put_product(&id, body).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/products/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Product ID")),
+    request_body = PatchProductBody,
+    responses(
+        (status = 200, description = "Patched product", body = newton_backend::ProductItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn patch_product(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PatchProductBody>,
+) -> Response {
+    match state.backend.patch_product(&id, body).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/products/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Product ID")),
+    responses(
+        (status = 200, description = "Deleted", body = DeletedItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 409, description = "Conflict", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn delete_product(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.delete_product(&id).await {
+        Ok(deleted_id) => (StatusCode::OK, Json(DeletedItem { id: deleted_id })).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+#[utoipa::path(
+    get,
+    path = "/api/components/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Component ID")),
+    responses(
+        (status = 200, description = "Component", body = newton_backend::ComponentItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn get_component(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.get_component(&id).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/components",
+    tag = "catalog",
+    request_body = CreateComponentBody,
+    responses(
+        (status = 201, description = "Created component", body = newton_backend::ComponentItem),
+        (status = 404, description = "Referenced product not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn create_component(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateComponentBody>,
+) -> Response {
+    match state.backend.create_component(body).await {
+        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/components/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Component ID")),
+    request_body = PutComponentBody,
+    responses(
+        (status = 200, description = "Updated component", body = newton_backend::ComponentItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn put_component(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PutComponentBody>,
+) -> Response {
+    match state.backend.put_component(&id, body).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/components/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Component ID")),
+    request_body = PatchComponentBody,
+    responses(
+        (status = 200, description = "Patched component", body = newton_backend::ComponentItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn patch_component(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PatchComponentBody>,
+) -> Response {
+    match state.backend.patch_component(&id, body).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/components/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Component ID")),
+    responses(
+        (status = 200, description = "Deleted", body = DeletedItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 409, description = "Conflict", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn delete_component(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.delete_component(&id).await {
+        Ok(deleted_id) => (StatusCode::OK, Json(DeletedItem { id: deleted_id })).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+// ── Repo ──────────────────────────────────────────────────────────────────────
+
+#[utoipa::path(
+    get,
+    path = "/api/repos/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Repo ID")),
+    responses(
+        (status = 200, description = "Repo", body = newton_backend::RepoItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn get_repo(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.get_repo(&id).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/repos",
+    tag = "catalog",
+    request_body = CreateRepoBody,
+    responses(
+        (status = 201, description = "Created repo", body = newton_backend::RepoItem),
+        (status = 404, description = "Referenced component not found", body = ApiError),
+        (status = 409, description = "Conflict", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn create_repo(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateRepoBody>,
+) -> Response {
+    match state.backend.create_repo(body).await {
+        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/repos/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Repo ID")),
+    request_body = PutRepoBody,
+    responses(
+        (status = 200, description = "Updated repo", body = newton_backend::RepoItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn put_repo(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PutRepoBody>,
+) -> Response {
+    match state.backend.put_repo(&id, body).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/repos/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Repo ID")),
+    request_body = PatchRepoBody,
+    responses(
+        (status = 200, description = "Patched repo", body = newton_backend::RepoItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn patch_repo(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PatchRepoBody>,
+) -> Response {
+    match state.backend.patch_repo(&id, body).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/repos/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Repo ID")),
+    responses(
+        (status = 200, description = "Deleted", body = DeletedItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 409, description = "Conflict", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn delete_repo(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.delete_repo(&id).await {
+        Ok(deleted_id) => (StatusCode::OK, Json(DeletedItem { id: deleted_id })).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+// ── Module ────────────────────────────────────────────────────────────────────
+
+#[utoipa::path(
+    get,
+    path = "/api/modules",
+    tag = "catalog",
+    responses(
+        (status = 200, description = "Module list", body = [newton_backend::ModuleItem]),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_modules(State(state): State<Arc<AppState>>) -> Response {
+    match state.backend.list_modules().await {
+        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/modules/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Module ID")),
+    responses(
+        (status = 200, description = "Module", body = newton_backend::ModuleItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn get_module(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.get_module(&id).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/modules",
+    tag = "catalog",
+    request_body = CreateModuleBody,
+    responses(
+        (status = 201, description = "Created module", body = newton_backend::ModuleItem),
+        (status = 404, description = "Referenced repo not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn create_module(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateModuleBody>,
+) -> Response {
+    match state.backend.create_module(body).await {
+        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/modules/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Module ID")),
+    request_body = PutModuleBody,
+    responses(
+        (status = 200, description = "Updated module", body = newton_backend::ModuleItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn put_module(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PutModuleBody>,
+) -> Response {
+    match state.backend.put_module(&id, body).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/modules/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Module ID")),
+    request_body = PatchModuleBody,
+    responses(
+        (status = 200, description = "Patched module", body = newton_backend::ModuleItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn patch_module(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PatchModuleBody>,
+) -> Response {
+    match state.backend.patch_module(&id, body).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/modules/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Module ID")),
+    responses(
+        (status = 200, description = "Deleted", body = DeletedItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 409, description = "Conflict", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn delete_module(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.delete_module(&id).await {
+        Ok(deleted_id) => (StatusCode::OK, Json(DeletedItem { id: deleted_id })).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+// ── ModuleDependency ──────────────────────────────────────────────────────────
+
+#[utoipa::path(
+    get,
+    path = "/api/module-dependencies/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "ModuleDependency ID")),
+    responses(
+        (status = 200, description = "ModuleDependency", body = newton_backend::ModuleDependencyItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn get_module_dependency(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.get_module_dependency(&id).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/module-dependencies/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "ModuleDependency ID")),
+    request_body = PatchModuleDependencyBody,
+    responses(
+        (status = 200, description = "Patched module dependency", body = newton_backend::ModuleDependencyItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn patch_module_dependency(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PatchModuleDependencyBody>,
+) -> Response {
+    match state.backend.patch_module_dependency(&id, body).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/module-dependencies/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "ModuleDependency ID")),
+    responses(
+        (status = 200, description = "Deleted", body = DeletedItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn delete_module_dependency(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.delete_module_dependency(&id).await {
+        Ok(deleted_id) => (StatusCode::OK, Json(DeletedItem { id: deleted_id })).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}

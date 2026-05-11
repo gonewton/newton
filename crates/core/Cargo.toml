@@ -179,3 +179,7 @@ path = "tests/lints/no_wildcard_payload_match.rs"
 [[test]]
 name = "test_workflow_io_contract"
 path = "tests/workflow_graph/test_io_contract.rs"
+
+[[test]]
+name = "test_catalog_crud"
+path = "tests/integration/test_catalog_crud.rs"

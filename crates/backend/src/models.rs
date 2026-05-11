@@ -321,3 +321,192 @@ pub struct OperatorItem {
     #[serde(rename = "paletteIcon", skip_serializing_if = "Option::is_none")]
     pub palette_icon: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleItem {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub repo_id: String,
+    pub repo_name: String,
+    pub component_id: String,
+    pub component_name: String,
+}
+
+// ── Product ──────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreateProductBody {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PutProductBody {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PatchProductBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateComponentBody {
+    pub name: String,
+    pub product_id: String,
+    pub domain: String,
+    pub owner: String,
+    pub criticality: String,
+    pub autonomy: String,
+    #[serde(default)]
+    pub health: i64,
+    #[serde(default)]
+    pub trend: i64,
+    pub last_eval: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PutComponentBody {
+    pub name: String,
+    pub product_id: String,
+    pub domain: String,
+    pub owner: String,
+    pub criticality: String,
+    pub autonomy: String,
+    pub health: i64,
+    pub trend: i64,
+    pub last_eval: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchComponentBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub criticality: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autonomy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trend: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_eval: Option<String>,
+}
+
+// ── Repo ──────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateRepoBody {
+    pub name: String,
+    pub component_id: String,
+    pub owner: String,
+    pub criticality: String,
+    pub autonomy: String,
+    pub quality_score: i64,
+    pub coverage: i64,
+    pub sec_score: i64,
+    pub exec_status: String,
+    pub last_eval: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PutRepoBody {
+    pub name: String,
+    pub component_id: String,
+    pub owner: String,
+    pub criticality: String,
+    pub autonomy: String,
+    pub quality_score: i64,
+    pub coverage: i64,
+    pub sec_score: i64,
+    pub exec_status: String,
+    pub last_eval: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchRepoBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub criticality: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autonomy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality_score: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sec_score: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exec_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_eval: Option<String>,
+}
+
+// ── Module ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateModuleBody {
+    pub name: String,
+    pub kind: String,
+    pub repo_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PutModuleBody {
+    pub name: String,
+    pub kind: String,
+    pub repo_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchModuleBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_id: Option<String>,
+}
+
+// ── ModuleDependency ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchModuleDependencyBody {
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub dep_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+// ── DELETE response ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeletedItem {
+    pub id: String,
+}
