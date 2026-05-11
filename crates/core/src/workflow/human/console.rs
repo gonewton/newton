@@ -1,6 +1,8 @@
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
-use crate::workflow::human::{ApprovalDefault, ApprovalResult, DecisionResult, Interviewer};
+use crate::workflow::human::{
+    ApprovalDefault, ApprovalResult, DecisionContent, DecisionResult, Interviewer,
+};
 use async_trait::async_trait;
 use chrono::Utc;
 use std::io::{self, Write};
@@ -162,5 +164,19 @@ impl Interviewer for ConsoleInterviewer {
             decision.default_used = true;
         }
         Ok(decision)
+    }
+
+    async fn ask_decision(
+        &self,
+        _content: DecisionContent,
+        _timeout: Option<Duration>,
+        _default_choice: Option<&str>,
+    ) -> Result<DecisionResult, AppError> {
+        Err(AppError::new(
+            crate::core::types::ErrorCategory::ValidationError,
+            "ConsoleInterviewer does not support structured decisions; \
+             configure ailoop. See docs/operators/human_decision.md#configuration",
+        )
+        .with_code("HIL-AILOOP-001"))
     }
 }

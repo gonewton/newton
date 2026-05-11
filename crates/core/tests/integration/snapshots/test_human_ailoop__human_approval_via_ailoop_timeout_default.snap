@@ -5,6 +5,7 @@ expression: entry
 approved: true
 choice: ~
 choices: ~
+decision_id: ~
 default_used: true
 execution_id: "[execution_id]"
 interviewer_type: ailoop

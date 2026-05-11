@@ -21,6 +21,7 @@ pub struct AuditEntry {
     pub response_text: Option<String>,
     pub timeout_applied: bool,
     pub default_used: bool,
+    pub decision_id: Option<String>,
 }
 
 pub fn append_entry(

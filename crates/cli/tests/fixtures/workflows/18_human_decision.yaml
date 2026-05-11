@@ -4,24 +4,46 @@ metadata:
   name: "Scenario 18: Human Decision"
 workflow:
   settings:
-    entry_task: "ask_choice"
+    entry_task: "pick_strategy"
     max_time_seconds: 60
     parallel_limit: 1
     continue_on_error: false
     max_task_iterations: 10
     max_workflow_iterations: 100
   tasks:
-    - id: "ask_choice"
+    - id: "pick_strategy"
       operator: "HumanDecisionOperator"
       params:
-        prompt: "Release to production?"
-        choices: ["yes", "no"]
+        summary: "Which rollout strategy should we use?"
+        decision_id: "rollout-strategy"
+        context_markdown: |
+          ## Background
+          Current p99 latency is 120 ms.
+        options:
+          - id: "canary"
+            label: "Canary (5% → 100%)"
+            detail_markdown: "Safest; takes 2 days."
+          - id: "blue_green"
+            label: "Blue/green cutover"
+            detail_markdown: "Fast; requires dual fleet."
+          - id: "skip"
+            label: "Skip this release"
+        recommendation:
+          option_id: "canary"
+          rationale_markdown: "Aligns with SLA commitments."
+        timeout_seconds: 3600
+        default_choice: "skip"
       transitions:
-        - to: "deploy"
-          when: { $expr: 'tasks.ask_choice.output.choice == "yes"' }
+        - to: "deploy_canary"
+          when: { $expr: 'tasks.pick_strategy.output.choice == "canary"' }
+        - to: "deploy_blue_green"
+          when: { $expr: 'tasks.pick_strategy.output.choice == "blue_green"' }
         - to: "abort"
-          when: { $expr: 'tasks.ask_choice.output.choice == "no"' }
-    - id: "deploy"
+          when: { $expr: 'tasks.pick_strategy.output.choice == "skip"' }
+    - id: "deploy_canary"
+      operator: "NoOpOperator"
+      terminal: success
+    - id: "deploy_blue_green"
       operator: "NoOpOperator"
       terminal: success
     - id: "abort"

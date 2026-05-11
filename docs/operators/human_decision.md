@@ -1,25 +1,79 @@
 # `HumanDecisionOperator`
 
-Prompts a human for one of a fixed set of choices and resolves the chosen
-value into the task output.
+Prompts a human for one of a fixed set of structured choices and resolves the
+selected option `id` into the task output. Renders a structured decision card
+in the ailoop UI with per-option detail and an optional recommendation.
 
-## YAML
+## YAML (structured — preferred)
 
 ```yaml
 - id: pick-strategy
   operator: HumanDecisionOperator
-  with:
-    prompt: "Which path forward?"
-    choices: ["fix", "skip", "abort"]
-    timeout_seconds: 600
+  params:
+    summary: "Which rollout strategy should we use?"
+    decision_id: "rollout-strategy"          # optional; defaults to task id
+    context_markdown: |
+      ## Background
+      Current p99 latency is 120 ms.
+    options:
+      - id: "canary"
+        label: "Canary (5% → 100%)"
+        detail_markdown: "Safest; takes 2 days."
+      - id: "blue_green"
+        label: "Blue/green cutover"
+        detail_markdown: "Fast; requires dual fleet."
+      - id: "skip"
+        label: "Skip this release"
+    recommendation:
+      option_id: "canary"
+      rationale_markdown: "Aligns with SLA commitments."
+    timeout_seconds: 3600
     default_choice: "skip"
 ```
+
+## YAML (legacy — deprecated, one-release migration window)
+
+```yaml
+- id: ask
+  operator: HumanDecisionOperator
+  params:
+    prompt: "Release to production?"
+    choices: ["yes", "no"]
+    timeout_seconds: 600
+    default_choice: "yes"
+```
+
+Legacy `prompt`/`choices` params are still accepted for one release to allow
+existing workflows to migrate without a flag day. A deprecation warning is
+recorded in `execution.json["warnings"]` (via the audit entry `prompt` field)
+when the legacy shape is used. **Remove `prompt`/`choices` before the next
+release.**
+
+Detection: if `params` contains `options` → structured path. If `params`
+contains `prompt` and no `options` → legacy path. Both present or neither →
+`ValidationError`.
 
 ## Output JSON
 
 ```json
-{ "choice": "<one of choices>", "timestamp": "<RFC3339>" }
+{
+  "choice": "canary",
+  "label": "Canary (5% → 100%)",
+  "timestamp": "2026-05-11T12:00:00Z",
+  "timeout_applied": false,
+  "default_used": false
+}
 ```
+
+`choice` is the selected option **`id`** (stable programmer-chosen token).
+Use `choice` in transition expressions:
+
+```yaml
+when: { $expr: 'tasks.pick-strategy.output.choice == "canary"' }
+```
+
+`label` is the display string for log readability; do not use it in `$expr`
+transitions since labels may change independently of ids.
 
 ## Configuration
 
@@ -49,16 +103,22 @@ ailoop_channel=newton-dev
 ```
 
 Set `NEWTON_AILOOP_INTEGRATION=1` and run the workflow normally; ailoop
-renders the prompt on the local TTY.
+renders the structured decision card on the local TTY.
 
 ### Error reference
 
-When a workflow contains a `human_decision` task but no enabled
-`AiloopContext` is available, the first prompt fails with error code
-`HIL-AILOOP-001` (category `ValidationError`). If the configuration file is
-present but malformed (bad URL, unreadable file), the helper
-`require_enabled_ailoop_context` returns `HIL-AILOOP-003` (category
-`IoError`).
+| Code | Category | Trigger |
+|---|---|---|
+| `HIL-AILOOP-001` | `ValidationError` | No enabled `AiloopContext` available |
+| `HIL-AILOOP-003` | `IoError` | Configuration file present but malformed (bad URL, unreadable) |
+| `WFG-HUMAN-002` | `ValidationError` | `timeout_seconds` set but `default_choice` absent |
+| `WFG-HUMAN-101` | `IoError` | ailoop transport failure with `fail_fast=true` |
+| `WFG-HUMAN-103` | `TimeoutError` | Timeout with no `default_choice` configured |
+| `WFG-HUMAN-104` | `ValidationError` | ailoop answer does not match any declared option `id` |
+| `WFG-HUMAN-201` | `ValidationError` | `options` array has fewer than 2 non-empty entries |
+| `WFG-HUMAN-202` | `ValidationError` | Two or more options share the same `id` (case-sensitive) |
+| `WFG-HUMAN-203` | `ValidationError` | `recommendation.option_id` does not match any option `id` |
+| `WFG-HUMAN-204` | `ValidationError` | `default_choice` does not match any option `id` |
 
 ### Upgrade note
 
@@ -73,14 +133,14 @@ When the ailoop backend is in use, the operator follows the
 non-2xx response, deserialization error, timeout):
 
 - `fail_fast=true`: returns `AppError(IoError, "WFG-HUMAN-101")`.
-- `fail_fast=false`: behaves as if a timeout occurred. If
-  `default_choice` is configured the audit entry records
-  `timeout_applied=true, default_used=true`; otherwise the operator
-  returns `AppError(TimeoutError, "WFG-HUMAN-103")`.
+- `fail_fast=false`: behaves as if a timeout occurred. If `default_choice`
+  is configured the audit entry records `timeout_applied=true, default_used=true`;
+  otherwise the operator returns `AppError(TimeoutError, "WFG-HUMAN-103")`.
 
 ## Audit log
 
 Audit entries are written to
 `<workspace>/.newton/state/workflows/<execution_id>/audit.jsonl`. The
 `interviewer_type` field reports `"ailoop"` in production and `"mock_ailoop"`
-under tests using the test double.
+under tests using the test double. The `decision_id` field is set to the
+resolved decision ID for structured-path tasks and `null` for legacy-path tasks.

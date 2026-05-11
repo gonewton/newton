@@ -3,18 +3,18 @@ source: tests/integration/test_human_ailoop.rs
 expression: entry
 ---
 approved: ~
-choice: fix
+choice: canary
 choices:
-  - fix
+  - canary
+  - blue_green
   - skip
-  - abort
-decision_id: ~
+decision_id: rollout-strategy
 default_used: false
 execution_id: "[execution_id]"
 interviewer_type: ailoop
-prompt: "Which path forward? [DEPRECATED: migrate to structured options by next release]"
+prompt: Which rollout strategy?
 responder: ~
-response_text: fix
-task_id: decision
+response_text: canary
+task_id: pick_strategy
 timeout_applied: false
 timestamp: "[timestamp]"

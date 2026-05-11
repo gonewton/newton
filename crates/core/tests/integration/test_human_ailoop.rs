@@ -135,7 +135,7 @@ async fn human_decision_via_ailoop_happy_path() {
         .await
         .expect("execute should succeed");
 
-    // Goal 7: operator output JSON shape unchanged
+    // Goal 7: operator output JSON shape (choice is the selected value)
     assert_eq!(output["choice"], json!("fix"));
     assert!(output.get("timestamp").is_some());
 
@@ -153,9 +153,126 @@ async fn human_decision_via_ailoop_happy_path() {
     assert_eq!(entry["interviewer_type"], json!("ailoop"));
     assert_eq!(entry["choice"], json!("fix"));
     assert_eq!(entry["task_id"], json!("decision"));
+    // Legacy path: decision_id is null
+    assert_eq!(entry["decision_id"], json!(null));
 
     redact_audit(&mut entry);
     assert_yaml_snapshot!("human_decision_via_ailoop", entry);
+}
+
+#[tokio::test]
+async fn human_decision_structured_via_ailoop() {
+    let workspace = TempDir::new().unwrap();
+    let execution_id = Uuid::new_v4().to_string();
+    let channel = "structured-decision-test";
+
+    // The ailoop server returns an option id as the answer
+    let (ws_url, _handle) = start_ws_responder(MessageContent::Response {
+        response_type: ResponseType::Text,
+        answer: Some("canary".to_string()),
+    })
+    .await;
+
+    let interviewer = build_ailoop_interviewer(&ws_url, channel);
+    let operator = HumanDecisionOperator::new(
+        provider_for(interviewer),
+        HumanSettings::default(),
+        Arc::new(Vec::new()),
+    );
+    let mut ctx = build_execution_context(&workspace, execution_id.clone());
+    ctx.task_id = "pick_strategy".to_string();
+
+    let output = operator
+        .execute(
+            json!({
+                "summary": "Which rollout strategy?",
+                "decision_id": "rollout-strategy",
+                "context_markdown": "## Background\nCurrent p99 latency is 120ms.",
+                "options": [
+                    { "id": "canary", "label": "Canary (5%→100%)", "detail_markdown": "Safest; takes 2 days." },
+                    { "id": "blue_green", "label": "Blue/green cutover" },
+                    { "id": "skip", "label": "Skip this release" }
+                ],
+                "recommendation": {
+                    "option_id": "canary",
+                    "rationale_markdown": "Aligns with SLA commitments."
+                },
+                "timeout_seconds": 3600,
+                "default_choice": "skip",
+            }),
+            ctx,
+        )
+        .await
+        .expect("structured execute should succeed");
+
+    // choice equals the option id, not the display label
+    assert_eq!(output["choice"], json!("canary"));
+    assert_eq!(output["label"], json!("Canary (5%→100%)"));
+    assert_eq!(output["timeout_applied"], json!(false));
+    assert_eq!(output["default_used"], json!(false));
+    assert!(output.get("timestamp").is_some());
+
+    // Audit entry has decision_id set
+    let audit_path = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(&execution_id)
+        .join("audit.jsonl");
+    let contents = std::fs::read_to_string(&audit_path).expect("audit file written");
+    let line = contents.lines().next().expect("at least one audit entry");
+    let mut entry: Value = serde_json::from_str(line).expect("audit entry is JSON");
+    assert_eq!(entry["interviewer_type"], json!("ailoop"));
+    assert_eq!(entry["choice"], json!("canary"));
+    assert_eq!(entry["task_id"], json!("pick_strategy"));
+    assert_eq!(entry["decision_id"], json!("rollout-strategy"));
+
+    redact_audit(&mut entry);
+    assert_yaml_snapshot!("human_decision_structured_via_ailoop", entry);
+}
+
+#[tokio::test]
+async fn human_decision_structured_timeout_with_default() {
+    let workspace = TempDir::new().unwrap();
+    let execution_id = Uuid::new_v4().to_string();
+    let channel = "structured-timeout-test";
+
+    let (ws_url, _handle) = start_ws_responder(MessageContent::Response {
+        response_type: ResponseType::Timeout,
+        answer: None,
+    })
+    .await;
+
+    let interviewer = build_ailoop_interviewer(&ws_url, channel);
+    let operator = HumanDecisionOperator::new(
+        provider_for(interviewer),
+        HumanSettings::default(),
+        Arc::new(Vec::new()),
+    );
+    let mut ctx = build_execution_context(&workspace, execution_id.clone());
+    ctx.task_id = "pick_strategy".to_string();
+
+    let output = operator
+        .execute(
+            json!({
+                "summary": "Which rollout strategy?",
+                "options": [
+                    { "id": "canary", "label": "Canary" },
+                    { "id": "skip", "label": "Skip" }
+                ],
+                "timeout_seconds": 2,
+                "default_choice": "skip",
+            }),
+            ctx,
+        )
+        .await
+        .expect("should succeed with default on timeout");
+
+    assert_eq!(output["choice"], json!("skip"));
+    assert_eq!(output["label"], json!("Skip"));
+    assert_eq!(output["timeout_applied"], json!(true));
+    assert_eq!(output["default_used"], json!(true));
 }
 
 #[tokio::test]
@@ -281,4 +398,221 @@ async fn lazy_provider_not_invoked_when_no_human_task() {
     let _operator =
         HumanDecisionOperator::new(provider, HumanSettings::default(), Arc::new(Vec::new()));
     assert_eq!(counter.load(Ordering::SeqCst), 0);
+}
+
+// ── validate_params tests ─────────────────────────────────────────────────────
+
+#[test]
+fn validate_params_fewer_than_2_options_returns_201() {
+    let provider: InterviewerProvider = Arc::new(|| {
+        Err(newton_core::core::error::AppError::new(
+            newton_core::core::types::ErrorCategory::ValidationError,
+            "unused",
+        ))
+    });
+    let operator =
+        HumanDecisionOperator::new(provider, HumanSettings::default(), Arc::new(Vec::new()));
+    let err = operator
+        .validate_params(&json!({
+            "summary": "Pick one",
+            "options": [{ "id": "only", "label": "Only" }]
+        }))
+        .unwrap_err();
+    assert_eq!(err.code, "WFG-HUMAN-201");
+}
+
+#[test]
+fn validate_params_duplicate_option_ids_returns_202() {
+    let provider: InterviewerProvider = Arc::new(|| {
+        Err(newton_core::core::error::AppError::new(
+            newton_core::core::types::ErrorCategory::ValidationError,
+            "unused",
+        ))
+    });
+    let operator =
+        HumanDecisionOperator::new(provider, HumanSettings::default(), Arc::new(Vec::new()));
+    let err = operator
+        .validate_params(&json!({
+            "summary": "Pick",
+            "options": [
+                { "id": "a", "label": "A" },
+                { "id": "a", "label": "B" }
+            ]
+        }))
+        .unwrap_err();
+    assert_eq!(err.code, "WFG-HUMAN-202");
+}
+
+#[test]
+fn validate_params_bad_recommendation_option_id_returns_203() {
+    let provider: InterviewerProvider = Arc::new(|| {
+        Err(newton_core::core::error::AppError::new(
+            newton_core::core::types::ErrorCategory::ValidationError,
+            "unused",
+        ))
+    });
+    let operator =
+        HumanDecisionOperator::new(provider, HumanSettings::default(), Arc::new(Vec::new()));
+    let err = operator
+        .validate_params(&json!({
+            "summary": "Pick",
+            "options": [
+                { "id": "a", "label": "A" },
+                { "id": "b", "label": "B" }
+            ],
+            "recommendation": { "option_id": "z" }
+        }))
+        .unwrap_err();
+    assert_eq!(err.code, "WFG-HUMAN-203");
+}
+
+#[test]
+fn validate_params_bad_default_choice_returns_204() {
+    let provider: InterviewerProvider = Arc::new(|| {
+        Err(newton_core::core::error::AppError::new(
+            newton_core::core::types::ErrorCategory::ValidationError,
+            "unused",
+        ))
+    });
+    let operator =
+        HumanDecisionOperator::new(provider, HumanSettings::default(), Arc::new(Vec::new()));
+    let err = operator
+        .validate_params(&json!({
+            "summary": "Pick",
+            "options": [
+                { "id": "a", "label": "A" },
+                { "id": "b", "label": "B" }
+            ],
+            "default_choice": "z"
+        }))
+        .unwrap_err();
+    assert_eq!(err.code, "WFG-HUMAN-204");
+}
+
+#[test]
+fn validate_params_timeout_without_default_returns_002() {
+    let provider: InterviewerProvider = Arc::new(|| {
+        Err(newton_core::core::error::AppError::new(
+            newton_core::core::types::ErrorCategory::ValidationError,
+            "unused",
+        ))
+    });
+    let operator =
+        HumanDecisionOperator::new(provider, HumanSettings::default(), Arc::new(Vec::new()));
+    let err = operator
+        .validate_params(&json!({
+            "summary": "Pick",
+            "options": [
+                { "id": "a", "label": "A" },
+                { "id": "b", "label": "B" }
+            ],
+            "timeout_seconds": 600
+        }))
+        .unwrap_err();
+    assert_eq!(err.code, "WFG-HUMAN-002");
+}
+
+#[test]
+fn validate_params_legacy_no_new_error_codes() {
+    let provider: InterviewerProvider = Arc::new(|| {
+        Err(newton_core::core::error::AppError::new(
+            newton_core::core::types::ErrorCategory::ValidationError,
+            "unused",
+        ))
+    });
+    let operator =
+        HumanDecisionOperator::new(provider, HumanSettings::default(), Arc::new(Vec::new()));
+    // Legacy with timeout + default_choice: valid
+    operator
+        .validate_params(&json!({
+            "prompt": "Pick",
+            "choices": ["yes", "no"],
+            "timeout_seconds": 60,
+            "default_choice": "yes"
+        }))
+        .expect("valid legacy params should pass validation");
+}
+
+#[test]
+fn validate_params_decision_id_absent_uses_task_id() {
+    // decision_id absent from structured params is valid — operator fills from task_id at execute time
+    let provider: InterviewerProvider = Arc::new(|| {
+        Err(newton_core::core::error::AppError::new(
+            newton_core::core::types::ErrorCategory::ValidationError,
+            "unused",
+        ))
+    });
+    let operator =
+        HumanDecisionOperator::new(provider, HumanSettings::default(), Arc::new(Vec::new()));
+    operator
+        .validate_params(&json!({
+            "summary": "Pick",
+            "options": [
+                { "id": "a", "label": "A" },
+                { "id": "b", "label": "B" }
+            ]
+        }))
+        .expect("absent decision_id should be valid");
+}
+
+#[tokio::test]
+async fn mock_interviewer_push_decision_independent_of_choices() {
+    use chrono::Utc;
+    use newton_core::workflow::human::{DecisionResult, MockAiloopInterviewer};
+    use std::sync::Arc;
+
+    let mock = Arc::new(MockAiloopInterviewer::new());
+
+    mock.push_choice(DecisionResult {
+        choice: "choice-queue".to_string(),
+        timestamp: Utc::now(),
+        timeout_applied: false,
+        default_used: false,
+        response_text: None,
+    });
+
+    mock.push_decision(DecisionResult {
+        choice: "canary".to_string(),
+        timestamp: Utc::now(),
+        timeout_applied: false,
+        default_used: false,
+        response_text: None,
+    });
+
+    // ask_decision pops from decisions queue
+    let content = newton_core::workflow::human::DecisionContent {
+        decision_id: "test".to_string(),
+        summary: "Pick".to_string(),
+        context_markdown: None,
+        options: vec![
+            newton_core::workflow::human::DecisionOption {
+                id: "canary".to_string(),
+                label: "Canary".to_string(),
+                detail_markdown: None,
+            },
+            newton_core::workflow::human::DecisionOption {
+                id: "skip".to_string(),
+                label: "Skip".to_string(),
+                detail_markdown: None,
+            },
+        ],
+        recommendation: None,
+    };
+    let decision_result = mock
+        .ask_decision(content, None::<std::time::Duration>, None)
+        .await
+        .unwrap();
+    assert_eq!(decision_result.choice, "canary");
+
+    // ask_choice still pops from choices queue (unchanged)
+    let choice_result = mock
+        .ask_choice(
+            "prompt",
+            &["choice-queue".to_string(), "b".to_string()],
+            None::<std::time::Duration>,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(choice_result.choice, "choice-queue");
 }

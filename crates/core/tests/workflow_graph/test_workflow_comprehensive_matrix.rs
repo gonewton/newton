@@ -3,7 +3,9 @@ use chrono::Utc;
 use newton_core::core::error::AppError;
 use newton_core::core::types::ErrorCategory;
 use newton_core::workflow::executor::{self, ExecutionOverrides, ExecutionSummary};
-use newton_core::workflow::human::{ApprovalDefault, ApprovalResult, DecisionResult, Interviewer};
+use newton_core::workflow::human::{
+    ApprovalDefault, ApprovalResult, DecisionContent, DecisionResult, Interviewer,
+};
 use newton_core::workflow::operator::OperatorRegistry;
 use newton_core::workflow::operators::command::{
     CommandExecutionOutput, CommandExecutionRequest, CommandRunner,
@@ -145,6 +147,15 @@ impl Interviewer for FakeInterviewer {
         &self,
         _prompt: &str,
         _choices: &[String],
+        _timeout: Option<Duration>,
+        _default_choice: Option<&str>,
+    ) -> Result<DecisionResult, AppError> {
+        Ok(self.decision_result.clone())
+    }
+
+    async fn ask_decision(
+        &self,
+        _content: DecisionContent,
         _timeout: Option<Duration>,
         _default_choice: Option<&str>,
     ) -> Result<DecisionResult, AppError> {

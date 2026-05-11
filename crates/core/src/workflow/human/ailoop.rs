@@ -2,7 +2,9 @@
 
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
-use crate::workflow::human::{ApprovalDefault, ApprovalResult, DecisionResult, Interviewer};
+use crate::workflow::human::{
+    ApprovalDefault, ApprovalResult, DecisionContent, DecisionResult, Interviewer,
+};
 use ailoop_core::models::{MessageContent, ResponseType};
 use async_trait::async_trait;
 use chrono::Utc;
@@ -176,6 +178,98 @@ impl Interviewer for AiloopInterviewer {
                         Err(AppError::new(
                             ErrorCategory::ValidationError,
                             format!("ailoop answer '{trimmed}' does not match any declared choice"),
+                        )
+                        .with_code("WFG-HUMAN-104"))
+                    }
+                    ResponseType::Timeout => handle_choice_timeout(default_choice),
+                    ResponseType::Cancelled
+                    | ResponseType::AuthorizationApproved
+                    | ResponseType::AuthorizationDenied => handle_choice_unavailable(
+                        "ailoop returned unexpected response type",
+                        default_choice,
+                        self.fail_fast,
+                    ),
+                },
+                _ => handle_choice_unavailable(
+                    "ailoop returned unexpected message content",
+                    default_choice,
+                    self.fail_fast,
+                ),
+            },
+            Ok(None) => handle_choice_timeout(default_choice),
+            Err(e) => handle_choice_transport_error(&e.to_string(), default_choice, self.fail_fast),
+        }
+    }
+
+    async fn ask_decision(
+        &self,
+        content: DecisionContent,
+        timeout: Option<Duration>,
+        default_choice: Option<&str>,
+    ) -> Result<DecisionResult, AppError> {
+        let effective_timeout = self.resolve_timeout(timeout);
+        let option_ids: Vec<String> = content.options.iter().map(|o| o.id.clone()).collect();
+
+        let mut question = content.summary.clone();
+        if let Some(ctx_md) = &content.context_markdown {
+            question.push_str("\n\n");
+            question.push_str(ctx_md);
+        }
+        question.push_str("\n\nOptions:");
+        for opt in &content.options {
+            question.push_str(&format!("\n  [{}] {}", opt.id, opt.label));
+            if let Some(detail) = &opt.detail_markdown {
+                question.push_str(&format!("\n    {detail}"));
+            }
+        }
+        if let Some(rec) = &content.recommendation {
+            question.push_str(&format!("\n\nRecommendation: {}", rec.option_id));
+            if let Some(rationale) = &rec.rationale_markdown {
+                question.push_str(&format!(" — {rationale}"));
+            }
+        }
+
+        let result = ailoop_core::client::ask(
+            &self.ws_url,
+            &self.channel,
+            &question,
+            to_timeout_secs(effective_timeout),
+            Some(option_ids.clone()),
+        )
+        .await;
+
+        match result {
+            Ok(Some(msg)) => match msg.content {
+                MessageContent::Response {
+                    response_type,
+                    answer,
+                } => match response_type {
+                    ResponseType::Text => {
+                        let answer = match answer {
+                            Some(a) => a,
+                            None => {
+                                return Err(AppError::new(
+                                    ErrorCategory::ValidationError,
+                                    "ailoop returned no answer and timed_out=false",
+                                )
+                                .with_code("WFG-HUMAN-104"))
+                            }
+                        };
+                        let trimmed = answer.trim();
+                        if let Some(matched) = option_ids.iter().find(|id| id.as_str() == trimmed) {
+                            return Ok(DecisionResult {
+                                choice: matched.clone(),
+                                timestamp: Utc::now(),
+                                timeout_applied: false,
+                                default_used: false,
+                                response_text: Some(answer),
+                            });
+                        }
+                        Err(AppError::new(
+                            ErrorCategory::ValidationError,
+                            format!(
+                                "ailoop answer '{trimmed}' does not match any declared option id"
+                            ),
                         )
                         .with_code("WFG-HUMAN-104"))
                     }
@@ -565,6 +659,115 @@ mod tests {
         assert_eq!(result.choice, "a");
         assert!(result.timeout_applied);
         assert!(result.default_used);
+    }
+
+    // ── ask_decision ──────────────────────────────────────────────────────────
+
+    fn make_decision_content() -> DecisionContent {
+        DecisionContent {
+            decision_id: "test-decision".to_string(),
+            summary: "Which strategy?".to_string(),
+            context_markdown: None,
+            options: vec![
+                crate::workflow::human::DecisionOption {
+                    id: "canary".to_string(),
+                    label: "Canary".to_string(),
+                    detail_markdown: None,
+                },
+                crate::workflow::human::DecisionOption {
+                    id: "skip".to_string(),
+                    label: "Skip".to_string(),
+                    detail_markdown: None,
+                },
+            ],
+            recommendation: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ask_decision_success_match() {
+        let (url, _h) = start_ws_responder(MessageContent::Response {
+            answer: Some("canary".to_string()),
+            response_type: ResponseType::Text,
+        })
+        .await;
+        let interviewer = make_interviewer(&url, true);
+        let result = interviewer
+            .ask_decision(
+                make_decision_content(),
+                Some(Duration::from_secs(2)),
+                Some("skip"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.choice, "canary");
+        assert!(!result.timeout_applied);
+        assert!(!result.default_used);
+    }
+
+    #[tokio::test]
+    async fn test_ask_decision_unmatched_answer_returns_104() {
+        let (url, _h) = start_ws_responder(MessageContent::Response {
+            answer: Some("banana".to_string()),
+            response_type: ResponseType::Text,
+        })
+        .await;
+        let interviewer = make_interviewer(&url, true);
+        let err = interviewer
+            .ask_decision(make_decision_content(), Some(Duration::from_secs(2)), None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "WFG-HUMAN-104");
+    }
+
+    #[tokio::test]
+    async fn test_ask_decision_timeout_with_default() {
+        let (url, _h) = start_ws_responder(MessageContent::Response {
+            answer: None,
+            response_type: ResponseType::Timeout,
+        })
+        .await;
+        let interviewer = make_interviewer(&url, false);
+        let result = interviewer
+            .ask_decision(
+                make_decision_content(),
+                Some(Duration::from_secs(2)),
+                Some("skip"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.choice, "skip");
+        assert!(result.timeout_applied);
+        assert!(result.default_used);
+    }
+
+    #[tokio::test]
+    async fn test_ask_decision_timeout_no_default_returns_103() {
+        let (url, _h) = start_ws_responder(MessageContent::Response {
+            answer: None,
+            response_type: ResponseType::Timeout,
+        })
+        .await;
+        let interviewer = make_interviewer(&url, true);
+        let err = interviewer
+            .ask_decision(make_decision_content(), Some(Duration::from_secs(2)), None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "WFG-HUMAN-103");
+    }
+
+    #[tokio::test]
+    async fn test_ask_decision_fail_fast_unreachable_returns_101() {
+        let interviewer = unreachable_interviewer(true);
+        let err = interviewer
+            .ask_decision(
+                make_decision_content(),
+                Some(Duration::from_millis(100)),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "WFG-HUMAN-101");
     }
 
     // ── unit tests for helpers ────────────────────────────────────────────────
