@@ -42,7 +42,7 @@ async fn start_ws_responder(
                 let msg: Message = serde_json::from_str(&text).unwrap();
                 let reply = Message::response(msg.channel.clone(), response_content, msg.id);
                 let reply_json = serde_json::to_string(&reply).unwrap();
-                let _ = sender.send(WsMessage::Text(reply_json)).await;
+                let _ = sender.send(WsMessage::Text(reply_json.into())).await;
             }
         }
     });
