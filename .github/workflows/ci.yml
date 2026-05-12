@@ -80,23 +80,20 @@ jobs:
         with:
           toolchain: 1.94
 
-      - name: Cache Cargo registry
+      - name: Cache cargo-audit binary
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-audit-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-audit-
+            ~/.cargo/bin/cargo-audit*
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+          key: cargo-audit-v0.22.0
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.0
 
       - name: Run security audit
-        uses: actions-rust-lang/audit@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          deny: critical
-        # continue-on-error removed — job now fails on critical advisories
+        run: cargo audit
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
