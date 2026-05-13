@@ -223,6 +223,128 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /api/grades:
+    get:
+      tags:
+      - catalog
+      operationId: list_grades
+      responses:
+        '200':
+          description: List of grades
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GradeItem'
+    post:
+      tags:
+      - catalog
+      operationId: create_grade
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGradeBody'
+        required: true
+      responses:
+        '201':
+          description: Created grade
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GradeItem'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/grades/{id}:
+    get:
+      tags:
+      - catalog
+      operationId: get_grade
+      parameters:
+      - name: id
+        in: path
+        description: Grade id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Grade
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GradeItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      tags:
+      - catalog
+      operationId: delete_grade
+      parameters:
+      - name: id
+        in: path
+        description: Grade id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      tags:
+      - catalog
+      operationId: patch_grade
+      parameters:
+      - name: id
+        in: path
+        description: Grade id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchGradeBody'
+        required: true
+      responses:
+        '200':
+          description: Updated grade
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GradeItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /api/hil/instances:
     get:
       tags:
@@ -1832,6 +1954,36 @@ components:
         trend:
           type: integer
           format: int64
+    CreateGradeBody:
+      type: object
+      required:
+      - scope
+      - scopeId
+      - indicator
+      - score
+      properties:
+        detailsUrl:
+          type:
+          - string
+          - 'null'
+        evaluatedAt:
+          type:
+          - string
+          - 'null'
+        indicator:
+          type: string
+        metrics: {}
+        rawOutput:
+          type:
+          - string
+          - 'null'
+        scope:
+          type: string
+        scopeId:
+          type: string
+        score:
+          type: number
+          format: double
     CreateModuleBody:
       type: object
       required:
@@ -2011,6 +2163,45 @@ components:
           type:
           - string
           - 'null'
+    GradeItem:
+      type: object
+      required:
+      - id
+      - scope
+      - scopeId
+      - indicator
+      - score
+      - evaluatedAt
+      - ingestedAt
+      properties:
+        detailsUrl:
+          type:
+          - string
+          - 'null'
+        evaluatedAt:
+          type: string
+        id:
+          type: string
+        indicator:
+          type: string
+        ingestedAt:
+          type: string
+        metrics: {}
+        rawOutput:
+          type:
+          - string
+          - 'null'
+        scope:
+          type: string
+        scopeId:
+          type: string
+        score:
+          type: number
+          format: double
+        warnings:
+          type: array
+          items:
+            type: string
     HealthResponse:
       type: object
       required:
@@ -2383,6 +2574,23 @@ components:
           - integer
           - 'null'
           format: int64
+    PatchGradeBody:
+      type: object
+      properties:
+        detailsUrl:
+          type:
+          - string
+          - 'null'
+        metrics: {}
+        rawOutput:
+          type:
+          - string
+          - 'null'
+        score:
+          type:
+          - number
+          - 'null'
+          format: double
     PatchModuleBody:
       type: object
       properties:

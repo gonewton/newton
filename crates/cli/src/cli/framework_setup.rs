@@ -628,13 +628,16 @@ const DATA_GET_LONG_ABOUT: &str =
     "Retrieve catalog entities — either a full collection or a single item by id.\n\n\
      EXAMPLES:\n  \
      newton data get products\n  \
-     newton data get product <id> --json";
+     newton data get product <id> --json\n  \
+     newton data get grades\n  \
+     newton data get grade <id>";
 
 const DATA_POST_LONG_ABOUT: &str =
     "Create a new catalog entity.  Do not pass an id; the server assigns one.\n\n\
      EXAMPLES:\n  \
      newton data post product -f body.json\n  \
-     newton data post component -f body.json --dry-run";
+     newton data post component -f body.json --dry-run\n  \
+     newton data post grade -f grade.json";
 
 const DATA_PUT_LONG_ABOUT: &str =
     "Replace an existing catalog entity (full update).  The entity id is required.\n\n\
@@ -644,11 +647,13 @@ const DATA_PUT_LONG_ABOUT: &str =
 const DATA_PATCH_LONG_ABOUT: &str =
     "Partially update an existing catalog entity.  The entity id is required.\n\n\
      EXAMPLES:\n  \
-     newton data patch product <id> --body '{\"name\":\"X\"}'";
+     newton data patch product <id> --body '{\"name\":\"X\"}'\n  \
+     newton data patch grade <id> --body '{\"score\":88}'";
 
 const DATA_DELETE_LONG_ABOUT: &str = "Delete a catalog entity by id.\n\n\
      EXAMPLES:\n  \
-     newton data delete product <id>";
+     newton data delete product <id>\n  \
+     newton data delete grade <id>";
 
 /// Build a clap-registered leaf `Command` for a single HTTP verb.
 fn data_verb_command(verb: DataVerb) -> Command {
@@ -710,7 +715,8 @@ fn data_verb_command(verb: DataVerb) -> Command {
             conflicts_with: vec![],
             requires: vec![],
             help: "Resource token (product, products, component, components, \
-                   repo, repos, module, modules, module-dependency, module-dependencies)",
+                   repo, repos, module, modules, module-dependency, module-dependencies, \
+                   grade, grades)",
         },
         ArgSpec {
             name: "id",

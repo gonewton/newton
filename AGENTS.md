@@ -25,6 +25,8 @@ NEWTON-0024 - You SHOULD NOT adopt an extremely defensive coding style with exce
 NEWTON-0025 - Each command and subcommand MUST have a proper descriptive help message (about/long_about as needed) including at least one example (e.g. in after_help)
 NEWTON-0026 - README.md MUST contain only information relevant to end users (for example product overview, installation, basic usage, and quick start)
 NEWTON-0027 - Information intended for Newton's development team MUST NOT be placed in README.md; that material MUST appear in CONTRIBUTING.md
+NEWTON-0028 - Whenever a backend CRUD endpoint is added or modified, you MUST regenerate `openapi/newton-backend-parity.yaml` by running `./scripts/generate-openapi.sh` and commit the updated file in the same PR
+NEWTON-0029 - Whenever a backend CRUD endpoint is added or modified, you MUST update the relevant public API documentation (doc comments on handler functions and types) so that NEWTON-0011 is satisfied for the new/changed surface
 
 ## Active Technologies
 - check Cargo.toml for dependencies and versions

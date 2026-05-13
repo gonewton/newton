@@ -211,3 +211,7 @@ path = "tests/integration/test_e2e_io_contract.rs"
 [[test]]
 name = "test_e2e_data"
 path = "tests/integration/test_e2e_data.rs"
+
+[[test]]
+name = "test_grade_crud"
+path = "tests/integration/test_grade_crud.rs"

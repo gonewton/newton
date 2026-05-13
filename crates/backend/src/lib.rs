@@ -152,4 +152,11 @@ pub trait BackendStore: Send + Sync {
         body: PatchModuleDependencyBody,
     ) -> Result<ModuleDependencyItem, ApiError>;
     async fn delete_module_dependency(&self, id: &str) -> Result<String, ApiError>;
+
+    // Grade
+    async fn list_grades(&self) -> Result<Vec<GradeItem>, ApiError>;
+    async fn get_grade(&self, id: &str) -> Result<GradeItem, ApiError>;
+    async fn create_grade(&self, body: CreateGradeBody) -> Result<GradeItem, ApiError>;
+    async fn patch_grade(&self, id: &str, body: PatchGradeBody) -> Result<GradeItem, ApiError>;
+    async fn delete_grade(&self, id: &str) -> Result<String, ApiError>;
 }

@@ -61,7 +61,12 @@ use utoipa::OpenApi;
         crate::api::catalog::delete_module,
         crate::api::catalog::get_module_dependency,
         crate::api::catalog::patch_module_dependency,
-        crate::api::catalog::delete_module_dependency
+        crate::api::catalog::delete_module_dependency,
+        crate::api::catalog::list_grades,
+        crate::api::catalog::create_grade,
+        crate::api::catalog::get_grade,
+        crate::api::catalog::patch_grade,
+        crate::api::catalog::delete_grade
     ),
     components(schemas(
         crate::api::HealthResponse,
@@ -103,6 +108,9 @@ use utoipa::OpenApi;
         newton_backend::PutModuleBody,
         newton_backend::PatchModuleBody,
         newton_backend::PatchModuleDependencyBody,
+        newton_backend::GradeItem,
+        newton_backend::CreateGradeBody,
+        newton_backend::PatchGradeBody,
         newton_types::WorkflowInstance,
         newton_types::WorkflowStatus,
         newton_types::NodeState,
