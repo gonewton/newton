@@ -117,23 +117,22 @@ newton serve --host 127.0.0.1 --port 8080 --with-mcp --mcp-path /mcp
 
 **Failure modes:** `NEWTON-SERVE-MCP-001` — invalid `--mcp-path`; `NEWTON-SERVE-MCP-002` — path collides with an existing REST route; `NEWTON-SERVE-MCP-004` — MCP router construction failed.
 
-### Option B — Dedicated MCP-only process (`newton --mcp-serve`)
+### Option B — Dedicated MCP-only process (`newton mcp serve`) _(primary)_
 
-`--mcp-serve` is **a top-level mode**, not a subcommand argument. It short-circuits subcommand dispatch and binds a separate MCP-only listener. Use this when you do not want the REST API running.
+`newton mcp serve` is the canonical subcommand for a dedicated MCP-only process. It binds a separate MCP-only listener and applies Newton's probe-bind, structured startup event, and stable error codes.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--mcp-serve` | off | Enable MCP server mode |
-| `--mcp-host` | `127.0.0.1` | Bind address for the Streamable HTTP listener |
-| `--mcp-port` | `8730` | Distinct from `newton serve` (8080) to avoid collision |
-| `--mcp-path` | `/mcp` | HTTP path prefix for the MCP endpoint |
+| `--host` | `127.0.0.1` | Bind address for the Streamable HTTP listener |
+| `--port` | `8730` | Distinct from `newton serve` (8080) to avoid collision |
+| `--path` | `/mcp` | HTTP path prefix for the MCP endpoint |
 
 ```bash
 # Default (loopback, port 8730, /mcp)
-newton --mcp-serve --mcp-port 8730
+newton mcp serve
 
 # Custom interface, port, and path
-newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
+newton mcp serve --host 0.0.0.0 --port 9100 --path /tools
 ```
 
 **Cursor / Claude Desktop integration (dedicated process):**
@@ -143,11 +142,13 @@ newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
   "mcpServers": {
     "newton": {
       "command": "newton",
-      "args": ["--mcp-serve", "--mcp-port", "8730"]
+      "args": ["mcp", "serve", "--port", "8730"]
     }
   }
 }
 ```
+
+**Compatibility alias (deprecated):** `newton --mcp-serve --mcp-port 8730` still works but emits a deprecation notice on stderr. Migrate to `newton mcp serve --port 8730`.
 
 ### Tool surface
 
