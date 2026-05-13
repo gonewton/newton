@@ -14,11 +14,12 @@
 //! `resume` and `runs` are now subcommands of `workflow` (issue #305).
 //!
 //! ## Nested-command note
-//! The framework routes via its root-level `commands` map; nested paths in
-//! `tree_commands` are not yet dispatched by the clap adapter.  Group
-//! commands (workflow, webhook) are therefore registered at root level and
-//! dispatch internally via their first positional arg (subcommand).
-//! `workflow` now handles validate/lint/preview/graph/resume/runs/checkpoint/artifact.
+//! The clap adapter now dispatches nested paths via `extract_nested_command_path`
+//! and the tree-based `build_clap_root` (cli-framework rev ≥ 0b2b1b2).  Group
+//! commands (workflow, webhook) are registered at root level and dispatch
+//! internally via their first positional arg.  The `data` group is registered
+//! as a true clap subcommand tree with one leaf per HTTP verb.
+//! `workflow` handles validate/lint/preview/graph/resume/runs/checkpoint/artifact.
 //!
 //! ## CLI command naming patterns
 //!
@@ -28,10 +29,10 @@
 //! positional arg selects a subcommand group, the second selects the action.
 //! Use when the resource/group is the primary noun (workflow, webhook).
 //!
-//! **Verb-first** (`data get product <id>`, `data post product`): The first
-//! positional arg is the HTTP verb, the second is the resource token.
-//! Use when callers think in terms of operations (analogous to REST/MCP).
-//! The `data` command uses this pattern.
+//! **Verb-first** (`data get product <id>`, `data post product`): The `data`
+//! group now uses native clap subcommands: `newton data get`, `newton data post`,
+//! etc.  Each verb is a separate leaf command with per-verb help, examples, and
+//! restricted flag sets.
 //!
 //! Both patterns are supported in the framework and may be used for future commands.
 
@@ -42,7 +43,7 @@ use anyhow::anyhow;
 use cli_framework::app::{App, AppBuilder};
 use cli_framework::command::{Command, CommandArgs};
 use cli_framework::spec::arg_spec::{ArgKind, ArgSpec, ArgValueType, Cardinality};
-use cli_framework::spec::command_tree::CommandSpec;
+use cli_framework::spec::command_tree::{CommandPath, CommandSpec, GroupMetadata};
 use uuid::Uuid;
 
 use crate::cli::args::{
@@ -621,140 +622,201 @@ fn serve_command() -> Command {
     }
 }
 
-fn data_command() -> Command {
-    Command {
-        id: "data",
-        summary: "Catalog CRUD via verb-first subcommands (get/post/put/patch/delete)",
-        syntax: Some("<get|post|put|patch|delete> <resource> [ID] [OPTIONS]"),
-        category: Some(categories::WORKFLOW),
-        spec: Some(Arc::new(CommandSpec {
-            summary: "Catalog CRUD via verb-first subcommands (get/post/put/patch/delete)",
-            long_about: Some("Manage catalog entities (Product, Component, Repo, Module, ModuleDependency) via HTTP-style verbs.\n\nEXAMPLES:\n  newton data get products\n  newton data get product <id>\n  newton data post product -f body.json\n  newton data put product <id> -f body.json\n  newton data patch product <id> --body '{\"name\":\"X\"}'\n  newton data delete product <id>"),
-            examples: vec![
-                "newton data get products",
-                "newton data get product <id> --json",
+// ── Per-verb help content ──────────────────────────────────────────────────────
+
+const DATA_GET_LONG_ABOUT: &str =
+    "Retrieve catalog entities — either a full collection or a single item by id.\n\n\
+     EXAMPLES:\n  \
+     newton data get products\n  \
+     newton data get product <id> --json";
+
+const DATA_POST_LONG_ABOUT: &str =
+    "Create a new catalog entity.  Do not pass an id; the server assigns one.\n\n\
+     EXAMPLES:\n  \
+     newton data post product -f body.json\n  \
+     newton data post component -f body.json --dry-run";
+
+const DATA_PUT_LONG_ABOUT: &str =
+    "Replace an existing catalog entity (full update).  The entity id is required.\n\n\
+     EXAMPLES:\n  \
+     newton data put product <id> -f body.json";
+
+const DATA_PATCH_LONG_ABOUT: &str =
+    "Partially update an existing catalog entity.  The entity id is required.\n\n\
+     EXAMPLES:\n  \
+     newton data patch product <id> --body '{\"name\":\"X\"}'";
+
+const DATA_DELETE_LONG_ABOUT: &str = "Delete a catalog entity by id.\n\n\
+     EXAMPLES:\n  \
+     newton data delete product <id>";
+
+/// Build a clap-registered leaf `Command` for a single HTTP verb.
+fn data_verb_command(verb: DataVerb) -> Command {
+    let (id, summary, long_about, examples, syntax, has_body_args) = match verb {
+        DataVerb::Get => (
+            "get",
+            "Retrieve catalog entities (list or single-item)",
+            DATA_GET_LONG_ABOUT,
+            vec!["newton data get products", "newton data get product <id> --json"],
+            "get <resource> [ID] [--json] [--output-format FORMAT] [--workspace PATH]",
+            false,
+        ),
+        DataVerb::Post => (
+            "post",
+            "Create a new catalog entity",
+            DATA_POST_LONG_ABOUT,
+            vec![
                 "newton data post product -f body.json",
-                "newton data put product <id> -f body.json",
-                "newton data patch product <id> --body '{\"name\":\"X\"}'",
-                "newton data delete product <id>",
                 "newton data post component -f body.json --dry-run",
             ],
-            args: vec![
-                ArgSpec {
-                    name: "verb",
-                    kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
-                    value_type: ArgValueType::Enum(vec!["get", "post", "put", "patch", "delete"]),
-                    cardinality: Cardinality::Required,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "HTTP verb: get | post | put | patch | delete",
-                },
-                ArgSpec {
-                    name: "resource",
-                    kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Required,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Resource token (e.g. product, products, component, repo, module, module-dependency)",
-                },
-                ArgSpec {
-                    name: "id",
-                    kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Entity ID (required for single-item GET and all mutating verbs except POST)",
-                },
-                ArgSpec {
-                    name: "file",
-                    kind: ArgKind::Option,
-                    short: Some('f'),
-                    long: Some("file"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec!["body"],
-                    requires: vec![],
-                    help: "Path to JSON body file for POST/PUT/PATCH; use - for stdin",
-                },
-                ArgSpec {
-                    name: "body",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("body"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec!["file"],
-                    requires: vec![],
-                    help: "Inline JSON body string for POST/PUT/PATCH (mutually exclusive with --file)",
-                },
-                ArgSpec {
-                    name: "json",
-                    kind: ArgKind::Flag,
-                    short: Some('j'),
-                    long: Some("json"),
-                    value_type: ArgValueType::Bool,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Emit machine-readable JSON to stdout",
-                },
-                ArgSpec {
-                    name: "output-format",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("output-format"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Output format: text (default) or json (alias for --json)",
-                },
-                ArgSpec {
-                    name: "dry-run",
-                    kind: ArgKind::Flag,
-                    short: None,
-                    long: Some("dry-run"),
-                    value_type: ArgValueType::Bool,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Parse and validate body without writing to DB",
-                },
-                ArgSpec {
-                    name: "workspace",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("workspace"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Workspace root containing .newton/state/backend.sqlite",
-                },
-            ],
+            "post <resource> [--file FILE | --body JSON] [--dry-run] [--json] [--workspace PATH]",
+            true,
+        ),
+        DataVerb::Put => (
+            "put",
+            "Replace a catalog entity (full update)",
+            DATA_PUT_LONG_ABOUT,
+            vec!["newton data put product <id> -f body.json"],
+            "put <resource> <ID> [--file FILE | --body JSON] [--dry-run] [--json] [--workspace PATH]",
+            true,
+        ),
+        DataVerb::Patch => (
+            "patch",
+            "Partially update a catalog entity",
+            DATA_PATCH_LONG_ABOUT,
+            vec!["newton data patch product <id> --body '{\"name\":\"X\"}'"],
+            "patch <resource> <ID> [--file FILE | --body JSON] [--dry-run] [--json] [--workspace PATH]",
+            true,
+        ),
+        DataVerb::Delete => (
+            "delete",
+            "Delete a catalog entity",
+            DATA_DELETE_LONG_ABOUT,
+            vec!["newton data delete product <id>"],
+            "delete <resource> <ID> [--json] [--workspace PATH]",
+            false,
+        ),
+    };
+
+    let mut args = vec![
+        ArgSpec {
+            name: "resource",
+            kind: ArgKind::Positional,
+            short: None,
+            long: None,
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Required,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Resource token (product, products, component, components, \
+                   repo, repos, module, modules, module-dependency, module-dependencies)",
+        },
+        ArgSpec {
+            name: "id",
+            kind: ArgKind::Positional,
+            short: None,
+            long: None,
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Entity ID (required for single-item GET and all mutating verbs except POST)",
+        },
+        ArgSpec {
+            name: "json",
+            kind: ArgKind::Flag,
+            short: Some('j'),
+            long: Some("json"),
+            value_type: ArgValueType::Bool,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Emit machine-readable JSON to stdout",
+        },
+        ArgSpec {
+            name: "output-format",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("output-format"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Output format: text (default) or json (alias for --json)",
+        },
+        ArgSpec {
+            name: "workspace",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("workspace"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Workspace root containing .newton/state/backend.sqlite",
+        },
+    ];
+
+    if has_body_args {
+        args.push(ArgSpec {
+            name: "file",
+            kind: ArgKind::Option,
+            short: Some('f'),
+            long: Some("file"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec!["body"],
+            requires: vec![],
+            help: "Path to JSON body file; use - for stdin",
+        });
+        args.push(ArgSpec {
+            name: "body",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("body"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec!["file"],
+            requires: vec![],
+            help: "Inline JSON body string (mutually exclusive with --file)",
+        });
+        args.push(ArgSpec {
+            name: "dry-run",
+            kind: ArgKind::Flag,
+            short: None,
+            long: Some("dry-run"),
+            value_type: ArgValueType::Bool,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Parse and validate body without writing to DB",
+        });
+    }
+
+    Command {
+        id,
+        summary,
+        syntax: Some(syntax),
+        category: Some(categories::WORKFLOW),
+        spec: Some(Arc::new(CommandSpec {
+            summary,
+            long_about: Some(long_about),
+            examples,
+            args,
             ..Default::default()
         })),
         validator: None,
-        execute: Arc::new(|_ctx, args| {
+        execute: Arc::new(move |_ctx, args| {
             Box::pin(async move {
-                let dto = DataArgs::try_from(args)?;
+                let dto = DataArgs::from_verb_and_args(verb, args)?;
                 commands::data(dto).await
             })
         }),
@@ -1622,18 +1684,17 @@ pub fn build_mcp_router_for_serve(
     _ctx: NewtonContext,
     mcp_path: &str,
 ) -> anyhow::Result<axum::Router> {
-    use cli_framework::command::registry::CommandRegistry;
-    use cli_framework::mcp::{CliFrameworkHandler, McpToolExportPolicy, McpToolRegistry};
+    use cli_framework::mcp::{
+        CliFrameworkHandler, McpToolExportPolicy, McpToolRegistry, McpTransportKind,
+    };
     use rmcp::transport::streamable_http_server::{
         session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
     };
 
-    // Build the same flat registry that `build_app` populates so MCP tool
+    // Build the same tree registry that `build_app` populates so MCP tool
     // names line up exactly with Newton's `--mcp-serve` mode.
-    let mut registry = CommandRegistry::new();
-    for cmd in enumerate_commands() {
-        registry.register(cmd);
-    }
+    let registry = build_mcp_command_registry()
+        .map_err(|e| anyhow!("{}: {e}", error_codes::NEWTON_SERVE_MCP_004))?;
 
     let tool_registry = std::sync::Arc::new(McpToolRegistry::from_command_registry_with_policy(
         &registry,
@@ -1653,9 +1714,10 @@ pub fn build_mcp_router_for_serve(
         {
             let tool_registry = std::sync::Arc::clone(&tool_registry);
             move || {
-                Ok(CliFrameworkHandler::new(std::sync::Arc::clone(
-                    &tool_registry,
-                )))
+                Ok(CliFrameworkHandler::new(
+                    std::sync::Arc::clone(&tool_registry),
+                    McpTransportKind::Http,
+                ))
             }
         },
         session_manager,
@@ -1668,20 +1730,9 @@ pub fn build_mcp_router_for_serve(
 /// Build the Newton CLI application backed by `cli-framework`.
 pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
     use cli_framework::mcp::McpToolExportPolicy;
+    let builder = AppBuilder::new().with_version("newton", env!("CARGO_PKG_VERSION"));
     #[allow(unused_mut)]
-    let mut builder = AppBuilder::new()
-        .with_version("newton", env!("CARGO_PKG_VERSION"))
-        .register_command(run_command())?
-        .register_command(init_command())?
-        .register_command(batch_command())?
-        .register_command(serve_command())?
-        .register_command(workflow_command())?
-        .register_command(webhook_command())?
-        .register_command(health_command())?
-        .register_command(doctor_command())?
-        .register_command(config_command())?
-        .register_command(completion_command())?
-        .register_command(data_command())?;
+    let mut builder = populate_command_registry(builder)?;
     #[cfg(feature = "ask")]
     {
         builder = builder.register_command(ask_command())?;
@@ -1692,8 +1743,9 @@ pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
         .map_err(|e| anyhow!("{}: {}", error_codes::CLI_MIG_001, e))
 }
 
-/// Stable list of command ids registered by [`build_app`].
-/// `resume`, `runs`, `checkpoint`, and `artifact` are now subcommands of `workflow` (issue #305).
+/// Stable list of tree-path strings registered by [`build_app`].
+/// `resume`, `runs`, `checkpoint`, and `artifact` are subcommands of `workflow` (issue #305).
+/// `data` is a group; its five verb leaves appear as path strings (issue #336).
 pub const REGISTERED_COMMAND_IDS: &[&str] = &[
     "run",
     "init",
@@ -1705,15 +1757,35 @@ pub const REGISTERED_COMMAND_IDS: &[&str] = &[
     "doctor",
     "config",
     "completion",
-    "data",
+    // data group leaves — "data" itself is a group node, not a leaf
+    "data/get",
+    "data/post",
+    "data/put",
+    "data/patch",
+    "data/delete",
 ];
 
-/// Commands exposed as MCP tools under the ExposeMcpOnly policy (issue #309).
-/// `resume` and `runs` were removed; they are now subcommands of `workflow` (issue #305).
-/// The order is alphabetical for readability; it does not affect registration order.
-pub const MCP_EXPOSED_COMMAND_IDS: &[&str] = &["config", "data", "health", "run", "workflow"];
+/// Commands exposed as MCP tools under the ExposeMcpOnly policy (issue #309, #336).
+/// Entries use dot-separated path notation matching MCP tool naming (e.g. `newton.data.get`).
+/// `data` is replaced by the five verb leaf tools (issue #336 — BREAKING CHANGE).
+pub const MCP_EXPOSED_COMMAND_IDS: &[&str] = &[
+    "config",
+    "data.get",
+    "data.post",
+    "data.put",
+    "data.patch",
+    "data.delete",
+    "health",
+    "run",
+    "workflow",
+];
 
-/// Returns every `Command` registered by `build_app`, in registration order.
+/// Returns root-level `Command`s registered by [`build_app`], in registration order.
+///
+/// NOTE: Superseded by [`build_mcp_command_registry`] for MCP use and
+/// [`enumerate_tree_commands`] for complete metadata inspection.
+/// The `data` verb leaves are NOT included here; they are registered as nested
+/// tree commands under the "data" group.
 pub fn enumerate_commands() -> Vec<Command> {
     #[allow(unused_mut)]
     let mut cmds = vec![
@@ -1727,13 +1799,120 @@ pub fn enumerate_commands() -> Vec<Command> {
         doctor_command(),
         config_command(),
         completion_command(),
-        data_command(),
     ];
     #[cfg(feature = "ask")]
     {
         cmds.push(ask_command());
     }
     cmds
+}
+
+/// Returns all leaf commands with their full path strings (slash-separated), suitable
+/// for metadata inspection and test assertions on the tree layout.
+pub fn enumerate_tree_commands() -> Vec<(String, Command)> {
+    let registry = build_mcp_command_registry()
+        .expect("failed to build command registry for tree enumeration");
+    let mut items: Vec<(String, Command)> = registry
+        .all_tree_commands()
+        .map(|(path, cmd)| (path.to_string(), cmd.clone()))
+        .collect();
+    items.sort_by(|a, b| a.0.cmp(&b.0));
+    #[cfg(feature = "ask")]
+    items.push(("ask".to_string(), ask_command()));
+    items
+}
+
+/// Build the full tree `CommandRegistry` used for MCP tool registration and
+/// the `newton serve --with-mcp` router.  Both `build_app` and
+/// `build_mcp_router_for_serve` derive their registrations from this function.
+pub fn build_mcp_command_registry(
+) -> anyhow::Result<cli_framework::command::registry::CommandRegistry> {
+    use cli_framework::command::registry::CommandRegistry;
+
+    let mut registry = CommandRegistry::new();
+
+    // Register root-level non-data commands
+    for cmd in [
+        run_command(),
+        init_command(),
+        batch_command(),
+        serve_command(),
+        workflow_command(),
+        webhook_command(),
+        health_command(),
+        doctor_command(),
+        config_command(),
+        completion_command(),
+    ] {
+        registry.register(cmd);
+    }
+
+    // Register `data` group and its five verb leaf commands
+    let data_path = CommandPath::new(&["data"]).map_err(|e| anyhow!("CLI-PATH-001: {e}"))?;
+    registry
+        .register_group(
+            &data_path,
+            GroupMetadata {
+                summary: "Catalog CRUD via HTTP-style verbs (get/post/put/patch/delete)",
+                hidden: false,
+            },
+        )
+        .map_err(|e| anyhow!("{e}"))?;
+
+    for verb in [
+        DataVerb::Get,
+        DataVerb::Post,
+        DataVerb::Put,
+        DataVerb::Patch,
+        DataVerb::Delete,
+    ] {
+        let path =
+            CommandPath::new(&["data", verb.as_str()]).map_err(|e| anyhow!("CLI-PATH-001: {e}"))?;
+        registry
+            .register_at(&path, data_verb_command(verb))
+            .map_err(|e| anyhow!("{e}"))?;
+    }
+
+    Ok(registry)
+}
+
+/// Shared registration logic called by both [`build_app`] and (indirectly) by
+/// [`build_mcp_router_for_serve`] via [`build_mcp_command_registry`].
+fn populate_command_registry(builder: AppBuilder) -> anyhow::Result<AppBuilder> {
+    let builder = builder
+        .register_command(run_command())?
+        .register_command(init_command())?
+        .register_command(batch_command())?
+        .register_command(serve_command())?
+        .register_command(workflow_command())?
+        .register_command(webhook_command())?
+        .register_command(health_command())?
+        .register_command(doctor_command())?
+        .register_command(config_command())?
+        .register_command(completion_command())?;
+
+    let data_path = CommandPath::new(&["data"]).map_err(|e| anyhow!("CLI-PATH-001: {e}"))?;
+    let builder = builder.register_group(
+        &data_path,
+        GroupMetadata {
+            summary: "Catalog CRUD via HTTP-style verbs (get/post/put/patch/delete)",
+            hidden: false,
+        },
+    )?;
+
+    [
+        DataVerb::Get,
+        DataVerb::Post,
+        DataVerb::Put,
+        DataVerb::Patch,
+        DataVerb::Delete,
+    ]
+    .into_iter()
+    .try_fold(builder, |b, verb| {
+        let path =
+            CommandPath::new(&["data", verb.as_str()]).map_err(|e| anyhow!("CLI-PATH-001: {e}"))?;
+        b.register_command_at(&path, data_verb_command(verb))
+    })
 }
 
 // ── TryFrom<CommandArgs> adapters ─────────────────────────────────────────────
@@ -1900,27 +2079,10 @@ impl TryFrom<CommandArgs> for ResumeArgs {
     }
 }
 
-impl TryFrom<CommandArgs> for DataArgs {
-    type Error = anyhow::Error;
-
-    fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
-        let verb_str = args
-            .named
-            .get("verb")
-            .cloned()
-            .ok_or_else(|| anyhow!("DATA-002: verb is required (get|post|put|patch|delete)"))?;
-        let verb = match verb_str.as_str() {
-            "get" => DataVerb::Get,
-            "post" => DataVerb::Post,
-            "put" => DataVerb::Put,
-            "patch" => DataVerb::Patch,
-            "delete" => DataVerb::Delete,
-            other => {
-                return Err(anyhow!(
-                "DATA-002: unknown verb '{other}'; must be one of: get, post, put, patch, delete"
-            ))
-            }
-        };
+impl DataArgs {
+    /// Construct `DataArgs` from a `CommandArgs` bag where the verb is already known
+    /// (supplied by the leaf command's execute closure, not parsed from positionals).
+    pub fn from_verb_and_args(verb: DataVerb, args: CommandArgs) -> Result<Self, anyhow::Error> {
         let resource = args
             .named
             .get("resource")

@@ -8,7 +8,7 @@ completed_tasks:
   run_echo:
     status: success
     output:
-      duration_ms: 0
+      duration_ms: "[duration]"
       exit_code: 0
       stderr: ""
       stdout: "{\"cpu\": 45}"

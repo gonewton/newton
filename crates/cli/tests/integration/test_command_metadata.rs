@@ -2,22 +2,28 @@
 //! the spec §4.1 requires (summary, syntax, allowed category).
 
 use newton_cli::cli::categories;
-use newton_cli::cli::framework_setup::{enumerate_commands, REGISTERED_COMMAND_IDS};
+use newton_cli::cli::framework_setup::{enumerate_tree_commands, REGISTERED_COMMAND_IDS};
 
 #[test]
 fn registered_ids_match_expected_set() {
-    let ids: Vec<&str> = enumerate_commands().iter().map(|c| c.id).collect();
+    let tree_paths: Vec<String> = enumerate_tree_commands()
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect();
     for id in REGISTERED_COMMAND_IDS {
-        assert!(ids.contains(id), "expected `{id}` in registry");
+        assert!(
+            tree_paths.contains(&id.to_string()),
+            "expected `{id}` in tree registry"
+        );
     }
-    // When `ask` feature is enabled, enumerate_commands adds the extra `ask`
+    // When `ask` feature is enabled, enumerate_tree_commands adds the extra `ask`
     // command on top of REGISTERED_COMMAND_IDS — that's expected.
-    let extras: Vec<&&str> = ids
+    let extras: Vec<&String> = tree_paths
         .iter()
-        .filter(|id| !REGISTERED_COMMAND_IDS.contains(id))
+        .filter(|p| !REGISTERED_COMMAND_IDS.contains(&p.as_str()))
         .collect();
     if cfg!(feature = "ask") {
-        assert_eq!(extras, vec![&"ask"]);
+        assert_eq!(extras, vec![&"ask".to_string()]);
     } else {
         assert!(extras.is_empty(), "unexpected extras: {extras:?}");
     }
@@ -30,6 +36,11 @@ fn category_bindings_match_spec_4_1() {
     let expected: &[(&str, &str)] = &[
         ("run", categories::WORKFLOW),
         ("workflow", categories::WORKFLOW),
+        ("data/get", categories::WORKFLOW),
+        ("data/post", categories::WORKFLOW),
+        ("data/put", categories::WORKFLOW),
+        ("data/patch", categories::WORKFLOW),
+        ("data/delete", categories::WORKFLOW),
         ("serve", categories::OPS),
         ("batch", categories::OPS),
         ("webhook", categories::OPS),
@@ -41,12 +52,13 @@ fn category_bindings_match_spec_4_1() {
         #[cfg(feature = "ask")]
         ("ask", categories::DIAGNOSTIC),
     ];
-    let cmds = enumerate_commands();
+    let cmds = enumerate_tree_commands();
     for (name, want) in expected {
         let cmd = cmds
             .iter()
-            .find(|c| c.id == *name)
-            .unwrap_or_else(|| panic!("expected `{name}` in registry"));
+            .find(|(p, _)| p == *name)
+            .map(|(_, c)| c)
+            .unwrap_or_else(|| panic!("expected `{name}` in tree registry"));
         assert_eq!(
             cmd.category,
             Some(*want),
@@ -58,16 +70,16 @@ fn category_bindings_match_spec_4_1() {
 
 #[test]
 fn metadata_is_populated_for_every_command() {
-    for cmd in enumerate_commands() {
-        assert!(!cmd.summary.is_empty(), "{} summary empty", cmd.id);
-        assert!(cmd.syntax.is_some(), "{} syntax missing", cmd.id);
+    for (path, cmd) in enumerate_tree_commands() {
+        assert!(!cmd.summary.is_empty(), "{} summary empty", path);
+        assert!(cmd.syntax.is_some(), "{} syntax missing", path);
         let cat = cmd
             .category
-            .unwrap_or_else(|| panic!("{} category missing", cmd.id));
+            .unwrap_or_else(|| panic!("{} category missing", path));
         assert!(
             categories::is_allowed(cat),
             "{} category `{}` not in allowed set",
-            cmd.id,
+            path,
             cat
         );
     }

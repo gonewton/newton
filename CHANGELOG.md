@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Nest `newton data` verbs as clap subcommands (issue #336) — BREAKING CHANGE
+
+`newton data` is now a clap command group with five dedicated subcommands: `get`, `post`, `put`, `patch`, `delete`.  Each subcommand has its own `--help` screen with verb-specific examples and a restricted flag set.
+
+**CLI changes:**
+- `newton data get --help`, `newton data post --help`, etc. now show per-verb help instead of the combined `data` block.
+- `newton data <typo> ...` produces a clap "unknown subcommand" error instead of `DATA-002`.
+- `--dry-run`, `--file`/`-f`, and `--body` are only accepted by `post`, `put`, and `patch` (not `get` or `delete`).
+- Argv shape is unchanged: `newton data <verb> <resource> [id] [OPTIONS]` continues to work.
+
+**MCP breaking change:** The single MCP tool `newton.data` no longer exists.  MCP clients **must** be updated to use the five new tools:
+
+| Old tool | New tool |
+|---|---|
+| `newton.data` | `newton.data.get` |
+| `newton.data` | `newton.data.post` |
+| `newton.data` | `newton.data.put` |
+| `newton.data` | `newton.data.patch` |
+| `newton.data` | `newton.data.delete` |
+
+`MCP_EXPOSED_COMMAND_IDS` grows from 5 to 9 entries.
+
 ### Nest `resume`, `runs`, `checkpoint`, and `artifact` under `workflow` (issue #305) — BREAKING CHANGE
 
 `resume`, `runs`, `checkpoint`, and `artifact` are no longer top-level commands. They are now subcommands of `workflow`. The `MCP_EXPOSED_COMMAND_IDS` list shrinks from 6 to 4 entries (`resume` and `runs` removed; use the `workflow` MCP tool instead). Scripts and MCP callers must be updated in lockstep with the binary — no aliases or deprecation period.
