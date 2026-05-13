@@ -145,6 +145,10 @@ name = "mcp_expose_mcp_only"
 path = "tests/integration/mcp_expose_mcp_only.rs"
 
 [[test]]
+name = "mcp_serve_subcommand"
+path = "tests/integration/mcp_serve_subcommand.rs"
+
+[[test]]
 name = "test_e2e_smoke"
 path = "tests/integration/test_e2e_smoke.rs"
 

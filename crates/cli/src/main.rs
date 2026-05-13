@@ -15,7 +15,7 @@ async fn main() -> Result<()> {
 
     let ctx = NewtonContext::new();
 
-    if mcp::is_mcp_serve(&app_args) {
+    if mcp::is_mcp_serve(&app_args) || mcp::is_mcp_subcommand(&app_args) {
         let code = mcp::run(app_args, ctx).await;
         std::process::exit(code);
     }

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### New: `newton mcp serve` subcommand; `--mcp-serve` flag deprecated (issue #337)
+
+`newton mcp serve` is now the canonical way to start a dedicated MCP-only process. The new subcommand applies Newton's full customizations: pre-bind probe, structured stderr startup event (`mcp_serve_started` JSON), and stable error codes `NEWTON-MCP-001` / `NEWTON-MCP-002`.
+
+The legacy `--mcp-serve` root flag remains functional but is deprecated and emits a one-time notice on stderr pointing to the new subcommand. Removal is planned for a future release.
+
+**Migration:** replace `newton --mcp-serve --mcp-port 8730` with `newton mcp serve --port 8730` in Cursor and Claude Desktop configs.
+
 ### Nest `newton data` verbs as clap subcommands (issue #336) — BREAKING CHANGE
 
 `newton data` is now a clap command group with five dedicated subcommands: `get`, `post`, `put`, `patch`, `delete`.  Each subcommand has its own `--help` screen with verb-specific examples and a restricted flag set.

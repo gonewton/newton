@@ -244,28 +244,49 @@ newton serve --host 127.0.0.1 --port 8080 --with-mcp --mcp-path /mcp
 
 **Failure modes:** `NEWTON-SERVE-MCP-001` — invalid `--mcp-path`; `NEWTON-SERVE-MCP-002` — path collides with an existing REST route; `NEWTON-SERVE-MCP-004` — MCP router construction failed.
 
-#### Option B — Dedicated MCP-only process (`newton --mcp-serve`)
+#### Option B — Dedicated MCP-only process (`newton mcp serve`) _(primary)_
 
-MCP mode is a top-level mode (not a subcommand) — it short-circuits subcommand dispatch and runs a standalone MCP HTTP listener on a separate port.
+`newton mcp serve` starts a standalone MCP HTTP listener on a separate port. This is the canonical way to run a dedicated MCP-only process.
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--mcp-serve` | off | Required to enable MCP-only mode |
-| `--mcp-host` | `127.0.0.1` | Loopback only |
-| `--mcp-port` | `8730` | Distinct from `newton serve` (8080) |
-| `--mcp-path` | `/mcp` | HTTP path prefix |
+| `--host` | `127.0.0.1` | Bind address for the MCP listener |
+| `--port` | `8730` | Distinct from `newton serve` (8080) to avoid collision |
+| `--path` | `/mcp` | HTTP path prefix |
 
 ```bash
 # Default (loopback, port 8730, /mcp)
-newton --mcp-serve
+newton mcp serve
 
 # Custom interface, port, and path
-newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
+newton mcp serve --host 0.0.0.0 --port 9100 --path /tools
 ```
 
-**Note on `--help` output.** The current upstream `cli-framework` clap definition prints `--mcp-port [default: 8080]`; Newton transparently rewrites argv to inject `8730` when no explicit port is given so the actual bind matches the table above. **For maximum clarity, always pass `--mcp-port` explicitly** until upstream defaults are aligned.
-
 **Cursor/Claude client config (dedicated process):**
+
+```json
+{
+  "mcpServers": {
+    "newton": {
+      "command": "newton",
+      "args": ["mcp", "serve", "--port", "8730"]
+    }
+  }
+}
+```
+
+**Port-conflict policy.** On bind failure Newton exits non-zero and prints a single line `NEWTON-MCP-001: failed to bind MCP server to <host>:<port>: <os error>`. There is no auto-rebind — pass an alternate `--port`. An unrecoverable upstream runtime error after a successful bind surfaces as `NEWTON-MCP-002`.
+
+#### Compatibility alias: `newton --mcp-serve` _(deprecated)_
+
+The legacy `--mcp-serve` root flag is still supported but **deprecated**. It emits a one-time notice on stderr and will be removed in a future release. Migrate existing configs to `newton mcp serve`.
+
+```bash
+# Deprecated — migrate to: newton mcp serve --mcp-port 8730
+newton --mcp-serve --mcp-port 8730
+```
+
+**Cursor/Claude client config (legacy, migrate to Option B above):**
 
 ```json
 {
@@ -277,8 +298,6 @@ newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
   }
 }
 ```
-
-**Port-conflict policy.** On bind failure Newton exits non-zero and prints a single line `NEWTON-MCP-001: failed to bind MCP server to <host>:<port>: <os error>`. There is no auto-rebind — pass an alternate `--mcp-port`. An unrecoverable upstream runtime error after a successful bind surfaces as `NEWTON-MCP-002`.
 
 ### Ailoop human-in-the-loop integration
 

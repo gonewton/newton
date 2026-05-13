@@ -44,13 +44,23 @@ pub fn is_mcp_serve(argv: &[String]) -> bool {
         .any(|a| a == "--mcp-serve" || a == "--mcp-serve=true")
 }
 
+/// Returns true iff argv matches the subcommand form: argv[1]=="mcp" && argv[2]=="serve".
+/// argv[0] is the binary name; elements beyond index 2 are ignored (they are flags).
+pub fn is_mcp_subcommand(argv: &[String]) -> bool {
+    argv.get(1).map(|s| s == "mcp").unwrap_or(false)
+        && argv.get(2).map(|s| s == "serve").unwrap_or(false)
+}
+
 /// Parse `--mcp-host`, `--mcp-port`, `--mcp-path` (space- or `=`-separated)
-/// from argv. Unknown values fall back to Newton defaults.
+/// from argv. Also recognises the cli-framework `mcp serve` short forms
+/// `--host`, `--port`, `--path` (Scenario B: rev 0b2b1b2 uses short flag names).
+/// Unknown values fall back to Newton defaults.
 pub fn parse_mcp_flags(argv: &[String]) -> McpFlags {
     let mut flags = McpFlags::default();
     let mut i = 0;
     while i < argv.len() {
         let a = &argv[i];
+        // Long forms (--mcp-*): used by the legacy --mcp-serve path.
         if a == "--mcp-host" && i + 1 < argv.len() {
             flags.host = argv[i + 1].clone();
             i += 2;
@@ -85,6 +95,41 @@ pub fn parse_mcp_flags(argv: &[String]) -> McpFlags {
             i += 1;
             continue;
         }
+        // Short forms (--host/--port/--path): used by `mcp serve` subcommand path.
+        if a == "--host" && i + 1 < argv.len() {
+            flags.host = argv[i + 1].clone();
+            i += 2;
+            continue;
+        }
+        if let Some(v) = a.strip_prefix("--host=") {
+            flags.host = v.to_string();
+            i += 1;
+            continue;
+        }
+        if a == "--port" && i + 1 < argv.len() {
+            if let Ok(p) = argv[i + 1].parse::<u16>() {
+                flags.port = p;
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(v) = a.strip_prefix("--port=") {
+            if let Ok(p) = v.parse::<u16>() {
+                flags.port = p;
+            }
+            i += 1;
+            continue;
+        }
+        if a == "--path" && i + 1 < argv.len() {
+            flags.path = argv[i + 1].clone();
+            i += 2;
+            continue;
+        }
+        if let Some(v) = a.strip_prefix("--path=") {
+            flags.path = v.to_string();
+            i += 1;
+            continue;
+        }
         i += 1;
     }
     flags
@@ -100,23 +145,44 @@ pub fn tool_count() -> usize {
 /// Build the argv that cli-framework expects: ensure host/port/path flags are
 /// present (with Newton defaults applied when absent) so the framework's
 /// `extract_mcp_args_from_raw` honours our overrides.
+///
+/// For the `mcp serve` subcommand form the framework uses short flag names
+/// (`--host`/`--port`/`--path`); for the legacy `--mcp-serve` form it uses
+/// the long names (`--mcp-host`/`--mcp-port`/`--mcp-path`).
 pub fn argv_with_newton_defaults(argv: &[String], flags: &McpFlags) -> Vec<String> {
     fn has(out: &[String], needle: &str) -> bool {
         let prefix = format!("{}=", needle);
         out.iter().any(|a| a == needle || a.starts_with(&prefix))
     }
     let mut out: Vec<String> = argv.to_vec();
-    if !has(&out, "--mcp-host") {
-        out.push("--mcp-host".to_string());
-        out.push(flags.host.clone());
-    }
-    if !has(&out, "--mcp-port") {
-        out.push("--mcp-port".to_string());
-        out.push(flags.port.to_string());
-    }
-    if !has(&out, "--mcp-path") {
-        out.push("--mcp-path".to_string());
-        out.push(flags.path.clone());
+    if is_mcp_subcommand(&out) {
+        // `mcp serve` form: framework reads --host / --port / --path.
+        if !has(&out, "--host") {
+            out.push("--host".to_string());
+            out.push(flags.host.clone());
+        }
+        if !has(&out, "--port") {
+            out.push("--port".to_string());
+            out.push(flags.port.to_string());
+        }
+        if !has(&out, "--path") {
+            out.push("--path".to_string());
+            out.push(flags.path.clone());
+        }
+    } else {
+        // `--mcp-serve` form: framework reads --mcp-host / --mcp-port / --mcp-path.
+        if !has(&out, "--mcp-host") {
+            out.push("--mcp-host".to_string());
+            out.push(flags.host.clone());
+        }
+        if !has(&out, "--mcp-port") {
+            out.push("--mcp-port".to_string());
+            out.push(flags.port.to_string());
+        }
+        if !has(&out, "--mcp-path") {
+            out.push("--mcp-path".to_string());
+            out.push(flags.path.clone());
+        }
     }
     out
 }
@@ -135,6 +201,12 @@ pub async fn probe_bind(flags: &McpFlags) -> Result<(), std::io::Error> {
 /// Run MCP mode using cli-framework's `serve_mcp` entry point. Returns the
 /// process exit code; callers `std::process::exit` on it.
 pub async fn run(argv: Vec<String>, ctx: crate::cli::context::NewtonContext) -> i32 {
+    // Emit deprecation notice only when entered via the legacy --mcp-serve flag,
+    // before the mcp_serve_started JSON line so consumers can filter it.
+    if is_mcp_serve(&argv) {
+        eprintln!("[newton] DEPRECATED: --mcp-serve is deprecated; use `newton mcp serve` instead");
+    }
+
     let flags = parse_mcp_flags(&argv);
     let bind_address = format!("{}:{}", flags.host, flags.port);
 
