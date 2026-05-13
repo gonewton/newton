@@ -74,6 +74,45 @@ pub struct IndicatorItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GradeItem {
+    pub id: String,
+    pub scope: String,
+    pub scope_id: String,
+    pub indicator: String,
+    pub score: f64,
+    pub metrics: Option<serde_json::Value>,
+    pub details_url: Option<String>,
+    pub raw_output: Option<String>,
+    pub evaluated_at: String,
+    pub ingested_at: String,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateGradeBody {
+    pub scope: String,
+    pub scope_id: String,
+    pub indicator: String,
+    pub score: f64,
+    pub metrics: Option<serde_json::Value>,
+    pub details_url: Option<String>,
+    pub raw_output: Option<String>,
+    pub evaluated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchGradeBody {
+    pub score: Option<f64>,
+    pub metrics: Option<serde_json::Value>,
+    pub details_url: Option<String>,
+    pub raw_output: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RecentActionItem {
     pub time: String,
     pub action: String,

@@ -2375,9 +2375,11 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
         "modules",
         "module-dependency",
         "module-dependencies",
+        "grade",
+        "grades",
     ];
     if !valid_resources.contains(&resource) {
-        eprintln!("DATA-003: unknown resource '{resource}'; must be one of: product, products, component, components, repo, repos, module, modules, module-dependency, module-dependencies");
+        eprintln!("DATA-003: unknown resource '{resource}'; must be one of: product, products, component, components, repo, repos, module, modules, module-dependency, module-dependencies, grade, grades");
         std::process::exit(1);
     }
 
@@ -2392,7 +2394,7 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
     let needs_id = match args.verb {
         DataVerb::Get => !matches!(
             resource,
-            "products" | "components" | "repos" | "modules" | "module-dependencies"
+            "products" | "components" | "repos" | "modules" | "module-dependencies" | "grades"
         ),
         DataVerb::Post => false,
         DataVerb::Put | DataVerb::Patch | DataVerb::Delete => true,
@@ -2669,6 +2671,30 @@ async fn dispatch_data(
         }
         (DataVerb::Delete, "module-dependency" | "module-dependencies") => store
             .delete_module_dependency(id)
+            .await
+            .map_err(api_err)
+            .and_then(|deleted_id| to_json(serde_json::json!({"id": deleted_id}))),
+        // -- Grade -------------------------------------------------------------
+        (DataVerb::Get, "grades") => store.list_grades().await.map_err(api_err).and_then(to_json),
+        (DataVerb::Get, "grade") => store.get_grade(id).await.map_err(api_err).and_then(to_json),
+        (DataVerb::Post, "grade" | "grades") => {
+            let b = parse_body::<newton_backend::CreateGradeBody>(body)?;
+            store
+                .create_grade(b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Patch, "grade" | "grades") => {
+            let b = parse_body::<newton_backend::PatchGradeBody>(body)?;
+            store
+                .patch_grade(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Delete, "grade" | "grades") => store
+            .delete_grade(id)
             .await
             .map_err(api_err)
             .and_then(|deleted_id| to_json(serde_json::json!({"id": deleted_id}))),

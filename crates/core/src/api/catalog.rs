@@ -7,9 +7,9 @@ use axum::{
     Router,
 };
 use newton_backend::{
-    CreateComponentBody, CreateModuleBody, CreateProductBody, CreateRepoBody, DeletedItem,
-    PatchComponentBody, PatchModuleBody, PatchModuleDependencyBody, PatchProductBody,
-    PatchRepoBody, PutComponentBody, PutModuleBody, PutProductBody, PutRepoBody,
+    CreateComponentBody, CreateGradeBody, CreateModuleBody, CreateProductBody, CreateRepoBody,
+    DeletedItem, PatchComponentBody, PatchGradeBody, PatchModuleBody, PatchModuleDependencyBody,
+    PatchProductBody, PatchRepoBody, PutComponentBody, PutModuleBody, PutProductBody, PutRepoBody,
 };
 use newton_types::ApiError;
 use std::sync::Arc;
@@ -59,6 +59,12 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route(
             "/api/module-dependencies/{id}",
             delete(delete_module_dependency),
+        )
+        // Grade
+        .route("/api/grades", get(list_grades).post(create_grade))
+        .route(
+            "/api/grades/{id}",
+            get(get_grade).patch(patch_grade).delete(delete_grade),
         )
         .with_state(state)
 }
@@ -592,6 +598,108 @@ pub(crate) async fn delete_module_dependency(
 ) -> Response {
     match state.backend.delete_module_dependency(&id).await {
         Ok(deleted_id) => (StatusCode::OK, Json(DeletedItem { id: deleted_id })).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+// ── Grade ─────────────────────────────────────────────────────────────────────
+
+#[utoipa::path(
+    get,
+    path = "/api/grades",
+    tag = "catalog",
+    responses(
+        (status = 200, description = "List of grades", body = Vec<newton_backend::GradeItem>)
+    )
+)]
+pub(crate) async fn list_grades(State(state): State<Arc<AppState>>) -> Response {
+    match state.backend.list_grades().await {
+        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/grades",
+    tag = "catalog",
+    request_body = CreateGradeBody,
+    responses(
+        (status = 201, description = "Created grade", body = newton_backend::GradeItem),
+        (status = 400, description = "Validation error", body = ApiError),
+        (status = 404, description = "Not found", body = ApiError)
+    )
+)]
+pub(crate) async fn create_grade(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateGradeBody>,
+) -> Response {
+    match state.backend.create_grade(body).await {
+        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/grades/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Grade id")),
+    responses(
+        (status = 200, description = "Grade", body = newton_backend::GradeItem),
+        (status = 404, description = "Not found", body = ApiError)
+    )
+)]
+pub(crate) async fn get_grade(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.get_grade(&id).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/grades/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Grade id")),
+    request_body = PatchGradeBody,
+    responses(
+        (status = 200, description = "Updated grade", body = newton_backend::GradeItem),
+        (status = 404, description = "Not found", body = ApiError)
+    )
+)]
+pub(crate) async fn patch_grade(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PatchGradeBody>,
+) -> Response {
+    match state.backend.patch_grade(&id, body).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/grades/{id}",
+    tag = "catalog",
+    params(("id" = String, Path, description = "Grade id")),
+    responses(
+        (status = 200, description = "Deleted", body = DeletedItem),
+        (status = 404, description = "Not found", body = ApiError)
+    )
+)]
+pub(crate) async fn delete_grade(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.delete_grade(&id).await {
+        Ok(deleted_id) => {
+            (StatusCode::OK, Json(serde_json::json!({"id": deleted_id}))).into_response()
+        }
         Err(e) => (status_from_error(&e), Json(e)).into_response(),
     }
 }
