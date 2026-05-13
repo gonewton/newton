@@ -1,0 +1,6 @@
+# .cargo/audit.toml
+# Advisories acknowledged by maintainers with justification.
+# Each entry MUST include a comment with: RUSTSEC ID, reason, review-by date.
+
+[advisories]
+ignore = []
