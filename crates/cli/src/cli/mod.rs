@@ -8,6 +8,7 @@ pub mod init;
 pub mod log_invocation;
 pub mod mcp;
 pub mod ops;
+pub mod workspace_paths;
 
 #[cfg(feature = "ask")]
 pub mod ask;
@@ -15,6 +16,7 @@ pub mod ask;
 pub use context::NewtonContext;
 pub use framework_setup::build_app;
 pub use log_invocation::kind_for_command;
+pub use workspace_paths::WorkspacePaths;
 
 pub use args::{
     ArtifactArgs, ArtifactCommand, BatchArgs, CheckpointArgs, CheckpointCommand, DotArgs,

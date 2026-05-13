@@ -9,12 +9,15 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use serde_json::{json, Map, Value};
 
+use crate::cli::WorkspacePaths;
+
 pub mod error_codes {
     pub const CLI_OPS_001: &str = "CLI-OPS-001";
     pub const CLI_OPS_002: &str = "CLI-OPS-002";
     pub const CLI_OPS_003: &str = "CLI-OPS-003";
     pub const CLI_OPS_004: &str = "CLI-OPS-004";
     pub const CLI_OPS_005: &str = "CLI-OPS-005";
+    pub const CLI_OPS_006: &str = "CLI-OPS-006";
 }
 
 // ── health ───────────────────────────────────────────────────────────────────
@@ -286,34 +289,47 @@ pub mod config_show {
         let mut root = Map::new();
         root.insert("newton_version".into(), json!(crate::VERSION));
 
-        if let Some(ws) = &args.workspace {
-            if !ws.exists() {
-                return Err(anyhow!(
-                    "{}: workspace '{}' does not exist",
-                    error_codes::CLI_OPS_004,
-                    ws.display()
-                ));
+        // Resolve workspace paths — always, regardless of whether --workspace was given.
+        let workspace_paths = match &args.workspace {
+            Some(ws) => {
+                if !ws.exists() {
+                    return Err(anyhow!(
+                        "{}: workspace '{}' does not exist",
+                        error_codes::CLI_OPS_004,
+                        ws.display()
+                    ));
+                }
+                WorkspacePaths::new(ws.clone())
             }
-            let dot = ws.join(".newton");
-            root.insert("workspace".into(), json!(dot.display().to_string()));
-            let mut logging = Map::new();
-            logging.insert(
-                "log_dir".into(),
-                json!(dot.join("logs").display().to_string()),
-            );
-            logging.insert("level".into(), json!(env_str("RUST_LOG", "info")));
-            root.insert("logging".into(), Value::Object(logging));
+            None => WorkspacePaths::from_cwd()
+                .map_err(|e| anyhow!("{}: {e}", error_codes::CLI_OPS_006))?,
+        };
 
-            let monitor_conf = dot.join("configs/monitor.conf");
-            if monitor_conf.exists() {
-                if let Ok(text) = std::fs::read_to_string(&monitor_conf) {
-                    let mut ailoop = Map::new();
-                    for (k, v) in parse_kv(&text) {
-                        ailoop.insert(k.clone(), json!(redact_value(&k, &v)));
-                    }
-                    if !ailoop.is_empty() {
-                        root.insert("ailoop".into(), Value::Object(ailoop));
-                    }
+        root.insert(
+            "paths".into(),
+            Value::Object(workspace_paths.to_json_object()),
+        );
+
+        let mut logging = Map::new();
+        logging.insert(
+            "log_dir".into(),
+            json!(workspace_paths
+                .dot_newton
+                .join("logs")
+                .display()
+                .to_string()),
+        );
+        logging.insert("level".into(), json!(env_str("RUST_LOG", "info")));
+        root.insert("logging".into(), Value::Object(logging));
+
+        if workspace_paths.monitor_conf_exists {
+            if let Ok(text) = std::fs::read_to_string(&workspace_paths.monitor_conf) {
+                let mut ailoop = Map::new();
+                for (k, v) in parse_kv(&text) {
+                    ailoop.insert(k.clone(), json!(redact_value(&k, &v)));
+                }
+                if !ailoop.is_empty() {
+                    root.insert("ailoop".into(), Value::Object(ailoop));
                 }
             }
         }

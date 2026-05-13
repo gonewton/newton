@@ -6,6 +6,7 @@ use crate::cli::args::{
     RunsArgs, RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
     WebhookStatusArgs,
 };
+use crate::cli::WorkspacePaths;
 use crate::Result;
 use anyhow::anyhow;
 use humantime::{format_duration, parse_duration};
@@ -1806,9 +1807,13 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         })
         .collect();
 
-    let db_path = std::path::PathBuf::from(".newton")
-        .join("state")
-        .join("backend.sqlite");
+    let workspace_paths = WorkspacePaths::from_cwd().map_err(|e| {
+        AppError::new(
+            newton_core::core::types::ErrorCategory::IoError,
+            format!("failed to resolve workspace paths: {e}"),
+        )
+    })?;
+    let db_path = &workspace_paths.backend_sqlite;
     if let Some(dir) = db_path.parent() {
         fs::create_dir_all(dir).map_err(|e| {
             AppError::new(
@@ -1817,7 +1822,7 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
             )
         })?;
     }
-    let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
+    let db_url = workspace_paths.backend_sqlite_url();
 
     let store = newton_backend::SqliteBackendStore::new(&db_url)
         .await
@@ -2316,11 +2321,8 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
         Some(ref p) => p.clone(),
         None => std::env::current_dir()?,
     };
-    let db_path = workspace
-        .join(".newton")
-        .join("state")
-        .join("backend.sqlite");
-    let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
+    let workspace_paths = WorkspacePaths::new(workspace);
+    let db_url = workspace_paths.backend_sqlite_url();
     let store = match newton_backend::SqliteBackendStore::new(&db_url).await {
         Ok(s) => s,
         Err(e) => {
