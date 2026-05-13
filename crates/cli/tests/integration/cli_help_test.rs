@@ -255,3 +255,173 @@ fn serve_help_lists_route_groups_and_pointers() {
         );
     }
 }
+
+// ── data subcommand help tests (issue #336) ───────────────────────────────────
+
+#[test]
+fn data_help_lists_verb_subcommands() {
+    let stdout = help_output(&["data"]);
+    for verb in ["get", "post", "put", "patch", "delete"] {
+        assert!(
+            stdout.contains(verb),
+            "data --help should list '{}' subcommand, got:\n{}",
+            verb,
+            stdout
+        );
+    }
+}
+
+#[test]
+fn data_get_help_has_examples_section() {
+    let stdout = help_output(&["data", "get"]);
+    assert!(
+        stdout.contains("EXAMPLES:"),
+        "data get --help should contain EXAMPLES: section, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_get_help_shows_product_example() {
+    let stdout = help_output(&["data", "get"]);
+    assert!(
+        stdout.contains("newton data get product"),
+        "data get --help should show 'newton data get product' example, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_get_help_does_not_have_dry_run() {
+    let stdout = help_output(&["data", "get"]);
+    assert!(
+        !stdout.contains("--dry-run"),
+        "data get --help should NOT list --dry-run, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_get_help_does_not_have_file_or_body() {
+    let stdout = help_output(&["data", "get"]);
+    assert!(
+        !stdout.contains("--file") && !stdout.contains("-f,"),
+        "data get --help should NOT list --file, got:\n{}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("--body"),
+        "data get --help should NOT list --body, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_post_help_has_examples_section() {
+    let stdout = help_output(&["data", "post"]);
+    assert!(
+        stdout.contains("EXAMPLES:"),
+        "data post --help should contain EXAMPLES: section, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_post_help_shows_file_flag_example() {
+    let stdout = help_output(&["data", "post"]);
+    assert!(
+        stdout.contains("newton data post product") || stdout.contains("-f"),
+        "data post --help should show POST example with -f, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_post_help_has_dry_run() {
+    let stdout = help_output(&["data", "post"]);
+    assert!(
+        stdout.contains("--dry-run"),
+        "data post --help should list --dry-run, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_post_help_does_not_show_get_or_delete_examples() {
+    let stdout = help_output(&["data", "post"]);
+    assert!(
+        !stdout.contains("newton data get products"),
+        "data post --help should NOT show GET example, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_put_help_has_examples_section() {
+    let stdout = help_output(&["data", "put"]);
+    assert!(
+        stdout.contains("EXAMPLES:"),
+        "data put --help should contain EXAMPLES: section, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_put_help_shows_product_id_example() {
+    let stdout = help_output(&["data", "put"]);
+    assert!(
+        stdout.contains("newton data put product"),
+        "data put --help should show 'newton data put product' example, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_patch_help_has_examples_section() {
+    let stdout = help_output(&["data", "patch"]);
+    assert!(
+        stdout.contains("EXAMPLES:"),
+        "data patch --help should contain EXAMPLES: section, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_patch_help_shows_product_example() {
+    let stdout = help_output(&["data", "patch"]);
+    assert!(
+        stdout.contains("newton data patch product"),
+        "data patch --help should show 'newton data patch product' example, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_delete_help_has_examples_section() {
+    let stdout = help_output(&["data", "delete"]);
+    assert!(
+        stdout.contains("EXAMPLES:"),
+        "data delete --help should contain EXAMPLES: section, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_delete_help_shows_product_example() {
+    let stdout = help_output(&["data", "delete"]);
+    assert!(
+        stdout.contains("newton data delete product"),
+        "data delete --help should show 'newton data delete product' example, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn data_delete_help_does_not_have_dry_run() {
+    let stdout = help_output(&["data", "delete"]);
+    assert!(
+        !stdout.contains("--dry-run"),
+        "data delete --help should NOT list --dry-run, got:\n{}",
+        stdout
+    );
+}

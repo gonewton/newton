@@ -616,6 +616,7 @@ async fn test_scenario_08_command_success() {
     assert_yaml_snapshot!(summary, {
         ".execution_id" => "[uuid]",
         ".completed_tasks.*.duration_ms" => "[duration]",
+        ".completed_tasks.*.output.duration_ms" => "[duration]",
     });
 }
 

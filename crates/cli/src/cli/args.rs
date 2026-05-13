@@ -395,7 +395,7 @@ pub struct ServeArgs {
 
 // ── Data ─────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataVerb {
     Get,
     Post,
@@ -404,15 +404,21 @@ pub enum DataVerb {
     Delete,
 }
 
+impl DataVerb {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DataVerb::Get => "get",
+            DataVerb::Post => "post",
+            DataVerb::Put => "put",
+            DataVerb::Patch => "patch",
+            DataVerb::Delete => "delete",
+        }
+    }
+}
+
 impl std::fmt::Display for DataVerb {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DataVerb::Get => write!(f, "get"),
-            DataVerb::Post => write!(f, "post"),
-            DataVerb::Put => write!(f, "put"),
-            DataVerb::Patch => write!(f, "patch"),
-            DataVerb::Delete => write!(f, "delete"),
-        }
+        write!(f, "{}", self.as_str())
     }
 }
 
