@@ -79,6 +79,14 @@ pub mod error_codes {
     pub const NEWTON_SERVE_MCP_003: &str = "NEWTON-SERVE-MCP-003";
     /// `serve --with-mcp`: cli-framework returned an error while constructing the MCP router (issue #294).
     pub const NEWTON_SERVE_MCP_004: &str = "NEWTON-SERVE-MCP-004";
+    /// `serve --with-embedded-ailoop`: invalid `--ailoop-base-path` shape (issue #351).
+    pub const NEWTON_SERVE_AIL_001: &str = "NEWTON-SERVE-AIL-001";
+    /// `serve --with-embedded-ailoop`: `--ailoop-base-path` collides with Newton REST prefix (issue #351).
+    pub const NEWTON_SERVE_AIL_002: &str = "NEWTON-SERVE-AIL-002";
+    /// `serve --with-embedded-ailoop`: `--ailoop-base-path` collides with `--mcp-path` (issue #351).
+    pub const NEWTON_SERVE_AIL_003: &str = "NEWTON-SERVE-AIL-003";
+    /// `serve --with-embedded-ailoop`: ailoop_server::router() returned an error (issue #351).
+    pub const NEWTON_SERVE_AIL_004: &str = "NEWTON-SERVE-AIL-004";
 }
 
 // ── help-text constants ───────────────────────────────────────────────────────
@@ -607,6 +615,30 @@ fn serve_command() -> Command {
                     conflicts_with: vec![],
                     requires: vec![],
                     help: "Path prefix where the MCP HTTP router is mounted (default: /mcp)",
+                },
+                ArgSpec {
+                    name: "with-embedded-ailoop",
+                    kind: ArgKind::Flag,
+                    short: None,
+                    long: Some("with-embedded-ailoop"),
+                    value_type: ArgValueType::Bool,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Embed the ailoop HTTP/WebSocket server on the same listener as the Newton API",
+                },
+                ArgSpec {
+                    name: "ailoop-base-path",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("ailoop-base-path"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Path prefix where the embedded ailoop router is mounted (default: /ailoop). Must not be `/api`.",
                 },
             ],
             ..Default::default()
@@ -2050,12 +2082,20 @@ impl TryFrom<CommandArgs> for ServeArgs {
             .get("mcp-path")
             .cloned()
             .unwrap_or_else(|| "/mcp".to_string());
+        let with_embedded_ailoop = get_bool(&args, "with-embedded-ailoop");
+        let ailoop_base_path = args
+            .named
+            .get("ailoop-base-path")
+            .cloned()
+            .unwrap_or_else(|| "/ailoop".to_string());
         Ok(ServeArgs {
             host,
             port,
             static_ui: get_opt_path(&args, "static-ui"),
             with_mcp,
             mcp_path,
+            with_embedded_ailoop,
+            ailoop_base_path,
         })
     }
 }

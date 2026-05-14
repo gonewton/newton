@@ -18,7 +18,9 @@ clap = { version = "4.4", features = ["derive", "cargo"] }
 tokio = { version = "1.49", features = ["full"] }
 anyhow = "1.0"
 aikit-sdk = { version = "0.3.0", git = "https://github.com/goaikit/aikit.git", branch = "main" }
-ailoop-core = { git = "https://github.com/goailoop/ailoop.git", rev = "dd186c055dbfcbf5c32c8e58b251eaf0bf07343b", default-features = false } # pinned: first rev exporting ask_decision, DecisionOption, DecisionRecommendation, MessageContent::Decision
+ailoop-core = { git = "https://github.com/goailoop/ailoop.git", rev = "596cff9303c7e56615cdb53babc95a03170cf790", default-features = false } # pinned: Axum 0.8 upgrade (goailoop/ailoop#59), exports ask_decision, DecisionOption, DecisionRecommendation, MessageContent::Decision
+ailoop-server = { git = "https://github.com/goailoop/ailoop.git", rev = "596cff9303c7e56615cdb53babc95a03170cf790", default-features = false } # pinned: Axum 0.8 upgrade (goailoop/ailoop#59)
+tokio-util = "0.7"
 thiserror = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"] }
