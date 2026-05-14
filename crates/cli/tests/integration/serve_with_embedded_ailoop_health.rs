@@ -2,11 +2,6 @@
 //! router onto the same Axum listener as Newton REST API, emits a structured
 //! `ailoop_serve_started` JSON event on stderr, and serves both Newton REST
 //! (`/health`) and ailoop health (`<base_path>/api/v1/health`) on the same port.
-//!
-//! NOTE: Full ailoop router integration is pending the upstream Axum 0.8 upgrade
-//! (goailoop/ailoop#59). Tests that verify ailoop route availability are marked
-//! `#[ignore]` until the upstream crate ships Axum 0.8 types and the router merge
-//! is enabled in `commands.rs`.
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -124,11 +119,7 @@ fn newton_health_responds_on_same_port() {
 }
 
 /// Criteria 1 and 2: ailoop health endpoint responds under the base path.
-///
-/// Requires the upstream ailoop-server Axum 0.8 upgrade (goailoop/ailoop#59)
-/// and the router merge in `commands.rs`. Ignored until Stage 2 lands.
 #[test]
-#[ignore = "pending goailoop/ailoop#59 upstream Axum 0.8 upgrade and router merge in commands.rs"]
 fn ailoop_health_endpoint_responds_under_base_path() {
     let port = pick_free_port();
     let base_path = "/ailoop";
@@ -160,4 +151,41 @@ fn ailoop_health_endpoint_responds_under_base_path() {
     let _ = child.kill();
     let _ = child.wait();
     result.expect("ailoop health endpoint reachable under base path");
+}
+
+/// §4.7 CORS verification: OPTIONS preflight on an ailoop route returns 2xx.
+#[test]
+fn cors_options_preflight_on_ailoop_route_returns_2xx() {
+    let port = pick_free_port();
+    let base_path = "/ailoop";
+    let (mut child, _line) = start_embedded_ailoop_server(port, base_path);
+
+    let result = (|| -> Result<(), String> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("runtime: {e}"))?;
+        rt.block_on(async {
+            let client = reqwest::Client::new();
+            let url = format!("http://127.0.0.1:{}{}/api/v1/health", port, base_path);
+            let resp = client
+                .request(reqwest::Method::OPTIONS, &url)
+                .header("Origin", "http://example.com")
+                .header("Access-Control-Request-Method", "GET")
+                .send()
+                .await
+                .map_err(|e| format!("OPTIONS preflight: {e}"))?;
+            let status = resp.status().as_u16();
+            if !(200..300).contains(&status) {
+                return Err(format!(
+                    "OPTIONS preflight on {url} returned {status}, expected 2xx"
+                ));
+            }
+            Ok(())
+        })
+    })();
+
+    let _ = child.kill();
+    let _ = child.wait();
+    result.expect("OPTIONS preflight on ailoop route returns 2xx");
 }

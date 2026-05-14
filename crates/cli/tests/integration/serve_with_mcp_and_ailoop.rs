@@ -204,11 +204,7 @@ fn mcp_serve_started_has_correct_fields_when_ailoop_also_active() {
 }
 
 /// Full multi-surface test: `/health`, MCP, and ailoop routes all reachable.
-///
-/// Requires the upstream ailoop-server Axum 0.8 upgrade (goailoop/ailoop#59)
-/// for the ailoop health assertion. Ignored until Stage 2 lands.
 #[test]
-#[ignore = "pending goailoop/ailoop#59 upstream Axum 0.8 upgrade and router merge in commands.rs"]
 fn all_surfaces_respond_when_both_flags_active() {
     let dir = tempdir().expect("tempdir");
     let port = pick_free_port();

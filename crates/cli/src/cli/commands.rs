@@ -2047,12 +2047,25 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         app = app.merge(mcp_router);
     }
 
-    // Build ailoop app state when embedded mode is requested. The router merge
-    // (`ailoop_server::router()`) is deferred until the upstream ailoop-server crate
-    // ships Axum 0.8 types (tracked in goailoop/ailoop#59). Background tasks and
-    // graceful shutdown are wired up unconditionally when the flag is set.
-    let ailoop_state: Option<Arc<ailoop_server::AiloopAppState>> = if args.with_embedded_ailoop {
-        Some(Arc::new(ailoop_server::AiloopAppState::new("default")))
+    // Build ailoop app state and merge the ailoop router when embedded mode is requested.
+    let ailoop_state: Option<(
+        Arc<ailoop_server::AiloopAppState>,
+        ailoop_server::ServeConfig,
+    )> = if args.with_embedded_ailoop {
+        let state = Arc::new(ailoop_server::AiloopAppState::new("default"));
+        let config = ailoop_server::ServeConfig {
+            base_path: Some(args.ailoop_base_path.clone()),
+            ..Default::default()
+        };
+        let ailoop_router = ailoop_server::router(Arc::clone(&state), &config).map_err(|e| {
+            AppError::new(
+                newton_core::core::types::ErrorCategory::IoError,
+                format!("NEWTON-SERVE-AIL-004: {e}"),
+            )
+            .with_code("NEWTON-SERVE-AIL-004")
+        })?;
+        app = app.merge(ailoop_router);
+        Some((state, config))
     } else {
         None
     };
@@ -2075,16 +2088,8 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     info!("Newton API server listening on {}", socket_addr);
 
     let cancel = CancellationToken::new();
-    if let Some(ref state) = ailoop_state {
-        let ailoop_config = ailoop_server::ServeConfig {
-            base_path: Some(args.ailoop_base_path.clone()),
-            ..Default::default()
-        };
-        let _handle = ailoop_server::spawn_background_tasks(
-            Arc::clone(state),
-            &ailoop_config,
-            cancel.clone(),
-        );
+    if let Some((ref state, ref ailoop_config)) = ailoop_state {
+        ailoop_server::spawn_background_tasks(Arc::clone(state), ailoop_config, cancel.clone());
     }
 
     if args.with_mcp {
