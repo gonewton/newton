@@ -7,9 +7,6 @@ info:
   license:
     name: ''
   version: 0.5.96
-externalDocs:
-  description: Realtime (WebSocket + SSE) contract — AsyncAPI 3.0
-  url: ./newton-realtime.asyncapi.yaml
 paths:
   /api/components:
     get:
@@ -3190,3 +3187,6 @@ tags:
   description: Catalog entity CRUD endpoints
 - name: testing
   description: Test-only maintenance endpoints
+externalDocs:
+  url: ./newton-realtime.asyncapi.yaml
+  description: Realtime (WebSocket + SSE) contract — AsyncAPI 3.0
