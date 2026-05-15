@@ -5,9 +5,6 @@ info:
   description: |
     AsyncAPI 3.0 contract for Newton's WebSocket and SSE streaming endpoints.
     Covers all four streaming surfaces exposed by `newton serve`.
-  externalDocs:
-    description: Newton REST API — OpenAPI 3.1
-    url: ./newton-backend-parity.yaml
 
 x-connection-lifecycle:
   heartbeat_ws:
@@ -58,9 +55,6 @@ channels:
     parameters:
       instanceId:
         description: UUID of the workflow instance.
-        schema:
-          type: string
-          format: uuid
     bindings:
       ws:
         query:
@@ -102,13 +96,8 @@ channels:
     parameters:
       instanceId:
         description: UUID of the workflow instance.
-        schema:
-          type: string
-          format: uuid
       nodeId:
         description: Node (task) identifier.
-        schema:
-          type: string
     bindings:
       ws:
         query:
@@ -135,9 +124,6 @@ channels:
     parameters:
       instanceId:
         description: UUID of the workflow instance.
-        schema:
-          type: string
-          format: uuid
     bindings:
       http:
         query:
