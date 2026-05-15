@@ -18,7 +18,12 @@ use newton_types::{ApiError, BroadcastEvent};
 use serde::Deserialize;
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::broadcast;
 use uuid::Uuid;
+
+const HEARTBEAT_PING_INTERVAL: Duration = Duration::from_secs(30);
+const WELCOME_FRAME: &str = r#"{"type":"welcome"}"#;
 
 #[derive(Debug, Deserialize, Clone)]
 /// Optional query-string filters applied to workflow event streams.
@@ -36,10 +41,46 @@ pub struct StreamFilters {
 /// Routes for streaming endpoints (WebSocket + SSE).
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
+        .route("/ws", get(heartbeat_ws))
         .route("/api/stream/workflow/{id}/ws", get(workflow_stream))
         .route("/api/stream/logs/{id}/{node_id}/ws", get(logs_stream))
         .route("/api/stream/workflow/{id}/sse", get(workflow_sse))
         .with_state(state)
+}
+
+async fn heartbeat_ws(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
+    ws.on_upgrade(move |socket| handle_heartbeat_socket(socket, state))
+}
+
+async fn handle_heartbeat_socket(mut socket: WebSocket, state: Arc<AppState>) {
+    let mut rx = state.events_tx.subscribe();
+    if socket
+        .send(Message::Text(WELCOME_FRAME.into()))
+        .await
+        .is_err()
+    {
+        return;
+    }
+    loop {
+        tokio::select! {
+            result = rx.recv() => match result {
+                Ok(event) => {
+                    if let Ok(json) = serde_json::to_string(&event) {
+                        if socket.send(Message::Text(json.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => break,
+            },
+            _ = tokio::time::sleep(HEARTBEAT_PING_INTERVAL) => {
+                if socket.send(Message::Ping(vec![].into())).await.is_err() {
+                    break;
+                }
+            }
+        }
+    }
 }
 
 async fn workflow_stream(
@@ -61,6 +102,19 @@ async fn workflow_stream(
             .into_response();
     }
 
+    if !state.instances.contains_key(&id) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ApiError {
+                code: "ERR_NOT_FOUND".to_string(),
+                category: "not_found".to_string(),
+                message: format!("Workflow instance '{}' not found", id),
+                details: None,
+            }),
+        )
+            .into_response();
+    }
+
     ws.on_upgrade(move |socket| handle_workflow_socket(socket, id, state, filters))
 }
 
@@ -71,6 +125,14 @@ async fn handle_workflow_socket(
     filters: StreamFilters,
 ) {
     let mut rx = state.events_tx.subscribe();
+
+    if let Ok(json) = serde_json::to_string(&BroadcastEvent::WorkflowInstanceUpdated {
+        instance_id: instance_id.clone(),
+    }) {
+        if socket.send(Message::Text(json.into())).await.is_err() {
+            return;
+        }
+    }
 
     while let Ok(event) = rx.recv().await {
         if should_send_event(&event, &instance_id, &filters) {
@@ -105,6 +167,15 @@ async fn logs_stream(
     ws.on_upgrade(move |socket| handle_logs_socket(socket, instance_id, node_id, state, filters))
 }
 
+fn resolve_task_name(state: &AppState, instance_id: &str, node_id: &str) -> String {
+    state
+        .instances
+        .get(instance_id)
+        .and_then(|inst| inst.definition.clone())
+        .and_then(|def| def["tasks"][node_id]["name"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| node_id.to_owned())
+}
+
 async fn handle_logs_socket(
     mut socket: WebSocket,
     instance_id: String,
@@ -113,6 +184,16 @@ async fn handle_logs_socket(
     filters: StreamFilters,
 ) {
     let mut rx = state.events_tx.subscribe();
+
+    let task_name = resolve_task_name(&state, &instance_id, &node_id);
+    let connect_line = BroadcastEvent::LogMessage {
+        instance_id: instance_id.clone(),
+        node_id: node_id.clone(),
+        message: format!("Connected to {task_name}"),
+    };
+    if let Ok(json) = serde_json::to_string(&connect_line) {
+        let _ = socket.send(Message::Text(json.into())).await;
+    }
 
     while let Ok(event) = rx.recv().await {
         if should_send_event(&event, &instance_id, &filters) {
@@ -152,11 +233,29 @@ async fn workflow_sse(
             .into_response();
     }
 
+    if !state.instances.contains_key(&id) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ApiError {
+                code: "ERR_NOT_FOUND".to_string(),
+                category: "not_found".to_string(),
+                message: format!("Workflow instance '{}' not found", id),
+                details: None,
+            }),
+        )
+            .into_response();
+    }
+
     let rx = state.events_tx.subscribe();
     let id_clone = id.clone();
     let filters_clone = filters.clone();
 
     let stream = async_stream::stream! {
+        let snapshot = BroadcastEvent::WorkflowInstanceUpdated { instance_id: id_clone.clone() };
+        if let Ok(json) = serde_json::to_string(&snapshot) {
+            let sse_event = axum::response::sse::Event::default().data(json);
+            yield Ok::<_, Infallible>(sse_event);
+        }
         let mut rx = rx;
         while let Ok(event) = rx.recv().await {
             if should_send_event(&event, &id_clone, &filters_clone) {
@@ -171,7 +270,7 @@ async fn workflow_sse(
     Sse::new(stream)
         .keep_alive(
             axum::response::sse::KeepAlive::new()
-                .interval(std::time::Duration::from_secs(10))
+                .interval(Duration::from_secs(10))
                 .text("keepalive"),
         )
         .into_response()

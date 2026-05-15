@@ -46,6 +46,9 @@ jobs:
            ./scripts/generate-openapi.sh
            git diff --exit-code openapi/newton-backend-parity.yaml
 
+       - name: Validate AsyncAPI realtime contract
+         run: npx -y @asyncapi/cli@3 validate openapi/newton-realtime.asyncapi.yaml
+
        - name: Run clippy
          run: cargo clippy --all-targets --all-features -- -D warnings
 

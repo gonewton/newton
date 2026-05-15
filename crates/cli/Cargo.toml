@@ -72,6 +72,7 @@ regex = { workspace = true }
 tempfile = { workspace = true }
 wiremock = { workspace = true }
 wait-timeout = "0.2"
+tokio-tungstenite = { workspace = true }
 
 [[test]]
 name = "test_main_functionality"
@@ -229,3 +230,7 @@ path = "tests/integration/serve_embedded_ailoop_path_validation.rs"
 [[test]]
 name = "serve_with_mcp_and_ailoop"
 path = "tests/integration/serve_with_mcp_and_ailoop.rs"
+
+[[test]]
+name = "test_streaming_parity"
+path = "tests/integration/test_streaming_parity.rs"
