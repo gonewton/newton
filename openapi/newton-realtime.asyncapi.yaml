@@ -1,0 +1,330 @@
+asyncapi: 3.0.0
+info:
+  title: Newton Realtime Contract
+  version: "0.5.96"
+  description: |
+    AsyncAPI 3.0 contract for Newton's WebSocket and SSE streaming endpoints.
+    Covers all four streaming surfaces exposed by `newton serve`.
+
+x-connection-lifecycle:
+  heartbeat_ws:
+    welcome_frame: '{"type":"welcome"}' # sent immediately on connect
+    ping_cadence_seconds: 30            # WS Ping frame (Message::Ping)
+    close_codes: [1000, 1001]
+  workflow_ws:
+    snapshot_on_connect: workflowInstanceUpdated
+    close_codes: [1000, 1001]
+  workflow_sse:
+    snapshot_on_connect: workflowInstanceUpdated
+    keepalive_text: keepalive
+    keepalive_interval_seconds: 10
+  logs_ws:
+    connect_confirmation: 'logMessage "Connected to <task_name>"'
+    close_codes: [1000, 1001]
+
+channels:
+  heartbeat:
+    address: /ws
+    description: |
+      Generic heartbeat WebSocket. Sends `{"type":"welcome"}` on connect,
+      forwards every BroadcastEvent without filtering, and sends a WS Ping
+      frame every 30 seconds to keep the connection alive.
+    messages:
+      welcome:
+        $ref: '#/components/messages/WelcomeMessage'
+      workflowInstanceUpdated:
+        $ref: '#/components/messages/WorkflowInstanceUpdated'
+      nodeStateChanged:
+        $ref: '#/components/messages/NodeStateChanged'
+      logMessage:
+        $ref: '#/components/messages/LogMessage'
+      hilEvent:
+        $ref: '#/components/messages/HilEvent'
+      planUpdate:
+        $ref: '#/components/messages/PlanUpdate'
+      executionUpdate:
+        $ref: '#/components/messages/ExecutionUpdate'
+
+  workflowInstanceWs:
+    address: /api/stream/workflow/{instanceId}/ws
+    description: |
+      Per-instance workflow WebSocket. Returns HTTP 404 if the instance does
+      not exist (no WS upgrade). Emits a `workflowInstanceUpdated` snapshot
+      immediately on connect before entering the live broadcast forward loop.
+      Events are filtered to the specified instance.
+    parameters:
+      instanceId:
+        description: UUID of the workflow instance.
+    bindings:
+      ws:
+        query:
+          type: object
+          properties:
+            instance_id:
+              type: string
+              description: Override instance id filter (legacy clients).
+            node_id:
+              type: string
+              description: Filter to a single node.
+            event_type:
+              type: string
+              description: Filter by event type name.
+    messages:
+      snapshotWorkflowInstanceUpdated:
+        $ref: '#/components/messages/WorkflowInstanceUpdated'
+      workflowInstanceUpdated:
+        $ref: '#/components/messages/WorkflowInstanceUpdated'
+      nodeStateChanged:
+        $ref: '#/components/messages/NodeStateChanged'
+      logMessage:
+        $ref: '#/components/messages/LogMessage'
+      hilEvent:
+        $ref: '#/components/messages/HilEvent'
+      planUpdate:
+        $ref: '#/components/messages/PlanUpdate'
+      executionUpdate:
+        $ref: '#/components/messages/ExecutionUpdate'
+
+  logsWs:
+    address: /api/stream/logs/{instanceId}/{nodeId}/ws
+    description: |
+      Per-instance, per-node log WebSocket. Emits a synthetic
+      `logMessage "Connected to <task_name>"` frame immediately on connect.
+      Task name is resolved from `WorkflowInstance.definition["tasks"][nodeId]["name"]`,
+      falling back to `nodeId` when unavailable. Forwards only `LogMessage`
+      events matching the given instance and node.
+    parameters:
+      instanceId:
+        description: UUID of the workflow instance.
+      nodeId:
+        description: Node (task) identifier.
+    bindings:
+      ws:
+        query:
+          type: object
+          properties:
+            instance_id:
+              type: string
+            node_id:
+              type: string
+            event_type:
+              type: string
+    messages:
+      connectConfirmation:
+        $ref: '#/components/messages/LogMessage'
+      logMessage:
+        $ref: '#/components/messages/LogMessage'
+
+  workflowInstanceSse:
+    address: /api/stream/workflow/{instanceId}/sse
+    description: |
+      Per-instance workflow SSE (EventSource) fallback. Returns HTTP 404 if
+      the instance does not exist. Emits a `workflowInstanceUpdated` snapshot
+      as the first SSE event. Sends a text "keepalive" ping every 10 seconds.
+    parameters:
+      instanceId:
+        description: UUID of the workflow instance.
+    bindings:
+      http:
+        query:
+          type: object
+          properties:
+            instance_id:
+              type: string
+            node_id:
+              type: string
+            event_type:
+              type: string
+    messages:
+      snapshotWorkflowInstanceUpdated:
+        $ref: '#/components/messages/WorkflowInstanceUpdated'
+      workflowInstanceUpdated:
+        $ref: '#/components/messages/WorkflowInstanceUpdated'
+      nodeStateChanged:
+        $ref: '#/components/messages/NodeStateChanged'
+      logMessage:
+        $ref: '#/components/messages/LogMessage'
+      hilEvent:
+        $ref: '#/components/messages/HilEvent'
+      planUpdate:
+        $ref: '#/components/messages/PlanUpdate'
+      executionUpdate:
+        $ref: '#/components/messages/ExecutionUpdate'
+
+components:
+  messages:
+    WelcomeMessage:
+      name: WelcomeMessage
+      title: Welcome
+      description: Sent by the heartbeat socket immediately on connect.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/WelcomePayload'
+
+    WorkflowInstanceUpdated:
+      name: WorkflowInstanceUpdated
+      title: Workflow Instance Updated
+      description: |
+        Emitted when a workflow instance state changes. Also sent as a snapshot
+        immediately on connect to per-instance workflow streams (WS and SSE).
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/WorkflowInstanceUpdatedPayload'
+
+    NodeStateChanged:
+      name: NodeStateChanged
+      title: Node State Changed
+      description: Emitted when a node (task) within a workflow instance changes state.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/NodeStateChangedPayload'
+
+    LogMessage:
+      name: LogMessage
+      title: Log Message
+      description: |
+        A log line emitted by a workflow node. Also used for the synthetic
+        "Connected to <task_name>" frame sent on logs WS connect.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/LogMessagePayload'
+
+    HilEvent:
+      name: HilEvent
+      title: HIL Event
+      description: A human-in-the-loop event requiring operator input.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/HilEventPayload'
+
+    PlanUpdate:
+      name: PlanUpdate
+      title: Plan Update
+      description: Emitted when a plan is approved or rejected.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PlanUpdatePayload'
+
+    ExecutionUpdate:
+      name: ExecutionUpdate
+      title: Execution Update
+      description: Emitted when a workflow execution status changes.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ExecutionUpdatePayload'
+
+  schemas:
+    WelcomePayload:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [welcome]
+      example:
+        type: welcome
+
+    WorkflowInstanceUpdatedPayload:
+      type: object
+      required: [type, instance_id]
+      properties:
+        type:
+          type: string
+          enum: [workflowInstanceUpdated]
+        instance_id:
+          type: string
+          format: uuid
+      example:
+        type: workflowInstanceUpdated
+        instance_id: 550e8400-e29b-41d4-a716-446655440000
+
+    NodeStateChangedPayload:
+      type: object
+      required: [type, instance_id, node_id]
+      properties:
+        type:
+          type: string
+          enum: [nodeStateChanged]
+        instance_id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+      example:
+        type: nodeStateChanged
+        instance_id: 550e8400-e29b-41d4-a716-446655440000
+        node_id: build-task
+
+    LogMessagePayload:
+      type: object
+      required: [type, instance_id, node_id, message]
+      properties:
+        type:
+          type: string
+          enum: [logMessage]
+        instance_id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+        message:
+          type: string
+      example:
+        type: logMessage
+        instance_id: 550e8400-e29b-41d4-a716-446655440000
+        node_id: build-task
+        message: Connected to build-task
+
+    HilEventPayload:
+      type: object
+      required: [type, instance_id, event_id]
+      properties:
+        type:
+          type: string
+          enum: [hilEvent]
+        instance_id:
+          type: string
+          format: uuid
+        event_id:
+          type: string
+      example:
+        type: hilEvent
+        instance_id: 550e8400-e29b-41d4-a716-446655440000
+        event_id: hil-001
+
+    PlanUpdatePayload:
+      type: object
+      required: [type, plan_id]
+      properties:
+        type:
+          type: string
+          enum: [plan_update]
+        plan_id:
+          type: string
+      example:
+        type: plan_update
+        plan_id: plan-abc
+
+    ExecutionUpdatePayload:
+      type: object
+      required: [type, execution_id, status, created_at]
+      properties:
+        type:
+          type: string
+          enum: [execution_update]
+        execution_id:
+          type: string
+        plan_id:
+          type: string
+          nullable: true
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      example:
+        type: execution_update
+        execution_id: exec-001
+        plan_id: null
+        status: running
+        created_at: "2026-01-01T00:00:00Z"

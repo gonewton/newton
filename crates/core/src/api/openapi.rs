@@ -143,6 +143,10 @@ use utoipa::OpenApi;
         title = "Newton Backend Parity API",
         version = env!("CARGO_PKG_VERSION"),
         description = "Contract for Rust `newton serve` parity endpoints sourced from Rust DTOs and handlers."
+    ),
+    external_docs(
+        url = "./newton-realtime.asyncapi.yaml",
+        description = "Realtime (WebSocket + SSE) contract — AsyncAPI 3.0"
     )
 )]
 pub struct ApiDoc;
