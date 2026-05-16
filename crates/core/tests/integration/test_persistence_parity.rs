@@ -116,16 +116,20 @@ async fn test_restart_persistence() {
     }
 }
 
-/// Test B: Append N ≥ 10 log lines, restart AppState, then list_log_lines — all N
-/// lines are returned in seq order.
+/// Test B: Append N ≥ 10 log lines, restart AppState, connect to the logs WebSocket,
+/// assert all N historical lines are received (in seq order) before any live events.
 #[tokio::test]
 async fn test_log_replay_after_restart() {
+    use futures::StreamExt;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::tungstenite::Message as WsMessage;
+
     let backend = make_backend().await;
     let instance_id = Uuid::new_v4().to_string();
     let node_id = "task-log";
     const N: usize = 12;
 
-    // Insert parent instance
+    // Insert parent instance (FK requirement for NodeState and WorkflowLog)
     backend
         .upsert_workflow_instance(&WorkflowInstance {
             instance_id: instance_id.clone(),
@@ -140,7 +144,7 @@ async fn test_log_replay_after_restart() {
         .await
         .unwrap();
 
-    // Append N log lines
+    // Append N log lines before the "restart"
     for i in 0..N {
         let line = LogLine {
             instance_id: instance_id.clone(),
@@ -155,18 +159,72 @@ async fn test_log_replay_after_restart() {
             .unwrap();
     }
 
-    // Simulate restart — create a fresh AppState over the same backend
-    let backend2 = Arc::clone(&backend);
+    // ── Simulate restart: new AppState over the same backend ─────────────────
+    let state2 = make_state(Arc::clone(&backend));
+    let app2 = newton_core::api::create_router(state2, None);
 
-    // list_log_lines should return all N lines in order
-    let lines = backend2
-        .list_log_lines(&instance_id, node_id, 0)
+    // Bind to an ephemeral port and spawn the axum server in the background
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server_handle = tokio::spawn(async move {
+        axum::serve(listener, app2.into_make_service())
+            .await
+            .unwrap();
+    });
+
+    // Give the server a moment to start accepting connections
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    // Connect to the logs WebSocket endpoint
+    let ws_url = format!("ws://127.0.0.1:{port}/api/stream/logs/{instance_id}/{node_id}/ws");
+    let (mut ws_stream, _) = tokio_tungstenite::connect_async(&ws_url)
         .await
-        .unwrap();
-    assert_eq!(lines.len(), N);
-    for (i, line) in lines.iter().enumerate() {
-        assert_eq!(line.message, format!("log-line-{i}"));
+        .expect("WebSocket connect");
+
+    // Collect log message frames.
+    // handle_logs_socket emits:
+    //   1. A "Connected to …" LogMessage (the join frame — skip it)
+    //   2. N historical LogMessage frames (the replay — assert these)
+    //   3. Any live broadcast events (we stop before any arrive)
+    let mut historical: Vec<String> = Vec::new();
+    let mut skip_connect = true;
+
+    let collect = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while let Some(Ok(msg)) = ws_stream.next().await {
+            if let WsMessage::Text(text) = msg {
+                let event: serde_json::Value = serde_json::from_str(&text).unwrap();
+                if event["type"] == "logMessage" {
+                    if skip_connect {
+                        // First logMessage is the "Connected to …" join frame
+                        skip_connect = false;
+                        continue;
+                    }
+                    historical.push(event["message"].as_str().unwrap().to_string());
+                    if historical.len() == N {
+                        break;
+                    }
+                }
+            }
+        }
+    })
+    .await;
+
+    assert!(
+        collect.is_ok(),
+        "Timed out waiting for {N} historical log lines from logs WebSocket"
+    );
+
+    // All N historical lines must arrive in seq order before any live events
+    assert_eq!(historical.len(), N, "Expected {N} historical log lines");
+    for (i, msg) in historical.iter().enumerate() {
+        assert_eq!(
+            msg,
+            &format!("log-line-{i}"),
+            "Historical log line {i} out of order"
+        );
     }
+
+    server_handle.abort();
 }
 
 /// Test C: POST a HIL event, submit an action (resolve), restart, GET HIL events for
