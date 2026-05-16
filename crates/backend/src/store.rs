@@ -2559,6 +2559,12 @@ impl BackendStore for SqliteBackendStore {
         node_id: &str,
         line: &newton_types::LogLine,
     ) -> Result<(), ApiError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+
         sqlx::query(
             "INSERT INTO WorkflowLog (instanceId, nodeId, seq, ts, level, message)
              VALUES (?, ?, COALESCE((SELECT MAX(seq) FROM WorkflowLog WHERE instanceId = ? AND nodeId = ?), 0) + 1, ?, ?, ?)"
@@ -2570,9 +2576,13 @@ impl BackendStore for SqliteBackendStore {
         .bind(line.timestamp.to_rfc3339())
         .bind(&line.level)
         .bind(&line.message)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| err_internal(&format!("append log line error: {e}")))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| err_internal(&format!("commit tx error: {e}")))?;
 
         Ok(())
     }
@@ -2927,6 +2937,174 @@ async fn compute_repo_depended_on_by(
     .map_err(|e| err_internal(&format!("query error: {e}")))?;
 
     Ok(rows.into_iter().map(|r| r.target_repo).collect())
+}
+
+#[cfg(test)]
+mod store_tests {
+    use super::*;
+    use chrono::Utc;
+    use newton_types::{
+        HilEventType, HilStatus, NodeState, NodeStatus, WorkflowInstance, WorkflowStatus,
+    };
+
+    fn make_instance(id: &str) -> WorkflowInstance {
+        WorkflowInstance {
+            instance_id: id.to_string(),
+            workflow_id: "wf-1".to_string(),
+            status: WorkflowStatus::Running,
+            nodes: vec![],
+            started_at: Utc::now(),
+            ended_at: None,
+            linked_plan_id: None,
+            definition: None,
+        }
+    }
+
+    fn make_node(node_id: &str) -> NodeState {
+        NodeState {
+            node_id: node_id.to_string(),
+            status: NodeStatus::Running,
+            started_at: Some(Utc::now()),
+            ended_at: None,
+            operator_type: Some("command".to_string()),
+        }
+    }
+
+    fn make_hil(event_id: &str, instance_id: &str) -> newton_types::HilEvent {
+        newton_types::HilEvent {
+            event_id: event_id.to_string(),
+            instance_id: instance_id.to_string(),
+            node_id: Some("node-1".to_string()),
+            channel: "slack".to_string(),
+            event_type: HilEventType::Question,
+            question: "Continue?".to_string(),
+            choices: vec!["yes".to_string(), "no".to_string()],
+            timeout_seconds: Some(300),
+            correlation_id: None,
+            status: HilStatus::Pending,
+            timestamp: Utc::now(),
+        }
+    }
+
+    fn make_log(instance_id: &str, node_id: &str, msg: &str) -> newton_types::LogLine {
+        newton_types::LogLine {
+            instance_id: instance_id.to_string(),
+            node_id: node_id.to_string(),
+            level: "info".to_string(),
+            message: msg.to_string(),
+            timestamp: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn upsert_and_get_workflow_instance_round_trip() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let inst = make_instance("inst-1");
+
+        store.upsert_workflow_instance(&inst).await.unwrap();
+        let fetched = store.get_workflow_instance("inst-1").await.unwrap();
+
+        assert_eq!(fetched.instance_id, inst.instance_id);
+        assert_eq!(fetched.workflow_id, inst.workflow_id);
+    }
+
+    #[tokio::test]
+    async fn upsert_node_state_is_idempotent() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let inst = make_instance("inst-2");
+        store.upsert_workflow_instance(&inst).await.unwrap();
+
+        let node = make_node("node-a");
+        // First upsert
+        store.upsert_node_state("inst-2", &node).await.unwrap();
+        // Second upsert with different status — should update, not duplicate
+        let mut node2 = node.clone();
+        node2.status = NodeStatus::Succeeded;
+        store.upsert_node_state("inst-2", &node2).await.unwrap();
+
+        let nodes = store.list_node_states_for_instance("inst-2").await.unwrap();
+        assert_eq!(
+            nodes.len(),
+            1,
+            "idempotent upsert must not create duplicate rows"
+        );
+        assert_eq!(nodes[0].status, NodeStatus::Succeeded);
+    }
+
+    #[tokio::test]
+    async fn insert_hil_event_and_update_status_round_trip() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let inst = make_instance("inst-3");
+        store.upsert_workflow_instance(&inst).await.unwrap();
+
+        let hil = make_hil("hil-1", "inst-3");
+        store.insert_hil_event(&hil).await.unwrap();
+
+        let fetched = store.get_hil_event("hil-1").await.unwrap();
+        assert_eq!(fetched.status, HilStatus::Pending);
+
+        let updated = store
+            .update_hil_event_status("hil-1", HilStatus::Resolved)
+            .await
+            .unwrap();
+        assert_eq!(updated.status, HilStatus::Resolved);
+    }
+
+    #[tokio::test]
+    async fn append_log_line_seq_is_monotonic() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let inst = make_instance("inst-4");
+        store.upsert_workflow_instance(&inst).await.unwrap();
+
+        for i in 0..5 {
+            let line = make_log("inst-4", "node-1", &format!("msg-{i}"));
+            store
+                .append_log_line("inst-4", "node-1", &line)
+                .await
+                .unwrap();
+        }
+
+        let rows: Vec<(i64,)> = sqlx::query_as(
+            "SELECT seq FROM WorkflowLog WHERE instanceId = ? AND nodeId = ? ORDER BY seq ASC",
+        )
+        .bind("inst-4")
+        .bind("node-1")
+        .fetch_all(&store.pool)
+        .await
+        .unwrap();
+
+        let seqs: Vec<i64> = rows.into_iter().map(|(s,)| s).collect();
+        assert_eq!(
+            seqs,
+            vec![1, 2, 3, 4, 5],
+            "seq must be strictly monotonic starting at 1"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_log_lines_with_since_seq_filter() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let inst = make_instance("inst-5");
+        store.upsert_workflow_instance(&inst).await.unwrap();
+
+        for i in 0..10 {
+            let line = make_log("inst-5", "node-x", &format!("line-{i}"));
+            store
+                .append_log_line("inst-5", "node-x", &line)
+                .await
+                .unwrap();
+        }
+
+        // since_seq=0 returns all 10
+        let all = store.list_log_lines("inst-5", "node-x", 0).await.unwrap();
+        assert_eq!(all.len(), 10);
+
+        // since_seq=5 returns lines with seq > 5 (i.e., seq 6–10 → 5 lines)
+        let tail = store.list_log_lines("inst-5", "node-x", 5).await.unwrap();
+        assert_eq!(tail.len(), 5);
+        assert_eq!(tail[0].message, "line-5");
+        assert_eq!(tail[4].message, "line-9");
+    }
 }
 
 #[cfg(test)]
