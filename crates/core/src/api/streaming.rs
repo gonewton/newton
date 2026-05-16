@@ -102,17 +102,33 @@ async fn workflow_stream(
             .into_response();
     }
 
-    if !state.instances.contains_key(&id) {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(ApiError {
-                code: "ERR_NOT_FOUND".to_string(),
-                category: "not_found".to_string(),
-                message: format!("Workflow instance '{}' not found", id),
-                details: None,
-            }),
-        )
-            .into_response();
+    // Check instance exists via BackendStore (authoritative source)
+    match state.backend.get_workflow_instance(&id).await {
+        Ok(_) => {}
+        Err(e) if e.code == "ERR_NOT_FOUND" => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ApiError {
+                    code: "ERR_NOT_FOUND".to_string(),
+                    category: "not_found".to_string(),
+                    message: format!("Workflow instance '{}' not found", id),
+                    details: None,
+                }),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError {
+                    code: "ERR_INTERNAL".to_string(),
+                    category: "internal".to_string(),
+                    message: "Internal storage error".to_string(),
+                    details: None,
+                }),
+            )
+                .into_response();
+        }
     }
 
     ws.on_upgrade(move |socket| handle_workflow_socket(socket, id, state, filters))
@@ -167,11 +183,13 @@ async fn logs_stream(
     ws.on_upgrade(move |socket| handle_logs_socket(socket, instance_id, node_id, state, filters))
 }
 
-fn resolve_task_name(state: &AppState, instance_id: &str, node_id: &str) -> String {
+async fn resolve_task_name(state: &AppState, instance_id: &str, node_id: &str) -> String {
     state
-        .instances
-        .get(instance_id)
-        .and_then(|inst| inst.definition.clone())
+        .backend
+        .get_workflow_instance(instance_id)
+        .await
+        .ok()
+        .and_then(|inst| inst.definition)
         .and_then(|def| def["tasks"][node_id]["name"].as_str().map(str::to_owned))
         .unwrap_or_else(|| node_id.to_owned())
 }
@@ -183,18 +201,42 @@ async fn handle_logs_socket(
     state: Arc<AppState>,
     filters: StreamFilters,
 ) {
+    // Subscribe first to avoid missing events during historical replay
     let mut rx = state.events_tx.subscribe();
 
-    let task_name = resolve_task_name(&state, &instance_id, &node_id);
+    let task_name = resolve_task_name(&state, &instance_id, &node_id).await;
     let connect_line = BroadcastEvent::LogMessage {
         instance_id: instance_id.clone(),
         node_id: node_id.clone(),
         message: format!("Connected to {task_name}"),
     };
     if let Ok(json) = serde_json::to_string(&connect_line) {
-        let _ = socket.send(Message::Text(json.into())).await;
+        if socket.send(Message::Text(json.into())).await.is_err() {
+            return;
+        }
     }
 
+    // Replay historical log lines (seq > 0 returns all)
+    if let Ok(historical) = state
+        .backend
+        .list_log_lines(&instance_id, &node_id, 0)
+        .await
+    {
+        for line in historical {
+            let event = BroadcastEvent::LogMessage {
+                instance_id: line.instance_id.clone(),
+                node_id: line.node_id.clone(),
+                message: line.message.clone(),
+            };
+            if let Ok(json) = serde_json::to_string(&event) {
+                if socket.send(Message::Text(json.into())).await.is_err() {
+                    return;
+                }
+            }
+        }
+    }
+
+    // Forward live broadcast events
     while let Ok(event) = rx.recv().await {
         if should_send_event(&event, &instance_id, &filters) {
             if let BroadcastEvent::LogMessage {
@@ -233,17 +275,33 @@ async fn workflow_sse(
             .into_response();
     }
 
-    if !state.instances.contains_key(&id) {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(ApiError {
-                code: "ERR_NOT_FOUND".to_string(),
-                category: "not_found".to_string(),
-                message: format!("Workflow instance '{}' not found", id),
-                details: None,
-            }),
-        )
-            .into_response();
+    // Check instance exists via BackendStore (authoritative source)
+    match state.backend.get_workflow_instance(&id).await {
+        Ok(_) => {}
+        Err(e) if e.code == "ERR_NOT_FOUND" => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ApiError {
+                    code: "ERR_NOT_FOUND".to_string(),
+                    category: "not_found".to_string(),
+                    message: format!("Workflow instance '{}' not found", id),
+                    details: None,
+                }),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError {
+                    code: "ERR_INTERNAL".to_string(),
+                    category: "internal".to_string(),
+                    message: "Internal storage error".to_string(),
+                    details: None,
+                }),
+            )
+                .into_response();
+        }
     }
 
     let rx = state.events_tx.subscribe();

@@ -1,7 +1,7 @@
 use crate::models::*;
 use crate::{err_conflict, err_internal, err_not_found, err_validation, BackendStore};
-use chrono::Utc;
-use newton_types::ApiError;
+use chrono::{DateTime, Utc};
+use newton_types::{ApiError, HilEventType, HilStatus, NodeStatus, WorkflowStatus};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::FromRow;
 use sqlx::SqlitePool;
@@ -40,6 +40,11 @@ impl SqliteBackendStore {
             .execute(&pool)
             .await
             .map_err(|e| err_internal(&format!("migration 002 failed: {e}")))?;
+
+        sqlx::query(include_str!("../migrations/003_workflow_runtime.sql"))
+            .execute(&pool)
+            .await
+            .map_err(|e| err_internal(&format!("migration 003 failed: {e}")))?;
 
         Ok(Self { pool })
     }
@@ -360,6 +365,224 @@ struct StringValueRow {
 #[derive(Debug, FromRow)]
 struct ExpectedDeltaRow {
     expected_delta: Option<String>,
+}
+
+// ── Workflow runtime row types ───────────────────────────────────────────────
+
+#[derive(Debug, FromRow)]
+struct WorkflowInstanceRow {
+    #[sqlx(rename = "instanceId")]
+    instance_id: String,
+    #[sqlx(rename = "workflowId")]
+    workflow_id: String,
+    status: String,
+    #[sqlx(rename = "linkedPlanId")]
+    linked_plan_id: Option<String>,
+    #[sqlx(rename = "startedAt")]
+    started_at: String,
+    #[sqlx(rename = "endedAt")]
+    ended_at: Option<String>,
+    definition: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct NodeStateRow {
+    #[allow(dead_code)]
+    #[sqlx(rename = "instanceId")]
+    instance_id: String,
+    #[sqlx(rename = "nodeId")]
+    node_id: String,
+    status: String,
+    #[sqlx(rename = "startedAt")]
+    started_at: Option<String>,
+    #[sqlx(rename = "endedAt")]
+    ended_at: Option<String>,
+    #[sqlx(rename = "operatorType")]
+    operator_type: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct HilEventRow {
+    #[sqlx(rename = "eventId")]
+    event_id: String,
+    #[sqlx(rename = "instanceId")]
+    instance_id: String,
+    #[sqlx(rename = "nodeId")]
+    node_id: Option<String>,
+    channel: String,
+    #[sqlx(rename = "eventType")]
+    event_type: String,
+    question: String,
+    choices: String,
+    #[sqlx(rename = "timeoutSeconds")]
+    timeout_seconds: Option<i64>,
+    #[sqlx(rename = "correlationId")]
+    correlation_id_str: Option<String>,
+    status: String,
+    timestamp: String,
+}
+
+#[derive(Debug, FromRow)]
+struct WorkflowLogRow {
+    #[allow(dead_code)]
+    seq: i64,
+    #[sqlx(rename = "instanceId")]
+    instance_id: String,
+    #[sqlx(rename = "nodeId")]
+    node_id: String,
+    ts: String,
+    level: String,
+    message: String,
+}
+
+#[derive(Debug, FromRow)]
+struct InstanceIdRow {
+    #[sqlx(rename = "instanceId")]
+    instance_id: String,
+}
+
+// ── Workflow runtime conversion helpers ──────────────────────────────────────
+
+fn parse_dt(s: &str) -> Result<DateTime<Utc>, ApiError> {
+    s.parse::<DateTime<Utc>>()
+        .map_err(|_| err_internal(&format!("invalid datetime: {s}")))
+}
+
+fn parse_opt_dt(s: Option<&str>) -> Result<Option<DateTime<Utc>>, ApiError> {
+    match s {
+        None => Ok(None),
+        Some(v) => Ok(Some(parse_dt(v)?)),
+    }
+}
+
+fn parse_workflow_status(s: &str) -> WorkflowStatus {
+    match s {
+        "running" => WorkflowStatus::Running,
+        "succeeded" => WorkflowStatus::Succeeded,
+        "failed" => WorkflowStatus::Failed,
+        "paused" => WorkflowStatus::Paused,
+        "cancelled" => WorkflowStatus::Cancelled,
+        _ => WorkflowStatus::Running,
+    }
+}
+
+fn workflow_status_str(s: &WorkflowStatus) -> &'static str {
+    match s {
+        WorkflowStatus::Running => "running",
+        WorkflowStatus::Succeeded => "succeeded",
+        WorkflowStatus::Failed => "failed",
+        WorkflowStatus::Paused => "paused",
+        WorkflowStatus::Cancelled => "cancelled",
+    }
+}
+
+fn parse_node_status(s: &str) -> NodeStatus {
+    match s {
+        "pending" => NodeStatus::Pending,
+        "running" => NodeStatus::Running,
+        "succeeded" => NodeStatus::Succeeded,
+        "failed" => NodeStatus::Failed,
+        "timeout" => NodeStatus::Timeout,
+        "cancelled" => NodeStatus::Cancelled,
+        _ => NodeStatus::Pending,
+    }
+}
+
+fn node_status_str(s: &NodeStatus) -> &'static str {
+    match s {
+        NodeStatus::Pending => "pending",
+        NodeStatus::Running => "running",
+        NodeStatus::Succeeded => "succeeded",
+        NodeStatus::Failed => "failed",
+        NodeStatus::Timeout => "timeout",
+        NodeStatus::Cancelled => "cancelled",
+    }
+}
+
+fn parse_hil_event_type(s: &str) -> HilEventType {
+    match s {
+        "authorization" => HilEventType::Authorization,
+        _ => HilEventType::Question,
+    }
+}
+
+fn hil_event_type_str(t: &HilEventType) -> &'static str {
+    match t {
+        HilEventType::Question => "question",
+        HilEventType::Authorization => "authorization",
+    }
+}
+
+fn parse_hil_status(s: &str) -> HilStatus {
+    match s {
+        "resolved" => HilStatus::Resolved,
+        "timed_out" => HilStatus::TimedOut,
+        "cancelled" => HilStatus::Cancelled,
+        _ => HilStatus::Pending,
+    }
+}
+
+fn hil_status_str(s: &HilStatus) -> &'static str {
+    match s {
+        HilStatus::Pending => "pending",
+        HilStatus::Resolved => "resolved",
+        HilStatus::TimedOut => "timed_out",
+        HilStatus::Cancelled => "cancelled",
+    }
+}
+
+fn wi_row_to_instance(
+    row: WorkflowInstanceRow,
+    nodes: Vec<newton_types::NodeState>,
+) -> Result<newton_types::WorkflowInstance, ApiError> {
+    Ok(newton_types::WorkflowInstance {
+        instance_id: row.instance_id,
+        workflow_id: row.workflow_id,
+        status: parse_workflow_status(&row.status),
+        linked_plan_id: row.linked_plan_id,
+        started_at: parse_dt(&row.started_at)?,
+        ended_at: parse_opt_dt(row.ended_at.as_deref())?,
+        definition: row
+            .definition
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|e| err_internal(&format!("definition json: {e}")))?,
+        nodes,
+    })
+}
+
+fn row_to_node_state(row: NodeStateRow) -> Result<newton_types::NodeState, ApiError> {
+    Ok(newton_types::NodeState {
+        node_id: row.node_id,
+        status: parse_node_status(&row.status),
+        started_at: parse_opt_dt(row.started_at.as_deref())?,
+        ended_at: parse_opt_dt(row.ended_at.as_deref())?,
+        operator_type: row.operator_type,
+    })
+}
+
+fn row_to_hil_event(row: HilEventRow) -> Result<newton_types::HilEvent, ApiError> {
+    let choices: Vec<String> = serde_json::from_str(&row.choices)
+        .map_err(|e| err_internal(&format!("choices json: {e}")))?;
+    let correlation_id = row
+        .correlation_id_str
+        .as_deref()
+        .map(|s| Uuid::parse_str(s).map_err(|_| err_internal(&format!("invalid uuid: {s}"))))
+        .transpose()?;
+    Ok(newton_types::HilEvent {
+        event_id: row.event_id,
+        instance_id: row.instance_id,
+        node_id: row.node_id,
+        channel: row.channel,
+        event_type: parse_hil_event_type(&row.event_type),
+        question: row.question,
+        choices,
+        timeout_seconds: row.timeout_seconds.map(|v| v as u64),
+        correlation_id,
+        status: parse_hil_status(&row.status),
+        timestamp: parse_dt(&row.timestamp)?,
+    })
 }
 
 #[async_trait::async_trait]
@@ -2064,6 +2287,334 @@ impl BackendStore for SqliteBackendStore {
         }
         Ok(id.to_string())
     }
+
+    // ── Workflow runtime methods ───────────────────────────────────────────
+
+    async fn get_workflow_instance(
+        &self,
+        instance_id: &str,
+    ) -> Result<newton_types::WorkflowInstance, ApiError> {
+        let row: Option<WorkflowInstanceRow> = sqlx::query_as::<_, WorkflowInstanceRow>(
+            "SELECT instanceId, workflowId, status, linkedPlanId, startedAt, endedAt, definition FROM WorkflowInstance WHERE instanceId = ?"
+        )
+        .bind(instance_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        let row = row.ok_or_else(|| err_not_found("Workflow instance not found"))?;
+        let nodes = self.list_node_states_for_instance(instance_id).await?;
+        wi_row_to_instance(row, nodes)
+    }
+
+    async fn list_workflow_instances(
+        &self,
+        status: Option<newton_types::WorkflowStatus>,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<Vec<newton_types::WorkflowInstance>, ApiError> {
+        let rows: Vec<WorkflowInstanceRow> = match &status {
+            Some(s) => {
+                sqlx::query_as::<_, WorkflowInstanceRow>(
+                    "SELECT instanceId, workflowId, status, linkedPlanId, startedAt, endedAt, definition FROM WorkflowInstance WHERE status = ? ORDER BY startedAt DESC LIMIT ? OFFSET ?"
+                )
+                .bind(workflow_status_str(s))
+                .bind(limit.unwrap_or(100) as i64)
+                .bind(offset.unwrap_or(0) as i64)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?
+            }
+            None => {
+                sqlx::query_as::<_, WorkflowInstanceRow>(
+                    "SELECT instanceId, workflowId, status, linkedPlanId, startedAt, endedAt, definition FROM WorkflowInstance ORDER BY startedAt DESC LIMIT ? OFFSET ?"
+                )
+                .bind(limit.unwrap_or(100) as i64)
+                .bind(offset.unwrap_or(0) as i64)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?
+            }
+        };
+
+        let mut instances = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id = row.instance_id.clone();
+            let nodes = self.list_node_states_for_instance(&id).await?;
+            instances.push(wi_row_to_instance(row, nodes)?);
+        }
+        Ok(instances)
+    }
+
+    async fn upsert_workflow_instance(
+        &self,
+        instance: &newton_types::WorkflowInstance,
+    ) -> Result<(), ApiError> {
+        let now = Utc::now().to_rfc3339();
+        let definition_json = instance
+            .definition
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|e| err_internal(&format!("definition serialize: {e}")))?;
+
+        sqlx::query(
+            "INSERT INTO WorkflowInstance (instanceId, workflowId, status, linkedPlanId, startedAt, endedAt, definition, createdAt, updatedAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(instanceId) DO UPDATE SET
+               workflowId = excluded.workflowId,
+               status = excluded.status,
+               linkedPlanId = excluded.linkedPlanId,
+               startedAt = excluded.startedAt,
+               endedAt = excluded.endedAt,
+               definition = excluded.definition,
+               updatedAt = excluded.updatedAt"
+        )
+        .bind(&instance.instance_id)
+        .bind(&instance.workflow_id)
+        .bind(workflow_status_str(&instance.status))
+        .bind(&instance.linked_plan_id)
+        .bind(instance.started_at.to_rfc3339())
+        .bind(instance.ended_at.map(|dt| dt.to_rfc3339()))
+        .bind(definition_json)
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("upsert error: {e}")))?;
+
+        Ok(())
+    }
+
+    async fn delete_workflow_instance(&self, instance_id: &str) -> Result<(), ApiError> {
+        let affected = sqlx::query("DELETE FROM WorkflowInstance WHERE instanceId = ?")
+            .bind(instance_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("delete error: {e}")))?;
+        if affected.rows_affected() == 0 {
+            return Err(err_not_found("Workflow instance not found"));
+        }
+        Ok(())
+    }
+
+    async fn get_node_state(
+        &self,
+        instance_id: &str,
+        node_id: &str,
+    ) -> Result<newton_types::NodeState, ApiError> {
+        let row: Option<NodeStateRow> = sqlx::query_as::<_, NodeStateRow>(
+            "SELECT instanceId, nodeId, status, startedAt, endedAt, operatorType FROM NodeState WHERE instanceId = ? AND nodeId = ?"
+        )
+        .bind(instance_id)
+        .bind(node_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        let row = row.ok_or_else(|| err_not_found("Node state not found"))?;
+        row_to_node_state(row)
+    }
+
+    async fn list_node_states_for_instance(
+        &self,
+        instance_id: &str,
+    ) -> Result<Vec<newton_types::NodeState>, ApiError> {
+        let rows: Vec<NodeStateRow> = sqlx::query_as::<_, NodeStateRow>(
+            "SELECT instanceId, nodeId, status, startedAt, endedAt, operatorType FROM NodeState WHERE instanceId = ? ORDER BY rowid ASC"
+        )
+        .bind(instance_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        rows.into_iter().map(row_to_node_state).collect()
+    }
+
+    async fn upsert_node_state(
+        &self,
+        instance_id: &str,
+        node: &newton_types::NodeState,
+    ) -> Result<(), ApiError> {
+        let id = format!("{}-{}", instance_id, node.node_id);
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO NodeState (id, instanceId, nodeId, status, startedAt, endedAt, operatorType)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(instanceId, nodeId) DO UPDATE SET
+               status = excluded.status,
+               startedAt = excluded.startedAt,
+               endedAt = excluded.endedAt,
+               operatorType = excluded.operatorType"
+        )
+        .bind(&id)
+        .bind(instance_id)
+        .bind(&node.node_id)
+        .bind(node_status_str(&node.status))
+        .bind(node.started_at.map(|dt| dt.to_rfc3339()))
+        .bind(node.ended_at.map(|dt| dt.to_rfc3339()))
+        .bind(&node.operator_type)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("upsert node state error: {e}")))?;
+
+        let _ = now;
+        Ok(())
+    }
+
+    async fn get_hil_event(&self, event_id: &str) -> Result<newton_types::HilEvent, ApiError> {
+        let row: Option<HilEventRow> = sqlx::query_as::<_, HilEventRow>(
+            "SELECT eventId, instanceId, nodeId, channel, eventType, question, choices, timeoutSeconds, correlationId, status, timestamp FROM HilEvent WHERE eventId = ?"
+        )
+        .bind(event_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        let row = row.ok_or_else(|| err_not_found("HIL event not found"))?;
+        row_to_hil_event(row)
+    }
+
+    async fn list_hil_events_for_instance(
+        &self,
+        instance_id: &str,
+    ) -> Result<Vec<newton_types::HilEvent>, ApiError> {
+        let rows: Vec<HilEventRow> = sqlx::query_as::<_, HilEventRow>(
+            "SELECT eventId, instanceId, nodeId, channel, eventType, question, choices, timeoutSeconds, correlationId, status, timestamp FROM HilEvent WHERE instanceId = ? ORDER BY rowid ASC"
+        )
+        .bind(instance_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        rows.into_iter().map(row_to_hil_event).collect()
+    }
+
+    async fn list_hil_instances(&self) -> Result<Vec<String>, ApiError> {
+        let rows: Vec<InstanceIdRow> = sqlx::query_as::<_, InstanceIdRow>(
+            "SELECT DISTINCT instanceId FROM HilEvent ORDER BY instanceId ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        Ok(rows.into_iter().map(|r| r.instance_id).collect())
+    }
+
+    async fn insert_hil_event(&self, event: &newton_types::HilEvent) -> Result<(), ApiError> {
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        let choices_json = serde_json::to_string(&event.choices)
+            .map_err(|e| err_internal(&format!("choices serialize: {e}")))?;
+
+        sqlx::query(
+            "INSERT INTO HilEvent (id, eventId, instanceId, nodeId, channel, eventType, question, choices, timeoutSeconds, correlationId, status, timestamp, createdAt, updatedAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(&id)
+        .bind(&event.event_id)
+        .bind(&event.instance_id)
+        .bind(&event.node_id)
+        .bind(&event.channel)
+        .bind(hil_event_type_str(&event.event_type))
+        .bind(&event.question)
+        .bind(&choices_json)
+        .bind(event.timeout_seconds.map(|v| v as i64))
+        .bind(event.correlation_id.map(|u| u.to_string()))
+        .bind(hil_status_str(&event.status))
+        .bind(event.timestamp.to_rfc3339())
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("insert HIL event error: {e}")))?;
+
+        Ok(())
+    }
+
+    async fn update_hil_event_status(
+        &self,
+        event_id: &str,
+        status: newton_types::HilStatus,
+    ) -> Result<newton_types::HilEvent, ApiError> {
+        let now = Utc::now().to_rfc3339();
+        let affected =
+            sqlx::query("UPDATE HilEvent SET status = ?, updatedAt = ? WHERE eventId = ?")
+                .bind(hil_status_str(&status))
+                .bind(&now)
+                .bind(event_id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("update error: {e}")))?;
+
+        if affected.rows_affected() == 0 {
+            return Err(err_not_found("HIL event not found"));
+        }
+        self.get_hil_event(event_id).await
+    }
+
+    async fn append_log_line(
+        &self,
+        instance_id: &str,
+        node_id: &str,
+        line: &newton_types::LogLine,
+    ) -> Result<(), ApiError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+
+        sqlx::query(
+            "INSERT INTO WorkflowLog (instanceId, nodeId, seq, ts, level, message)
+             VALUES (?, ?, COALESCE((SELECT MAX(seq) FROM WorkflowLog WHERE instanceId = ? AND nodeId = ?), 0) + 1, ?, ?, ?)"
+        )
+        .bind(instance_id)
+        .bind(node_id)
+        .bind(instance_id)
+        .bind(node_id)
+        .bind(line.timestamp.to_rfc3339())
+        .bind(&line.level)
+        .bind(&line.message)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| err_internal(&format!("append log line error: {e}")))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| err_internal(&format!("commit tx error: {e}")))?;
+
+        Ok(())
+    }
+
+    async fn list_log_lines(
+        &self,
+        instance_id: &str,
+        node_id: &str,
+        since_seq: i64,
+    ) -> Result<Vec<newton_types::LogLine>, ApiError> {
+        let rows: Vec<WorkflowLogRow> = sqlx::query_as::<_, WorkflowLogRow>(
+            "SELECT seq, instanceId, nodeId, ts, level, message FROM WorkflowLog WHERE instanceId = ? AND nodeId = ? AND seq > ? ORDER BY seq ASC"
+        )
+        .bind(instance_id)
+        .bind(node_id)
+        .bind(since_seq)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+
+        rows.into_iter()
+            .map(|r| {
+                Ok(newton_types::LogLine {
+                    instance_id: r.instance_id,
+                    node_id: r.node_id,
+                    level: r.level,
+                    message: r.message,
+                    timestamp: parse_dt(&r.ts)?,
+                })
+            })
+            .collect()
+    }
 }
 
 impl SqliteBackendStore {
@@ -2386,6 +2937,174 @@ async fn compute_repo_depended_on_by(
     .map_err(|e| err_internal(&format!("query error: {e}")))?;
 
     Ok(rows.into_iter().map(|r| r.target_repo).collect())
+}
+
+#[cfg(test)]
+mod store_tests {
+    use super::*;
+    use chrono::Utc;
+    use newton_types::{
+        HilEventType, HilStatus, NodeState, NodeStatus, WorkflowInstance, WorkflowStatus,
+    };
+
+    fn make_instance(id: &str) -> WorkflowInstance {
+        WorkflowInstance {
+            instance_id: id.to_string(),
+            workflow_id: "wf-1".to_string(),
+            status: WorkflowStatus::Running,
+            nodes: vec![],
+            started_at: Utc::now(),
+            ended_at: None,
+            linked_plan_id: None,
+            definition: None,
+        }
+    }
+
+    fn make_node(node_id: &str) -> NodeState {
+        NodeState {
+            node_id: node_id.to_string(),
+            status: NodeStatus::Running,
+            started_at: Some(Utc::now()),
+            ended_at: None,
+            operator_type: Some("command".to_string()),
+        }
+    }
+
+    fn make_hil(event_id: &str, instance_id: &str) -> newton_types::HilEvent {
+        newton_types::HilEvent {
+            event_id: event_id.to_string(),
+            instance_id: instance_id.to_string(),
+            node_id: Some("node-1".to_string()),
+            channel: "slack".to_string(),
+            event_type: HilEventType::Question,
+            question: "Continue?".to_string(),
+            choices: vec!["yes".to_string(), "no".to_string()],
+            timeout_seconds: Some(300),
+            correlation_id: None,
+            status: HilStatus::Pending,
+            timestamp: Utc::now(),
+        }
+    }
+
+    fn make_log(instance_id: &str, node_id: &str, msg: &str) -> newton_types::LogLine {
+        newton_types::LogLine {
+            instance_id: instance_id.to_string(),
+            node_id: node_id.to_string(),
+            level: "info".to_string(),
+            message: msg.to_string(),
+            timestamp: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn upsert_and_get_workflow_instance_round_trip() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let inst = make_instance("inst-1");
+
+        store.upsert_workflow_instance(&inst).await.unwrap();
+        let fetched = store.get_workflow_instance("inst-1").await.unwrap();
+
+        assert_eq!(fetched.instance_id, inst.instance_id);
+        assert_eq!(fetched.workflow_id, inst.workflow_id);
+    }
+
+    #[tokio::test]
+    async fn upsert_node_state_is_idempotent() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let inst = make_instance("inst-2");
+        store.upsert_workflow_instance(&inst).await.unwrap();
+
+        let node = make_node("node-a");
+        // First upsert
+        store.upsert_node_state("inst-2", &node).await.unwrap();
+        // Second upsert with different status — should update, not duplicate
+        let mut node2 = node.clone();
+        node2.status = NodeStatus::Succeeded;
+        store.upsert_node_state("inst-2", &node2).await.unwrap();
+
+        let nodes = store.list_node_states_for_instance("inst-2").await.unwrap();
+        assert_eq!(
+            nodes.len(),
+            1,
+            "idempotent upsert must not create duplicate rows"
+        );
+        assert_eq!(nodes[0].status, NodeStatus::Succeeded);
+    }
+
+    #[tokio::test]
+    async fn insert_hil_event_and_update_status_round_trip() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let inst = make_instance("inst-3");
+        store.upsert_workflow_instance(&inst).await.unwrap();
+
+        let hil = make_hil("hil-1", "inst-3");
+        store.insert_hil_event(&hil).await.unwrap();
+
+        let fetched = store.get_hil_event("hil-1").await.unwrap();
+        assert_eq!(fetched.status, HilStatus::Pending);
+
+        let updated = store
+            .update_hil_event_status("hil-1", HilStatus::Resolved)
+            .await
+            .unwrap();
+        assert_eq!(updated.status, HilStatus::Resolved);
+    }
+
+    #[tokio::test]
+    async fn append_log_line_seq_is_monotonic() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let inst = make_instance("inst-4");
+        store.upsert_workflow_instance(&inst).await.unwrap();
+
+        for i in 0..5 {
+            let line = make_log("inst-4", "node-1", &format!("msg-{i}"));
+            store
+                .append_log_line("inst-4", "node-1", &line)
+                .await
+                .unwrap();
+        }
+
+        let rows: Vec<(i64,)> = sqlx::query_as(
+            "SELECT seq FROM WorkflowLog WHERE instanceId = ? AND nodeId = ? ORDER BY seq ASC",
+        )
+        .bind("inst-4")
+        .bind("node-1")
+        .fetch_all(&store.pool)
+        .await
+        .unwrap();
+
+        let seqs: Vec<i64> = rows.into_iter().map(|(s,)| s).collect();
+        assert_eq!(
+            seqs,
+            vec![1, 2, 3, 4, 5],
+            "seq must be strictly monotonic starting at 1"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_log_lines_with_since_seq_filter() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let inst = make_instance("inst-5");
+        store.upsert_workflow_instance(&inst).await.unwrap();
+
+        for i in 0..10 {
+            let line = make_log("inst-5", "node-x", &format!("line-{i}"));
+            store
+                .append_log_line("inst-5", "node-x", &line)
+                .await
+                .unwrap();
+        }
+
+        // since_seq=0 returns all 10
+        let all = store.list_log_lines("inst-5", "node-x", 0).await.unwrap();
+        assert_eq!(all.len(), 10);
+
+        // since_seq=5 returns lines with seq > 5 (i.e., seq 6–10 → 5 lines)
+        let tail = store.list_log_lines("inst-5", "node-x", 5).await.unwrap();
+        assert_eq!(tail.len(), 5);
+        assert_eq!(tail[0].message, "line-5");
+        assert_eq!(tail[4].message, "line-9");
+    }
 }
 
 #[cfg(test)]

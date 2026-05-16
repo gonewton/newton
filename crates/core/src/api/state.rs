@@ -1,17 +1,19 @@
-use dashmap::DashMap;
-use newton_types::{BroadcastEvent, HilEvent, LogLine, OperatorDescriptor, WorkflowInstance};
+use newton_types::{BroadcastEvent, OperatorDescriptor};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
 pub const BROADCAST_CAPACITY: usize = 1024;
 
+/// Application state shared across all HTTP handlers.
+///
+/// DashMap caches (instances, hil_events, logs) have been removed.
+/// BackendStore is the single authoritative source for all runtime state.
+/// events_tx remains transient by design: it is a pub/sub channel for SSE/WebSocket
+/// clients and is NOT persisted.
 #[derive(Clone)]
 pub struct AppState {
-    pub instances: Arc<DashMap<String, WorkflowInstance>>,
-    pub hil_events: Arc<DashMap<String, HilEvent>>,
     pub operators: Arc<Vec<OperatorDescriptor>>,
     pub events_tx: broadcast::Sender<BroadcastEvent>,
-    pub logs: Arc<DashMap<(String, String), Vec<LogLine>>>,
     pub backend: Arc<dyn newton_backend::BackendStore>,
 }
 
@@ -22,11 +24,8 @@ impl AppState {
     ) -> Self {
         let (events_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         AppState {
-            instances: Arc::new(DashMap::new()),
-            hil_events: Arc::new(DashMap::new()),
             operators: Arc::new(operators),
             events_tx,
-            logs: Arc::new(DashMap::new()),
             backend,
         }
     }

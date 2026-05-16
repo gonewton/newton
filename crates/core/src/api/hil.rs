@@ -22,6 +22,19 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+fn map_store_err(_e: ApiError) -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ApiError {
+            code: "ERR_INTERNAL".to_string(),
+            category: "internal".to_string(),
+            message: "Internal storage error".to_string(),
+            details: None,
+        }),
+    )
+        .into_response()
+}
+
 /// List distinct workflow instance IDs that currently have HIL events.
 #[utoipa::path(
     get,
@@ -29,16 +42,11 @@ pub fn routes(state: Arc<AppState>) -> Router {
     tag = "hil",
     responses((status = 200, description = "HIL workflow instance ids", body = [String]))
 )]
-pub(crate) async fn list_hil_instances(State(state): State<Arc<AppState>>) -> Json<Vec<String>> {
-    let mut instance_ids: Vec<String> = state
-        .hil_events
-        .iter()
-        .map(|entry| entry.value().instance_id.clone())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    instance_ids.sort();
-    Json(instance_ids)
+pub(crate) async fn list_hil_instances(State(state): State<Arc<AppState>>) -> Response {
+    match state.backend.list_hil_instances().await {
+        Ok(ids) => (StatusCode::OK, Json(ids)).into_response(),
+        Err(e) => map_store_err(e),
+    }
 }
 
 #[utoipa::path(
@@ -52,13 +60,10 @@ pub(crate) async fn list_hil_events(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let events: Vec<HilEvent> = state
-        .hil_events
-        .iter()
-        .filter(|entry| entry.value().instance_id == id)
-        .map(|entry| entry.value().clone())
-        .collect();
-    (StatusCode::OK, Json(events)).into_response()
+    match state.backend.list_hil_events_for_instance(&id).await {
+        Ok(events) => (StatusCode::OK, Json(events)).into_response(),
+        Err(e) => map_store_err(e),
+    }
 }
 
 #[utoipa::path(
@@ -81,47 +86,70 @@ pub(crate) async fn submit_hil_action(
     State(state): State<Arc<AppState>>,
     Json(action): Json<HilAction>,
 ) -> Response {
-    match state.hil_events.get_mut(&event_id) {
-        Some(mut hil_event) => {
-            if hil_event.instance_id != instance_id {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(ApiError {
-                        code: "ERR_NOT_FOUND".to_string(),
-                        category: "resource".to_string(),
-                        message: "HIL event not found for this workflow".to_string(),
-                        details: None,
-                    }),
-                )
-                    .into_response();
-            }
-
-            if let Err((status, error)) = apply_hil_action(&mut hil_event, &action) {
-                return (status, Json(error)).into_response();
-            }
-            let _ = state.events_tx.send(BroadcastEvent::HilEvent {
-                instance_id: hil_event.instance_id.clone(),
-                event_id: event_id.clone(),
-            });
-            (StatusCode::OK, Json(hil_event.clone())).into_response()
+    // Fetch the HIL event
+    let hil_event = match state.backend.get_hil_event(&event_id).await {
+        Ok(e) => e,
+        Err(e) if e.code == "ERR_NOT_FOUND" => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ApiError {
+                    code: "ERR_NOT_FOUND".to_string(),
+                    category: "resource".to_string(),
+                    message: "HIL event not found".to_string(),
+                    details: None,
+                }),
+            )
+                .into_response()
         }
-        None => (
+        Err(e) => return map_store_err(e),
+    };
+
+    if hil_event.instance_id != instance_id {
+        return (
             StatusCode::NOT_FOUND,
             Json(ApiError {
                 code: "ERR_NOT_FOUND".to_string(),
                 category: "resource".to_string(),
-                message: "HIL event not found".to_string(),
+                message: "HIL event not found for this workflow".to_string(),
                 details: None,
             }),
         )
-            .into_response(),
+            .into_response();
     }
+
+    let new_status = match apply_hil_action_status(&action) {
+        Ok(s) => s,
+        Err((status, error)) => return (status, Json(error)).into_response(),
+    };
+
+    // Persist updated status first, then broadcast
+    let updated = match state
+        .backend
+        .update_hil_event_status(&event_id, new_status)
+        .await
+    {
+        Ok(e) => e,
+        Err(e) => return map_store_err(e),
+    };
+
+    let _ = state.events_tx.send(BroadcastEvent::HilEvent {
+        instance_id: updated.instance_id.clone(),
+        event_id: event_id.clone(),
+    });
+
+    (StatusCode::OK, Json(updated)).into_response()
 }
 
+#[allow(dead_code)]
 pub(crate) fn apply_hil_action(
     hil_event: &mut HilEvent,
     action: &HilAction,
 ) -> Result<(), (StatusCode, ApiError)> {
+    hil_event.status = apply_hil_action_status(action)?;
+    Ok(())
+}
+
+fn apply_hil_action_status(action: &HilAction) -> Result<HilStatus, (StatusCode, ApiError)> {
     match action.response_type.as_str() {
         "text" | "authorization_approved" | "authorization_denied" | "timeout" | "cancelled" => {}
         _ => {
@@ -149,10 +177,9 @@ pub(crate) fn apply_hil_action(
         ));
     }
 
-    hil_event.status = match action.response_type.as_str() {
+    Ok(match action.response_type.as_str() {
         "timeout" => HilStatus::TimedOut,
         "cancelled" => HilStatus::Cancelled,
         _ => HilStatus::Resolved,
-    };
-    Ok(())
+    })
 }
