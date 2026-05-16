@@ -197,12 +197,13 @@ CREATE INDEX IF NOT EXISTS idx_workflowinstance_status ON WorkflowInstance(statu
 CREATE INDEX IF NOT EXISTS idx_workflowinstance_linkedPlanId ON WorkflowInstance(linkedPlanId);
 
 CREATE TABLE IF NOT EXISTS NodeState (
-  id TEXT PRIMARY KEY,
-  instanceId TEXT NOT NULL,
-  nodeId TEXT NOT NULL,
-  status TEXT NOT NULL,
-  startedAt TEXT NULL,
-  endedAt TEXT NULL,
+  id           TEXT PRIMARY KEY,
+  instanceId   TEXT NOT NULL,
+  nodeId       TEXT NOT NULL,
+  status       TEXT NOT NULL,
+  startedAt    TEXT NULL,
+  endedAt      TEXT NULL,
+  operatorType TEXT NULL,  -- Rust extension: newton_types::NodeState.operator_type
   FOREIGN KEY(instanceId) REFERENCES WorkflowInstance(instanceId) ON DELETE CASCADE,
   UNIQUE(instanceId, nodeId)
 );
@@ -227,6 +228,20 @@ CREATE TABLE IF NOT EXISTS HilEvent (
 );
 CREATE INDEX IF NOT EXISTS idx_hilevent_instanceId ON HilEvent(instanceId);
 CREATE INDEX IF NOT EXISTS idx_hilevent_status ON HilEvent(status);
+
+-- Append-only log table. seq is computed as MAX(seq)+1 per (instanceId, nodeId) pair.
+CREATE TABLE IF NOT EXISTS WorkflowLog (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  instanceId TEXT NOT NULL,
+  nodeId     TEXT NOT NULL,
+  seq        INTEGER NOT NULL,
+  ts         TEXT NOT NULL,
+  level      TEXT NOT NULL,
+  message    TEXT NOT NULL,
+  FOREIGN KEY(instanceId) REFERENCES WorkflowInstance(instanceId) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_workflowlog_instance_node_seq
+  ON WorkflowLog(instanceId, nodeId, seq);
 
 CREATE TABLE IF NOT EXISTS ExecutionRecord (
   id TEXT PRIMARY KEY,

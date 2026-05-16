@@ -9,7 +9,9 @@ use axum::{
     Router,
 };
 use chrono::{DateTime, Utc};
-use newton_types::{ApiError, BroadcastEvent, NodeStatus, WorkflowInstance, WorkflowStatus};
+use newton_types::{
+    ApiError, BroadcastEvent, NodeState, NodeStatus, WorkflowInstance, WorkflowStatus,
+};
 use serde::Deserialize;
 use std::sync::Arc;
 use utoipa::ToSchema;
@@ -29,11 +31,8 @@ pub fn routes(state: Arc<AppState>) -> Router {
 /// Query parameters for listing workflow instances.
 #[derive(Debug, Deserialize)]
 pub struct WorkflowListQuery {
-    /// Optional status filter.
     pub status: Option<WorkflowStatus>,
-    /// Maximum number of items to return.
     pub limit: Option<usize>,
-    /// Number of items to skip before collecting results.
     pub offset: Option<usize>,
 }
 
@@ -56,6 +55,58 @@ pub(crate) struct WorkflowUpdateBody {
     ended_at: Option<DateTime<Utc>>,
 }
 
+fn map_store_err(_e: ApiError) -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ApiError {
+            code: "ERR_INTERNAL".to_string(),
+            category: "internal".to_string(),
+            message: "Internal storage error".to_string(),
+            details: None,
+        }),
+    )
+        .into_response()
+}
+
+fn not_found_response(message: &str) -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ApiError {
+            code: "ERR_NOT_FOUND".to_string(),
+            category: "resource".to_string(),
+            message: message.to_string(),
+            details: None,
+        }),
+    )
+        .into_response()
+}
+
+fn conflict_response(message: &str) -> Response {
+    (
+        StatusCode::CONFLICT,
+        Json(ApiError {
+            code: "ERR_CONFLICT".to_string(),
+            category: "state".to_string(),
+            message: message.to_string(),
+            details: None,
+        }),
+    )
+        .into_response()
+}
+
+fn validation_response(message: &str) -> Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(ApiError {
+            code: "ERR_VALIDATION".to_string(),
+            category: "validation".to_string(),
+            message: message.to_string(),
+            details: None,
+        }),
+    )
+        .into_response()
+}
+
 #[utoipa::path(
     get,
     path = "/api/workflows",
@@ -72,22 +123,15 @@ pub(crate) struct WorkflowUpdateBody {
 pub(crate) async fn list_workflows(
     Query(query): Query<WorkflowListQuery>,
     State(state): State<Arc<AppState>>,
-) -> Json<Vec<WorkflowInstance>> {
-    let mut instances: Vec<WorkflowInstance> = state
-        .instances
-        .iter()
-        .map(|entry| entry.value().clone())
-        .collect();
-
-    if let Some(ref status) = query.status {
-        instances.retain(|i| &i.status == status);
+) -> Response {
+    match state
+        .backend
+        .list_workflow_instances(query.status, query.limit, query.offset)
+        .await
+    {
+        Ok(instances) => (StatusCode::OK, Json(instances)).into_response(),
+        Err(e) => map_store_err(e),
     }
-
-    let offset = query.offset.unwrap_or(0);
-    let limit = query.limit.unwrap_or(usize::MAX);
-    instances = instances.into_iter().skip(offset).take(limit).collect();
-
-    Json(instances)
 }
 
 #[utoipa::path(
@@ -105,34 +149,14 @@ pub(crate) async fn get_workflow(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match Uuid::parse_str(&id) {
-        Ok(_) => {}
-        Err(_) => {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(ApiError {
-                    code: "ERR_VALIDATION".to_string(),
-                    category: "validation".to_string(),
-                    message: "Invalid workflow instance ID format".to_string(),
-                    details: None,
-                }),
-            )
-                .into_response()
-        }
+    if Uuid::parse_str(&id).is_err() {
+        return validation_response("Invalid workflow instance ID format");
     }
 
-    match state.instances.get(&id) {
-        Some(instance) => (StatusCode::OK, Json(instance.clone())).into_response(),
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(ApiError {
-                code: "ERR_NOT_FOUND".to_string(),
-                category: "resource".to_string(),
-                message: "Workflow instance not found".to_string(),
-                details: None,
-            }),
-        )
-            .into_response(),
+    match state.backend.get_workflow_instance(&id).await {
+        Ok(instance) => (StatusCode::OK, Json(instance)).into_response(),
+        Err(e) if e.code == "ERR_NOT_FOUND" => not_found_response("Workflow instance not found"),
+        Err(e) => map_store_err(e),
     }
 }
 
@@ -152,34 +176,36 @@ pub(crate) async fn create_workflow(
     Json(instance): Json<WorkflowInstance>,
 ) -> Response {
     if Uuid::parse_str(&instance.instance_id).is_err() {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(ApiError {
-                code: "ERR_VALIDATION".to_string(),
-                category: "validation".to_string(),
-                message: "Invalid workflow instance ID format".to_string(),
-                details: None,
-            }),
-        )
-            .into_response();
+        return validation_response("Invalid workflow instance ID format");
     }
 
-    if state.instances.contains_key(&instance.instance_id) {
-        return (
-            StatusCode::CONFLICT,
-            Json(ApiError {
-                code: "ERR_CONFLICT".to_string(),
-                category: "state".to_string(),
-                message: "Workflow instance already exists".to_string(),
-                details: None,
-            }),
-        )
-            .into_response();
+    // Check for duplicate
+    match state
+        .backend
+        .get_workflow_instance(&instance.instance_id)
+        .await
+    {
+        Ok(_) => return conflict_response("Workflow instance already exists"),
+        Err(e) if e.code == "ERR_NOT_FOUND" => {}
+        Err(e) => return map_store_err(e),
     }
 
-    state
-        .instances
-        .insert(instance.instance_id.clone(), instance.clone());
+    // Persist instance row (nodes handled separately below)
+    if let Err(e) = state.backend.upsert_workflow_instance(&instance).await {
+        return map_store_err(e);
+    }
+
+    // Persist any nodes included in the initial payload
+    for node in &instance.nodes {
+        if let Err(e) = state
+            .backend
+            .upsert_node_state(&instance.instance_id, node)
+            .await
+        {
+            return map_store_err(e);
+        }
+    }
+
     (StatusCode::CREATED, Json(instance)).into_response()
 }
 
@@ -201,41 +227,32 @@ pub(crate) async fn update_workflow(
     Json(body): Json<WorkflowUpdateBody>,
 ) -> Response {
     if Uuid::parse_str(&id).is_err() {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(ApiError {
-                code: "ERR_VALIDATION".to_string(),
-                category: "validation".to_string(),
-                message: "Invalid workflow instance ID format".to_string(),
-                details: None,
-            }),
-        )
-            .into_response();
+        return validation_response("Invalid workflow instance ID format");
     }
 
-    if let Some(mut instance) = state.instances.get_mut(&id) {
-        if let Some(workflow_id) = body.workflow_id {
-            instance.workflow_id = workflow_id;
+    let mut instance = match state.backend.get_workflow_instance(&id).await {
+        Ok(i) => i,
+        Err(e) if e.code == "ERR_NOT_FOUND" => {
+            return not_found_response("Workflow instance not found")
         }
-        if let Some(status) = body.status {
-            instance.status = status;
-        }
-        if let Some(ended_at) = body.ended_at {
-            instance.ended_at = Some(ended_at);
-        }
-        (StatusCode::OK, Json(instance.clone())).into_response()
-    } else {
-        (
-            StatusCode::NOT_FOUND,
-            Json(ApiError {
-                code: "ERR_NOT_FOUND".to_string(),
-                category: "resource".to_string(),
-                message: "Workflow instance not found".to_string(),
-                details: None,
-            }),
-        )
-            .into_response()
+        Err(e) => return map_store_err(e),
+    };
+
+    if let Some(workflow_id) = body.workflow_id {
+        instance.workflow_id = workflow_id;
     }
+    if let Some(status) = body.status {
+        instance.status = status;
+    }
+    if let Some(ended_at) = body.ended_at {
+        instance.ended_at = Some(ended_at);
+    }
+
+    if let Err(e) = state.backend.upsert_workflow_instance(&instance).await {
+        return map_store_err(e);
+    }
+
+    (StatusCode::OK, Json(instance)).into_response()
 }
 
 #[utoipa::path(
@@ -259,69 +276,42 @@ pub(crate) async fn update_node(
     Json(node_update): Json<NodeUpdate>,
 ) -> Response {
     if Uuid::parse_str(&id).is_err() {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(ApiError {
-                code: "ERR_VALIDATION".to_string(),
-                category: "validation".to_string(),
-                message: "Invalid workflow instance ID format".to_string(),
-                details: None,
-            }),
-        )
-            .into_response();
+        return validation_response("Invalid workflow instance ID format");
     }
 
     if node_id.trim().is_empty() {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(ApiError {
-                code: "ERR_VALIDATION".to_string(),
-                category: "validation".to_string(),
-                message: "Invalid node ID format".to_string(),
-                details: None,
-            }),
-        )
-            .into_response();
+        return validation_response("Invalid node ID format");
     }
 
-    match state.instances.get_mut(&id) {
-        Some(mut instance) => {
-            if let Some(node) = instance.nodes.iter_mut().find(|n| n.node_id == node_id) {
-                node.status = node_update.status;
-                if node_update.started_at.is_some() {
-                    node.started_at = node_update.started_at;
-                }
-                node.ended_at = node_update.ended_at;
-                if node_update.operator_type.is_some() {
-                    node.operator_type = node_update.operator_type;
-                }
-            } else {
-                let new_node = newton_types::NodeState {
-                    node_id: node_id.clone(),
-                    status: node_update.status,
-                    started_at: node_update.started_at,
-                    ended_at: node_update.ended_at,
-                    operator_type: node_update.operator_type,
-                };
-                instance.nodes.push(new_node);
-            }
-
-            let _ = state.events_tx.send(BroadcastEvent::NodeStateChanged {
-                instance_id: id.clone(),
-                node_id: node_id.clone(),
-            });
-
-            (StatusCode::OK, Json(instance.clone())).into_response()
+    // Verify instance exists
+    match state.backend.get_workflow_instance(&id).await {
+        Ok(_) => {}
+        Err(e) if e.code == "ERR_NOT_FOUND" => {
+            return not_found_response("Workflow instance not found")
         }
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(ApiError {
-                code: "ERR_NOT_FOUND".to_string(),
-                category: "resource".to_string(),
-                message: "Workflow instance not found".to_string(),
-                details: None,
-            }),
-        )
-            .into_response(),
+        Err(e) => return map_store_err(e),
+    }
+
+    let node = NodeState {
+        node_id: node_id.clone(),
+        status: node_update.status,
+        started_at: node_update.started_at,
+        ended_at: node_update.ended_at,
+        operator_type: node_update.operator_type,
+    };
+
+    if let Err(e) = state.backend.upsert_node_state(&id, &node).await {
+        return map_store_err(e);
+    }
+
+    let _ = state.events_tx.send(BroadcastEvent::NodeStateChanged {
+        instance_id: id.clone(),
+        node_id: node_id.clone(),
+    });
+
+    // Return full instance with updated nodes
+    match state.backend.get_workflow_instance(&id).await {
+        Ok(instance) => (StatusCode::OK, Json(instance)).into_response(),
+        Err(e) => map_store_err(e),
     }
 }

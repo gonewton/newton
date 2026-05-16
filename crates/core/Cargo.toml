@@ -183,3 +183,7 @@ path = "tests/workflow_graph/test_io_contract.rs"
 [[test]]
 name = "test_catalog_crud"
 path = "tests/integration/test_catalog_crud.rs"
+
+[[test]]
+name = "test_persistence_parity"
+path = "tests/integration/test_persistence_parity.rs"

@@ -159,4 +159,86 @@ pub trait BackendStore: Send + Sync {
     async fn create_grade(&self, body: CreateGradeBody) -> Result<GradeItem, ApiError>;
     async fn patch_grade(&self, id: &str, body: PatchGradeBody) -> Result<GradeItem, ApiError>;
     async fn delete_grade(&self, id: &str) -> Result<String, ApiError>;
+
+    // ── WorkflowInstance ────────────────────────────────────────────────────────
+
+    async fn get_workflow_instance(
+        &self,
+        instance_id: &str,
+    ) -> Result<newton_types::WorkflowInstance, ApiError>;
+
+    async fn list_workflow_instances(
+        &self,
+        status: Option<newton_types::WorkflowStatus>,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<Vec<newton_types::WorkflowInstance>, ApiError>;
+
+    /// Inserts or fully replaces (upsert) the workflow instance row.
+    /// Node rows are NOT touched by this method; use upsert_node_state for nodes.
+    async fn upsert_workflow_instance(
+        &self,
+        instance: &newton_types::WorkflowInstance,
+    ) -> Result<(), ApiError>;
+
+    async fn delete_workflow_instance(&self, instance_id: &str) -> Result<(), ApiError>;
+
+    // ── NodeState ────────────────────────────────────────────────────────────────
+
+    async fn get_node_state(
+        &self,
+        instance_id: &str,
+        node_id: &str,
+    ) -> Result<newton_types::NodeState, ApiError>;
+
+    async fn list_node_states_for_instance(
+        &self,
+        instance_id: &str,
+    ) -> Result<Vec<newton_types::NodeState>, ApiError>;
+
+    /// Upserts on (instanceId, nodeId). Assigns a new UUID id on first insert.
+    async fn upsert_node_state(
+        &self,
+        instance_id: &str,
+        node: &newton_types::NodeState,
+    ) -> Result<(), ApiError>;
+
+    // ── HilEvent ─────────────────────────────────────────────────────────────────
+
+    async fn get_hil_event(&self, event_id: &str) -> Result<newton_types::HilEvent, ApiError>;
+
+    async fn list_hil_events_for_instance(
+        &self,
+        instance_id: &str,
+    ) -> Result<Vec<newton_types::HilEvent>, ApiError>;
+
+    async fn list_hil_instances(&self) -> Result<Vec<String>, ApiError>;
+
+    async fn insert_hil_event(&self, event: &newton_types::HilEvent) -> Result<(), ApiError>;
+
+    async fn update_hil_event_status(
+        &self,
+        event_id: &str,
+        status: newton_types::HilStatus,
+    ) -> Result<newton_types::HilEvent, ApiError>;
+
+    // ── WorkflowLog ──────────────────────────────────────────────────────────────
+
+    /// Appends a single log line; seq is MAX(seq)+1 for the (instance_id, node_id) pair,
+    /// or 1 if no rows exist yet.
+    async fn append_log_line(
+        &self,
+        instance_id: &str,
+        node_id: &str,
+        line: &newton_types::LogLine,
+    ) -> Result<(), ApiError>;
+
+    /// Returns log lines with seq > since_seq, ordered by seq ASC.
+    /// since_seq = 0 returns all lines.
+    async fn list_log_lines(
+        &self,
+        instance_id: &str,
+        node_id: &str,
+        since_seq: i64,
+    ) -> Result<Vec<newton_types::LogLine>, ApiError>;
 }

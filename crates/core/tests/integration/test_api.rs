@@ -11,6 +11,74 @@ use serde_json::json;
 use tower::ServiceExt;
 use uuid::Uuid;
 
+// ── Test helpers ──────────────────────────────────────────────────────────────
+
+async fn create_test_state() -> AppState {
+    let operators = vec![
+        OperatorDescriptor {
+            operator_type: "noop".to_string(),
+            description: "No-operation operator".to_string(),
+            params_schema: json!({}),
+        },
+        OperatorDescriptor {
+            operator_type: "command".to_string(),
+            description: "Execute shell commands".to_string(),
+            params_schema: json!({"type": "object"}),
+        },
+    ];
+
+    let store = newton_backend::SqliteBackendStore::new_in_memory()
+        .await
+        .expect("in-memory backend init");
+    let backend: std::sync::Arc<dyn newton_backend::BackendStore> = std::sync::Arc::new(store);
+    AppState::new(operators, backend)
+}
+
+/// Insert a WorkflowInstance (and its nodes) into BackendStore.
+async fn insert_test_instance(state: &AppState, instance: &WorkflowInstance) {
+    state
+        .backend
+        .upsert_workflow_instance(instance)
+        .await
+        .expect("upsert_workflow_instance");
+    for node in &instance.nodes {
+        state
+            .backend
+            .upsert_node_state(&instance.instance_id, node)
+            .await
+            .expect("upsert_node_state");
+    }
+}
+
+/// Insert a HilEvent into BackendStore.
+/// Note: requires a corresponding WorkflowInstance to satisfy the FK constraint.
+async fn insert_test_hil_event(state: &AppState, event: &HilEvent) {
+    // Ensure the parent WorkflowInstance exists (FK requirement)
+    let dummy = WorkflowInstance {
+        instance_id: event.instance_id.clone(),
+        workflow_id: "dummy".to_string(),
+        status: WorkflowStatus::Running,
+        nodes: vec![],
+        started_at: chrono::Utc::now(),
+        ended_at: None,
+        linked_plan_id: None,
+        definition: None,
+    };
+    // Upsert (no-op if it already exists)
+    state
+        .backend
+        .upsert_workflow_instance(&dummy)
+        .await
+        .expect("upsert_workflow_instance for hil parent");
+    state
+        .backend
+        .insert_hil_event(event)
+        .await
+        .expect("insert_hil_event");
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
 #[tokio::test]
 async fn test_health_endpoint() {
     let state = create_test_state().await;
@@ -72,7 +140,7 @@ async fn test_list_workflows_with_instances() {
         linked_plan_id: None,
     };
 
-    state.instances.insert(instance_id.clone(), instance);
+    insert_test_instance(&state, &instance).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -165,7 +233,7 @@ async fn test_get_workflow_success() {
         linked_plan_id: None,
     };
 
-    state.instances.insert(instance_id.clone(), instance);
+    insert_test_instance(&state, &instance).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -205,7 +273,7 @@ async fn test_update_workflow_success() {
         linked_plan_id: None,
     };
 
-    state.instances.insert(instance_id.clone(), instance);
+    insert_test_instance(&state, &instance).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -300,7 +368,7 @@ async fn test_list_hil_events_with_events() {
         timestamp: chrono::Utc::now(),
     };
 
-    state.hil_events.insert(event_id.clone(), event);
+    insert_test_hil_event(&state, &event).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -344,7 +412,7 @@ async fn test_submit_hil_action_success() {
         timestamp: chrono::Utc::now(),
     };
 
-    state.hil_events.insert(event_id.clone(), event);
+    insert_test_hil_event(&state, &event).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -417,7 +485,7 @@ async fn test_submit_hil_action_already_resolved() {
         timestamp: chrono::Utc::now(),
     };
 
-    state.hil_events.insert(event_id.clone(), event);
+    insert_test_hil_event(&state, &event).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -462,7 +530,7 @@ async fn test_submit_hil_action_accepts_opaque_event_id() {
         timestamp: chrono::Utc::now(),
     };
 
-    state.hil_events.insert(event_id.clone(), event);
+    insert_test_hil_event(&state, &event).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -507,7 +575,7 @@ async fn test_submit_hil_action_invalid_response_type() {
         timestamp: chrono::Utc::now(),
     };
 
-    state.hil_events.insert(event_id.clone(), event);
+    insert_test_hil_event(&state, &event).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -552,7 +620,7 @@ async fn test_submit_hil_action_missing_answer() {
         timestamp: chrono::Utc::now(),
     };
 
-    state.hil_events.insert(event_id.clone(), event);
+    insert_test_hil_event(&state, &event).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -645,9 +713,7 @@ async fn test_create_workflow_duplicate_returns_409() {
         linked_plan_id: None,
     };
 
-    state
-        .instances
-        .insert(instance_id.clone(), instance.clone());
+    insert_test_instance(&state, &instance).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -725,7 +791,7 @@ async fn test_update_node_success() {
         linked_plan_id: None,
     };
 
-    state.instances.insert(instance_id.clone(), instance);
+    insert_test_instance(&state, &instance).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -794,9 +860,9 @@ async fn test_list_workflows_filter_by_status() {
     let id1 = Uuid::new_v4().to_string();
     let id2 = Uuid::new_v4().to_string();
 
-    state.instances.insert(
-        id1.clone(),
-        WorkflowInstance {
+    insert_test_instance(
+        &state,
+        &WorkflowInstance {
             instance_id: id1.clone(),
             workflow_id: "wf-1".to_string(),
             status: WorkflowStatus::Running,
@@ -806,10 +872,11 @@ async fn test_list_workflows_filter_by_status() {
             definition: None,
             linked_plan_id: None,
         },
-    );
-    state.instances.insert(
-        id2.clone(),
-        WorkflowInstance {
+    )
+    .await;
+    insert_test_instance(
+        &state,
+        &WorkflowInstance {
             instance_id: id2.clone(),
             workflow_id: "wf-2".to_string(),
             status: WorkflowStatus::Succeeded,
@@ -819,7 +886,8 @@ async fn test_list_workflows_filter_by_status() {
             definition: None,
             linked_plan_id: None,
         },
-    );
+    )
+    .await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -847,9 +915,9 @@ async fn test_list_workflows_pagination() {
 
     for i in 0..5 {
         let id = Uuid::new_v4().to_string();
-        state.instances.insert(
-            id.clone(),
-            WorkflowInstance {
+        insert_test_instance(
+            &state,
+            &WorkflowInstance {
                 instance_id: id,
                 workflow_id: format!("wf-{}", i),
                 status: WorkflowStatus::Succeeded,
@@ -859,7 +927,8 @@ async fn test_list_workflows_pagination() {
                 definition: None,
                 linked_plan_id: None,
             },
-        );
+        )
+        .await;
     }
 
     let app = newton_core::api::create_router(state, None);
@@ -897,7 +966,7 @@ async fn test_update_workflow_status() {
         linked_plan_id: None,
     };
 
-    state.instances.insert(instance_id.clone(), instance);
+    insert_test_instance(&state, &instance).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -926,27 +995,6 @@ async fn test_update_workflow_status() {
     assert!(workflow.ended_at.is_some());
 }
 
-async fn create_test_state() -> AppState {
-    let operators = vec![
-        OperatorDescriptor {
-            operator_type: "noop".to_string(),
-            description: "No-operation operator".to_string(),
-            params_schema: json!({}),
-        },
-        OperatorDescriptor {
-            operator_type: "command".to_string(),
-            description: "Execute shell commands".to_string(),
-            params_schema: json!({"type": "object"}),
-        },
-    ];
-
-    let store = newton_backend::SqliteBackendStore::new_in_memory()
-        .await
-        .expect("in-memory backend init");
-    let backend: std::sync::Arc<dyn newton_backend::BackendStore> = std::sync::Arc::new(store);
-    AppState::new(operators, backend)
-}
-
 #[tokio::test]
 async fn test_update_node_upsert_creates_missing_node() {
     let state = create_test_state().await;
@@ -969,7 +1017,7 @@ async fn test_update_node_upsert_creates_missing_node() {
         linked_plan_id: None,
     };
 
-    state.instances.insert(instance_id.clone(), instance);
+    insert_test_instance(&state, &instance).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -997,6 +1045,7 @@ async fn test_update_node_upsert_creates_missing_node() {
     let updated: WorkflowInstance = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(updated.nodes.len(), 2);
+
     let new_node = updated
         .nodes
         .iter()
@@ -1050,7 +1099,7 @@ async fn test_workflow_definition_exposure() {
         linked_plan_id: None,
     };
 
-    state.instances.insert(instance_id.clone(), instance);
+    insert_test_instance(&state, &instance).await;
 
     let app = newton_core::api::create_router(state, None);
 
@@ -1099,7 +1148,7 @@ async fn test_node_upsert_broadcasts_event() {
         linked_plan_id: None,
     };
 
-    state.instances.insert(instance_id.clone(), instance);
+    insert_test_instance(&state, &instance).await;
 
     let mut rx = state.events_tx.subscribe();
 
