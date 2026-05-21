@@ -252,6 +252,7 @@ fn require_workflow_path(args: &CommandArgs, label: &str) -> anyhow::Result<Path
 
 // ── command constructors ──────────────────────────────────────────────────────
 
+#[cfg(feature = "ask")]
 fn run_command() -> Command {
     Command {
         id: "run",
@@ -1898,7 +1899,6 @@ pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
 /// `resume`, `runs`, `checkpoint`, and `artifact` are subcommands of `workflow` (issue #305).
 /// `data` is a group; its five verb leaves appear as path strings (issue #336).
 pub const REGISTERED_COMMAND_IDS: &[&str] = &[
-    "run",
     "init",
     "batch",
     "serve",
@@ -1939,7 +1939,6 @@ pub const MCP_EXPOSED_COMMAND_IDS: &[&str] = &[
 pub fn enumerate_commands() -> Vec<Command> {
     #[allow(unused_mut)]
     let mut cmds = vec![
-        run_command(),
         init_command(),
         batch_command(),
         serve_command(),
@@ -1983,7 +1982,6 @@ pub fn build_mcp_command_registry(
 
     // Register root-level non-data commands
     for cmd in [
-        run_command(),
         init_command(),
         batch_command(),
         serve_command(),
@@ -2030,7 +2028,6 @@ pub fn build_mcp_command_registry(
 /// [`build_mcp_router_for_serve`] via [`build_mcp_command_registry`].
 fn populate_command_registry(builder: AppBuilder) -> anyhow::Result<AppBuilder> {
     let builder = builder
-        .register_command(run_command())?
         .register_command(init_command())?
         .register_command(batch_command())?
         .register_command(serve_command())?

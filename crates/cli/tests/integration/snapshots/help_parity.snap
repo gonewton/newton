@@ -18,7 +18,6 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
   init        Initialize a Newton workspace with the default template
   mcp         MCP server management
-  run         Execute a workflow graph (deprecated — use `newton workflow run`)
   serve       Start the Newton HTTP API server
   spec        Export the CLI command surface as JSON, YAML, or Markdown
   version     Print version information

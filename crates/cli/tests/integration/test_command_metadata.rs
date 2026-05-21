@@ -34,7 +34,6 @@ fn category_bindings_match_spec_4_1() {
     // Spec §4.1 binds each command to an exact category; future renames or
     // accidental category drift should fail this test loudly.
     let expected: &[(&str, &str)] = &[
-        ("run", categories::WORKFLOW),
         ("workflow", categories::WORKFLOW),
         ("data/get", categories::WORKFLOW),
         ("data/post", categories::WORKFLOW),

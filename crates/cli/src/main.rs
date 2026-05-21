@@ -21,6 +21,21 @@ async fn main() -> Result<()> {
     }
 
     let mut app = build_app(ctx)?;
+
+    // Intercept legacy `newton run …` → `newton workflow run …` with deprecation notice.
+    let app_args = if app_args.get(1).map(String::as_str) == Some("run") {
+        eprintln!(
+            "[newton] DEPRECATED: `newton run` is deprecated; use `newton workflow run` instead"
+        );
+        let mut rewritten = Vec::with_capacity(app_args.len() + 1);
+        rewritten.push(app_args[0].clone());
+        rewritten.push("workflow".to_string());
+        rewritten.extend_from_slice(&app_args[1..]);
+        rewritten
+    } else {
+        app_args
+    };
+
     app.run_with_args(app_args).await
 }
 
