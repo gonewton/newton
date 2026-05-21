@@ -10,6 +10,12 @@ use newton_cli::Result;
 async fn main() -> Result<()> {
     let raw_args: Vec<String> = std::env::args().collect();
     let (log_dir, app_args) = extract_log_dir(&raw_args);
+    let (app_args, is_legacy_run) = intercept_legacy_run(app_args);
+    if is_legacy_run {
+        eprintln!(
+            "[newton] DEPRECATED: `newton run` is deprecated; use `newton workflow run` instead"
+        );
+    }
     let log_inv = build_log_invocation(&app_args);
     let _log_guard = newton_core::logging::init(&log_inv, log_dir.as_deref())?;
 
@@ -42,6 +48,20 @@ fn extract_log_dir(argv: &[String]) -> (Option<PathBuf>, Vec<String>) {
         }
     }
     (log_dir, filtered)
+}
+
+/// Detect the legacy `newton run <args>` invocation and rewrite it to
+/// `newton workflow run <args>`. Returns the (possibly rewritten) argv and a
+/// boolean indicating whether a rewrite occurred so the caller can emit a
+/// deprecation notice.
+fn intercept_legacy_run(argv: Vec<String>) -> (Vec<String>, bool) {
+    if argv.get(1).map(|s| s.as_str()) == Some("run") {
+        let mut new_argv = vec![argv[0].clone(), "workflow".to_string()];
+        new_argv.extend_from_slice(&argv[1..]);
+        (new_argv, true)
+    } else {
+        (argv, false)
+    }
 }
 
 fn build_log_invocation(argv: &[String]) -> newton_core::logging::LogInvocation {

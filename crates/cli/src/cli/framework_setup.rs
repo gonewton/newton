@@ -197,6 +197,8 @@ Subcommands (execution-lifecycle):
   artifact clean     Remove old execution artifact files (--older-than)
 
 EXAMPLES:
+  newton workflow run workflow.yaml
+  newton workflow run workflow.yaml --workspace ./output --trigger key=value
   newton workflow validate workflow.yaml
   newton workflow lint workflow.yaml --format json
   newton workflow preview workflow.yaml --trigger env=prod --format prose
@@ -942,13 +944,11 @@ fn workflow_command() -> Command {
                     requires: vec![],
                     help: "Second-level subcommand (runs: list|show; checkpoint: list|clean; artifact: clean) or workflow file path (validate/lint/preview/graph)",
                 },
-                // Positional 3: YAML file path (validate/lint/preview/graph only).
-                // Note: because the framework fills positionals left-to-right, a file path
-                // passed after a file-oriented subcommand lands in subcommand2 (position 2),
-                // not here. This slot is declared per spec §4.4 but is not populated in
-                // normal usage — dispatch arms read from subcommand2 instead.
+                // Positional 3: input file for `workflow run`; declared per spec §4.3.
+                // For validate/lint/preview/graph the file lands in subcommand2 (slot 2),
+                // so this slot is only populated when running `workflow run wf.yaml input.txt`.
                 ArgSpec {
-                    name: "workflow",
+                    name: "input-file",
                     kind: ArgKind::Positional,
                     short: None,
                     long: None,
@@ -957,7 +957,7 @@ fn workflow_command() -> Command {
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Path to the workflow YAML file (validate/lint/preview/graph)",
+                    help: "Optional input file path (workflow run only)",
                 },
                 // Named options — pre-existing
                 ArgSpec {
@@ -1397,7 +1397,7 @@ fn workflow_command() -> Command {
                                     error_codes::CLI_MIG_002
                                 )
                             })?;
-                        let input_file = get_opt_path(&args, "workflow");
+                        let input_file = get_opt_path(&args, "input-file");
                         let trigger = parse_kvp_list(
                             args.named.get("trigger").map(String::as_str).unwrap_or(""),
                         )?;
@@ -1441,9 +1441,7 @@ fn workflow_command() -> Command {
                             verbose: get_bool(&args, "verbose"),
                             server: get_opt_str(&args, "server"),
                         };
-                        commands::workflow_run(run_args)
-                            .await
-                            .map_err(anyhow::Error::from)
+                        commands::run(run_args).await
                     }
                     _ => Err(anyhow!(
                         "{}: unknown workflow subcommand '{}'",
@@ -2051,7 +2049,6 @@ pub fn build_mcp_command_registry(
 /// [`build_mcp_router_for_serve`] via [`build_mcp_command_registry`].
 fn populate_command_registry(builder: AppBuilder) -> anyhow::Result<AppBuilder> {
     let builder = builder
-        .register_command(run_command())?
         .register_command(init_command())?
         .register_command(batch_command())?
         .register_command(serve_command())?

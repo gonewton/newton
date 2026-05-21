@@ -25,10 +25,11 @@ fn run_help_has_examples_section() {
 
 #[test]
 fn run_help_shows_basic_workflow_example() {
+    // `newton run --help` is intercepted to `newton workflow run --help`
     let stdout = help_output(&["run"]);
     assert!(
-        stdout.contains("newton run workflow.yaml"),
-        "run --help should show basic usage example"
+        stdout.contains("newton workflow run workflow.yaml"),
+        "run --help (intercepted to workflow run --help) should show basic usage example"
     );
 }
 
