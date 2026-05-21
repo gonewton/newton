@@ -999,7 +999,7 @@ fn workflow_command() -> Command {
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "JSON file with base trigger payload (preview). Accepts a bare path or @path syntax.",
+                    help: "JSON file with base trigger payload (preview/workflow run). Accepts a bare path or @path syntax.",
                 },
                 ArgSpec {
                     name: "output",

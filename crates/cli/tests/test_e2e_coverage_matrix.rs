@@ -13,6 +13,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+// Decision #4 (spec 051): "run" is kept in REQUIRED_SMOKE_IDS to gate coverage of the
+// hidden deprecation shim (`newton run`). The `smoke_run_help` row was repurposed to invoke
+// the deprecated path and assert stderr contains "[newton] DEPRECATED". Both "run" and
+// "workflow" entries MUST be removed from this array in the same PR that deletes the hidden
+// shim.
 const REQUIRED_SMOKE_IDS: &[&str] = &[
     "run",
     "init",
