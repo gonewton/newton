@@ -91,25 +91,6 @@ pub mod error_codes {
 
 // ── help-text constants ───────────────────────────────────────────────────────
 
-const RUN_LONG_ABOUT: &str = "\
-Run executes a workflow graph defined in YAML, with optional trigger payload.
-
-EXAMPLES:
-  Basic workflow execution:
-    newton run workflow.yaml
-
-  With workspace and trigger data:
-    newton run workflow.yaml --workspace ./output --trigger key=value
-
-  Multiple trigger arguments:
-    newton run workflow.yaml --trigger env=prod --trigger version=1.2.3
-
-  With input file and verbose output:
-    newton run workflow.yaml input.txt --workspace ./workspace --verbose
-
-  With base trigger payload from a JSON file:
-    newton run workflow.yaml --parameters-json payload.json --trigger override=1";
-
 pub const WORKFLOW_RUN_LONG_ABOUT: &str = "\
 Run executes a workflow graph defined in YAML, with optional trigger payload.
 
@@ -279,13 +260,13 @@ fn run_command() -> Command {
         category: Some(categories::WORKFLOW),
         spec: Some(Arc::new(CommandSpec {
             summary: "Execute a workflow graph (deprecated — use `newton workflow run`)",
-            long_about: Some(RUN_LONG_ABOUT),
+            long_about: Some(WORKFLOW_RUN_LONG_ABOUT),
             hidden: true,
             examples: vec![
-                "newton run workflow.yaml",
-                "newton run workflow.yaml --workspace ./output --trigger key=value",
-                "newton run workflow.yaml --trigger env=prod --trigger version=1.2.3",
-                "newton run workflow.yaml input.txt --workspace ./workspace --verbose",
+                "newton workflow run workflow.yaml",
+                "newton workflow run workflow.yaml --workspace ./output --trigger key=value",
+                "newton workflow run workflow.yaml --trigger env=prod --trigger version=1.2.3",
+                "newton workflow run workflow.yaml input.txt --workspace ./workspace --verbose",
             ],
             args: vec![
                 ArgSpec {
@@ -431,7 +412,7 @@ fn run_command() -> Command {
                      use `newton workflow run` instead"
                 );
                 let run_args = RunArgs::try_from(args)?;
-                commands::run(run_args).await
+                commands::workflow_run(run_args).await.map_err(anyhow::Error::from)
             })
         }),
         expose_mcp: false,
@@ -1441,7 +1422,7 @@ fn workflow_command() -> Command {
                             verbose: get_bool(&args, "verbose"),
                             server: get_opt_str(&args, "server"),
                         };
-                        commands::run(run_args).await
+                        commands::workflow_run(run_args).await.map_err(anyhow::Error::from)
                     }
                     _ => Err(anyhow!(
                         "{}: unknown workflow subcommand '{}'",
@@ -2049,6 +2030,7 @@ pub fn build_mcp_command_registry(
 /// [`build_mcp_router_for_serve`] via [`build_mcp_command_registry`].
 fn populate_command_registry(builder: AppBuilder) -> anyhow::Result<AppBuilder> {
     let builder = builder
+        .register_command(run_command())?
         .register_command(init_command())?
         .register_command(batch_command())?
         .register_command(serve_command())?
