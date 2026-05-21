@@ -454,8 +454,6 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
     );
     let registry = builder.build();
 
-    let emit_json = args.emit_completion_json;
-
     let summary_result = workflow_executor::execute_workflow(
         document,
         workflow_path,

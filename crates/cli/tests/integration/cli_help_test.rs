@@ -171,6 +171,11 @@ fn newton_help_matches_parity_snapshot() {
                         // `ask` is feature-gated; keep the parity snapshot
                         // independent of which feature flags built the bin.
                         continue;
+                    } else if trimmed.trim_start().starts_with("run ") {
+                        // `run` is a deprecated hidden alias (spec 051); excluded from
+                        // the public command surface snapshot even though the framework
+                        // renders it because CommandSpec::hidden does not suppress clap output.
+                        continue;
                     } else {
                         commands_body.push(trimmed);
                     }
