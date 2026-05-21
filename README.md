@@ -7,13 +7,13 @@
 
 Newton is a **workflow-first** tool for running structured, repeatable automation: you describe steps in YAML (shell commands, agents, human approvals, branching, and checks), and the CLI runs them with clear completion rules, checkpoints, and artifacts. It fits agent-assisted coding, release checklists, and other tasks where you want a defined graph instead of ad hoc scripts.
 
-You can still think in terms of **evaluate → advise → act** when designing workflows (measure, decide, apply), but the unit of execution is always the workflow file you run with `newton run` or `newton batch`.
+You can still think in terms of **evaluate → advise → act** when designing workflows (measure, decide, apply), but the unit of execution is always the workflow file you run with `newton workflow run` or `newton batch`.
 
 ## Workflow Graph Capabilities
 
 Newton includes a production workflow runner with YAML-defined tasks and deterministic execution semantics:
 
-- Workflow commands: `newton run`, `newton workflow {validate|lint|preview|graph|resume|runs list|runs show|checkpoint list|checkpoint clean|artifact clean}`, `newton webhook {serve|status}`
+- Workflow commands: `newton workflow {run|validate|lint|preview|graph|resume|runs list|runs show|checkpoint list|checkpoint clean|artifact clean}`, `newton webhook {serve|status}`
 - Safety checks: workflow lint, early validation of expressions, guarded shell usage, reachability checks
 - Deterministic completion: goal gates, terminal tasks, explicit completion policy, stable error codes
 - Runtime durability: checkpoint persistence, resume support, artifact routing/cleanup, execution warnings
@@ -90,7 +90,7 @@ scoop install newton
 
 ## Quick Start
 
-Follow the **Setting up a new project** flow below to go from a blank directory to `newton run` with the default templates and tooling.
+Follow the **Setting up a new project** flow below to go from a blank directory to `newton workflow run` with the default templates and tooling.
 
 ### Quick setup: run a simple coding project
 
@@ -98,7 +98,7 @@ Follow the **Setting up a new project** flow below to go from a blank directory 
 2. Run `newton init .` to scaffold the workspace.
 3. Run a workflow (path comes from your template or your own YAML; optional input file as second positional):
    ```bash
-   newton run path/to/workflow.yaml --workspace .
+   newton workflow run path/to/workflow.yaml --workspace .
    ```
 
 ### Setting up a new project
@@ -106,7 +106,7 @@ Follow the **Setting up a new project** flow below to go from a blank directory 
 1. Create a project directory and `cd` into it.
 2. Run `newton init .` to scaffold `.newton/` (layout, template files such as workflows and helper scripts, and `.newton/configs/default.conf`).
 3. Edit `.newton/configs/default.conf`: set `workflow_file` to the workflow YAML `newton batch` should run (see comment in that file). Add a `<project_id>.conf` copy or symlink if you use batch with a non-default id.
-4. Run a workflow explicitly, for example: `newton run path/to/workflow.yaml --workspace .` (use the paths described in your template README).
+4. Run a workflow explicitly, for example: `newton workflow run path/to/workflow.yaml --workspace .` (use the paths described in your template README).
 
 For an existing repository, run `newton init .` at the repo root instead of creating a new directory.
 
@@ -132,37 +132,38 @@ The help output now includes the same version banner at the top, so you can conf
 
 ## Commands Reference
 
-### `run <workflow.yaml>`
+### `workflow run <workflow.yaml>`
 
 Execute a workflow graph defined in YAML.
 
 **Options:**
 - `--workspace <PATH>`: Workspace root directory (default: current directory)
 - `--trigger KEY=VALUE`: Merge key into triggers.payload (repeatable; VALUE may be `@path` to load file content as the value)
-- `--trigger-file <PATH>`: Load JSON object as base trigger payload before `--trigger` overrides
+- `--parameters-json <PATH>`: Load JSON object as base trigger payload before `--trigger` overrides
 - `--context KEY=VALUE`: Merge key into workflow context at runtime (repeatable)
 - `--timeout SECONDS`: Wall-clock time limit override (in seconds)
 - `--parallel-limit N`: Runtime override for bounded task concurrency
+- `--emit-completion-json`: Write structured completion envelope to stdout as JSON
 - `-v`, `--verbose`: Print task stdout/stderr to terminal after each task completes
 - `--server <URL>`: Newton server URL to register this run (optional)
 
-The workflow YAML is supplied as a required positional argument; the legacy named flag has been removed.
+The workflow YAML is supplied as a required positional argument.
 
-**Trigger payload merge order** (left to right): `--trigger-file` is loaded first as the base JSON object, then each `--trigger KEY=VAL` overlays in order. Within a value, `@path` reads the file as a string.
+**Trigger payload merge order** (left to right): `--parameters-json` is loaded first as the base JSON object, then each `--trigger KEY=VAL` overlays in order. Within a value, `@path` reads the file as a string.
 
 **Examples:**
 ```bash
 # Run with default settings
-newton run workflow.yaml
+newton workflow run workflow.yaml
 
 # With workspace and trigger data
-newton run workflow.yaml --workspace ./output --trigger key=value
+newton workflow run workflow.yaml --workspace ./output --trigger key=value
 
 # Multiple trigger overrides
-newton run workflow.yaml --trigger env=prod --trigger version=1.2.3
+newton workflow run workflow.yaml --trigger env=prod --trigger version=1.2.3
 
 # With time limit
-newton run workflow.yaml --timeout 3600
+newton workflow run workflow.yaml --timeout 3600
 ```
 
 ### `init [workspace-path]`
@@ -180,7 +181,7 @@ newton init /path/to/project
 
 ### `batch <project_id>`
 
-Process queued plan files for a project. `newton batch` discovers the workspace root by walking up from the current directory (or use `--workspace PATH`) until it finds `.newton`. It reads `.newton/configs/<project_id>.conf`, which **must** include `project_root` and `workflow_file` (path to a workflow YAML, resolved relative to `project_root` or the workspace root). Queued items live under `.newton/plan/<project_id>/todo/`. For each plan, Newton runs that workflow the same way as `newton run` on that YAML.
+Process queued plan files for a project. `newton batch` discovers the workspace root by walking up from the current directory (or use `--workspace PATH`) until it finds `.newton`. It reads `.newton/configs/<project_id>.conf`, which **must** include `project_root` and `workflow_file` (path to a workflow YAML, resolved relative to `project_root` or the workspace root). Queued items live under `.newton/plan/<project_id>/todo/`. For each plan, Newton runs that workflow the same way as `newton workflow run` on that YAML.
 
 - `--workspace PATH`: Override workspace discovery.
 - `--once`: Process one todo file then exit.
@@ -388,7 +389,7 @@ The task ID is derived from the plan filename (sanitized to remove special chara
 1. Plan file is created in `.newton/plan/{project_id}/todo/`
 2. `newton batch {project_id}` picks it up for processing
 3. Plan content is copied to `.newton/tasks/{task_id}/input/spec.md`
-4. Newton runs the workflow from `workflow_file` in your `.conf`, passing the spec path and workspace in the trigger payload (same as running that workflow yourself with `newton run`)
+4. Newton runs the workflow from `workflow_file` in your `.conf`, passing the spec path and workspace in the trigger payload (same as running that workflow yourself with `newton workflow run`)
 5. If the workflow completes successfully, the plan moves to `completed/`
 6. If the workflow errors, the plan moves to `failed/`
 
@@ -398,7 +399,7 @@ Re-queuing a plan (moving it back to `todo/`) reuses the same task ID and task d
 
 Newton sends log output to files and sometimes to the terminal depending on how you invoke the CLI:
 
-- **Interactive commands** (for example `newton run`, `newton init`): console output defaults to `stderr` for normal messages.
+- **Interactive commands** (for example `newton workflow run`, `newton init`): console output defaults to `stderr` for normal messages.
 - **`newton batch`**: quiet terminal by default; inspect the log file when troubleshooting.
 - **`NEWTON_REMOTE_AGENT=1`**: keeps file logging on and avoids spamming the agent console.
 
@@ -476,13 +477,13 @@ Configure execution limits for workflows:
 
 ```bash
 # Set a wall-clock time limit (30 minutes)
-newton run workflow.yaml --timeout 1800
+newton workflow run workflow.yaml --timeout 1800
 
 # Limit concurrent task execution
-newton run workflow.yaml --parallel-limit 4
+newton workflow run workflow.yaml --parallel-limit 4
 
 # Combined: time limit and concurrency
-newton run workflow.yaml --timeout 3600 --parallel-limit 2
+newton workflow run workflow.yaml --timeout 3600 --parallel-limit 2
 ```
 
 ### Git and plans
@@ -552,7 +553,7 @@ Configure execution limits for workflow runs:
 
 ## Output, logs, and artifacts
 
-Each workflow run writes checkpoints, task output, and artifacts under your workspace, typically under `.newton/state/` and `.newton/artifacts/` (exact layout depends on the workflow and operators you use). Use `newton run ... --verbose` to print task stdout/stderr to the terminal after each task. Log files are described in **Logging** above.
+Each workflow run writes checkpoints, task output, and artifacts under your workspace, typically under `.newton/state/` and `.newton/artifacts/` (exact layout depends on the workflow and operators you use). Use `newton workflow run ... --verbose` to print task stdout/stderr to the terminal after each task. Log files are described in **Logging** above.
 
 ## Development
 

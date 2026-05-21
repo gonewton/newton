@@ -6,11 +6,35 @@
 mod support;
 
 use predicates::prelude::*;
-use support::newton;
+use support::{fixture_path, newton};
 
 #[test]
 fn smoke_run_help() {
-    newton().args(["run", "--help"]).assert().success();
+    // Repurposed (spec 051 Decision #4): exercises the hidden deprecated `newton run` alias.
+    // Kept in REQUIRED_SMOKE_IDS until the hidden shim is removed.
+    let wf = fixture_path("workflows/minimal_smoke.yaml");
+    let out = newton()
+        .args(["run", &wf.to_string_lossy()])
+        .output()
+        .expect("newton run (deprecated) should execute");
+    assert!(
+        out.status.success(),
+        "deprecated newton run should succeed; stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("[newton] DEPRECATED"),
+        "deprecated newton run should emit deprecation notice; stderr={stderr}"
+    );
+}
+
+#[test]
+fn smoke_workflow_run_help() {
+    newton()
+        .args(["workflow", "run", "--help"])
+        .assert()
+        .success();
 }
 
 #[test]
@@ -128,7 +152,7 @@ fn smoke_spec_json() {
 #[test]
 fn negative_run_unknown_flag() {
     let out = newton()
-        .args(["run", "--bogus-flag", "workflow.yaml"])
+        .args(["workflow", "run", "--bogus-flag", "workflow.yaml"])
         .output()
         .unwrap();
     let combined = format!(

@@ -1,8 +1,8 @@
 ---
 source: crates/cli/tests/integration/cli_help_test.rs
 description: |
-  Parity snapshot of `newton --help` after the spec 336 data-verb subcommands
-  and cli-framework rev bump to 0b2b1b2.
+  Parity snapshot of `newton --help` after spec 051 moves `run` under `workflow`.
+  `run` is now a hidden deprecated alias; its summary is updated accordingly.
   Lines under "Commands:" are sorted alphabetically; cli-framework returns
   them in HashMap order, which is non-deterministic across runs.
 ---
@@ -18,12 +18,12 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
   init        Initialize a Newton workspace with the default template
   mcp         MCP server management
-  run         Execute a workflow graph
+  run         Execute a workflow graph (deprecated — use `newton workflow run`)
   serve       Start the Newton HTTP API server
   spec        Export the CLI command surface as JSON, YAML, or Markdown
   version     Print version information
   webhook     Run webhooks to trigger workflows from external events
-  workflow    Operate on workflow YAML files or manage execution lifecycle (validate/lint/preview/graph/resume/runs/checkpoint/artifact)
+  workflow    Operate on workflow YAML files or manage execution lifecycle (validate/lint/preview/graph/run/resume/runs/checkpoint/artifact)
 
 Options:
   -h, --help     Print help

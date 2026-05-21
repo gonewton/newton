@@ -8,7 +8,7 @@
 //! Newton uses `McpToolExportPolicy::ExposeMcpOnly` for both MCP entry points
 //! (`newton --mcp-serve` and `newton serve --with-mcp`). Only commands with
 //! `expose_mcp: true` appear in `tools/list`. The curated allowlist is:
-//! `config`, `health`, `run`, `workflow`.
+//! `config`, `health`, `workflow`.
 //! All other commands (`init`, `batch`, `serve`, `checkpoint`, `artifact`,
 //! `webhook`, `doctor`, `completion`, `ask`) are excluded from the MCP surface.
 //! `resume` and `runs` are now subcommands of `workflow` (issue #305).
@@ -110,6 +110,25 @@ EXAMPLES:
   With base trigger payload from a JSON file:
     newton run workflow.yaml --parameters-json payload.json --trigger override=1";
 
+pub const WORKFLOW_RUN_LONG_ABOUT: &str = "\
+Run executes a workflow graph defined in YAML, with optional trigger payload.
+
+EXAMPLES:
+  Basic workflow execution:
+    newton workflow run workflow.yaml
+
+  With workspace and trigger data:
+    newton workflow run workflow.yaml --workspace ./output --trigger key=value
+
+  Multiple trigger arguments:
+    newton workflow run workflow.yaml --trigger env=prod --trigger version=1.2.3
+
+  With input file and verbose output:
+    newton workflow run workflow.yaml input.txt --workspace ./workspace --verbose
+
+  With base trigger payload from a JSON file:
+    newton workflow run workflow.yaml --parameters-json payload.json --trigger override=1";
+
 const INIT_LONG_ABOUT: &str = "\
 Init creates the .newton workspace layout, installs the Newton template with \
 aikit-sdk, and writes default configs so you can run immediately.
@@ -157,8 +176,11 @@ EXAMPLES:
 
 const WORKFLOW_LONG_ABOUT: &str = "\
 Workflow groups all commands for operating on workflow YAML files and managing \
-the execution lifecycle: validate, lint, preview, graph, resume, runs, \
+the execution lifecycle: run, validate, lint, preview, graph, resume, runs, \
 checkpoint, and artifact.
+
+Subcommands (execution):
+  run <FILE>         Execute a workflow graph
 
 Subcommands (file-oriented):
   validate <FILE>    Validate a workflow graph definition
@@ -250,12 +272,13 @@ fn require_workflow_path(args: &CommandArgs, label: &str) -> anyhow::Result<Path
 fn run_command() -> Command {
     Command {
         id: "run",
-        summary: "Execute a workflow graph",
+        summary: "Execute a workflow graph (deprecated — use `newton workflow run`)",
         syntax: Some("<WORKFLOW> [INPUT_FILE] [OPTIONS]"),
         category: Some(categories::WORKFLOW),
         spec: Some(Arc::new(CommandSpec {
-            summary: "Execute a workflow graph",
+            summary: "Execute a workflow graph (deprecated — use `newton workflow run`)",
             long_about: Some(RUN_LONG_ABOUT),
+            hidden: true,
             examples: vec![
                 "newton run workflow.yaml",
                 "newton run workflow.yaml --workspace ./output --trigger key=value",
@@ -401,11 +424,15 @@ fn run_command() -> Command {
         validator: None,
         execute: Arc::new(|_ctx, args| {
             Box::pin(async move {
-                let dto = RunArgs::try_from(args)?;
-                commands::run(dto).await
+                eprintln!(
+                    "[newton] DEPRECATED: `newton run` is deprecated; \
+                     use `newton workflow run` instead"
+                );
+                let run_args = RunArgs::try_from(args)?;
+                commands::run(run_args).await
             })
         }),
-        expose_mcp: true,
+        expose_mcp: false,
     }
 }
 
@@ -865,13 +892,15 @@ fn data_verb_command(verb: DataVerb) -> Command {
 fn workflow_command() -> Command {
     Command {
         id: "workflow",
-        summary: "Operate on workflow YAML files or manage execution lifecycle (validate/lint/preview/graph/resume/runs/checkpoint/artifact)",
-        syntax: Some("<validate|lint|preview|graph|resume|runs|checkpoint|artifact> [SUBCOMMAND] [FILE] [OPTIONS]"),
+        summary: "Operate on workflow YAML files or manage execution lifecycle (validate/lint/preview/graph/run/resume/runs/checkpoint/artifact)",
+        syntax: Some("<validate|lint|preview|graph|run|resume|runs|checkpoint|artifact> [SUBCOMMAND] [FILE] [OPTIONS]"),
         category: Some(categories::WORKFLOW),
         spec: Some(Arc::new(CommandSpec {
-            summary: "Operate on workflow YAML files or manage execution lifecycle (validate/lint/preview/graph/resume/runs/checkpoint/artifact)",
+            summary: "Operate on workflow YAML files or manage execution lifecycle (validate/lint/preview/graph/run/resume/runs/checkpoint/artifact)",
             long_about: Some(WORKFLOW_LONG_ABOUT),
             examples: vec![
+                "newton workflow run workflow.yaml",
+                "newton workflow run workflow.yaml --workspace ./output --trigger key=value",
                 "newton workflow validate workflow.yaml",
                 "newton workflow lint workflow.yaml --format json",
                 "newton workflow preview workflow.yaml --trigger env=prod --format prose",
@@ -891,14 +920,14 @@ fn workflow_command() -> Command {
                     short: None,
                     long: None,
                     value_type: ArgValueType::Enum(vec![
-                        "validate", "lint", "preview", "graph",
+                        "validate", "lint", "preview", "graph", "run",
                         "resume", "runs", "checkpoint", "artifact",
                     ]),
                     cardinality: Cardinality::Required,
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Subcommand: validate | lint | preview | graph | resume | runs | checkpoint | artifact",
+                    help: "Subcommand: validate | lint | preview | graph | run | resume | runs | checkpoint | artifact",
                 },
                 // Positional 2: second-level subcommand (runs/checkpoint/artifact) or file path (validate/lint/preview/graph)
                 ArgSpec {
@@ -1086,7 +1115,56 @@ fn workflow_command() -> Command {
                     default: None,
                     conflicts_with: vec![],
                     requires: vec![],
-                    help: "Expand single-task output for debugging (runs show)",
+                    help: "Expand single-task output for debugging (runs show) or workflow run",
+                },
+                // Run-specific options (workflow run subcommand)
+                ArgSpec {
+                    name: "emit-completion-json",
+                    kind: ArgKind::Flag,
+                    short: None,
+                    long: Some("emit-completion-json"),
+                    value_type: ArgValueType::Bool,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Write structured completion envelope to stdout as JSON (workflow run)",
+                },
+                ArgSpec {
+                    name: "parallel-limit",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("parallel-limit"),
+                    value_type: ArgValueType::Int,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Runtime override for bounded task concurrency (workflow run)",
+                },
+                ArgSpec {
+                    name: "timeout",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("timeout"),
+                    value_type: ArgValueType::Int,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Runtime wall-clock limit override in seconds (workflow run)",
+                },
+                ArgSpec {
+                    name: "server",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("server"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Newton server URL to register this run (workflow run)",
                 },
             ],
             ..Default::default()
@@ -1310,6 +1388,62 @@ fn workflow_command() -> Command {
                                 subcmd2
                             )),
                         }
+                    }
+                    "run" => {
+                        let workflow =
+                            get_opt_path(&args, "subcommand2").ok_or_else(|| {
+                                anyhow!(
+                                    "{}: workflow file is required for workflow run",
+                                    error_codes::CLI_MIG_002
+                                )
+                            })?;
+                        let input_file = get_opt_path(&args, "workflow");
+                        let trigger = parse_kvp_list(
+                            args.named.get("trigger").map(String::as_str).unwrap_or(""),
+                        )?;
+                        let context = parse_kvp_list(
+                            args.named.get("context").map(String::as_str).unwrap_or(""),
+                        )?;
+                        let parallel_limit = args
+                            .named
+                            .get("parallel-limit")
+                            .map(|s| {
+                                s.parse::<usize>().map_err(|_| {
+                                    anyhow!(
+                                        "{}: --parallel-limit must be a positive integer",
+                                        error_codes::CLI_MIG_002
+                                    )
+                                })
+                            })
+                            .transpose()?;
+                        let timeout_seconds = args
+                            .named
+                            .get("timeout")
+                            .map(|s| {
+                                s.parse::<u64>().map_err(|_| {
+                                    anyhow!(
+                                        "{}: --timeout must be a non-negative integer",
+                                        error_codes::CLI_MIG_002
+                                    )
+                                })
+                            })
+                            .transpose()?;
+                        let run_args = RunArgs {
+                            workflow,
+                            input_file,
+                            workspace: get_opt_path(&args, "workspace"),
+                            trigger,
+                            context,
+                            parameters_json: get_opt_path(&args, "parameters-json"),
+                            emit_completion_json: get_bool(&args, "emit-completion-json"),
+                            parallel_limit,
+                            timeout_seconds,
+                            verbose: get_bool(&args, "verbose"),
+                            server: get_opt_str(&args, "server"),
+                        };
+                        commands::workflow_run(run_args)
+                            .await
+                            .map_err(anyhow::Error::from)
                     }
                     _ => Err(anyhow!(
                         "{}: unknown workflow subcommand '{}'",
@@ -1814,7 +1948,6 @@ pub const MCP_EXPOSED_COMMAND_IDS: &[&str] = &[
     "data.patch",
     "data.delete",
     "health",
-    "run",
     "workflow",
 ];
 
