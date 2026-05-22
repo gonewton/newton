@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Adopt cli-framework built-in shell completion (issue #363)
+
+`newton completion <shell>` is now generated from the live command registry via cli-framework's built-in completion subcommand. The hand-rolled `ops::completion` module and its static `NEWTON_COMMANDS` list have been removed.
+
+**Behavioral changes:**
+- Completion candidates now reflect the live registry. Stale names (`validate`, `dot`, `lint`, `explain`, `resume`, `checkpoints`, `artifacts`, `monitor`, `log`) are no longer included. `workflow`, `webhook`, `data`, and the five data-verb leaves (`data/get`, etc.) are now present.
+- Tab-completion candidate order may differ from previous releases (now framework-defined, likely alphabetical).
+- Unknown-shell error message has changed; it no longer contains `CLI-OPS-005`. Exit code remains non-zero.
+
 ### New: `newton mcp serve` subcommand; `--mcp-serve` flag deprecated (issue #337)
 
 `newton mcp serve` is now the canonical way to start a dedicated MCP-only process. The new subcommand applies Newton's full customizations: pre-bind probe, structured stderr startup event (`mcp_serve_started` JSON), and stable error codes `NEWTON-MCP-001` / `NEWTON-MCP-002`.

@@ -18,7 +18,8 @@ name = "logging_integration_helper"
 path = "tests/bin/logging_integration_helper.rs"
 
 [dependencies]
-cli-framework = { git = "https://github.com/aroff/cli-framework", rev = "0b2b1b2", features = ["mcp-server"] }
+# TODO: re-pin to main HEAD once cli-framework PR #67 (feature/66-spec-011-built-in-completion-subcommand) merges upstream.
+cli-framework = { git = "https://github.com/aroff/cli-framework", rev = "8cfe8bc3", features = ["mcp-server"] }
 rmcp = { version = "1.6", features = ["server", "transport-streamable-http-server"] }
 newton-core = { path = "../core" }
 newton-types = { path = "../types" }

@@ -10,7 +10,7 @@ Usage: newton <COMMAND>
 
 Commands:
   batch       Process queued work items for a project
-  completion  Emit shell completion script
+  completion  Emit a shell completion stub for top-level subcommands
   config      Inspect resolved Newton configuration
   data        Catalog CRUD via HTTP-style verbs (get/post/put/patch/delete)
   doctor      Run local environment diagnostic probes
@@ -25,5 +25,5 @@ Commands:
   workflow    Operate on workflow YAML files or manage execution lifecycle (validate/lint/preview/graph/run/resume/runs/checkpoint/artifact)
 
 Options:
-  -h, --help     Print help
   -V, --version  Print version
+  -h, --help     Print help
