@@ -47,7 +47,7 @@ fn category_bindings_match_spec_4_1() {
         ("health", categories::OPERATIONAL),
         ("doctor", categories::OPERATIONAL),
         ("config", categories::OPERATIONAL),
-        ("completion", categories::OPERATIONAL),
+        // "completion" removed — now provided by cli-framework built-in, not in newton's registry
         #[cfg(feature = "ask")]
         ("ask", categories::DIAGNOSTIC),
     ];

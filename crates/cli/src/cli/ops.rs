@@ -16,7 +16,6 @@ pub mod error_codes {
     pub const CLI_OPS_002: &str = "CLI-OPS-002";
     pub const CLI_OPS_003: &str = "CLI-OPS-003";
     pub const CLI_OPS_004: &str = "CLI-OPS-004";
-    pub const CLI_OPS_005: &str = "CLI-OPS-005";
     pub const CLI_OPS_006: &str = "CLI-OPS-006";
 }
 
@@ -408,106 +407,4 @@ pub mod config_show {
             other => other,
         }
     }
-}
-
-// ── completion ───────────────────────────────────────────────────────────────
-
-pub mod completion {
-    use super::*;
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum Shell {
-        Bash,
-        Zsh,
-        Fish,
-        PowerShell,
-    }
-
-    impl Shell {
-        #[allow(clippy::should_implement_trait)]
-        pub fn from_str(s: &str) -> Result<Self> {
-            match s.to_ascii_lowercase().as_str() {
-                "bash" => Ok(Shell::Bash),
-                "zsh" => Ok(Shell::Zsh),
-                "fish" => Ok(Shell::Fish),
-                "powershell" | "pwsh" => Ok(Shell::PowerShell),
-                other => Err(anyhow!(
-                    "{}: unsupported shell '{}' (expected: bash|zsh|fish|powershell)",
-                    error_codes::CLI_OPS_005,
-                    other
-                )),
-            }
-        }
-    }
-
-    /// Emit a simple, hand-rolled completion stub.  cli-framework does not yet
-    /// expose a completion generator and we don't want to drag in `clap_complete`
-    /// just for the stub (spec §13 fallback).  The stub satisfies the
-    /// acceptance criterion that the script's first line matches
-    /// `^_newton\(\)|^complete `.
-    pub fn run(shell: Shell) -> Result<()> {
-        let commands = NEWTON_COMMANDS;
-        match shell {
-            Shell::Bash => {
-                println!("_newton() {{");
-                println!("    local cur opts");
-                println!("    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"");
-                println!("    opts=\"{}\"", commands.join(" "));
-                println!("    COMPREPLY=( $(compgen -W \"$opts\" -- \"$cur\") )");
-                println!("    return 0");
-                println!("}}");
-                println!("complete -F _newton newton");
-            }
-            Shell::Zsh => {
-                println!("#compdef newton");
-                println!("_newton() {{");
-                println!("    local -a commands");
-                println!("    commands=({})", commands.join(" "));
-                println!("    _describe 'command' commands");
-                println!("}}");
-                println!("compdef _newton newton");
-            }
-            Shell::Fish => {
-                println!("complete -c newton -f");
-                for cmd in commands {
-                    println!("complete -c newton -n '__fish_use_subcommand' -a '{cmd}'");
-                }
-            }
-            Shell::PowerShell => {
-                println!("Register-ArgumentCompleter -Native -CommandName newton -ScriptBlock {{");
-                println!("    param($wordToComplete, $commandAst, $cursorPosition)");
-                println!(
-                    "    @({}) | Where-Object {{ $_ -like \"$wordToComplete*\" }}",
-                    commands
-                        .iter()
-                        .map(|c| format!("'{c}'"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-                println!("}}");
-            }
-        }
-        Ok(())
-    }
-
-    pub const NEWTON_COMMANDS: &[&str] = &[
-        "run",
-        "init",
-        "batch",
-        "serve",
-        "monitor",
-        "validate",
-        "dot",
-        "lint",
-        "explain",
-        "resume",
-        "checkpoints",
-        "artifacts",
-        "webhook",
-        "log",
-        "health",
-        "doctor",
-        "config",
-        "completion",
-    ];
 }

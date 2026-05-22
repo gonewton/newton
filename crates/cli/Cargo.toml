@@ -18,7 +18,7 @@ name = "logging_integration_helper"
 path = "tests/bin/logging_integration_helper.rs"
 
 [dependencies]
-cli-framework = { git = "https://github.com/aroff/cli-framework", rev = "0b2b1b2", features = ["mcp-server"] }
+cli-framework = { git = "https://github.com/aroff/cli-framework", rev = "68b2831a7601fa97e35726860060e6cca9368ba2", features = ["mcp-server"] }
 rmcp = { version = "1.6", features = ["server", "transport-streamable-http-server"] }
 newton-core = { path = "../core" }
 newton-types = { path = "../types" }

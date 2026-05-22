@@ -58,7 +58,7 @@ fn expose_mcp_only_excludes_non_allowed_tools() {
         "artifact",
         "webhook",
         "doctor",
-        "completion",
+        // "completion" — now framework-provided, not in newton's CommandRegistry
         // "data" removed — it is now a group node, not a tool
     ] {
         let tool_name = format!("newton.{}", id);

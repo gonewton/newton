@@ -76,8 +76,8 @@ dependencies = [
 
 [[package]]
 name = "ailoop-core"
-version = "1.0.9"
-source = "git+https://github.com/goailoop/ailoop.git?branch=main#596cff9303c7e56615cdb53babc95a03170cf790"
+version = "1.0.5"
+source = "git+https://github.com/goailoop/ailoop.git?rev=dd186c055dbfcbf5c32c8e58b251eaf0bf07343b#dd186c055dbfcbf5c32c8e58b251eaf0bf07343b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -129,7 +129,7 @@ name = "ailoop-server"
 version = "1.0.0"
 source = "git+https://github.com/goailoop/ailoop.git?rev=596cff9303c7e56615cdb53babc95a03170cf790#596cff9303c7e56615cdb53babc95a03170cf790"
 dependencies = [
- "ailoop-core 1.0.9 (git+https://github.com/goailoop/ailoop.git?rev=596cff9303c7e56615cdb53babc95a03170cf790)",
+ "ailoop-core 1.0.9",
  "anyhow",
  "async-trait",
  "axum",
@@ -639,9 +639,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 [[package]]
 name = "cli-framework"
 version = "0.4.0"
-source = "git+https://github.com/aroff/cli-framework?rev=0b2b1b2#0b2b1b21e5430381154183bc12cf67caef44bbb4"
+source = "git+https://github.com/aroff/cli-framework?rev=68b2831a7601fa97e35726860060e6cca9368ba2#68b2831a7601fa97e35726860060e6cca9368ba2"
 dependencies = [
- "ailoop-core 1.0.9 (git+https://github.com/goailoop/ailoop.git?branch=main)",
+ "ailoop-core 1.0.5",
  "anthropic-sdk",
  "anyhow",
  "async-openai",
@@ -2391,7 +2391,7 @@ name = "newton-core"
 version = "0.5.98"
 dependencies = [
  "aikit-sdk",
- "ailoop-core 1.0.9 (git+https://github.com/goailoop/ailoop.git?rev=596cff9303c7e56615cdb53babc95a03170cf790)",
+ "ailoop-core 1.0.9",
  "anyhow",
  "assert_cmd",
  "async-stream",

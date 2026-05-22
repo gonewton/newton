@@ -68,10 +68,10 @@ fn integ_completion_bash() {
 
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.is_empty(), "completion bash should produce output");
+    let first_line = stdout.lines().next().unwrap_or("");
     assert!(
-        stdout.contains("newton") || stdout.contains("_newton"),
-        "completion output should reference newton; got first 200 chars: {}",
-        &stdout[..stdout.len().min(200)]
+        first_line.starts_with("_newton()"),
+        "completion bash first line should start with '_newton()'; got: {first_line}"
     );
 }
 

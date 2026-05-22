@@ -10,7 +10,8 @@
 //! `expose_mcp: true` appear in `tools/list`. The curated allowlist is:
 //! `config`, `health`, `workflow`.
 //! All other commands (`init`, `batch`, `serve`, `checkpoint`, `artifact`,
-//! `webhook`, `doctor`, `completion`, `ask`) are excluded from the MCP surface.
+//! `webhook`, `doctor`, `ask`) are excluded from the MCP surface.
+//! `completion` is provided by cli-framework's built-in generator and is excluded by default.
 //! `resume` and `runs` are now subcommands of `workflow` (issue #305).
 //!
 //! ## Nested-command note
@@ -1682,60 +1683,6 @@ fn config_command() -> Command {
     }
 }
 
-fn completion_command() -> Command {
-    Command {
-        id: "completion",
-        summary: "Emit shell completion script",
-        syntax: Some("<SHELL>"),
-        category: Some(categories::OPERATIONAL),
-        spec: Some(Arc::new(CommandSpec {
-            summary: "Emit shell completion script",
-            long_about: Some(
-                "Completion writes a shell completion stub for the requested shell to stdout.\n\
-                 Supported shells: bash, zsh, fish, powershell.",
-            ),
-            examples: vec![
-                "newton completion bash",
-                "newton completion zsh",
-                "newton completion fish",
-                "newton completion powershell",
-            ],
-            args: vec![ArgSpec {
-                name: "shell",
-                kind: ArgKind::Positional,
-                short: None,
-                long: None,
-                value_type: ArgValueType::String,
-                cardinality: Cardinality::Required,
-                default: None,
-                conflicts_with: vec![],
-                requires: vec![],
-                help: "Target shell: bash | zsh | fish | powershell",
-            }],
-            ..Default::default()
-        })),
-        validator: None,
-        execute: Arc::new(|_ctx, args| {
-            Box::pin(async move {
-                let shell_name = args
-                    .named
-                    .get("shell")
-                    .cloned()
-                    .or_else(|| args.positional.first().cloned())
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "{}: completion requires a shell argument",
-                            error_codes::CLI_MIG_002
-                        )
-                    })?;
-                let shell = ops::completion::Shell::from_str(&shell_name)?;
-                ops::completion::run(shell)
-            })
-        }),
-        expose_mcp: false,
-    }
-}
-
 #[cfg(feature = "ask")]
 fn ask_command() -> Command {
     Command {
@@ -1800,7 +1747,6 @@ fn ask_summaries() -> Vec<ask::CommandSummary> {
         health_command(),
         doctor_command(),
         config_command(),
-        completion_command(),
     ];
     cmds.into_iter()
         .map(|c| {
@@ -1907,7 +1853,7 @@ pub const REGISTERED_COMMAND_IDS: &[&str] = &[
     "health",
     "doctor",
     "config",
-    "completion",
+    // "completion" removed — provided by cli-framework built-in
     // data group leaves — "data" itself is a group node, not a leaf
     "data/get",
     "data/post",
@@ -1948,7 +1894,6 @@ pub fn enumerate_commands() -> Vec<Command> {
         health_command(),
         doctor_command(),
         config_command(),
-        completion_command(),
     ];
     #[cfg(feature = "ask")]
     {
@@ -1992,7 +1937,6 @@ pub fn build_mcp_command_registry(
         health_command(),
         doctor_command(),
         config_command(),
-        completion_command(),
     ] {
         registry.register(cmd);
     }
@@ -2038,8 +1982,7 @@ fn populate_command_registry(builder: AppBuilder) -> anyhow::Result<AppBuilder> 
         .register_command(webhook_command())?
         .register_command(health_command())?
         .register_command(doctor_command())?
-        .register_command(config_command())?
-        .register_command(completion_command())?;
+        .register_command(config_command())?;
 
     let data_path = CommandPath::new(&["data"]).map_err(|e| anyhow!("CLI-PATH-001: {e}"))?;
     let builder = builder.register_group(
