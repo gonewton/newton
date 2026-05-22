@@ -73,3 +73,10 @@ cargo fmt --all -- --check       # check formatting
 cargo clippy --all-targets       # lint
 cargo tree -p newton-core        # verify no clap/ratatui/crossterm in core
 ```
+
+To execute a workflow:
+
+```bash
+newton workflow run examples/hello.yaml
+newton workflow run examples/hello.yaml --workspace ./ws --verbose
+```

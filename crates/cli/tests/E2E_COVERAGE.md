@@ -18,7 +18,7 @@ smoke row below. The required set is the sixteen Newton ids registered in
 `crates/cli/src/cli/framework_setup.rs`, plus the framework-provided `spec`
 command.
 
-Required smoke rows: `run`, `init`, `batch`, `serve`, `workflow`,
+Required smoke rows: `run` (deprecated alias — remove when shim is removed), `init`, `batch`, `serve`, `workflow`,
 `resume`, `checkpoint`, `artifact`, `webhook`, `runs`, `health`, `doctor`,
 `config`, `completion`, `ask`, `spec`.
 
@@ -26,7 +26,8 @@ Required smoke rows: `run`, `init`, `batch`, `serve`, `workflow`,
 
 | Command path | Flag | Test name | Tier |
 |---|---|---|---|
-| run | --help | smoke_run_help | smoke |
+| run | (deprecated) | smoke_run_help | smoke |
+| workflow run | --help | smoke_workflow_run_help | smoke |
 | init | --help | smoke_init_help | smoke |
 | batch | --help | smoke_batch_help | smoke |
 | serve | --help | smoke_serve_help | smoke |
@@ -42,8 +43,8 @@ Required smoke rows: `run`, `init`, `batch`, `serve`, `workflow`,
 | completion | --help | smoke_completion_help | smoke |
 | ask | --help | smoke_ask_help | smoke |
 | spec | --format json | smoke_spec_json | smoke |
-| run | --workspace | integ_run_workspace_creates_state | integration |
-| run | --trigger | integ_run_trigger_payload | integration |
+| workflow run | --workspace | integ_run_workspace_creates_state | integration |
+| workflow run | --trigger | integ_run_trigger_payload | integration |
 | workflow validate |  | integ_workflow_validate_ok | integration |
 | workflow lint | --format json | integ_workflow_lint_json | integration |
 | workflow preview | --format text | integ_workflow_preview_text | integration |
@@ -64,7 +65,8 @@ Required smoke rows: `run`, `init`, `batch`, `serve`, `workflow`,
 | serve | --port | ext_serve_ephemeral_port_health | extended |
 | webhook serve | --workflow | ext_webhook_serve_starts | extended |
 | ask |  | ext_ask_with_wiremock | extended |
-| run | --bogus-flag (negative) | negative_run_unknown_flag | integration |
+| workflow run | --bogus-flag (negative) | negative_run_unknown_flag | integration |
+| run | (deprecated) | integ_run_deprecated_notice | integration |
 | workflow validate |  (missing positional) | negative_workflow_validate_missing_arg | integration |
 | runs show |  (missing run id) | negative_runs_show_missing_id | integration |
 | checkpoint clean |  (missing --older-than) | negative_checkpoint_clean_missing_older_than | integration |

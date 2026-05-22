@@ -25,10 +25,11 @@ fn run_help_has_examples_section() {
 
 #[test]
 fn run_help_shows_basic_workflow_example() {
+    // `newton run --help` is intercepted to `newton workflow run --help`
     let stdout = help_output(&["run"]);
     assert!(
-        stdout.contains("newton run workflow.yaml"),
-        "run --help should show basic usage example"
+        stdout.contains("newton workflow run workflow.yaml"),
+        "run --help (intercepted to workflow run --help) should show basic usage example"
     );
 }
 
@@ -169,6 +170,11 @@ fn newton_help_matches_parity_snapshot() {
                     } else if trimmed.trim_start().starts_with("ask ") {
                         // `ask` is feature-gated; keep the parity snapshot
                         // independent of which feature flags built the bin.
+                        continue;
+                    } else if trimmed.trim_start().starts_with("run ") {
+                        // `run` is a deprecated hidden alias (spec 051); excluded from
+                        // the public command surface snapshot even though the framework
+                        // renders it because CommandSpec::hidden does not suppress clap output.
                         continue;
                     } else {
                         commands_body.push(trimmed);

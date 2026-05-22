@@ -185,6 +185,11 @@ pub enum WorkflowCommand {
     Preview(ExplainArgs),
     #[command(about = "Render the workflow graph (dot output)")]
     Graph(DotArgs),
+    #[command(
+        about = "Execute a workflow graph",
+        long_about = crate::cli::framework_setup::WORKFLOW_RUN_LONG_ABOUT
+    )]
+    Run(RunArgs),
 }
 
 #[derive(Args, Clone)]

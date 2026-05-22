@@ -21,6 +21,7 @@ async fn main() -> Result<()> {
     }
 
     let mut app = build_app(ctx)?;
+
     app.run_with_args(app_args).await
 }
 
