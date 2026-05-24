@@ -15,6 +15,7 @@ pub struct WorkspacePaths {
     pub plan_dir: PathBuf,
     pub workflows_state_dir: PathBuf,
     pub artifacts_dir: PathBuf,
+    pub workflows_dir: PathBuf, // <dot_newton>/workflows
     // Exists flags, populated at construction time
     pub dot_newton_exists: bool,
     pub backend_sqlite_exists: bool,
@@ -23,6 +24,7 @@ pub struct WorkspacePaths {
     pub plan_dir_exists: bool,
     pub workflows_state_dir_exists: bool,
     pub artifacts_dir_exists: bool,
+    pub workflows_dir_exists: bool,
 }
 
 impl WorkspacePaths {
@@ -47,6 +49,7 @@ impl WorkspacePaths {
         let monitor_conf = configs_dir.join("monitor.conf");
         let plan_dir = dot_newton.join("plan");
         let artifacts_dir = workflows_state_dir.join("artifacts");
+        let workflows_dir = dot_newton.join("workflows");
 
         let dot_newton_exists = dot_newton.exists();
         let backend_sqlite_exists = backend_sqlite.exists();
@@ -55,6 +58,7 @@ impl WorkspacePaths {
         let plan_dir_exists = plan_dir.exists();
         let workflows_state_dir_exists = workflows_state_dir.exists();
         let artifacts_dir_exists = artifacts_dir.exists();
+        let workflows_dir_exists = workflows_dir.exists();
 
         Self {
             workspace_root,
@@ -65,6 +69,7 @@ impl WorkspacePaths {
             plan_dir,
             workflows_state_dir,
             artifacts_dir,
+            workflows_dir,
             dot_newton_exists,
             backend_sqlite_exists,
             configs_dir_exists,
@@ -72,6 +77,7 @@ impl WorkspacePaths {
             plan_dir_exists,
             workflows_state_dir_exists,
             artifacts_dir_exists,
+            workflows_dir_exists,
         }
     }
 
@@ -137,6 +143,14 @@ impl WorkspacePaths {
             "artifacts_dir_exists".into(),
             json!(self.artifacts_dir_exists),
         );
+        map.insert(
+            "workflows_dir".into(),
+            json!(self.workflows_dir.display().to_string()),
+        );
+        map.insert(
+            "workflows_dir_exists".into(),
+            json!(self.workflows_dir_exists),
+        );
         map
     }
 
@@ -187,7 +201,7 @@ mod tests {
         let paths = WorkspacePaths::new(root);
         let obj = paths.to_json_object();
 
-        // Eight path keys
+        // Nine path keys
         assert!(obj.contains_key("workspace_root"));
         assert!(obj.contains_key("dot_newton"));
         assert!(obj.contains_key("backend_sqlite"));
@@ -196,8 +210,9 @@ mod tests {
         assert!(obj.contains_key("plan_dir"));
         assert!(obj.contains_key("workflows_state_dir"));
         assert!(obj.contains_key("artifacts_dir"));
+        assert!(obj.contains_key("workflows_dir"));
 
-        // Seven exists keys
+        // Eight exists keys
         assert!(obj.contains_key("dot_newton_exists"));
         assert!(obj.contains_key("backend_sqlite_exists"));
         assert!(obj.contains_key("configs_dir_exists"));
@@ -205,6 +220,7 @@ mod tests {
         assert!(obj.contains_key("plan_dir_exists"));
         assert!(obj.contains_key("workflows_state_dir_exists"));
         assert!(obj.contains_key("artifacts_dir_exists"));
+        assert!(obj.contains_key("workflows_dir_exists"));
     }
 
     #[test]
@@ -228,5 +244,6 @@ mod tests {
         assert!(!paths.plan_dir_exists);
         assert!(!paths.workflows_state_dir_exists);
         assert!(!paths.artifacts_dir_exists);
+        assert!(!paths.workflows_dir_exists);
     }
 }

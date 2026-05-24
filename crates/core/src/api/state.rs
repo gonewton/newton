@@ -1,3 +1,4 @@
+use crate::workflow::file_store::WorkflowFileStore;
 use newton_types::{BroadcastEvent, OperatorDescriptor};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -15,6 +16,7 @@ pub struct AppState {
     pub operators: Arc<Vec<OperatorDescriptor>>,
     pub events_tx: broadcast::Sender<BroadcastEvent>,
     pub backend: Arc<dyn newton_backend::BackendStore>,
+    pub workflow_files: Option<Arc<dyn WorkflowFileStore>>,
 }
 
 impl AppState {
@@ -27,6 +29,12 @@ impl AppState {
             operators: Arc::new(operators),
             events_tx,
             backend,
+            workflow_files: None,
         }
+    }
+
+    pub fn with_workflow_files(mut self, store: Arc<dyn WorkflowFileStore>) -> Self {
+        self.workflow_files = Some(store);
+        self
     }
 }

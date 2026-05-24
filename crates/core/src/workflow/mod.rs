@@ -7,6 +7,7 @@ pub mod dot;
 pub mod executor;
 pub mod explain;
 pub mod expression;
+pub mod file_store;
 pub mod human;
 pub mod io;
 pub mod lint;
