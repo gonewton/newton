@@ -37,6 +37,10 @@ jobs:
         with:
           toolchain: stable
           target: ${{ matrix.target }}
+          # Release builds are clean one-offs per tag; caching target/ adds little
+          # and the Windows cache-save (tar over target/ while vctip.exe holds file
+          # handles) flakily fails the post step, blocking the release jobs.
+          cache: false
 
       - name: Install musl tools (for musl target)
         if: matrix.target == 'x86_64-unknown-linux-musl'
