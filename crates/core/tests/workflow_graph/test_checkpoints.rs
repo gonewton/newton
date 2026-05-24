@@ -2,13 +2,16 @@ use newton_core::workflow::checkpoint;
 use newton_core::workflow::{
     executor::{self, ExecutionOverrides},
     operator::OperatorRegistry,
-    operators, schema, state,
+    operators, schema,
+    server_notifier::ServerNotifier,
+    state,
 };
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tempfile::{tempdir, NamedTempFile};
 
 const RESUME_WORKFLOW: &str = r#"
@@ -897,5 +900,75 @@ async fn test_workflow_definition_snapshot_hash_matches_execution() {
     assert_eq!(
         def_hash, execution.workflow_hash,
         "workflow_definition.json SHA-256 must match execution.workflow_hash"
+    );
+}
+
+#[tokio::test]
+async fn test_workflow_instance_definition_non_null_for_cli_run() {
+    // G30: WorkflowInstance.definition must be non-null for all runs.
+    // Because the instance is only observable via a server notifier, we use a
+    // wiremock server to capture the POST /api/workflows payload and verify the
+    // `definition` field is present and non-null.  Per spec: if CLI-notifier-less
+    // runs are unobservable without changing the return type, a minimal notifier
+    // may be used — but the test itself must be present.
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/workflows"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mock_server)
+        .await;
+
+    let workspace = tempdir().unwrap();
+    let workflow_file = write_workflow(RESUME_WORKFLOW);
+    let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let notifier = ServerNotifier::new(mock_server.uri());
+    let overrides = ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
+        max_nesting_depth: None,
+        verbose: false,
+        server_notifier: Some(Arc::new(notifier)),
+        pre_seed_nodes: true,
+    };
+
+    executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry,
+        workspace.path().to_path_buf(),
+        overrides,
+    )
+    .await
+    .expect("execution succeeded");
+
+    // Allow background HTTP task time to fire the request.
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+    let requests = mock_server
+        .received_requests()
+        .await
+        .expect("received_requests");
+    let start_request = requests
+        .iter()
+        .find(|r| r.url.path() == "/api/workflows")
+        .expect("POST /api/workflows request was not received");
+
+    let body: serde_json::Value =
+        serde_json::from_slice(&start_request.body).expect("request body is valid JSON");
+
+    assert!(
+        !body["definition"].is_null(),
+        "WorkflowInstance.definition must be non-null in the workflow-started notification; got: {:?}",
+        body["definition"]
     );
 }
