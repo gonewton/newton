@@ -366,19 +366,14 @@ pub(crate) async fn delete_workflow_file(
     request_body = PutWorkflowFileBody,
     responses(
         (status = 200, description = "Diagnostics", body = WorkflowFileDiagnostics),
-        (status = 422, description = "Unparseable YAML", body = ApiError),
-        (status = 503, description = "File store not configured", body = ApiError)
+        (status = 422, description = "Unparseable YAML", body = ApiError)
     )
 )]
 pub(crate) async fn validate_workflow_file(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     Json(body): Json<PutWorkflowFileBody>,
 ) -> Response {
-    let _store = match &state.workflow_files {
-        Some(s) => s.clone(),
-        None => return err_503(),
-    };
-    // Check parseability first
+    // Validate is stateless — no file store required
     if serde_yaml::from_str::<WorkflowDocument>(&body.content).is_err() {
         return err_validation("content is not parseable as a WorkflowDocument");
     }

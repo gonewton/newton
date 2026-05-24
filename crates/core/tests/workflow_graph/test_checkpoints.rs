@@ -217,9 +217,10 @@ async fn resume_hash_mismatch_blocks_resume() {
     .await
     .expect("first run succeeded");
 
-    let mut contents = fs::read_to_string(workflow_file.path()).expect("read workflow");
-    contents.push('\n');
-    fs::write(workflow_file.path(), contents).expect("rewrite workflow");
+    // Make a structural change (not just whitespace) so the JSON hash changes.
+    let contents = fs::read_to_string(workflow_file.path()).expect("read workflow");
+    let modified = contents.replace("max_task_iterations: 5", "max_task_iterations: 99");
+    fs::write(workflow_file.path(), modified).expect("rewrite workflow");
 
     let resume_registry = build_registry(workspace.path().to_path_buf(), settings.clone());
     let err = executor::resume_workflow(
@@ -815,4 +816,86 @@ workflow:
         .as_u64()
         .expect("total_iterations is number");
     assert_eq!(total_iterations, 1, "total_iterations should be 1");
+}
+
+// ── Phase 2: workflow_definition.json snapshot tests ─────────────────────────
+
+#[tokio::test]
+async fn test_workflow_definition_snapshot_written() {
+    let workspace = tempdir().unwrap();
+    let workflow_file = write_workflow(RESUME_WORKFLOW);
+    let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let overrides = ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
+        max_nesting_depth: None,
+        verbose: false,
+        server_notifier: None,
+        pre_seed_nodes: true,
+    };
+
+    let summary = executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry,
+        workspace.path().to_path_buf(),
+        overrides,
+    )
+    .await
+    .expect("execution succeeded");
+
+    let state_paths = checkpoint::WorkflowStatePaths::new(workspace.path(), &summary.execution_id);
+    assert!(
+        state_paths.workflow_definition_file.exists(),
+        "workflow_definition.json must be written at {:?}",
+        state_paths.workflow_definition_file
+    );
+}
+
+#[tokio::test]
+async fn test_workflow_definition_snapshot_hash_matches_execution() {
+    let workspace = tempdir().unwrap();
+    let workflow_file = write_workflow(RESUME_WORKFLOW);
+    let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let overrides = ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
+        max_nesting_depth: None,
+        verbose: false,
+        server_notifier: None,
+        pre_seed_nodes: true,
+    };
+
+    let summary = executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry,
+        workspace.path().to_path_buf(),
+        overrides,
+    )
+    .await
+    .expect("execution succeeded");
+
+    let state_paths = checkpoint::WorkflowStatePaths::new(workspace.path(), &summary.execution_id);
+    let execution = checkpoint::load_execution(workspace.path(), &summary.execution_id)
+        .expect("load execution");
+
+    let def_bytes =
+        fs::read(&state_paths.workflow_definition_file).expect("read workflow_definition.json");
+    let def_hash = state::compute_sha256_hex(&def_bytes);
+
+    assert_eq!(
+        def_hash, execution.workflow_hash,
+        "workflow_definition.json SHA-256 must match execution.workflow_hash"
+    );
 }

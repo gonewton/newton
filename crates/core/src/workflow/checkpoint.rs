@@ -17,6 +17,7 @@ pub struct WorkflowStatePaths {
     pub execution_file: PathBuf,
     pub checkpoint_file: PathBuf,
     pub checkpoints_dir: PathBuf,
+    pub workflow_definition_file: PathBuf,
 }
 
 impl WorkflowStatePaths {
@@ -25,11 +26,13 @@ impl WorkflowStatePaths {
         let execution_file = execution_dir.join("execution.json");
         let checkpoint_file = execution_dir.join("checkpoint.json");
         let checkpoints_dir = execution_dir.join("checkpoints");
+        let workflow_definition_file = execution_dir.join("workflow_definition.json");
         Self {
             execution_dir,
             execution_file,
             checkpoint_file,
             checkpoints_dir,
+            workflow_definition_file,
         }
     }
 
@@ -43,7 +46,7 @@ impl WorkflowStatePaths {
     }
 }
 
-fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
+pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| {
             AppError::new(

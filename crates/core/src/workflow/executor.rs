@@ -506,19 +506,21 @@ impl WorkflowRuntime {
         );
         self.save_execution()?;
 
+        // Build instance unconditionally so definition is always populated (Phase 2).
+        let workflow_instance = WorkflowInstance {
+            instance_id: self.workflow_execution.execution_id.to_string(),
+            workflow_id: self.workflow_execution.workflow_file.clone(),
+            status: WorkflowStatus::Running,
+            nodes: self.build_preseed_nodes(),
+            started_at: self.workflow_execution.started_at,
+            ended_at: None,
+            linked_plan_id: None,
+            definition: self.workflow_definition_json.clone(),
+        };
+
         // Notify server that workflow has started.
         if let Some(notifier) = &self.server_notifier {
-            let instance = WorkflowInstance {
-                instance_id: self.workflow_execution.execution_id.to_string(),
-                workflow_id: self.workflow_execution.workflow_file.clone(),
-                status: WorkflowStatus::Running,
-                nodes: self.build_preseed_nodes(),
-                started_at: self.workflow_execution.started_at,
-                ended_at: None,
-                linked_plan_id: None,
-                definition: self.workflow_definition_json.clone(),
-            };
-            notifier.notify_workflow_started(instance);
+            notifier.notify_workflow_started(workflow_instance);
         }
 
         let mut terminal_stop_triggered = false;
@@ -1479,17 +1481,16 @@ fn build_workflow_runtime_with_parent(
     );
     validate_required_triggers(&graph_settings.required_triggers, &trigger_payload)?;
     let workflow_file = canonicalize_workflow_path(&workflow_path)?;
-    let workflow_bytes = fs::read(&workflow_file).map_err(|err| {
-        AppError::new(
-            ErrorCategory::IoError,
-            format!(
-                "failed to read workflow file {}: {}",
-                workflow_file.display(),
-                err
-            ),
-        )
-    })?;
-    let workflow_hash = compute_sha256_hex(&workflow_bytes);
+    // Hash the canonical JSON representation so whitespace-only YAML edits don't invalidate checkpoints.
+    let workflow_hash = {
+        let json_bytes = serde_json::to_vec(&workflow_definition_json).map_err(|e| {
+            AppError::new(
+                ErrorCategory::ValidationError,
+                format!("failed to serialize workflow definition for hashing: {e}"),
+            )
+        })?;
+        compute_sha256_hex(&json_bytes)
+    };
 
     let engine = Arc::new(ExpressionEngine::default());
     let eval_ctx = context::resolve_initial_evaluation_context(
@@ -1552,6 +1553,17 @@ fn build_workflow_runtime_with_parent(
 
     let context = eval_ctx.context.clone();
     let execution_uuid = Uuid::new_v4();
+
+    // Phase 2: write workflow_definition.json snapshot alongside execution.json
+    {
+        let state_paths =
+            checkpoint::WorkflowStatePaths::from_base(&checkpoint_root, &execution_uuid);
+        if let Ok(snapshot_bytes) = serde_json::to_vec(&workflow_definition_json) {
+            let _ =
+                checkpoint::atomic_write(&state_paths.workflow_definition_file, &snapshot_bytes);
+        }
+    }
+
     let state = Arc::new(tokio::sync::RwLock::new(ExecutionState {
         context,
         completed: HashMap::new(),
@@ -1631,17 +1643,23 @@ pub async fn resume_workflow(
         )
         .with_code("WFG-CKPT-001"));
     }
-    let current_bytes = fs::read(&workflow_path).map_err(|err| {
-        AppError::new(
-            ErrorCategory::IoError,
-            format!(
-                "failed to read workflow file {}: {}",
-                workflow_path.display(),
-                err
-            ),
-        )
-    })?;
-    let current_hash = compute_sha256_hex(&current_bytes);
+    // Compute hash from JSON representation (same as build_workflow_runtime_with_parent)
+    // so whitespace-only YAML edits don't invalidate checkpoints.
+    let current_hash = {
+        let doc_json = serde_json::to_value(&document).map_err(|e| {
+            AppError::new(
+                ErrorCategory::ValidationError,
+                format!("failed to serialize workflow definition for hash check: {e}"),
+            )
+        })?;
+        let json_bytes = serde_json::to_vec(&doc_json).map_err(|e| {
+            AppError::new(
+                ErrorCategory::ValidationError,
+                format!("failed to serialize workflow definition for hash check: {e}"),
+            )
+        })?;
+        compute_sha256_hex(&json_bytes)
+    };
     if current_hash != execution.workflow_hash && !allow_workflow_change {
         return Err(AppError::new(
             ErrorCategory::ValidationError,

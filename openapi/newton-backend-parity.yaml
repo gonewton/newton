@@ -1666,6 +1666,173 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /api/workflow-files:
+    get:
+      tags:
+      - workflow-files
+      operationId: list_workflow_files
+      responses:
+        '200':
+          description: List of workflow files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkflowFileSummary'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: File store not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/workflow-files/validate:
+    post:
+      tags:
+      - workflow-files
+      operationId: validate_workflow_file
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutWorkflowFileBody'
+        required: true
+      responses:
+        '200':
+          description: Diagnostics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowFileDiagnostics'
+        '422':
+          description: Unparseable YAML
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/workflow-files/{name}:
+    get:
+      tags:
+      - workflow-files
+      operationId: get_workflow_file
+      parameters:
+      - name: name
+        in: path
+        description: Workflow file name (no .yaml extension)
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Workflow file detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowFileDetail'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: File store not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    put:
+      tags:
+      - workflow-files
+      operationId: put_workflow_file
+      parameters:
+      - name: name
+        in: path
+        description: Workflow file name (no .yaml extension)
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutWorkflowFileBody'
+        required: true
+      responses:
+        '200':
+          description: Updated workflow file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowFileDetail'
+        '201':
+          description: Created workflow file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowFileDetail'
+        '409':
+          description: ETag conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error or unparseable YAML
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: File store not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      tags:
+      - workflow-files
+      operationId: delete_workflow_file
+      parameters:
+      - name: name
+        in: path
+        description: Workflow file name (no .yaml extension)
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: File store not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /api/workflows:
     get:
       tags:
@@ -2323,6 +2490,27 @@ components:
         weight:
           type: number
           format: double
+    LintFinding:
+      type: object
+      required:
+      - code
+      - severity
+      - message
+      properties:
+        code:
+          type: string
+        location:
+          type:
+          - string
+          - 'null'
+        message:
+          type: string
+        severity:
+          type: string
+        suggestion:
+          type:
+          - string
+          - 'null'
     ModuleDependencyItem:
       type: object
       required:
@@ -2935,6 +3123,17 @@ components:
         secScore:
           type: integer
           format: int64
+    PutWorkflowFileBody:
+      type: object
+      required:
+      - content
+      properties:
+        content:
+          type: string
+        expected_hash:
+          type:
+          - string
+          - 'null'
     RecentActionItem:
       type: object
       required:
@@ -3100,6 +3299,78 @@ components:
           type:
           - string
           - 'null'
+    WorkflowFileDetail:
+      type: object
+      required:
+      - name
+      - content
+      - content_hash
+      - modified_at
+      - diagnostics
+      properties:
+        content:
+          type: string
+        content_hash:
+          type: string
+        diagnostics:
+          $ref: '#/components/schemas/WorkflowFileDiagnostics'
+        modified_at:
+          type: string
+          format: date-time
+        name:
+          type: string
+    WorkflowFileDiagnostics:
+      type: object
+      required:
+      - parse_ok
+      - validate_ok
+      - lint
+      properties:
+        lint:
+          type: array
+          items:
+            $ref: '#/components/schemas/LintFinding'
+        parse_error:
+          type:
+          - string
+          - 'null'
+        parse_ok:
+          type: boolean
+        validate_ok:
+          type: boolean
+    WorkflowFileSummary:
+      type: object
+      required:
+      - name
+      - size_bytes
+      - modified_at
+      - content_hash
+      properties:
+        content_hash:
+          type: string
+        description:
+          type:
+          - string
+          - 'null'
+        metadata_name:
+          type:
+          - string
+          - 'null'
+        modified_at:
+          type: string
+          format: date-time
+        name:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        tags:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
     WorkflowInstance:
       type: object
       required:
@@ -3187,6 +3458,8 @@ tags:
   description: Catalog entity CRUD endpoints
 - name: testing
   description: Test-only maintenance endpoints
+- name: workflow-files
+  description: Workflow definition file CRUD endpoints
 externalDocs:
   url: ./newton-realtime.asyncapi.yaml
   description: Realtime (WebSocket + SSE) contract — AsyncAPI 3.0
