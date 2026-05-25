@@ -19,6 +19,7 @@ use tempfile::{tempdir, TempDir};
 struct MockGhRunner {
     responses: Arc<Mutex<HashMap<Vec<String>, GhOutput>>>,
     calls: Arc<AtomicUsize>,
+    last_cwd: Arc<Mutex<Option<std::path::PathBuf>>>,
 }
 
 impl MockGhRunner {
@@ -26,6 +27,7 @@ impl MockGhRunner {
         Self {
             responses: Arc::new(Mutex::new(HashMap::new())),
             calls: Arc::new(AtomicUsize::new(0)),
+            last_cwd: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -37,12 +39,17 @@ impl MockGhRunner {
     fn call_count(&self) -> usize {
         self.calls.load(Ordering::SeqCst)
     }
+
+    fn last_cwd(&self) -> Option<std::path::PathBuf> {
+        self.last_cwd.lock().unwrap().clone()
+    }
 }
 
 #[async_trait]
 impl GhRunner for MockGhRunner {
-    async fn run(&self, args: &[&str]) -> Result<GhOutput, AppError> {
+    async fn run(&self, args: &[&str], cwd: &std::path::Path) -> Result<GhOutput, AppError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        *self.last_cwd.lock().unwrap() = Some(cwd.to_path_buf());
         let key: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         let responses = self.responses.lock().unwrap();
         match responses.get(&key) {
@@ -1615,7 +1622,7 @@ impl FlakyGhRunner {
 
 #[async_trait]
 impl GhRunner for FlakyGhRunner {
-    async fn run(&self, _args: &[&str]) -> Result<GhOutput, AppError> {
+    async fn run(&self, _args: &[&str], _cwd: &std::path::Path) -> Result<GhOutput, AppError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let remaining = self.fail_count.load(Ordering::SeqCst);
         if remaining > 0 {
@@ -2107,6 +2114,84 @@ async fn branch_push_cwd_is_workspace_path() {
     op.execute(params, ctx).await.expect("should succeed");
 
     let cwd = git_runner.last_cwd().expect("cwd should be recorded");
+    assert_eq!(cwd, workspace.path());
+}
+
+#[tokio::test]
+async fn pr_create_cwd_is_workspace_path() {
+    let workspace = tempdir().expect("workspace");
+    let runner = Arc::new(MockGhRunner::new());
+    runner.add_response(
+        vec![
+            "pr", "create", "--base", "main", "--title", "Test PR", "--body", "",
+        ],
+        GhOutput {
+            stdout: "https://github.com/testorg/testrepo/pull/42\n".to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+    );
+
+    let op = GhOperator::with_runner(runner.clone() as Arc<dyn GhRunner>);
+    let params = json!({
+        "operation": "pr_create",
+        "title": "Test PR",
+        "retry_count": 1
+    });
+    let ctx = make_exec_ctx(workspace.path());
+    op.execute(params, ctx).await.expect("should succeed");
+
+    let cwd = runner.last_cwd().expect("cwd should be recorded");
+    assert_eq!(cwd, workspace.path());
+}
+
+#[tokio::test]
+async fn pr_view_cwd_is_workspace_path() {
+    let workspace = tempdir().expect("workspace");
+    let runner = Arc::new(MockGhRunner::new());
+    runner.add_response(
+        vec!["pr", "view", "42", "--json", "state"],
+        GhOutput {
+            stdout: r#"{"state":"OPEN"}"#.to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+    );
+
+    let op = GhOperator::with_runner(runner.clone() as Arc<dyn GhRunner>);
+    let params = json!({
+        "operation": "pr_view",
+        "pr": 42
+    });
+    let ctx = make_exec_ctx(workspace.path());
+    op.execute(params, ctx).await.expect("should succeed");
+
+    let cwd = runner.last_cwd().expect("cwd should be recorded");
+    assert_eq!(cwd, workspace.path());
+}
+
+#[tokio::test]
+async fn pr_approve_cwd_is_workspace_path() {
+    let workspace = tempdir().expect("workspace");
+    let runner = Arc::new(MockGhRunner::new());
+    runner.add_response(
+        vec!["pr", "review", "36", "--approve"],
+        GhOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+        },
+    );
+
+    let op = GhOperator::with_runner(runner.clone() as Arc<dyn GhRunner>);
+    let params = json!({
+        "operation": "pr_approve",
+        "pr_number": 36
+    });
+    let ctx = make_exec_ctx(workspace.path());
+    op.execute(params, ctx).await.expect("should succeed");
+
+    let cwd = runner.last_cwd().expect("cwd should be recorded");
     assert_eq!(cwd, workspace.path());
 }
 
