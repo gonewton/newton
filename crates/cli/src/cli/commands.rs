@@ -2162,6 +2162,10 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     let backend: Arc<dyn newton_backend::BackendStore> = Arc::new(store);
 
     let state = AppState::new(operator_descriptors, backend);
+    let store = newton_core::workflow::file_store::FsWorkflowFileStore::new(
+        workspace_paths.workflows_dir.clone(),
+    );
+    let state = state.with_workflow_files(std::sync::Arc::new(store));
 
     let mut app = api::create_router(state, args.static_ui.clone());
 

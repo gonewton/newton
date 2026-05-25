@@ -38,6 +38,11 @@ use utoipa::OpenApi;
         crate::api::persistence::put_persistence,
         crate::api::persistence::delete_persistence,
         crate::api::testing_reset::reset_testing,
+        crate::api::workflow_files::list_workflow_files,
+        crate::api::workflow_files::get_workflow_file,
+        crate::api::workflow_files::put_workflow_file,
+        crate::api::workflow_files::delete_workflow_file,
+        crate::api::workflow_files::validate_workflow_file,
         crate::api::catalog::get_product,
         crate::api::catalog::create_product,
         crate::api::catalog::put_product,
@@ -122,7 +127,12 @@ use utoipa::OpenApi;
         newton_types::HilAction,
         newton_types::ApiError,
         crate::api::workflows::NodeUpdate,
-        crate::api::workflows::WorkflowUpdateBody
+        crate::api::workflows::WorkflowUpdateBody,
+        crate::api::workflow_files::WorkflowFileSummary,
+        crate::api::workflow_files::WorkflowFileDetail,
+        crate::api::workflow_files::PutWorkflowFileBody,
+        crate::api::workflow_files::WorkflowFileDiagnostics,
+        crate::api::workflow_files::LintFinding
     )),
     tags(
         (name = "health", description = "Service health and liveness endpoints"),
@@ -137,7 +147,8 @@ use utoipa::OpenApi;
         (name = "operators", description = "Operator catalog endpoint"),
         (name = "persistence", description = "Key-value persistence endpoints"),
         (name = "catalog", description = "Catalog entity CRUD endpoints"),
-        (name = "testing", description = "Test-only maintenance endpoints")
+        (name = "testing", description = "Test-only maintenance endpoints"),
+        (name = "workflow-files", description = "Workflow definition file CRUD endpoints")
     ),
     info(
         title = "Newton Backend Parity API",

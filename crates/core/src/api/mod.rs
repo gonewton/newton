@@ -11,6 +11,7 @@ pub mod requests;
 pub mod state;
 pub mod streaming;
 pub mod testing_reset;
+pub mod workflow_files;
 pub mod workflows;
 
 use crate::api::state::AppState;
@@ -38,6 +39,7 @@ pub fn create_router(state: AppState, ui_dir: Option<PathBuf>) -> Router {
         .merge(persistence::routes(arc_state.clone()))
         .merge(catalog::routes(arc_state.clone()))
         .merge(testing_reset::routes(arc_state.clone()))
+        .merge(workflow_files::routes(arc_state.clone()))
         .route("/health", get(health_check))
         .layer(CorsLayer::permissive());
 

@@ -3,6 +3,7 @@ use axum::{
     http::{header, method::Method, Request, StatusCode},
 };
 use newton_core::api::state::AppState;
+use newton_core::workflow::file_store::FsWorkflowFileStore;
 use newton_types::{
     ApiError, BroadcastEvent, HilAction, HilEvent, HilEventType, HilStatus, NodeState, NodeStatus,
     OperatorDescriptor, WorkflowDefinition, WorkflowInstance, WorkflowStatus,
@@ -32,6 +33,12 @@ async fn create_test_state() -> AppState {
         .expect("in-memory backend init");
     let backend: std::sync::Arc<dyn newton_backend::BackendStore> = std::sync::Arc::new(store);
     AppState::new(operators, backend)
+}
+
+async fn create_test_state_with_files(workflows_dir: std::path::PathBuf) -> AppState {
+    let state = create_test_state().await;
+    let store = FsWorkflowFileStore::new(workflows_dir);
+    state.with_workflow_files(std::sync::Arc::new(store))
 }
 
 /// Insert a WorkflowInstance (and its nodes) into BackendStore.
@@ -1184,4 +1191,400 @@ async fn test_node_upsert_broadcasts_event() {
         }
         _ => panic!("Expected NodeStateChanged event, got {:?}", event),
     }
+}
+
+// ── Workflow Files API Tests ───────────────────────────────────────────────────
+
+const VALID_WORKFLOW_YAML: &str = r#"version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    max_workflow_iterations: 10
+  tasks:
+    - id: step1
+      operator: command
+      params:
+        command: echo hello
+"#;
+
+// Parseable as WorkflowDocument but will fail semantic validation / lint
+const INVALID_SEMANTIC_WORKFLOW_YAML: &str = r#"version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: nonexistent-task
+    max_workflow_iterations: 10
+  tasks:
+    - id: step1
+      operator: completely-unknown-operator-xyz
+      params: {}
+"#;
+
+#[tokio::test]
+async fn test_workflow_files_503_when_not_configured() {
+    let state = create_test_state().await;
+    let app = newton_core::api::create_router(state, None);
+
+    let request = Request::builder()
+        .uri("/api/workflow-files")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn test_workflow_files_list_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::create_router(state, None);
+
+    let request = Request::builder()
+        .uri("/api/workflow-files")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let items: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(items.as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_workflow_files_put_and_get() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::create_router(state, None);
+
+    let body = serde_json::json!({
+        "content": VALID_WORKFLOW_YAML,
+        "expected_hash": null
+    });
+
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri("/api/workflow-files/my-flow")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let resp_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let detail: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+    assert_eq!(detail["name"], "my-flow");
+    assert!(detail["content_hash"].is_string());
+
+    // GET it back
+    let get_request = Request::builder()
+        .uri("/api/workflow-files/my-flow")
+        .body(Body::empty())
+        .unwrap();
+    let get_response = app.oneshot(get_request).await.unwrap();
+    assert_eq!(get_response.status(), StatusCode::OK);
+
+    let get_body = axum::body::to_bytes(get_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let get_detail: serde_json::Value = serde_json::from_slice(&get_body).unwrap();
+    assert_eq!(get_detail["name"], "my-flow");
+    assert_eq!(get_detail["content"], VALID_WORKFLOW_YAML);
+}
+
+#[tokio::test]
+async fn test_workflow_files_get_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::create_router(state, None);
+
+    let request = Request::builder()
+        .uri("/api/workflow-files/nonexistent")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_workflow_files_put_invalid_yaml() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::create_router(state, None);
+
+    let body = serde_json::json!({
+        "content": "this: is: not: valid: yaml: {{{",
+        "expected_hash": null
+    });
+
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri("/api/workflow-files/bad-flow")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn test_workflow_files_delete() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::create_router(state, None);
+
+    // Create
+    let body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
+    let put_request = Request::builder()
+        .method(Method::PUT)
+        .uri("/api/workflow-files/to-delete")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let put_response = app.clone().oneshot(put_request).await.unwrap();
+    assert_eq!(put_response.status(), StatusCode::CREATED);
+
+    // Delete
+    let del_request = Request::builder()
+        .method(Method::DELETE)
+        .uri("/api/workflow-files/to-delete")
+        .body(Body::empty())
+        .unwrap();
+    let del_response = app.clone().oneshot(del_request).await.unwrap();
+    assert_eq!(del_response.status(), StatusCode::NO_CONTENT);
+
+    // Confirm gone
+    let get_request = Request::builder()
+        .uri("/api/workflow-files/to-delete")
+        .body(Body::empty())
+        .unwrap();
+    let get_response = app.oneshot(get_request).await.unwrap();
+    assert_eq!(get_response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_workflow_files_delete_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::create_router(state, None);
+
+    let request = Request::builder()
+        .method(Method::DELETE)
+        .uri("/api/workflow-files/nonexistent")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_workflow_files_validate_endpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::create_router(state, None);
+
+    let body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
+
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/workflow-files/validate")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let resp_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let diag: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+    assert_eq!(diag["parse_ok"], true);
+}
+
+#[tokio::test]
+async fn test_workflow_files_list_shows_created_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::create_router(state, None);
+
+    // Create two files
+    for name in &["alpha", "beta"] {
+        let body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
+        let req = Request::builder()
+            .method(Method::PUT)
+            .uri(format!("/api/workflow-files/{name}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+
+    // List
+    let list_req = Request::builder()
+        .uri("/api/workflow-files")
+        .body(Body::empty())
+        .unwrap();
+    let list_resp = app.oneshot(list_req).await.unwrap();
+    assert_eq!(list_resp.status(), StatusCode::OK);
+
+    let list_body = axum::body::to_bytes(list_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let items: serde_json::Value = serde_json::from_slice(&list_body).unwrap();
+    assert_eq!(items.as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn test_workflow_files_slug_traversal_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::create_router(state, None);
+
+    // GET with traversal slug
+    let get_req = Request::builder()
+        .uri("/api/workflow-files/..%2F..%2Fsecret")
+        .body(Body::empty())
+        .unwrap();
+    let get_resp = app.clone().oneshot(get_req).await.unwrap();
+    assert_eq!(get_resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // PUT with traversal slug
+    let body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
+    let put_req = Request::builder()
+        .method(Method::PUT)
+        .uri("/api/workflow-files/..%2Fetc%2Fpasswd")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let put_resp = app.oneshot(put_req).await.unwrap();
+    assert_eq!(put_resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn test_workflow_files_if_match_conflict() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::create_router(state, None);
+
+    // Create file first
+    let body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
+    let create_req = Request::builder()
+        .method(Method::PUT)
+        .uri("/api/workflow-files/conflict-test")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let create_resp = app.clone().oneshot(create_req).await.unwrap();
+    assert_eq!(create_resp.status(), StatusCode::CREATED);
+
+    // Try to overwrite with wrong If-Match hash
+    let body2 = serde_json::json!({
+        "content": VALID_WORKFLOW_YAML,
+        "expected_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    });
+    let conflict_req = Request::builder()
+        .method(Method::PUT)
+        .uri("/api/workflow-files/conflict-test")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body2).unwrap()))
+        .unwrap();
+    let conflict_resp = app.oneshot(conflict_req).await.unwrap();
+    assert_eq!(conflict_resp.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn test_workflow_files_validate_invalid_semantic() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::create_router(state, None);
+
+    let body =
+        serde_json::json!({ "content": INVALID_SEMANTIC_WORKFLOW_YAML, "expected_hash": null });
+
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/workflow-files/validate")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let resp_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let diag: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+    assert_eq!(diag["parse_ok"], true);
+    // Semantically invalid: either validate_ok is false or lint findings are present
+    let validate_ok = diag["validate_ok"].as_bool().unwrap_or(true);
+    let lint_empty = diag["lint"]
+        .as_array()
+        .map(|a| a.is_empty())
+        .unwrap_or(true);
+    assert!(
+        !validate_ok || !lint_empty,
+        "expected validation failure or lint findings"
+    );
+}
+
+#[tokio::test]
+async fn test_workflow_files_lenient_save_invalid_semantic() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::create_router(state, None);
+
+    let body =
+        serde_json::json!({ "content": INVALID_SEMANTIC_WORKFLOW_YAML, "expected_hash": null });
+
+    let put_req = Request::builder()
+        .method(Method::PUT)
+        .uri("/api/workflow-files/lenient-test")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let put_resp = app.oneshot(put_req).await.unwrap();
+    // Must be 201 or 200 (not 422) — file IS written even though semantically invalid
+    let status = put_resp.status();
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "expected 201 or 200, got {status}"
+    );
+
+    let resp_body = axum::body::to_bytes(put_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let detail: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+
+    // File exists on disk
+    let file_path = dir.path().join("lenient-test.yaml");
+    assert!(file_path.exists(), "file should have been written to disk");
+
+    // Diagnostics should reflect semantic invalidity
+    let parse_ok = detail["diagnostics"]["parse_ok"].as_bool().unwrap_or(false);
+    assert!(parse_ok, "parse_ok should be true");
+    let validate_ok = detail["diagnostics"]["validate_ok"]
+        .as_bool()
+        .unwrap_or(true);
+    let lint_empty = detail["diagnostics"]["lint"]
+        .as_array()
+        .map(|a| a.is_empty())
+        .unwrap_or(true);
+    assert!(
+        !validate_ok || !lint_empty,
+        "expected diagnostics to reflect invalid workflow"
+    );
 }
