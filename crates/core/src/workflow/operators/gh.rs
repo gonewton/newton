@@ -141,11 +141,17 @@ impl Operator for GhOperator {
         }
 
         match operation {
-            "project_resolve_board" => self.execute_project_resolve_board(map).await,
-            "project_item_set_status" => self.execute_project_item_set_status(map).await,
-            "pr_create" => self.execute_pr_create(map).await,
-            "pr_view" => self.execute_pr_view(map).await,
-            "pr_approve" => self.execute_pr_approve(map).await,
+            "project_resolve_board" => {
+                self.execute_project_resolve_board(map, &ctx.workspace_path)
+                    .await
+            }
+            "project_item_set_status" => {
+                self.execute_project_item_set_status(map, &ctx.workspace_path)
+                    .await
+            }
+            "pr_create" => self.execute_pr_create(map, &ctx.workspace_path).await,
+            "pr_view" => self.execute_pr_view(map, &ctx.workspace_path).await,
+            "pr_approve" => self.execute_pr_approve(map, &ctx.workspace_path).await,
             "branch_push" => self.execute_branch_push(map, &ctx.workspace_path).await,
             _ => Err(AppError::new(
                 ErrorCategory::ValidationError,
@@ -651,7 +657,11 @@ fn validate_repository_format(repo: &str) -> Result<(), AppError> {
 }
 
 impl GhOperator {
-    async fn execute_pr_approve(&self, map: &Map<String, Value>) -> Result<Value, AppError> {
+    async fn execute_pr_approve(
+        &self,
+        map: &Map<String, Value>,
+        workspace: &std::path::Path,
+    ) -> Result<Value, AppError> {
         let (pr_number, repository, pr_url_input) =
             if let Some(url) = map.get("pr_url").and_then(Value::as_str) {
                 let (owner_repo, number) = parse_pr_url(url)?;
@@ -672,7 +682,7 @@ impl GhOperator {
             args.push(repo);
         }
 
-        self.runner.run(&args).await?;
+        self.runner.run(&args, workspace).await?;
 
         let mut out = serde_json::Map::new();
         out.insert("review_submitted".to_string(), json!(true));
@@ -697,6 +707,7 @@ impl GhOperator {
     async fn execute_project_resolve_board(
         &self,
         map: &Map<String, Value>,
+        workspace: &std::path::Path,
     ) -> Result<Value, AppError> {
         let owner = map.get("owner").and_then(Value::as_str).unwrap();
         let project_number = map
@@ -713,15 +724,18 @@ impl GhOperator {
 
         let view_output = self
             .runner
-            .run(&[
-                "project",
-                "view",
-                &project_number,
-                "--owner",
-                owner,
-                "--format",
-                "json",
-            ])
+            .run(
+                &[
+                    "project",
+                    "view",
+                    &project_number,
+                    "--owner",
+                    owner,
+                    "--format",
+                    "json",
+                ],
+                workspace,
+            )
             .await?;
 
         let view_json: Value = serde_json::from_str(&view_output.stdout).map_err(|e| {
@@ -742,15 +756,18 @@ impl GhOperator {
 
         let fields_output = self
             .runner
-            .run(&[
-                "project",
-                "field-list",
-                &project_number,
-                "--owner",
-                owner,
-                "--format",
-                "json",
-            ])
+            .run(
+                &[
+                    "project",
+                    "field-list",
+                    &project_number,
+                    "--owner",
+                    owner,
+                    "--format",
+                    "json",
+                ],
+                workspace,
+            )
             .await?;
 
         let fields_json: Value = serde_json::from_str(&fields_output.stdout).map_err(|e| {
@@ -878,6 +895,7 @@ impl GhOperator {
     async fn execute_project_item_set_status(
         &self,
         map: &Map<String, Value>,
+        workspace: &std::path::Path,
     ) -> Result<Value, AppError> {
         let item_id = map.get("item_id").and_then(Value::as_str).unwrap();
         let board = map.get("board").and_then(Value::as_object).unwrap();
@@ -909,18 +927,21 @@ impl GhOperator {
         for attempt in 1..=2 {
             let result = self
                 .runner
-                .run(&[
-                    "project",
-                    "item-edit",
-                    "--project-id",
-                    project_id,
-                    "--id",
-                    item_id,
-                    "--field-id",
-                    field_id,
-                    "--single-select-option-id",
-                    &option_id,
-                ])
+                .run(
+                    &[
+                        "project",
+                        "item-edit",
+                        "--project-id",
+                        project_id,
+                        "--id",
+                        item_id,
+                        "--field-id",
+                        field_id,
+                        "--single-select-option-id",
+                        &option_id,
+                    ],
+                    workspace,
+                )
                 .await;
 
             match result {
@@ -967,7 +988,11 @@ impl GhOperator {
     /// jitter in `[0, retry_jitter_ms]`. Each per-attempt delay is clamped to
     /// `MAX_RETRY_DELAY_MS` (5 minutes). The `ailoop` approver is consulted
     /// at most once per logical invocation (outside this retry loop).
-    async fn execute_pr_create(&self, map: &Map<String, Value>) -> Result<Value, AppError> {
+    async fn execute_pr_create(
+        &self,
+        map: &Map<String, Value>,
+        workspace: &std::path::Path,
+    ) -> Result<Value, AppError> {
         use rand::Rng;
         let base = map.get("base").and_then(Value::as_str).unwrap_or("main");
         let title = map.get("title").and_then(Value::as_str).unwrap();
@@ -992,9 +1017,12 @@ impl GhOperator {
         for attempt in 1..=retry_count {
             let result = self
                 .runner
-                .run(&[
-                    "pr", "create", "--base", base, "--title", title, "--body", body,
-                ])
+                .run(
+                    &[
+                        "pr", "create", "--base", base, "--title", title, "--body", body,
+                    ],
+                    workspace,
+                )
                 .await;
 
             match result {
@@ -1041,7 +1069,11 @@ impl GhOperator {
         }))
     }
 
-    async fn execute_pr_view(&self, map: &Map<String, Value>) -> Result<Value, AppError> {
+    async fn execute_pr_view(
+        &self,
+        map: &Map<String, Value>,
+        workspace: &std::path::Path,
+    ) -> Result<Value, AppError> {
         let pr = get_pr_identifier(map)?;
 
         let pr_number = pr.parse::<u64>().map_err(|_| {
@@ -1053,7 +1085,7 @@ impl GhOperator {
 
         let output = self
             .runner
-            .run(&["pr", "view", &pr, "--json", "state"])
+            .run(&["pr", "view", &pr, "--json", "state"], workspace)
             .await?;
 
         let pr_json: Value = serde_json::from_str(&output.stdout).map_err(|e| {
@@ -1237,7 +1269,7 @@ pub struct GhOutput {
 
 #[async_trait]
 pub trait GhRunner: Send + Sync + 'static {
-    async fn run(&self, args: &[&str]) -> Result<GhOutput, AppError>;
+    async fn run(&self, args: &[&str], cwd: &std::path::Path) -> Result<GhOutput, AppError>;
 }
 
 pub struct TokioGhRunner;
@@ -1248,12 +1280,13 @@ pub fn default_runner() -> TokioGhRunner {
 
 #[async_trait]
 impl GhRunner for TokioGhRunner {
-    async fn run(&self, args: &[&str]) -> Result<GhOutput, AppError> {
+    async fn run(&self, args: &[&str], cwd: &std::path::Path) -> Result<GhOutput, AppError> {
         let mut cmd = Command::new("gh");
         for arg in args {
             cmd.arg(arg);
         }
-        cmd.stdout(Stdio::piped())
+        cmd.current_dir(cwd)
+            .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
 
