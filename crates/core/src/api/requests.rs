@@ -12,14 +12,14 @@ use std::sync::Arc;
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/requests", get(list_requests))
-        .route("/api/requests", post(create_request))
+        .route("/requests", get(list_requests))
+        .route("/requests", post(create_request))
         .with_state(state)
 }
 
 #[utoipa::path(
     get,
-    path = "/api/requests",
+    path = "/requests",
     tag = "requests",
     responses(
         (status = 200, description = "Request list", body = [newton_backend::RequestItem]),
@@ -35,7 +35,7 @@ pub(crate) async fn list_requests(State(state): State<Arc<AppState>>) -> Respons
 
 #[utoipa::path(
     post,
-    path = "/api/requests",
+    path = "/requests",
     tag = "requests",
     request_body = CreateRequestBody,
     responses(

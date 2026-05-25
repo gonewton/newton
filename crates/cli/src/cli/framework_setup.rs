@@ -616,18 +616,6 @@ fn serve_command() -> Command {
                     help: "Mount the MCP HTTP router on the same listener as the Newton API",
                 },
                 ArgSpec {
-                    name: "mcp-path",
-                    kind: ArgKind::Option,
-                    short: None,
-                    long: Some("mcp-path"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
-                    help: "Path prefix where the MCP HTTP router is mounted (default: /mcp)",
-                },
-                ArgSpec {
                     name: "with-embedded-ailoop",
                     kind: ArgKind::Flag,
                     short: None,
@@ -2132,11 +2120,6 @@ impl TryFrom<CommandArgs> for ServeArgs {
             .transpose()?
             .unwrap_or(8080);
         let with_mcp = get_bool(&args, "with-mcp");
-        let mcp_path = args
-            .named
-            .get("mcp-path")
-            .cloned()
-            .unwrap_or_else(|| "/mcp".to_string());
         let with_embedded_ailoop = get_bool(&args, "with-embedded-ailoop");
         let ailoop_base_path = args
             .named
@@ -2148,7 +2131,6 @@ impl TryFrom<CommandArgs> for ServeArgs {
             port,
             static_ui: get_opt_path(&args, "static-ui"),
             with_mcp,
-            mcp_path,
             with_embedded_ailoop,
             ailoop_base_path,
         })

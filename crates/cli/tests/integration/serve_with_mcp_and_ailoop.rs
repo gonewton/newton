@@ -32,8 +32,6 @@ fn both_serve_started_events_emitted() {
             "--port",
             &port.to_string(),
             "--with-mcp",
-            "--mcp-path",
-            "/mcp",
             "--with-embedded-ailoop",
             "--ailoop-base-path",
             "/ailoop",
@@ -95,8 +93,6 @@ fn non_colliding_mcp_and_ailoop_paths_start_successfully() {
             "--port",
             &port.to_string(),
             "--with-mcp",
-            "--mcp-path",
-            "/mcp",
             "--with-embedded-ailoop",
             "--ailoop-base-path",
             "/ailoop",
@@ -147,8 +143,6 @@ fn mcp_serve_started_has_correct_fields_when_ailoop_also_active() {
             "--port",
             &port.to_string(),
             "--with-mcp",
-            "--mcp-path",
-            "/mcp",
             "--with-embedded-ailoop",
             "--ailoop-base-path",
             "/ailoop",
@@ -218,8 +212,6 @@ fn all_surfaces_respond_when_both_flags_active() {
             "--port",
             &port.to_string(),
             "--with-mcp",
-            "--mcp-path",
-            "/mcp",
             "--with-embedded-ailoop",
             "--ailoop-base-path",
             "/ailoop",
@@ -252,7 +244,7 @@ fn all_surfaces_respond_when_both_flags_active() {
             let client = reqwest::Client::new();
 
             let health = client
-                .get(format!("http://127.0.0.1:{}/health", port))
+                .get(format!("http://127.0.0.1:{}/healthz", port))
                 .send()
                 .await
                 .map_err(|e| format!("/health: {e}"))?;

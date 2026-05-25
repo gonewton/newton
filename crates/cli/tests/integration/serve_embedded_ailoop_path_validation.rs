@@ -80,7 +80,7 @@ fn rejects_api_base_path() {
         ])
         .assert()
         .failure()
-        .stderr(contains("NEWTON-SERVE-AIL-001"));
+        .stderr(contains("NEWTON-SERVE-AIL-002"));
 }
 
 // ── NEWTON-SERVE-AIL-002: Newton REST route prefix collision ──────────────────
@@ -119,42 +119,16 @@ fn rejects_collision_with_workflows() {
         .stderr(contains("NEWTON-SERVE-AIL-002"));
 }
 
-// ── NEWTON-SERVE-AIL-003: --mcp-path collision ────────────────────────────────
-
 #[test]
-fn rejects_collision_with_mcp_path() {
+fn allows_non_colliding_paths() {
     let dir = tempdir().expect("tempdir");
-    Command::cargo_bin("newton")
-        .expect("binary builds")
-        .current_dir(dir.path())
-        .args([
-            "serve",
-            "--with-mcp",
-            "--mcp-path",
-            "/mcp",
-            "--with-embedded-ailoop",
-            "--ailoop-base-path",
-            "/mcp",
-        ])
-        .assert()
-        .failure()
-        .stderr(contains("NEWTON-SERVE-AIL-003"));
-}
-
-#[test]
-fn allows_non_colliding_paths_with_mcp() {
-    let dir = tempdir().expect("tempdir");
-    // This should NOT fail on path validation — it will fail later trying to
-    // bind (port 0 resolves to an ephemeral port and SQLite init runs), but
-    // it must NOT produce a NEWTON-SERVE-AIL-* error.
+    // This should NOT fail on path validation.
     let output = Command::cargo_bin("newton")
         .expect("binary builds")
         .current_dir(dir.path())
         .args([
             "serve",
             "--with-mcp",
-            "--mcp-path",
-            "/mcp",
             "--with-embedded-ailoop",
             "--ailoop-base-path",
             "/ailoop",
@@ -173,9 +147,5 @@ fn allows_non_colliding_paths_with_mcp() {
     assert!(
         !stderr.contains("NEWTON-SERVE-AIL-002"),
         "unexpected NEWTON-SERVE-AIL-002 in stderr: {stderr}"
-    );
-    assert!(
-        !stderr.contains("NEWTON-SERVE-AIL-003"),
-        "unexpected NEWTON-SERVE-AIL-003 in stderr: {stderr}"
     );
 }

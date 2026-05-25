@@ -13,17 +13,17 @@ use std::sync::Arc;
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/repos", get(list_repos))
-        .route("/api/repo-dependencies", get(list_repo_dependencies))
-        .route("/api/module-dependencies", get(list_module_dependencies))
-        .route("/api/module-dependencies", post(create_module_dependency))
-        .route("/api/saved-views", get(list_saved_views))
+        .route("/repos", get(list_repos))
+        .route("/repo-dependencies", get(list_repo_dependencies))
+        .route("/module-dependencies", get(list_module_dependencies))
+        .route("/module-dependencies", post(create_module_dependency))
+        .route("/saved-views", get(list_saved_views))
         .with_state(state)
 }
 
 #[utoipa::path(
     get,
-    path = "/api/repos",
+    path = "/repos",
     tag = "portfolio",
     responses(
         (status = 200, description = "Repository list", body = [newton_backend::RepoItem]),
@@ -39,7 +39,7 @@ pub(crate) async fn list_repos(State(state): State<Arc<AppState>>) -> Response {
 
 #[utoipa::path(
     get,
-    path = "/api/repo-dependencies",
+    path = "/repo-dependencies",
     tag = "portfolio",
     responses(
         (status = 200, description = "Repository dependency list", body = [newton_backend::RepoDependencyItem]),
@@ -55,7 +55,7 @@ pub(crate) async fn list_repo_dependencies(State(state): State<Arc<AppState>>) -
 
 #[utoipa::path(
     get,
-    path = "/api/module-dependencies",
+    path = "/module-dependencies",
     tag = "portfolio",
     responses(
         (status = 200, description = "Module dependency list", body = [newton_backend::ModuleDependencyItem]),
@@ -71,7 +71,7 @@ pub(crate) async fn list_module_dependencies(State(state): State<Arc<AppState>>)
 
 #[utoipa::path(
     post,
-    path = "/api/module-dependencies",
+    path = "/module-dependencies",
     tag = "portfolio",
     request_body = CreateModuleDependencyBody,
     responses(
@@ -107,7 +107,7 @@ pub(crate) struct SavedViewsQuery {
 
 #[utoipa::path(
     get,
-    path = "/api/saved-views",
+    path = "/saved-views",
     tag = "portfolio",
     params(("kind" = Option<String>, Query, description = "Optional saved-view kind filter")),
     responses(

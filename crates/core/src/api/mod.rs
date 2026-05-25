@@ -15,18 +15,15 @@ pub mod workflow_files;
 pub mod workflows;
 
 use crate::api::state::AppState;
-use axum::{routing::get, Router};
-use serde::{Deserialize, Serialize};
+use axum::Router;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
-use utoipa::ToSchema;
 
-pub fn create_router(state: AppState, ui_dir: Option<PathBuf>) -> Router {
+// lockstep: axum major version MUST match cli-framework (both 0.8)
+pub fn api_v1_router(state: AppState) -> Router {
     let arc_state = Arc::new(state);
-
-    let mut router = Router::new()
+    Router::new()
         .merge(workflows::routes(arc_state.clone()))
         .merge(hil::routes(arc_state.clone()))
         .merge(streaming::routes(arc_state.clone()))
@@ -40,35 +37,15 @@ pub fn create_router(state: AppState, ui_dir: Option<PathBuf>) -> Router {
         .merge(catalog::routes(arc_state.clone()))
         .merge(testing_reset::routes(arc_state.clone()))
         .merge(workflow_files::routes(arc_state.clone()))
-        .route("/health", get(health_check))
-        .layer(CorsLayer::permissive());
-
-    if let Some(ref dir) = ui_dir {
-        if dir.exists() {
-            router = router.fallback_service(
-                ServeDir::new(dir).not_found_service(ServeFile::new(dir.join("index.html"))),
-            );
-        }
-    }
-
-    router
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct HealthResponse {
-    pub status: String,
-    pub version: String,
+pub fn static_ui_router(dir: PathBuf) -> Router {
+    Router::new().fallback_service(
+        ServeDir::new(&dir).not_found_service(ServeFile::new(dir.join("index.html"))),
+    )
 }
 
-#[utoipa::path(
-    get,
-    path = "/health",
-    tag = "health",
-    responses((status = 200, description = "Service health", body = HealthResponse))
-)]
-pub(crate) async fn health_check() -> axum::response::Json<HealthResponse> {
-    axum::response::Json(HealthResponse {
-        status: "ok".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-    })
+pub fn openapi_json() -> serde_json::Value {
+    use utoipa::OpenApi;
+    serde_json::to_value(openapi::ApiDoc::openapi()).expect("OpenAPI doc serialization failed")
 }

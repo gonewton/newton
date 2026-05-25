@@ -24,7 +24,7 @@ x-connection-lifecycle:
 
 channels:
   heartbeat:
-    address: /ws
+    address: /api/v1/ws
     description: |
       Generic heartbeat WebSocket. Sends `{"type":"welcome"}` on connect,
       forwards every BroadcastEvent without filtering, and sends a WS Ping
@@ -46,7 +46,7 @@ channels:
         $ref: '#/components/messages/ExecutionUpdate'
 
   workflowInstanceWs:
-    address: /api/stream/workflow/{instanceId}/ws
+    address: /api/v1/stream/workflow/{instanceId}/ws
     description: |
       Per-instance workflow WebSocket. Returns HTTP 404 if the instance does
       not exist (no WS upgrade). Emits a `workflowInstanceUpdated` snapshot
@@ -86,7 +86,7 @@ channels:
         $ref: '#/components/messages/ExecutionUpdate'
 
   logsWs:
-    address: /api/stream/logs/{instanceId}/{nodeId}/ws
+    address: /api/v1/stream/logs/{instanceId}/{nodeId}/ws
     description: |
       Per-instance, per-node log WebSocket. Emits a synthetic
       `logMessage "Connected to <task_name>"` frame immediately on connect.
@@ -116,7 +116,7 @@ channels:
         $ref: '#/components/messages/LogMessage'
 
   workflowInstanceSse:
-    address: /api/stream/workflow/{instanceId}/sse
+    address: /api/v1/stream/workflow/{instanceId}/sse
     description: |
       Per-instance workflow SSE (EventSource) fallback. Returns HTTP 404 if
       the instance does not exist. Emits a `workflowInstanceUpdated` snapshot

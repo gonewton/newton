@@ -12,18 +12,18 @@ use std::sync::Arc;
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/products", get(list_products))
-        .route("/api/components", get(list_components))
-        .route("/api/pending-approvals", get(list_pending_approvals))
-        .route("/api/regressions", get(list_regressions))
-        .route("/api/indicators", get(list_indicators))
-        .route("/api/recent-actions", get(list_recent_actions))
+        .route("/products", get(list_products))
+        .route("/components", get(list_components))
+        .route("/pending-approvals", get(list_pending_approvals))
+        .route("/regressions", get(list_regressions))
+        .route("/indicators", get(list_indicators))
+        .route("/recent-actions", get(list_recent_actions))
         .with_state(state)
 }
 
 #[utoipa::path(
     get,
-    path = "/api/products",
+    path = "/products",
     tag = "dashboard",
     responses(
         (status = 200, description = "Product list", body = [newton_backend::ProductItem]),
@@ -39,7 +39,7 @@ pub(crate) async fn list_products(State(state): State<Arc<AppState>>) -> Respons
 
 #[utoipa::path(
     get,
-    path = "/api/components",
+    path = "/components",
     tag = "dashboard",
     responses(
         (status = 200, description = "Component list", body = [newton_backend::ComponentItem]),
@@ -55,7 +55,7 @@ pub(crate) async fn list_components(State(state): State<Arc<AppState>>) -> Respo
 
 #[utoipa::path(
     get,
-    path = "/api/pending-approvals",
+    path = "/pending-approvals",
     tag = "dashboard",
     responses(
         (status = 200, description = "Pending approval list", body = [newton_backend::PendingApprovalItem]),
@@ -71,7 +71,7 @@ pub(crate) async fn list_pending_approvals(State(state): State<Arc<AppState>>) -
 
 #[utoipa::path(
     get,
-    path = "/api/regressions",
+    path = "/regressions",
     tag = "dashboard",
     responses(
         (status = 200, description = "Regression list", body = [newton_backend::RegressionItem]),
@@ -87,7 +87,7 @@ pub(crate) async fn list_regressions(State(state): State<Arc<AppState>>) -> Resp
 
 #[utoipa::path(
     get,
-    path = "/api/indicators",
+    path = "/indicators",
     tag = "dashboard",
     responses(
         (status = 200, description = "Indicator list", body = [newton_backend::IndicatorItem]),
@@ -108,7 +108,7 @@ pub(crate) struct RecentActionsQuery {
 
 #[utoipa::path(
     get,
-    path = "/api/recent-actions",
+    path = "/recent-actions",
     tag = "dashboard",
     params(("limit" = Option<u32>, Query, description = "Maximum number of recent actions")),
     responses(

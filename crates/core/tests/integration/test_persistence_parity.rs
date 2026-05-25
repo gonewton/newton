@@ -40,7 +40,7 @@ async fn test_restart_persistence() {
     // ── Phase 1: create state and populate ───────────────────────────────────
     {
         let state = make_state(Arc::clone(&backend));
-        let app = newton_core::api::create_router(state, None);
+        let app = newton_core::api::api_v1_router(state);
 
         // POST workflow
         let instance = WorkflowInstance {
@@ -55,7 +55,7 @@ async fn test_restart_persistence() {
         };
         let req = Request::builder()
             .method(Method::POST)
-            .uri("/api/workflows")
+            .uri("/workflows")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(serde_json::to_vec(&instance).unwrap()))
             .unwrap();
@@ -66,7 +66,7 @@ async fn test_restart_persistence() {
         let patch_a = json!({"status": "running", "started_at": chrono::Utc::now()});
         let req = Request::builder()
             .method(Method::PATCH)
-            .uri(format!("/api/workflows/{}/nodes/node-a", instance_id))
+            .uri(format!("/workflows/{}/nodes/node-a", instance_id))
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(serde_json::to_vec(&patch_a).unwrap()))
             .unwrap();
@@ -77,7 +77,7 @@ async fn test_restart_persistence() {
         let patch_b = json!({"status": "succeeded", "started_at": chrono::Utc::now(), "ended_at": chrono::Utc::now()});
         let req = Request::builder()
             .method(Method::PATCH)
-            .uri(format!("/api/workflows/{}/nodes/node-b", instance_id))
+            .uri(format!("/workflows/{}/nodes/node-b", instance_id))
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(serde_json::to_vec(&patch_b).unwrap()))
             .unwrap();
@@ -88,10 +88,10 @@ async fn test_restart_persistence() {
     // ── Phase 2: new AppState over the same backend (simulate restart) ───────
     {
         let state2 = make_state(Arc::clone(&backend));
-        let app2 = newton_core::api::create_router(state2, None);
+        let app2 = newton_core::api::api_v1_router(state2);
 
         let req = Request::builder()
-            .uri(format!("/api/workflows/{}", instance_id))
+            .uri(format!("/workflows/{}", instance_id))
             .body(Body::empty())
             .unwrap();
         let resp = app2.oneshot(req).await.unwrap();
@@ -161,7 +161,7 @@ async fn test_log_replay_after_restart() {
 
     // ── Simulate restart: new AppState over the same backend ─────────────────
     let state2 = make_state(Arc::clone(&backend));
-    let app2 = newton_core::api::create_router(state2, None);
+    let app2 = newton_core::api::api_v1_router(state2);
 
     // Bind to an ephemeral port and spawn the axum server in the background
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -176,7 +176,7 @@ async fn test_log_replay_after_restart() {
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
     // Connect to the logs WebSocket endpoint
-    let ws_url = format!("ws://127.0.0.1:{port}/api/stream/logs/{instance_id}/{node_id}/ws");
+    let ws_url = format!("ws://127.0.0.1:{port}/stream/logs/{instance_id}/{node_id}/ws");
     let (mut ws_stream, _) = tokio_tungstenite::connect_async(&ws_url)
         .await
         .expect("WebSocket connect");
@@ -253,7 +253,7 @@ async fn test_hil_persistence_after_restart() {
     // Phase 1: insert HIL event and submit action
     {
         let state = make_state(Arc::clone(&backend));
-        let app = newton_core::api::create_router(state, None);
+        let app = newton_core::api::api_v1_router(state);
 
         // Insert HIL event via backend (no HTTP endpoint for creating HIL events externally)
         backend
@@ -278,7 +278,7 @@ async fn test_hil_persistence_after_restart() {
         let req = Request::builder()
             .method(Method::POST)
             .uri(format!(
-                "/api/hil/workflows/{}/{}/action",
+                "/hil/workflows/{}/{}/action",
                 instance_id, event_id
             ))
             .header(header::CONTENT_TYPE, "application/json")
@@ -291,10 +291,10 @@ async fn test_hil_persistence_after_restart() {
     // Phase 2: restart — new AppState over the same backend
     {
         let state2 = make_state(Arc::clone(&backend));
-        let app2 = newton_core::api::create_router(state2, None);
+        let app2 = newton_core::api::api_v1_router(state2);
 
         let req = Request::builder()
-            .uri(format!("/api/hil/workflows/{}", instance_id))
+            .uri(format!("/hil/workflows/{}", instance_id))
             .body(Body::empty())
             .unwrap();
         let resp = app2.oneshot(req).await.unwrap();
@@ -324,7 +324,7 @@ async fn test_list_after_restart_with_filter() {
     // Phase 1: insert 3 instances
     {
         let state = make_state(Arc::clone(&backend));
-        let app = newton_core::api::create_router(state, None);
+        let app = newton_core::api::api_v1_router(state);
 
         for (id, status) in [
             (id_running1.clone(), "running"),
@@ -341,7 +341,7 @@ async fn test_list_after_restart_with_filter() {
             });
             let req = Request::builder()
                 .method(Method::POST)
-                .uri("/api/workflows")
+                .uri("/workflows")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(serde_json::to_vec(&body).unwrap()))
                 .unwrap();
@@ -353,10 +353,10 @@ async fn test_list_after_restart_with_filter() {
     // Phase 2: restart — new AppState, check filtered list
     {
         let state2 = make_state(Arc::clone(&backend));
-        let app2 = newton_core::api::create_router(state2, None);
+        let app2 = newton_core::api::api_v1_router(state2);
 
         let req = Request::builder()
-            .uri("/api/workflows?status=running")
+            .uri("/workflows?status=running")
             .body(Body::empty())
             .unwrap();
         let resp = app2.oneshot(req).await.unwrap();
@@ -374,11 +374,11 @@ async fn test_list_after_restart_with_filter() {
 
         // Also verify the full list has 3
         let req = Request::builder()
-            .uri("/api/workflows")
+            .uri("/workflows")
             .body(Body::empty())
             .unwrap();
         let state3 = make_state(Arc::clone(&backend));
-        let app3 = newton_core::api::create_router(state3, None);
+        let app3 = newton_core::api::api_v1_router(state3);
         let resp = app3.oneshot(req).await.unwrap();
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await

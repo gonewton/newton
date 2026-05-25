@@ -13,10 +13,10 @@ use std::sync::Arc;
 /// Routes for the human-in-the-loop (HIL) API resource.
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/hil/instances", get(list_hil_instances))
-        .route("/api/hil/workflows/{id}", get(list_hil_events))
+        .route("/hil/instances", get(list_hil_instances))
+        .route("/hil/workflows/{id}", get(list_hil_events))
         .route(
-            "/api/hil/workflows/{id}/{event_id}/action",
+            "/hil/workflows/{id}/{event_id}/action",
             post(submit_hil_action),
         )
         .with_state(state)
@@ -38,7 +38,7 @@ fn map_store_err(_e: ApiError) -> Response {
 /// List distinct workflow instance IDs that currently have HIL events.
 #[utoipa::path(
     get,
-    path = "/api/hil/instances",
+    path = "/hil/instances",
     tag = "hil",
     responses((status = 200, description = "HIL workflow instance ids", body = [String]))
 )]
@@ -51,7 +51,7 @@ pub(crate) async fn list_hil_instances(State(state): State<Arc<AppState>>) -> Re
 
 #[utoipa::path(
     get,
-    path = "/api/hil/workflows/{id}",
+    path = "/hil/workflows/{id}",
     tag = "hil",
     params(("id" = String, Path, description = "Workflow instance id")),
     responses((status = 200, description = "HIL event list", body = [HilEvent]))
@@ -68,7 +68,7 @@ pub(crate) async fn list_hil_events(
 
 #[utoipa::path(
     post,
-    path = "/api/hil/workflows/{id}/{event_id}/action",
+    path = "/hil/workflows/{id}/{event_id}/action",
     tag = "hil",
     params(
         ("id" = String, Path, description = "Workflow instance id"),

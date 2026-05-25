@@ -42,9 +42,9 @@ pub struct StreamFilters {
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/ws", get(heartbeat_ws))
-        .route("/api/stream/workflow/{id}/ws", get(workflow_stream))
-        .route("/api/stream/logs/{id}/{node_id}/ws", get(logs_stream))
-        .route("/api/stream/workflow/{id}/sse", get(workflow_sse))
+        .route("/stream/workflow/{id}/ws", get(workflow_stream))
+        .route("/stream/logs/{id}/{node_id}/ws", get(logs_stream))
+        .route("/stream/workflow/{id}/sse", get(workflow_sse))
         .with_state(state)
 }
 

@@ -6,14 +6,14 @@ use std::sync::Arc;
 /// Routes for the operators API resource.
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/operators", get(list_operators))
+        .route("/operators", get(list_operators))
         .with_state(state)
 }
 
 /// Return the configured operator descriptors as a typed JSON array.
 #[utoipa::path(
     get,
-    path = "/api/operators",
+    path = "/operators",
     tag = "operators",
     responses((status = 200, description = "Operator descriptor list", body = [OperatorDescriptor]))
 )]

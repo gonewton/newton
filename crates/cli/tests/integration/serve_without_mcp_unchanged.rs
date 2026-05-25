@@ -94,7 +94,7 @@ async fn run_serve_without_mcp_test() -> Result<(), String> {
         .build()
         .map_err(|e| format!("reqwest client: {e}"))?;
 
-    let health_url = format!("http://127.0.0.1:{}/health", port);
+    let health_url = format!("http://127.0.0.1:{}/healthz", port);
     let ready_deadline = tokio::time::Instant::now() + READINESS_POLL_BUDGET;
     let mut ready = false;
     while tokio::time::Instant::now() < ready_deadline {

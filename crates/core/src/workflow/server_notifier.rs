@@ -63,7 +63,7 @@ impl ServerNotifier {
         while let Some(event) = rx.recv().await {
             match event {
                 NotifierEvent::WorkflowStarted(instance) => {
-                    let url = format!("{server_url}/api/workflows");
+                    let url = format!("{server_url}/api/v1/workflows");
                     if let Err(e) = client.post(&url).json(&instance).send().await {
                         tracing::warn!(
                             code = "SERVER-NOTIFY-001",
@@ -74,7 +74,7 @@ impl ServerNotifier {
                 }
                 NotifierEvent::NodeUpdated { instance_id, node } => {
                     let url = format!(
-                        "{}/api/workflows/{}/nodes/{}",
+                        "{}/api/v1/workflows/{}/nodes/{}",
                         server_url, instance_id, node.node_id
                     );
                     let update = serde_json::json!({
@@ -96,7 +96,7 @@ impl ServerNotifier {
                     status,
                     ended_at,
                 } => {
-                    let url = format!("{server_url}/api/workflows/{instance_id}");
+                    let url = format!("{server_url}/api/v1/workflows/{instance_id}");
                     let update = serde_json::json!({
                         "status": status,
                         "ended_at": ended_at,

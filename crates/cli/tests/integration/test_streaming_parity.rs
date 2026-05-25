@@ -40,7 +40,7 @@ async fn wait_for_ready(port: u16) -> bool {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     while tokio::time::Instant::now() < deadline {
         if let Ok(resp) = client
-            .get(format!("http://127.0.0.1:{}/health", port))
+            .get(format!("http://127.0.0.1:{}/healthz", port))
             .send()
             .await
         {
@@ -66,7 +66,7 @@ async fn ws_heartbeat_welcome() {
         panic!("server did not become ready within 20s");
     }
 
-    let url = format!("ws://127.0.0.1:{}/ws", port);
+    let url = format!("ws://127.0.0.1:{}/api/v1/ws", port);
     let connect_result =
         tokio::time::timeout(Duration::from_millis(500), connect_async(&url)).await;
     let (mut ws, _) = match connect_result {
@@ -113,7 +113,7 @@ async fn ws_heartbeat_forwards_broadcast() {
         panic!("server did not become ready within 20s");
     }
 
-    let url = format!("ws://127.0.0.1:{}/ws", port);
+    let url = format!("ws://127.0.0.1:{}/api/v1/ws", port);
     let (mut ws, _) = connect_async(&url).await.expect("WS connect /ws");
 
     // Read and discard the welcome frame.
@@ -123,7 +123,7 @@ async fn ws_heartbeat_forwards_broadcast() {
         .expect("welcome frame present")
         .expect("welcome frame ok");
 
-    // Create a workflow instance (POST /api/workflows).
+    // Create a workflow instance (POST /api/v1/workflows).
     let client = reqwest::Client::new();
     let instance_id = uuid::Uuid::new_v4().to_string();
     let body = serde_json::json!({
@@ -134,11 +134,11 @@ async fn ws_heartbeat_forwards_broadcast() {
         "started_at": "2026-01-01T00:00:00Z"
     });
     let create_resp = client
-        .post(format!("http://127.0.0.1:{}/api/workflows", port))
+        .post(format!("http://127.0.0.1:{}/api/v1/workflows", port))
         .json(&body)
         .send()
         .await
-        .expect("POST /api/workflows");
+        .expect("POST /api/v1/workflows");
     assert!(
         create_resp.status().is_success(),
         "create workflow: {}",
@@ -149,7 +149,7 @@ async fn ws_heartbeat_forwards_broadcast() {
     let patch_body = serde_json::json!({"status": "running"});
     let patch_resp = client
         .patch(format!(
-            "http://127.0.0.1:{}/api/workflows/{}/nodes/task-1",
+            "http://127.0.0.1:{}/api/v1/workflows/{}/nodes/task-1",
             port, instance_id
         ))
         .json(&patch_body)
@@ -206,15 +206,15 @@ async fn ws_workflow_snapshot_on_connect() {
         "started_at": "2026-01-01T00:00:00Z"
     });
     let create_resp = client
-        .post(format!("http://127.0.0.1:{}/api/workflows", port))
+        .post(format!("http://127.0.0.1:{}/api/v1/workflows", port))
         .json(&body)
         .send()
         .await
-        .expect("POST /api/workflows");
+        .expect("POST /api/v1/workflows");
     assert!(create_resp.status().is_success());
 
     let url = format!(
-        "ws://127.0.0.1:{}/api/stream/workflow/{}/ws",
+        "ws://127.0.0.1:{}/api/v1/stream/workflow/{}/ws",
         port, instance_id
     );
     let (mut ws, _) = connect_async(&url)
@@ -263,7 +263,7 @@ async fn ws_workflow_not_found_returns_404() {
 
     let unknown_id = uuid::Uuid::new_v4().to_string();
     let url = format!(
-        "ws://127.0.0.1:{}/api/stream/workflow/{}/ws",
+        "ws://127.0.0.1:{}/api/v1/stream/workflow/{}/ws",
         port, unknown_id
     );
     let result = connect_async(&url).await;
@@ -315,16 +315,16 @@ async fn ws_logs_connected_line() {
         "started_at": "2026-01-01T00:00:00Z"
     });
     let create_resp = client
-        .post(format!("http://127.0.0.1:{}/api/workflows", port))
+        .post(format!("http://127.0.0.1:{}/api/v1/workflows", port))
         .json(&body)
         .send()
         .await
-        .expect("POST /api/workflows");
+        .expect("POST /api/v1/workflows");
     assert!(create_resp.status().is_success());
 
     let node_id = "my-node";
     let url = format!(
-        "ws://127.0.0.1:{}/api/stream/logs/{}/{}/ws",
+        "ws://127.0.0.1:{}/api/v1/stream/logs/{}/{}/ws",
         port, instance_id, node_id
     );
     let (mut ws, _) = connect_async(&url).await.expect("WS connect logs stream");
