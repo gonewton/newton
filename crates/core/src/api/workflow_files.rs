@@ -191,17 +191,17 @@ fn extract_metadata(content: &str) -> (Option<String>, Option<String>, Option<Ve
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/workflow-files", get(list_workflow_files))
-        .route("/api/workflow-files/validate", post(validate_workflow_file))
-        .route("/api/workflow-files/{name}", get(get_workflow_file))
-        .route("/api/workflow-files/{name}", put(put_workflow_file))
-        .route("/api/workflow-files/{name}", delete(delete_workflow_file))
+        .route("/workflow-files", get(list_workflow_files))
+        .route("/workflow-files/validate", post(validate_workflow_file))
+        .route("/workflow-files/{name}", get(get_workflow_file))
+        .route("/workflow-files/{name}", put(put_workflow_file))
+        .route("/workflow-files/{name}", delete(delete_workflow_file))
         .with_state(state)
 }
 
 #[utoipa::path(
     get,
-    path = "/api/workflow-files",
+    path = "/workflow-files",
     tag = "workflow-files",
     responses(
         (status = 200, description = "List of workflow files", body = Vec<WorkflowFileSummary>),
@@ -239,7 +239,7 @@ pub(crate) async fn list_workflow_files(State(state): State<Arc<AppState>>) -> R
 
 #[utoipa::path(
     get,
-    path = "/api/workflow-files/{name}",
+    path = "/workflow-files/{name}",
     tag = "workflow-files",
     params(("name" = String, Path, description = "Workflow file name (no .yaml extension)")),
     responses(
@@ -276,7 +276,7 @@ pub(crate) async fn get_workflow_file(
 
 #[utoipa::path(
     put,
-    path = "/api/workflow-files/{name}",
+    path = "/workflow-files/{name}",
     tag = "workflow-files",
     params(("name" = String, Path, description = "Workflow file name (no .yaml extension)")),
     request_body = PutWorkflowFileBody,
@@ -335,7 +335,7 @@ pub(crate) async fn put_workflow_file(
 
 #[utoipa::path(
     delete,
-    path = "/api/workflow-files/{name}",
+    path = "/workflow-files/{name}",
     tag = "workflow-files",
     params(("name" = String, Path, description = "Workflow file name (no .yaml extension)")),
     responses(
@@ -361,7 +361,7 @@ pub(crate) async fn delete_workflow_file(
 
 #[utoipa::path(
     post,
-    path = "/api/workflow-files/validate",
+    path = "/workflow-files/validate",
     tag = "workflow-files",
     request_body = PutWorkflowFileBody,
     responses(

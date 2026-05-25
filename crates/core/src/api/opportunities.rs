@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/opportunities", get(list_opportunities))
-        .route("/api/opportunities/{id}", patch(patch_opportunity))
+        .route("/opportunities", get(list_opportunities))
+        .route("/opportunities/{id}", patch(patch_opportunity))
         .with_state(state)
 }
 
@@ -25,7 +25,7 @@ pub(crate) struct OpportunityQuery {
 
 #[utoipa::path(
     get,
-    path = "/api/opportunities",
+    path = "/opportunities",
     tag = "opportunities",
     params(("status" = Option<String>, Query, description = "Optional opportunity status filter")),
     responses(
@@ -45,7 +45,7 @@ pub(crate) async fn list_opportunities(
 
 #[utoipa::path(
     patch,
-    path = "/api/opportunities/{id}",
+    path = "/opportunities/{id}",
     tag = "opportunities",
     params(("id" = String, Path, description = "Opportunity id")),
     request_body = PatchOpportunityBody,

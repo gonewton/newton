@@ -33,8 +33,6 @@ fn serve_with_mcp_emits_log_and_serves_both_surfaces() {
             "--port",
             &port.to_string(),
             "--with-mcp",
-            "--mcp-path",
-            "/mcp",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -92,7 +90,7 @@ fn serve_with_mcp_emits_log_and_serves_both_surfaces() {
             .map_err(|e| format!("runtime: {e}"))?;
         rt.block_on(async {
             let client = reqwest::Client::new();
-            let health_url = format!("http://127.0.0.1:{}/health", port);
+            let health_url = format!("http://127.0.0.1:{}/healthz", port);
             let mcp_url = format!("http://127.0.0.1:{}/mcp", port);
 
             // /health: well-defined Newton REST surface.

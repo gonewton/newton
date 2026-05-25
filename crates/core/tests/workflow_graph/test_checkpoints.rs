@@ -907,7 +907,7 @@ async fn test_workflow_definition_snapshot_hash_matches_execution() {
 async fn test_workflow_instance_definition_non_null_for_cli_run() {
     // G30: WorkflowInstance.definition must be non-null for all runs.
     // Because the instance is only observable via a server notifier, we use a
-    // wiremock server to capture the POST /api/workflows payload and verify the
+    // wiremock server to capture the POST /api/v1/workflows payload and verify the
     // `definition` field is present and non-null.  Per spec: if CLI-notifier-less
     // runs are unobservable without changing the return type, a minimal notifier
     // may be used — but the test itself must be present.
@@ -918,7 +918,7 @@ async fn test_workflow_instance_definition_non_null_for_cli_run() {
 
     let mock_server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/api/workflows"))
+        .and(path("/api/v1/workflows"))
         .respond_with(ResponseTemplate::new(200))
         .mount(&mock_server)
         .await;
@@ -960,8 +960,8 @@ async fn test_workflow_instance_definition_non_null_for_cli_run() {
         .expect("received_requests");
     let start_request = requests
         .iter()
-        .find(|r| r.url.path() == "/api/workflows")
-        .expect("POST /api/workflows request was not received");
+        .find(|r| r.url.path() == "/api/v1/workflows")
+        .expect("POST /api/v1/workflows request was not received");
 
     let body: serde_json::Value =
         serde_json::from_slice(&start_request.body).expect("request body is valid JSON");

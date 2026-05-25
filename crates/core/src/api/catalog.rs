@@ -26,44 +26,41 @@ fn status_from_error(e: &ApiError) -> StatusCode {
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
         // Product
-        .route("/api/products/{id}", get(get_product))
-        .route("/api/products", post(create_product))
-        .route("/api/products/{id}", put(put_product))
-        .route("/api/products/{id}", patch(patch_product))
-        .route("/api/products/{id}", delete(delete_product))
+        .route("/products/{id}", get(get_product))
+        .route("/products", post(create_product))
+        .route("/products/{id}", put(put_product))
+        .route("/products/{id}", patch(patch_product))
+        .route("/products/{id}", delete(delete_product))
         // Component
-        .route("/api/components/{id}", get(get_component))
-        .route("/api/components", post(create_component))
-        .route("/api/components/{id}", put(put_component))
-        .route("/api/components/{id}", patch(patch_component))
-        .route("/api/components/{id}", delete(delete_component))
+        .route("/components/{id}", get(get_component))
+        .route("/components", post(create_component))
+        .route("/components/{id}", put(put_component))
+        .route("/components/{id}", patch(patch_component))
+        .route("/components/{id}", delete(delete_component))
         // Repo
-        .route("/api/repos/{id}", get(get_repo))
-        .route("/api/repos", post(create_repo))
-        .route("/api/repos/{id}", put(put_repo))
-        .route("/api/repos/{id}", patch(patch_repo))
-        .route("/api/repos/{id}", delete(delete_repo))
+        .route("/repos/{id}", get(get_repo))
+        .route("/repos", post(create_repo))
+        .route("/repos/{id}", put(put_repo))
+        .route("/repos/{id}", patch(patch_repo))
+        .route("/repos/{id}", delete(delete_repo))
         // Module
-        .route("/api/modules", get(list_modules))
-        .route("/api/modules/{id}", get(get_module))
-        .route("/api/modules", post(create_module))
-        .route("/api/modules/{id}", put(put_module))
-        .route("/api/modules/{id}", patch(patch_module))
-        .route("/api/modules/{id}", delete(delete_module))
+        .route("/modules", get(list_modules))
+        .route("/modules/{id}", get(get_module))
+        .route("/modules", post(create_module))
+        .route("/modules/{id}", put(put_module))
+        .route("/modules/{id}", patch(patch_module))
+        .route("/modules/{id}", delete(delete_module))
         // ModuleDependency
-        .route("/api/module-dependencies/{id}", get(get_module_dependency))
+        .route("/module-dependencies/{id}", get(get_module_dependency))
+        .route("/module-dependencies/{id}", patch(patch_module_dependency))
         .route(
-            "/api/module-dependencies/{id}",
-            patch(patch_module_dependency),
-        )
-        .route(
-            "/api/module-dependencies/{id}",
+            "/module-dependencies/{id}",
             delete(delete_module_dependency),
         )
         // Grade
-        .route("/api/grades", get(list_grades).post(create_grade))
+        .route("/grades", get(list_grades).post(create_grade))
         .route(
-            "/api/grades/{id}",
+            "/grades/{id}",
             get(get_grade).patch(patch_grade).delete(delete_grade),
         )
         .with_state(state)
@@ -73,7 +70,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
 
 #[utoipa::path(
     get,
-    path = "/api/products/{id}",
+    path = "/products/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Product ID")),
     responses(
@@ -94,7 +91,7 @@ pub(crate) async fn get_product(
 
 #[utoipa::path(
     post,
-    path = "/api/products",
+    path = "/products",
     tag = "catalog",
     request_body = CreateProductBody,
     responses(
@@ -115,7 +112,7 @@ pub(crate) async fn create_product(
 
 #[utoipa::path(
     put,
-    path = "/api/products/{id}",
+    path = "/products/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Product ID")),
     request_body = PutProductBody,
@@ -139,7 +136,7 @@ pub(crate) async fn put_product(
 
 #[utoipa::path(
     patch,
-    path = "/api/products/{id}",
+    path = "/products/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Product ID")),
     request_body = PatchProductBody,
@@ -162,7 +159,7 @@ pub(crate) async fn patch_product(
 
 #[utoipa::path(
     delete,
-    path = "/api/products/{id}",
+    path = "/products/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Product ID")),
     responses(
@@ -186,7 +183,7 @@ pub(crate) async fn delete_product(
 
 #[utoipa::path(
     get,
-    path = "/api/components/{id}",
+    path = "/components/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Component ID")),
     responses(
@@ -207,7 +204,7 @@ pub(crate) async fn get_component(
 
 #[utoipa::path(
     post,
-    path = "/api/components",
+    path = "/components",
     tag = "catalog",
     request_body = CreateComponentBody,
     responses(
@@ -228,7 +225,7 @@ pub(crate) async fn create_component(
 
 #[utoipa::path(
     put,
-    path = "/api/components/{id}",
+    path = "/components/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Component ID")),
     request_body = PutComponentBody,
@@ -251,7 +248,7 @@ pub(crate) async fn put_component(
 
 #[utoipa::path(
     patch,
-    path = "/api/components/{id}",
+    path = "/components/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Component ID")),
     request_body = PatchComponentBody,
@@ -274,7 +271,7 @@ pub(crate) async fn patch_component(
 
 #[utoipa::path(
     delete,
-    path = "/api/components/{id}",
+    path = "/components/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Component ID")),
     responses(
@@ -298,7 +295,7 @@ pub(crate) async fn delete_component(
 
 #[utoipa::path(
     get,
-    path = "/api/repos/{id}",
+    path = "/repos/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Repo ID")),
     responses(
@@ -319,7 +316,7 @@ pub(crate) async fn get_repo(
 
 #[utoipa::path(
     post,
-    path = "/api/repos",
+    path = "/repos",
     tag = "catalog",
     request_body = CreateRepoBody,
     responses(
@@ -341,7 +338,7 @@ pub(crate) async fn create_repo(
 
 #[utoipa::path(
     put,
-    path = "/api/repos/{id}",
+    path = "/repos/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Repo ID")),
     request_body = PutRepoBody,
@@ -364,7 +361,7 @@ pub(crate) async fn put_repo(
 
 #[utoipa::path(
     patch,
-    path = "/api/repos/{id}",
+    path = "/repos/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Repo ID")),
     request_body = PatchRepoBody,
@@ -387,7 +384,7 @@ pub(crate) async fn patch_repo(
 
 #[utoipa::path(
     delete,
-    path = "/api/repos/{id}",
+    path = "/repos/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Repo ID")),
     responses(
@@ -411,7 +408,7 @@ pub(crate) async fn delete_repo(
 
 #[utoipa::path(
     get,
-    path = "/api/modules",
+    path = "/modules",
     tag = "catalog",
     responses(
         (status = 200, description = "Module list", body = [newton_backend::ModuleItem]),
@@ -427,7 +424,7 @@ pub(crate) async fn list_modules(State(state): State<Arc<AppState>>) -> Response
 
 #[utoipa::path(
     get,
-    path = "/api/modules/{id}",
+    path = "/modules/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Module ID")),
     responses(
@@ -448,7 +445,7 @@ pub(crate) async fn get_module(
 
 #[utoipa::path(
     post,
-    path = "/api/modules",
+    path = "/modules",
     tag = "catalog",
     request_body = CreateModuleBody,
     responses(
@@ -469,7 +466,7 @@ pub(crate) async fn create_module(
 
 #[utoipa::path(
     put,
-    path = "/api/modules/{id}",
+    path = "/modules/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Module ID")),
     request_body = PutModuleBody,
@@ -492,7 +489,7 @@ pub(crate) async fn put_module(
 
 #[utoipa::path(
     patch,
-    path = "/api/modules/{id}",
+    path = "/modules/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Module ID")),
     request_body = PatchModuleBody,
@@ -515,7 +512,7 @@ pub(crate) async fn patch_module(
 
 #[utoipa::path(
     delete,
-    path = "/api/modules/{id}",
+    path = "/modules/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Module ID")),
     responses(
@@ -539,7 +536,7 @@ pub(crate) async fn delete_module(
 
 #[utoipa::path(
     get,
-    path = "/api/module-dependencies/{id}",
+    path = "/module-dependencies/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "ModuleDependency ID")),
     responses(
@@ -560,7 +557,7 @@ pub(crate) async fn get_module_dependency(
 
 #[utoipa::path(
     patch,
-    path = "/api/module-dependencies/{id}",
+    path = "/module-dependencies/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "ModuleDependency ID")),
     request_body = PatchModuleDependencyBody,
@@ -583,7 +580,7 @@ pub(crate) async fn patch_module_dependency(
 
 #[utoipa::path(
     delete,
-    path = "/api/module-dependencies/{id}",
+    path = "/module-dependencies/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "ModuleDependency ID")),
     responses(
@@ -606,7 +603,7 @@ pub(crate) async fn delete_module_dependency(
 
 #[utoipa::path(
     get,
-    path = "/api/grades",
+    path = "/grades",
     tag = "catalog",
     responses(
         (status = 200, description = "List of grades", body = Vec<newton_backend::GradeItem>)
@@ -621,7 +618,7 @@ pub(crate) async fn list_grades(State(state): State<Arc<AppState>>) -> Response 
 
 #[utoipa::path(
     post,
-    path = "/api/grades",
+    path = "/grades",
     tag = "catalog",
     request_body = CreateGradeBody,
     responses(
@@ -642,7 +639,7 @@ pub(crate) async fn create_grade(
 
 #[utoipa::path(
     get,
-    path = "/api/grades/{id}",
+    path = "/grades/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Grade id")),
     responses(
@@ -662,7 +659,7 @@ pub(crate) async fn get_grade(
 
 #[utoipa::path(
     patch,
-    path = "/api/grades/{id}",
+    path = "/grades/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Grade id")),
     request_body = PatchGradeBody,
@@ -684,7 +681,7 @@ pub(crate) async fn patch_grade(
 
 #[utoipa::path(
     delete,
-    path = "/api/grades/{id}",
+    path = "/grades/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Grade id")),
     responses(

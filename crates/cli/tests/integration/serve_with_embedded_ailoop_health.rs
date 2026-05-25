@@ -100,7 +100,7 @@ fn newton_health_responds_on_same_port() {
             .map_err(|e| format!("runtime: {e}"))?;
         rt.block_on(async {
             let client = reqwest::Client::new();
-            let health_url = format!("http://127.0.0.1:{}/health", port);
+            let health_url = format!("http://127.0.0.1:{}/healthz", port);
             let resp = client
                 .get(&health_url)
                 .send()

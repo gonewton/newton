@@ -12,15 +12,15 @@ use std::sync::Arc;
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/persistence/{key}", get(get_persistence))
-        .route("/api/persistence/{key}", put(put_persistence))
-        .route("/api/persistence/{key}", delete(delete_persistence))
+        .route("/persistence/{key}", get(get_persistence))
+        .route("/persistence/{key}", put(put_persistence))
+        .route("/persistence/{key}", delete(delete_persistence))
         .with_state(state)
 }
 
 #[utoipa::path(
     get,
-    path = "/api/persistence/{key}",
+    path = "/persistence/{key}",
     tag = "persistence",
     params(("key" = String, Path, description = "Persistence key")),
     responses(
@@ -55,7 +55,7 @@ pub(crate) async fn get_persistence(
 
 #[utoipa::path(
     put,
-    path = "/api/persistence/{key}",
+    path = "/persistence/{key}",
     tag = "persistence",
     params(("key" = String, Path, description = "Persistence key")),
     request_body = serde_json::Value,
@@ -85,7 +85,7 @@ pub(crate) async fn put_persistence(
 
 #[utoipa::path(
     delete,
-    path = "/api/persistence/{key}",
+    path = "/persistence/{key}",
     tag = "persistence",
     params(("key" = String, Path, description = "Persistence key")),
     responses(

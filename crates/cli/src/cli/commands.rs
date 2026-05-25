@@ -1793,9 +1793,9 @@ fn load_trigger_payload(path: &Path) -> StdResult<Value, AppError> {
     Ok(value)
 }
 
-/// Newton REST route prefixes that the optional MCP mount MUST NOT shadow
-/// (issue #294 §4.4). Kept in sync with `crates/core/src/api/mod.rs`.
+/// Prefixes reserved by the framework or Newton that `--ailoop-base-path` MUST NOT shadow.
 const NEWTON_REST_ROUTE_PREFIXES: &[&str] = &[
+    "/api",
     "/health",
     "/workflows",
     "/hil",
@@ -1810,52 +1810,10 @@ const NEWTON_REST_ROUTE_PREFIXES: &[&str] = &[
     "/testing",
 ];
 
-/// Validate `--mcp-path` shape (issue #294 §4.4).
-///
-/// Returns `NEWTON-SERVE-MCP-001` when the value is empty, missing the leading
-/// slash, equal to the bare root `/`, or ends with `/`.
-fn validate_mcp_path(p: &str) -> StdResult<(), AppError> {
-    let invalid =
-        p.is_empty() || !p.starts_with('/') || p == "/" || (p.len() > 1 && p.ends_with('/'));
-    if invalid {
-        return Err(AppError::new(
-            newton_core::core::types::ErrorCategory::ValidationError,
-            format!(
-                "NEWTON-SERVE-MCP-001: --mcp-path must start with '/' and must not be '/' or end with '/'; got {:?}",
-                p
-            ),
-        )
-        .with_code("NEWTON-SERVE-MCP-001"));
-    }
-    Ok(())
-}
-
-/// Reject `--mcp-path` values that collide with or are an ancestor of an
-/// existing Newton REST route prefix (issue #294 §4.4). Returns
-/// `NEWTON-SERVE-MCP-002`.
-fn ensure_no_route_collision(mcp_path: &str) -> StdResult<(), AppError> {
-    for prefix in NEWTON_REST_ROUTE_PREFIXES {
-        if mcp_path == *prefix
-            || prefix.starts_with(&format!("{}/", mcp_path))
-            || mcp_path.starts_with(&format!("{}/", prefix))
-        {
-            return Err(AppError::new(
-                newton_core::core::types::ErrorCategory::ValidationError,
-                format!(
-                    "NEWTON-SERVE-MCP-002: --mcp-path {:?} collides with Newton REST route prefix {:?}",
-                    mcp_path, prefix
-                ),
-            )
-            .with_code("NEWTON-SERVE-MCP-002"));
-        }
-    }
-    Ok(())
-}
-
 /// Validate `--ailoop-base-path` shape (issue #351 §5.2).
 ///
 /// Returns `NEWTON-SERVE-AIL-001` when the value is empty, missing the leading
-/// slash, equal to the bare root `/`, ends with `/`, or equals `/api`.
+/// slash, equal to the bare root `/`, or ends with `/`.
 fn validate_ailoop_path(p: &str) -> StdResult<(), AppError> {
     let invalid =
         p.is_empty() || !p.starts_with('/') || p == "/" || (p.len() > 1 && p.ends_with('/'));
@@ -1863,17 +1821,7 @@ fn validate_ailoop_path(p: &str) -> StdResult<(), AppError> {
         return Err(AppError::new(
             newton_core::core::types::ErrorCategory::ValidationError,
             format!(
-                "NEWTON-SERVE-AIL-001: --ailoop-base-path must start with '/' and must not be '/', end with '/', or equal '/api'; got {:?}",
-                p
-            ),
-        )
-        .with_code("NEWTON-SERVE-AIL-001"));
-    }
-    if p == "/api" {
-        return Err(AppError::new(
-            newton_core::core::types::ErrorCategory::ValidationError,
-            format!(
-                "NEWTON-SERVE-AIL-001: --ailoop-base-path must not be '/api' (collides with ailoop internal routes); got {:?}",
+                "NEWTON-SERVE-AIL-001: --ailoop-base-path must start with '/' and must not be '/' or end with '/'; got {:?}",
                 p
             ),
         )
@@ -1883,12 +1831,8 @@ fn validate_ailoop_path(p: &str) -> StdResult<(), AppError> {
 }
 
 /// Reject `--ailoop-base-path` values that collide with Newton REST route prefixes
-/// (`NEWTON-SERVE-AIL-002`) or with `--mcp-path` when both flags are active
-/// (`NEWTON-SERVE-AIL-003`) (issue #351 §5.2).
-fn ensure_no_ailoop_path_collision(
-    ailoop_path: &str,
-    mcp_path_if_active: Option<&str>,
-) -> StdResult<(), AppError> {
+/// (`NEWTON-SERVE-AIL-002`) (issue #351 §5.2).
+fn ensure_no_ailoop_path_collision(ailoop_path: &str) -> StdResult<(), AppError> {
     for prefix in NEWTON_REST_ROUTE_PREFIXES {
         if ailoop_path == *prefix
             || prefix.starts_with(&format!("{}/", ailoop_path))
@@ -1904,65 +1848,7 @@ fn ensure_no_ailoop_path_collision(
             .with_code("NEWTON-SERVE-AIL-002"));
         }
     }
-    if let Some(mcp_path) = mcp_path_if_active {
-        if ailoop_path == mcp_path {
-            return Err(AppError::new(
-                newton_core::core::types::ErrorCategory::ValidationError,
-                format!(
-                    "NEWTON-SERVE-AIL-003: --ailoop-base-path {:?} collides with --mcp-path {:?}",
-                    ailoop_path, mcp_path
-                ),
-            )
-            .with_code("NEWTON-SERVE-AIL-003"));
-        }
-    }
     Ok(())
-}
-
-#[cfg(test)]
-mod serve_mcp_validation_tests {
-    use super::*;
-
-    #[test]
-    fn validate_path_accepts_normal_paths() {
-        assert!(validate_mcp_path("/mcp").is_ok());
-        assert!(validate_mcp_path("/api/mcp").is_ok());
-    }
-
-    #[test]
-    fn validate_path_rejects_empty_or_root() {
-        assert!(validate_mcp_path("").is_err());
-        assert!(validate_mcp_path("/").is_err());
-    }
-
-    #[test]
-    fn validate_path_rejects_missing_leading_slash() {
-        let err = validate_mcp_path("mcp").unwrap_err();
-        assert!(err.message.contains("NEWTON-SERVE-MCP-001"));
-    }
-
-    #[test]
-    fn validate_path_rejects_trailing_slash() {
-        assert!(validate_mcp_path("/mcp/").is_err());
-    }
-
-    #[test]
-    fn collision_detects_health() {
-        let err = ensure_no_route_collision("/health").unwrap_err();
-        assert!(err.message.contains("NEWTON-SERVE-MCP-002"));
-    }
-
-    #[test]
-    fn collision_detects_ancestor_of_health() {
-        // /health is an existing prefix; mounting under it would shadow it.
-        assert!(ensure_no_route_collision("/health/x").is_err());
-    }
-
-    #[test]
-    fn collision_allows_unrelated_path() {
-        assert!(ensure_no_route_collision("/mcp").is_ok());
-        assert!(ensure_no_route_collision("/api/mcp").is_ok());
-    }
 }
 
 #[cfg(test)]
@@ -2017,18 +1903,24 @@ mod serve_ailoop_validation_tests {
     }
 
     #[test]
-    fn validate_ailoop_path_rejects_api() {
-        let err = validate_ailoop_path("/api").unwrap_err();
+    fn validate_ailoop_path_accepts_api() {
+        // /api passes shape validation; collision is caught by ensure_no_ailoop_path_collision
+        assert!(validate_ailoop_path("/api").is_ok());
+    }
+
+    #[test]
+    fn ailoop_collision_detects_health() {
+        let err = ensure_no_ailoop_path_collision("/health").unwrap_err();
         assert!(
-            err.message.contains("NEWTON-SERVE-AIL-001"),
+            err.message.contains("NEWTON-SERVE-AIL-002"),
             "err={}",
             err.message
         );
     }
 
     #[test]
-    fn ailoop_collision_detects_health() {
-        let err = ensure_no_ailoop_path_collision("/health", None).unwrap_err();
+    fn ailoop_collision_detects_api() {
+        let err = ensure_no_ailoop_path_collision("/api").unwrap_err();
         assert!(
             err.message.contains("NEWTON-SERVE-AIL-002"),
             "err={}",
@@ -2038,7 +1930,7 @@ mod serve_ailoop_validation_tests {
 
     #[test]
     fn ailoop_collision_detects_workflows() {
-        let err = ensure_no_ailoop_path_collision("/workflows", None).unwrap_err();
+        let err = ensure_no_ailoop_path_collision("/workflows").unwrap_err();
         assert!(
             err.message.contains("NEWTON-SERVE-AIL-002"),
             "err={}",
@@ -2048,7 +1940,7 @@ mod serve_ailoop_validation_tests {
 
     #[test]
     fn ailoop_collision_detects_ancestor_of_prefix() {
-        let err = ensure_no_ailoop_path_collision("/health/sub", None).unwrap_err();
+        let err = ensure_no_ailoop_path_collision("/health/sub").unwrap_err();
         assert!(
             err.message.contains("NEWTON-SERVE-AIL-002"),
             "err={}",
@@ -2057,26 +1949,15 @@ mod serve_ailoop_validation_tests {
     }
 
     #[test]
-    fn ailoop_collision_detects_mcp_path_clash() {
-        let err = ensure_no_ailoop_path_collision("/mcp", Some("/mcp")).unwrap_err();
-        assert!(
-            err.message.contains("NEWTON-SERVE-AIL-003"),
-            "err={}",
-            err.message
-        );
-    }
-
-    #[test]
     fn ailoop_collision_allows_unrelated_path() {
-        assert!(ensure_no_ailoop_path_collision("/ailoop", None).is_ok());
-        assert!(ensure_no_ailoop_path_collision("/ailoop", Some("/mcp")).is_ok());
+        assert!(ensure_no_ailoop_path_collision("/ailoop").is_ok());
     }
 
     #[test]
     fn ailoop_collision_checks_all_newton_prefixes() {
         for prefix in NEWTON_REST_ROUTE_PREFIXES {
             assert!(
-                ensure_no_ailoop_path_collision(prefix, None).is_err(),
+                ensure_no_ailoop_path_collision(prefix).is_err(),
                 "expected collision for prefix {prefix}"
             );
         }
@@ -2085,35 +1966,39 @@ mod serve_ailoop_validation_tests {
 
 /// Launch the Newton HTTP API server
 pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
+    use cli_framework::api::{
+        ApiServerBuilder, ApiVersion, ApiVersionName, DefaultVersion, Stability,
+    };
     use newton_core::api::{self, state::AppState};
     use newton_core::workflow::operators;
     use std::net::SocketAddr;
-    use tokio::net::TcpListener;
-    use tokio_util::sync::CancellationToken;
+    use tower_http::cors::CorsLayer;
     use tracing::info;
 
-    if args.with_mcp {
-        validate_mcp_path(&args.mcp_path)?;
-        ensure_no_route_collision(&args.mcp_path)?;
-    }
     if args.with_embedded_ailoop {
         validate_ailoop_path(&args.ailoop_base_path)?;
-        ensure_no_ailoop_path_collision(
-            &args.ailoop_base_path,
-            args.with_mcp.then_some(&args.mcp_path),
-        )?;
+        ensure_no_ailoop_path_collision(&args.ailoop_base_path)?;
     }
+
+    // Early bind-address parse: surface invalid host:port as ValidationError before build().
+    let addr = format!("{}:{}", args.host, args.port);
+    let _: SocketAddr = addr.parse().map_err(|err| {
+        AppError::new(
+            newton_core::core::types::ErrorCategory::ValidationError,
+            format!("invalid bind address: {err}"),
+        )
+    })?;
 
     info!("Starting Newton API server on {}: {}", args.host, args.port);
 
-    let mut builder = OperatorRegistry::builder();
+    let mut registry_builder = OperatorRegistry::builder();
     let serve_settings: workflow_schema::WorkflowSettings = Default::default();
     let interviewer = newton_core::workflow::human::lazy_interviewer_provider(
         None,
         Duration::from_secs(serve_settings.human.default_timeout_seconds),
     );
     operators::register_builtins_with_deps(
-        &mut builder,
+        &mut registry_builder,
         std::path::PathBuf::from("."),
         serve_settings,
         operators::BuiltinOperatorDeps {
@@ -2121,7 +2006,7 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
             ..Default::default()
         },
     );
-    let registry = builder.build();
+    let registry = registry_builder.build();
 
     let operator_names = registry.operator_names();
     let operator_descriptors: Vec<newton_types::OperatorDescriptor> = operator_names
@@ -2162,71 +2047,88 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     let backend: Arc<dyn newton_backend::BackendStore> = Arc::new(store);
 
     let state = AppState::new(operator_descriptors, backend);
-    let store = newton_core::workflow::file_store::FsWorkflowFileStore::new(
+    let file_store = newton_core::workflow::file_store::FsWorkflowFileStore::new(
         workspace_paths.workflows_dir.clone(),
     );
-    let state = state.with_workflow_files(std::sync::Arc::new(store));
+    let state = state.with_workflow_files(std::sync::Arc::new(file_store));
 
-    let mut app = api::create_router(state, args.static_ui.clone());
+    let v1 = api::api_v1_router(state);
+
+    let openapi_value = api::openapi_json();
+
+    let version_name = ApiVersionName::parse("v1").map_err(|e| {
+        AppError::new(
+            newton_core::core::types::ErrorCategory::InternalError,
+            format!("invalid API version name: {e}"),
+        )
+    })?;
+
+    let mut builder = ApiServerBuilder::new()
+        .version(ApiVersion {
+            name: version_name.clone(),
+            router: v1,
+            stability: Stability::Stable,
+            deprecation: None,
+            openapi: Some(openapi_value),
+        })
+        .default_version(DefaultVersion::Pinned(version_name))
+        .cors(CorsLayer::permissive())
+        .health_version(env!("CARGO_PKG_VERSION"));
+
+    if let Some(dir) = args.static_ui.as_ref() {
+        if dir.exists() {
+            builder = builder.root_fallback(api::static_ui_router(dir.clone()));
+        }
+    }
 
     if args.with_mcp {
         let ctx = crate::cli::context::NewtonContext::new();
-        let mcp_router =
-            crate::cli::framework_setup::build_mcp_router_for_serve(ctx, &args.mcp_path).map_err(
-                |err| {
-                    AppError::new(
-                        newton_core::core::types::ErrorCategory::InternalError,
-                        format!("NEWTON-SERVE-MCP-004: failed to build MCP router: {err}"),
-                    )
-                    .with_code("NEWTON-SERVE-MCP-004")
-                },
-            )?;
-        app = app.merge(mcp_router);
+        let mcp_router = crate::cli::framework_setup::build_mcp_router_for_serve(ctx, "/mcp")
+            .map_err(|err| {
+                AppError::new(
+                    newton_core::core::types::ErrorCategory::IoError,
+                    format!("NEWTON-SERVE-MCP-004: failed to build MCP router: {err}"),
+                )
+                .with_code("NEWTON-SERVE-MCP-004")
+            })?;
+        builder = builder.mcp_router(mcp_router);
     }
 
-    // Build ailoop app state and merge the ailoop router when embedded mode is requested.
+    // Build ailoop app state and mount when embedded mode is requested.
     let ailoop_state: Option<(
         Arc<ailoop_server::AiloopAppState>,
         ailoop_server::ServeConfig,
     )> = if args.with_embedded_ailoop {
-        let state = Arc::new(ailoop_server::AiloopAppState::new("default"));
+        let ailoop_app_state = Arc::new(ailoop_server::AiloopAppState::new("default"));
+        // base_path is intentionally None here: the framework's mount() handles the
+        // prefix stripping via nest_service, so passing base_path again would double-prefix.
         let config = ailoop_server::ServeConfig {
-            base_path: Some(args.ailoop_base_path.clone()),
+            base_path: None,
             ..Default::default()
         };
-        let ailoop_router = ailoop_server::router(Arc::clone(&state), &config).map_err(|e| {
-            AppError::new(
-                newton_core::core::types::ErrorCategory::IoError,
-                format!("NEWTON-SERVE-AIL-004: {e}"),
-            )
-            .with_code("NEWTON-SERVE-AIL-004")
-        })?;
-        app = app.merge(ailoop_router);
-        Some((state, config))
+        let ailoop_router =
+            ailoop_server::router(Arc::clone(&ailoop_app_state), &config).map_err(|e| {
+                AppError::new(
+                    newton_core::core::types::ErrorCategory::IoError,
+                    format!("NEWTON-SERVE-AIL-004: {e}"),
+                )
+                .with_code("NEWTON-SERVE-AIL-004")
+            })?;
+        builder = builder.mount(&args.ailoop_base_path, ailoop_router);
+        Some((ailoop_app_state, config))
     } else {
         None
     };
 
-    let addr = format!("{}:{}", args.host, args.port);
-    let socket_addr: SocketAddr = addr.parse().map_err(|err| {
-        AppError::new(
-            newton_core::core::types::ErrorCategory::ValidationError,
-            format!("invalid bind address: {err}"),
-        )
-    })?;
+    let server = builder.build();
+    let cancel = server.shutdown_token();
 
-    let listener = TcpListener::bind(&socket_addr).await.map_err(|err| {
-        AppError::new(
-            newton_core::core::types::ErrorCategory::IoError,
-            format!("failed to bind to {addr}: {err}"),
-        )
-    })?;
-
-    info!("Newton API server listening on {}", socket_addr);
-
-    let cancel = CancellationToken::new();
-    if let Some((ref state, ref ailoop_config)) = ailoop_state {
-        ailoop_server::spawn_background_tasks(Arc::clone(state), ailoop_config, cancel.clone());
+    if let Some((ref ailoop_app_state, ref ailoop_config)) = ailoop_state {
+        ailoop_server::spawn_background_tasks(
+            Arc::clone(ailoop_app_state),
+            ailoop_config,
+            cancel.clone(),
+        );
     }
 
     if args.with_mcp {
@@ -2236,15 +2138,13 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
             event = "mcp_serve_started",
             mcp_enabled = true,
             bind_address = %bind_address,
-            mcp_path = %args.mcp_path,
+            mcp_path = "/mcp",
             tool_count = count,
             "MCP router mounted on Newton serve listener"
         );
-        // Mirror to stderr as a single JSON line so integration tests have a
-        // deterministic surface (matches `cli/mcp.rs:166-169`).
         eprintln!(
-            "{{\"event\":\"mcp_serve_started\",\"mcp_enabled\":true,\"bind_address\":\"{}\",\"mcp_path\":\"{}\",\"tool_count\":{}}}",
-            bind_address, args.mcp_path, count
+            "{{\"event\":\"mcp_serve_started\",\"mcp_enabled\":true,\"bind_address\":\"{}\",\"mcp_path\":\"/mcp\",\"tool_count\":{}}}",
+            bind_address, count
         );
     }
 
@@ -2268,17 +2168,13 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         );
     }
 
-    axum::serve(listener, app.into_make_service())
-        .with_graceful_shutdown(cancel.clone().cancelled_owned())
-        .await
-        .map_err(|err| {
-            AppError::new(
-                newton_core::core::types::ErrorCategory::IoError,
-                format!("server error: {err}"),
-            )
-        })?;
+    server.serve(&addr).await.map_err(|err| {
+        AppError::new(
+            newton_core::core::types::ErrorCategory::IoError,
+            format!("server error: {err}"),
+        )
+    })?;
 
-    cancel.cancel();
     Ok(())
 }
 

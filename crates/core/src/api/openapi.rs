@@ -4,7 +4,6 @@ use utoipa::OpenApi;
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        crate::api::health_check,
         crate::api::dashboard::list_products,
         crate::api::dashboard::list_components,
         crate::api::dashboard::list_pending_approvals,
@@ -74,7 +73,6 @@ use utoipa::OpenApi;
         crate::api::catalog::delete_grade
     ),
     components(schemas(
-        crate::api::HealthResponse,
         newton_backend::ProductItem,
         newton_backend::ComponentItem,
         newton_backend::PendingApprovalItem,
@@ -135,7 +133,6 @@ use utoipa::OpenApi;
         crate::api::workflow_files::LintFinding
     )),
     tags(
-        (name = "health", description = "Service health and liveness endpoints"),
         (name = "dashboard", description = "Product, component, indicator, and activity aggregate endpoints"),
         (name = "portfolio", description = "Repository, module graph, and saved view endpoints"),
         (name = "opportunities", description = "Opportunity listing and state transition endpoints"),
@@ -150,6 +147,7 @@ use utoipa::OpenApi;
         (name = "testing", description = "Test-only maintenance endpoints"),
         (name = "workflow-files", description = "Workflow definition file CRUD endpoints")
     ),
+    servers((url = "/api/v1")),
     info(
         title = "Newton Backend Parity API",
         version = env!("CARGO_PKG_VERSION"),

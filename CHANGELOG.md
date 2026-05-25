@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Migrate `newton serve` to `ApiServerBuilder` host — BREAKING CHANGE (issue #379)
+
+`newton serve` now uses cli-framework's `ApiServerBuilder` for all HTTP hosting. Signal handling, TCP bind, CORS, and health probes are owned by the framework.
+
+**Breaking URL changes:**
+- REST routes: `/api/<resource>` → `/api/v1/<resource>`. A 308 redirect is served at bare `/api`; deep paths like `/api/workflows` return 404.
+- Health probe: `/health` → `/healthz` (Kubernetes-standard). The version field now reports the newton binary version, not the core library version.
+- WebSocket heartbeat: `/ws` → `/api/v1/ws`.
+
+**New endpoints:**
+- `GET /readyz` — readiness probe (HTTP 200 when server is ready).
+- `GET /api/docs` — Swagger UI.
+- `GET /api/v1/openapi.json` — live OpenAPI JSON document.
+
+**CLI changes:**
+- `--mcp-path` flag removed. When `--with-mcp` is used, MCP is always mounted at `/mcp`.
+
+**Migration:** update REST API base from `/api` to `/api/v1`, update liveness probe from `/health` to `/healthz`, update WebSocket URL from `/ws` to `/api/v1/ws`, and remove `--mcp-path` from any scripts that passed it to `newton serve`.
+
 ### Adopt cli-framework built-in shell completion (issue #363)
 
 `newton completion <shell>` is now generated from the live command registry via cli-framework's built-in completion subcommand. The hand-rolled `ops::completion` module and its static `NEWTON_COMMANDS` list have been removed.

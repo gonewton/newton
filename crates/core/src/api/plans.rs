@@ -12,17 +12,17 @@ use std::sync::Arc;
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/plans", get(list_plans))
-        .route("/api/plans/{id}", get(get_plan))
-        .route("/api/plans/{id}/approve", post(approve_plan))
-        .route("/api/plans/{id}/reject", post(reject_plan))
-        .route("/api/executions", get(list_executions))
+        .route("/plans", get(list_plans))
+        .route("/plans/{id}", get(get_plan))
+        .route("/plans/{id}/approve", post(approve_plan))
+        .route("/plans/{id}/reject", post(reject_plan))
+        .route("/executions", get(list_executions))
         .with_state(state)
 }
 
 #[utoipa::path(
     get,
-    path = "/api/plans",
+    path = "/plans",
     tag = "plans",
     responses(
         (status = 200, description = "Plan list", body = [newton_backend::PlanItem]),
@@ -38,7 +38,7 @@ pub(crate) async fn list_plans(State(state): State<Arc<AppState>>) -> Response {
 
 #[utoipa::path(
     get,
-    path = "/api/plans/{id}",
+    path = "/plans/{id}",
     tag = "plans",
     params(("id" = String, Path, description = "Plan id")),
     responses(
@@ -65,7 +65,7 @@ pub(crate) async fn get_plan(
 
 #[utoipa::path(
     post,
-    path = "/api/plans/{id}/approve",
+    path = "/plans/{id}/approve",
     tag = "plans",
     params(("id" = String, Path, description = "Plan id")),
     responses(
@@ -109,7 +109,7 @@ pub(crate) async fn approve_plan(
 
 #[utoipa::path(
     post,
-    path = "/api/plans/{id}/reject",
+    path = "/plans/{id}/reject",
     tag = "plans",
     params(("id" = String, Path, description = "Plan id")),
     responses(
@@ -151,7 +151,7 @@ pub(crate) struct ExecutionsQuery {
 
 #[utoipa::path(
     get,
-    path = "/api/executions",
+    path = "/executions",
     tag = "executions",
     params(("planId" = Option<String>, Query, description = "Optional plan id filter")),
     responses(

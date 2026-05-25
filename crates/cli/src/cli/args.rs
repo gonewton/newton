@@ -393,10 +393,6 @@ pub struct ServeArgs {
     #[arg(long = "with-mcp", default_value_t = false)]
     pub with_mcp: bool,
 
-    /// Path prefix at which the MCP HTTP router is mounted (used only with --with-mcp).
-    #[arg(long = "mcp-path", default_value = "/mcp")]
-    pub mcp_path: String,
-
     /// Embed the ailoop HTTP/WebSocket server on the same listener as the Newton API.
     #[arg(long = "with-embedded-ailoop", default_value_t = false)]
     pub with_embedded_ailoop: bool,

@@ -20,11 +20,11 @@ use uuid::Uuid;
 /// Routes for the workflows API resource.
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/workflows", get(list_workflows))
-        .route("/api/workflows", post(create_workflow))
-        .route("/api/workflows/{id}", get(get_workflow))
-        .route("/api/workflows/{id}", put(update_workflow))
-        .route("/api/workflows/{id}/nodes/{node_id}", patch(update_node))
+        .route("/workflows", get(list_workflows))
+        .route("/workflows", post(create_workflow))
+        .route("/workflows/{id}", get(get_workflow))
+        .route("/workflows/{id}", put(update_workflow))
+        .route("/workflows/{id}/nodes/{node_id}", patch(update_node))
         .with_state(state)
 }
 
@@ -109,7 +109,7 @@ fn validation_response(message: &str) -> Response {
 
 #[utoipa::path(
     get,
-    path = "/api/workflows",
+    path = "/workflows",
     tag = "workflows",
     params(
         ("status" = Option<WorkflowStatus>, Query, description = "Optional workflow status filter"),
@@ -136,7 +136,7 @@ pub(crate) async fn list_workflows(
 
 #[utoipa::path(
     get,
-    path = "/api/workflows/{id}",
+    path = "/workflows/{id}",
     tag = "workflows",
     params(("id" = String, Path, description = "Workflow instance id")),
     responses(
@@ -162,7 +162,7 @@ pub(crate) async fn get_workflow(
 
 #[utoipa::path(
     post,
-    path = "/api/workflows",
+    path = "/workflows",
     tag = "workflows",
     request_body = WorkflowInstance,
     responses(
@@ -211,7 +211,7 @@ pub(crate) async fn create_workflow(
 
 #[utoipa::path(
     put,
-    path = "/api/workflows/{id}",
+    path = "/workflows/{id}",
     tag = "workflows",
     params(("id" = String, Path, description = "Workflow instance id")),
     request_body = WorkflowUpdateBody,
@@ -257,7 +257,7 @@ pub(crate) async fn update_workflow(
 
 #[utoipa::path(
     patch,
-    path = "/api/workflows/{id}/nodes/{node_id}",
+    path = "/workflows/{id}/nodes/{node_id}",
     tag = "workflows",
     params(
         ("id" = String, Path, description = "Workflow instance id"),

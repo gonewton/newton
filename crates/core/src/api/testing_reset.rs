@@ -12,13 +12,13 @@ use std::sync::Arc;
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/testing/reset", post(reset_testing))
+        .route("/testing/reset", post(reset_testing))
         .with_state(state)
 }
 
 #[utoipa::path(
     post,
-    path = "/api/testing/reset",
+    path = "/testing/reset",
     tag = "testing",
     responses(
         (status = 200, description = "Reset result", body = serde_json::Value),

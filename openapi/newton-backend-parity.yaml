@@ -7,8 +7,10 @@ info:
   license:
     name: ''
   version: 0.5.101
+servers:
+- url: /api/v1
 paths:
-  /api/components:
+  /components:
     get:
       tags:
       - dashboard
@@ -57,7 +59,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/components/{id}:
+  /components/{id}:
     get:
       tags:
       - catalog
@@ -196,7 +198,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/executions:
+  /executions:
     get:
       tags:
       - executions
@@ -223,7 +225,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/grades:
+  /grades:
     get:
       tags:
       - catalog
@@ -266,7 +268,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/grades/{id}:
+  /grades/{id}:
     get:
       tags:
       - catalog
@@ -345,7 +347,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/hil/instances:
+  /hil/instances:
     get:
       tags:
       - hil
@@ -360,7 +362,7 @@ paths:
                 type: array
                 items:
                   type: string
-  /api/hil/workflows/{id}:
+  /hil/workflows/{id}:
     get:
       tags:
       - hil
@@ -381,7 +383,7 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/HilEvent'
-  /api/hil/workflows/{id}/{event_id}/action:
+  /hil/workflows/{id}/{event_id}/action:
     post:
       tags:
       - hil
@@ -424,7 +426,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/indicators:
+  /indicators:
     get:
       tags:
       - dashboard
@@ -444,7 +446,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/module-dependencies:
+  /module-dependencies:
     get:
       tags:
       - portfolio
@@ -505,7 +507,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/module-dependencies/{id}:
+  /module-dependencies/{id}:
     get:
       tags:
       - catalog
@@ -602,7 +604,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/modules:
+  /modules:
     get:
       tags:
       - catalog
@@ -651,7 +653,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/modules/{id}:
+  /modules/{id}:
     get:
       tags:
       - catalog
@@ -790,7 +792,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/operators:
+  /operators:
     get:
       tags:
       - operators
@@ -805,7 +807,7 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/OperatorDescriptor'
-  /api/opportunities:
+  /opportunities:
     get:
       tags:
       - opportunities
@@ -832,7 +834,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/opportunities/{id}:
+  /opportunities/{id}:
     patch:
       tags:
       - opportunities
@@ -875,7 +877,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/pending-approvals:
+  /pending-approvals:
     get:
       tags:
       - dashboard
@@ -895,7 +897,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/persistence/{key}:
+  /persistence/{key}:
     get:
       tags:
       - persistence
@@ -994,7 +996,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/plans:
+  /plans:
     get:
       tags:
       - plans
@@ -1014,7 +1016,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/plans/{id}:
+  /plans/{id}:
     get:
       tags:
       - plans
@@ -1045,7 +1047,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/plans/{id}/approve:
+  /plans/{id}/approve:
     post:
       tags:
       - plans
@@ -1082,7 +1084,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/plans/{id}/reject:
+  /plans/{id}/reject:
     post:
       tags:
       - plans
@@ -1119,7 +1121,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/products:
+  /products:
     get:
       tags:
       - dashboard
@@ -1168,7 +1170,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/products/{id}:
+  /products/{id}:
     get:
       tags:
       - catalog
@@ -1313,7 +1315,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/recent-actions:
+  /recent-actions:
     get:
       tags:
       - dashboard
@@ -1342,7 +1344,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/regressions:
+  /regressions:
     get:
       tags:
       - dashboard
@@ -1362,7 +1364,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/repo-dependencies:
+  /repo-dependencies:
     get:
       tags:
       - portfolio
@@ -1382,7 +1384,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/repos:
+  /repos:
     get:
       tags:
       - portfolio
@@ -1437,7 +1439,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/repos/{id}:
+  /repos/{id}:
     get:
       tags:
       - catalog
@@ -1576,7 +1578,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/requests:
+  /requests:
     get:
       tags:
       - requests
@@ -1619,7 +1621,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/saved-views:
+  /saved-views:
     get:
       tags:
       - portfolio
@@ -1643,7 +1645,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/testing/reset:
+  /testing/reset:
     post:
       tags:
       - testing
@@ -1666,7 +1668,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/workflow-files:
+  /workflow-files:
     get:
       tags:
       - workflow-files
@@ -1692,7 +1694,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/workflow-files/validate:
+  /workflow-files/validate:
     post:
       tags:
       - workflow-files
@@ -1716,7 +1718,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/workflow-files/{name}:
+  /workflow-files/{name}:
     get:
       tags:
       - workflow-files
@@ -1833,7 +1835,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/workflows:
+  /workflows:
     get:
       tags:
       - workflows
@@ -1897,7 +1899,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/workflows/{id}:
+  /workflows/{id}:
     get:
       tags:
       - workflows
@@ -1964,7 +1966,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /api/workflows/{id}/nodes/{node_id}:
+  /workflows/{id}/nodes/{node_id}:
     patch:
       tags:
       - workflows
@@ -2007,18 +2009,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /health:
-    get:
-      tags:
-      - health
-      operationId: health_check
-      responses:
-        '200':
-          description: Service health
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HealthResponse'
 components:
   schemas:
     ApiError:
@@ -2369,16 +2359,6 @@ components:
           type: array
           items:
             type: string
-    HealthResponse:
-      type: object
-      required:
-      - status
-      - version
-      properties:
-        status:
-          type: string
-        version:
-          type: string
     HilAction:
       type: object
       required:
@@ -3432,8 +3412,6 @@ components:
           - string
           - 'null'
 tags:
-- name: health
-  description: Service health and liveness endpoints
 - name: dashboard
   description: Product, component, indicator, and activity aggregate endpoints
 - name: portfolio
