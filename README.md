@@ -205,6 +205,24 @@ Serve starts the HTTP/WebSocket API server that provides real-time access to wor
 newton serve --host 0.0.0.0 --port 9000
 ```
 
+**URL surface:**
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/v1/<resource>` | REST API routes (versioned) |
+| `GET /api` | 308 redirect to `/api/v1` |
+| `GET /healthz` | Liveness probe: `{"status":"ok","version":"<newton version>"}` |
+| `GET /readyz` | Readiness probe: 200 when server is ready |
+| `GET /api/docs` | Swagger UI |
+| `GET /api/v1/openapi.json` | OpenAPI JSON document |
+| `ws:// /api/v1/ws` | WebSocket heartbeat stream |
+
+**Breaking changes from pre-v0.5.101 releases:**
+- REST routes moved from `/api/<resource>` to `/api/v1/<resource>` (no transparent rewrite — `/api/workflows` returns 404).
+- Health probe moved from `/health` to `/healthz` (Kubernetes-standard).
+- WebSocket heartbeat moved from `/ws` to `/api/v1/ws`.
+- `--mcp-path` flag removed; MCP is always mounted at `/mcp` when `--with-mcp` is used.
+
 **Endpoint groups:** see `newton serve --help` for an enumeration of route groups, or [`openapi/newton-backend-parity.yaml`](openapi/newton-backend-parity.yaml) for the canonical contract (methods, parameters, and response shapes). Schemas and query parameters are also catalogued in [`skill/newton/references/serve-api.md`](skill/newton/references/serve-api.md).
 
 **Storage:** `newton serve` reads from the parity backend store (default SQLite) defined in [`crates/backend/src/store.rs`](crates/backend/src/store.rs); the schema lives in [`openapi/newton-backend-parity.sqlite.sql`](openapi/newton-backend-parity.sqlite.sql).
@@ -217,18 +235,18 @@ Newton exposes every registered command as an MCP tool. There are two ways to en
 
 #### Option A — Single-port topology (`newton serve --with-mcp`) _(recommended)_
 
-`newton serve --with-mcp` mounts the MCP HTTP router on the **same listener** as the Newton REST API. One process, one port, one URL prefix — simpler firewall rules, simpler TLS termination, simpler client config.
+`newton serve --with-mcp` mounts the MCP HTTP router on the **same listener** as the Newton REST API. One process, one port, one URL prefix — simpler firewall rules, simpler TLS termination, simpler client config. The MCP path is always `/mcp`.
 
 ```bash
-newton serve --host 127.0.0.1 --port 8080 --with-mcp --mcp-path /mcp
-# REST:  curl  http://127.0.0.1:8080/health
-# MCP:   POST  http://127.0.0.1:8080/mcp
+newton serve --host 127.0.0.1 --port 8080 --with-mcp
+# REST:    curl  http://127.0.0.1:8080/api/v1/workflows
+# Health:  curl  http://127.0.0.1:8080/healthz
+# MCP:     POST  http://127.0.0.1:8080/mcp
 ```
 
 | Flag | Default | Notes |
 |---|---|---|
 | `--with-mcp` | off | Opt-in; absent leaves `serve` behavior unchanged |
-| `--mcp-path` | `/mcp` | HTTP path prefix; must start with `/`, must not be `/` or collide with a REST route |
 
 **Cursor/Claude client config (single-port):**
 
@@ -243,7 +261,7 @@ newton serve --host 127.0.0.1 --port 8080 --with-mcp --mcp-path /mcp
 }
 ```
 
-**Failure modes:** `NEWTON-SERVE-MCP-001` — invalid `--mcp-path`; `NEWTON-SERVE-MCP-002` — path collides with an existing REST route; `NEWTON-SERVE-MCP-004` — MCP router construction failed.
+**Failure modes:** `NEWTON-SERVE-MCP-004` — MCP router construction failed.
 
 #### Option B — Dedicated MCP-only process (`newton mcp serve`) _(primary)_
 
