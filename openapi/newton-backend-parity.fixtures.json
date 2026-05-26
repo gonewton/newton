@@ -22,9 +22,6 @@
   "PendingApproval": [
     { "id": "pa-1", "title": "Approve auth-api hotfix", "type": "plan", "componentId": "comp-1", "repoName": "auth-api", "risk": "medium", "expectedValue": "$10k", "waitingSince": "2026-01-01T00:00:00Z", "reviewer": "Bob", "status": "awaiting", "confidence": 80, "agentGenerated": 0, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
   ],
-  "Indicator": [
-    { "id": "ind-1", "name": "Test Coverage", "description": "Code coverage percentage", "scope": "repo", "weight": 1.0, "threshold": 80.0, "current": 88.0, "trend": 1.0, "reports": 5, "mode": "auto", "lastRun": "2026-01-01T00:00:00Z", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
-  ],
   "KPI": [
     { "id": "test-discipline", "name": "Test Discipline", "description": "Test findings and coverage discipline", "scopeLevel": "repo", "threshold": 80.0, "weight": 1.0, "aggFn": "latest", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
   ],

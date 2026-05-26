@@ -2263,6 +2263,47 @@ impl BackendStore for SqliteBackendStore {
         Ok(id.to_string())
     }
 
+    async fn create_kpi(&self, body: CreateKpiBody) -> Result<KpiItem, ApiError> {
+        if body.id.trim().is_empty() {
+            return Err(err_validation("id is required"));
+        }
+        if body.name.trim().is_empty() {
+            return Err(err_validation("name is required"));
+        }
+        if body.description.trim().is_empty() {
+            return Err(err_validation("description is required"));
+        }
+        if body.scope_level.trim().is_empty() {
+            return Err(err_validation("scopeLevel is required"));
+        }
+
+        let now = Self::now_iso();
+        sqlx::query(
+            "INSERT INTO KPI (id, name, description, scopeLevel, threshold, weight, aggFn, createdAt, updatedAt) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&body.id)
+        .bind(&body.name)
+        .bind(&body.description)
+        .bind(&body.scope_level)
+        .bind(body.threshold)
+        .bind(body.weight)
+        .bind(&body.agg_fn)
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("UNIQUE constraint failed") {
+                err_conflict("KPI already exists")
+            } else {
+                err_internal(&format!("insert error: {e}"))
+            }
+        })?;
+
+        self.get_kpi(&body.id).await
+    }
+
     async fn get_kpi(&self, id: &str) -> Result<KpiItem, ApiError> {
         let row: Option<KpiRow> = sqlx::query_as::<_, KpiRow>(
             "SELECT id, name, description, scopeLevel AS scope_level, threshold, weight, aggFn AS agg_fn, createdAt AS created_at, updatedAt AS updated_at \
@@ -3414,6 +3455,209 @@ mod store_tests {
         assert_eq!(tail.len(), 5);
         assert_eq!(tail[0].message, "line-5");
         assert_eq!(tail[4].message, "line-9");
+    }
+}
+
+#[cfg(test)]
+mod kpi_evalrun_grade_tests {
+    use super::*;
+
+    async fn seed_repo(store: &SqliteBackendStore) -> String {
+        let now = SqliteBackendStore::now_iso();
+
+        let product = store
+            .create_product(CreateProductBody {
+                name: "Test Product".to_string(),
+            })
+            .await
+            .unwrap();
+        let component = store
+            .create_component(CreateComponentBody {
+                name: "Test Component".to_string(),
+                product_id: product.id,
+                domain: "platform".to_string(),
+                owner: "owner".to_string(),
+                criticality: "low".to_string(),
+                autonomy: "semi".to_string(),
+                health: 0,
+                trend: 0,
+                last_eval: now.clone(),
+            })
+            .await
+            .unwrap();
+        let repo = store
+            .create_repo(CreateRepoBody {
+                name: "test-repo".to_string(),
+                component_id: component.id,
+                owner: "owner".to_string(),
+                criticality: "low".to_string(),
+                autonomy: "semi".to_string(),
+                quality_score: 0,
+                coverage: 0,
+                sec_score: 0,
+                exec_status: "idle".to_string(),
+                last_eval: now,
+            })
+            .await
+            .unwrap();
+        repo.id
+    }
+
+    #[tokio::test]
+    async fn create_kpi_duplicate_returns_conflict() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let body = CreateKpiBody {
+            id: "test-discipline".to_string(),
+            name: "Test Discipline".to_string(),
+            description: "Test KPI".to_string(),
+            scope_level: "repo".to_string(),
+            threshold: 80.0,
+            weight: 1.0,
+            agg_fn: "latest".to_string(),
+        };
+        store.create_kpi(body.clone()).await.unwrap();
+        let err = store.create_kpi(body).await.unwrap_err();
+        assert_eq!(err.code, "ERR_CONFLICT");
+    }
+
+    #[tokio::test]
+    async fn create_two_eval_runs_for_same_scope_and_scope_id_preserves_history() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let repo_id = seed_repo(&store).await;
+
+        let run1 = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "evalrun.1".to_string(),
+                source: "test".to_string(),
+                scope: "repo".to_string(),
+                scope_id: repo_id.clone(),
+                score: Some(70.0),
+                verdict: Some("ok".to_string()),
+                summary: Some("first".to_string()),
+                evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
+            })
+            .await
+            .unwrap();
+        let run2 = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "evalrun.2".to_string(),
+                source: "test".to_string(),
+                scope: "repo".to_string(),
+                scope_id: repo_id.clone(),
+                score: Some(72.0),
+                verdict: Some("ok".to_string()),
+                summary: Some("second".to_string()),
+                evaluated_at: Some("2026-05-26T00:05:00Z".to_string()),
+            })
+            .await
+            .unwrap();
+        assert_ne!(run1.id, run2.id);
+
+        let list = store
+            .list_eval_runs(Some("repo".to_string()), Some(repo_id), None, None)
+            .await
+            .unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn create_grade_missing_run_id_returns_not_found() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let err = store
+            .create_grade(CreateGradeBody {
+                id: "grade.1".to_string(),
+                run_id: "no-such-run".to_string(),
+                kpi_id: None,
+                dimension: "tests".to_string(),
+                score: 50.0,
+                evidence: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn create_grade_out_of_range_score_returns_validation() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let repo_id = seed_repo(&store).await;
+        store
+            .create_eval_run(CreateEvalRunBody {
+                id: "evalrun.score".to_string(),
+                source: "test".to_string(),
+                scope: "repo".to_string(),
+                scope_id: repo_id,
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
+            })
+            .await
+            .unwrap();
+
+        let err = store
+            .create_grade(CreateGradeBody {
+                id: "grade.bad-score".to_string(),
+                run_id: "evalrun.score".to_string(),
+                kpi_id: None,
+                dimension: "tests".to_string(),
+                score: 101.0,
+                evidence: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+    }
+
+    #[tokio::test]
+    async fn create_grade_duplicate_dimension_returns_conflict_and_does_not_overwrite() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let repo_id = seed_repo(&store).await;
+        store
+            .create_eval_run(CreateEvalRunBody {
+                id: "evalrun.dupe".to_string(),
+                source: "test".to_string(),
+                scope: "repo".to_string(),
+                scope_id: repo_id,
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
+            })
+            .await
+            .unwrap();
+
+        let first = store
+            .create_grade(CreateGradeBody {
+                id: "grade.dupe.1".to_string(),
+                run_id: "evalrun.dupe".to_string(),
+                kpi_id: None,
+                dimension: "tests".to_string(),
+                score: 60.0,
+                evidence: Some(serde_json::json!({"findings": 1})),
+                evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
+            })
+            .await
+            .unwrap();
+
+        let err = store
+            .create_grade(CreateGradeBody {
+                id: "grade.dupe.2".to_string(),
+                run_id: "evalrun.dupe".to_string(),
+                kpi_id: None,
+                dimension: "tests".to_string(),
+                score: 10.0,
+                evidence: Some(serde_json::json!({"findings": 999})),
+                evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_CONFLICT");
+
+        let fetched = store.get_grade(&first.id).await.unwrap();
+        assert_eq!(fetched.score, 60.0);
     }
 }
 

@@ -159,6 +159,7 @@ pub trait BackendStore: Send + Sync {
     async fn delete_module_dependency(&self, id: &str) -> Result<String, ApiError>;
 
     // KPI catalog
+    async fn create_kpi(&self, body: CreateKpiBody) -> Result<KpiItem, ApiError>;
     async fn get_kpi(&self, id: &str) -> Result<KpiItem, ApiError>;
 
     // EvalRun

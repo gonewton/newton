@@ -545,7 +545,7 @@ paths:
   /kpis:
     get:
       tags:
-      - dashboard
+      - catalog
       operationId: list_kpis
       responses:
         '200':
@@ -562,10 +562,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+      - catalog
+      operationId: create_kpi
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateKpiBody'
+        required: true
+      responses:
+        '201':
+          description: Created KPI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KpiItem'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /kpis/{id}:
     get:
       tags:
-      - dashboard
+      - catalog
       operationId: get_kpi
       parameters:
       - name: id
@@ -2344,6 +2379,33 @@ components:
         runId:
           type: string
         score:
+          type: number
+          format: double
+    CreateKpiBody:
+      type: object
+      required:
+      - id
+      - name
+      - description
+      - scopeLevel
+      - threshold
+      - weight
+      - aggFn
+      properties:
+        aggFn:
+          type: string
+        description:
+          type: string
+        id:
+          type: string
+        name:
+          type: string
+        scopeLevel:
+          type: string
+        threshold:
+          type: number
+          format: double
+        weight:
           type: number
           format: double
     CreateModuleBody:
