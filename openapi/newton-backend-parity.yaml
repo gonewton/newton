@@ -545,7 +545,7 @@ paths:
   /kpis:
     get:
       tags:
-      - catalog
+      - dashboard
       operationId: list_kpis
       responses:
         '200':
@@ -564,7 +564,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
     post:
       tags:
-      - catalog
+      - dashboard
       operationId: create_kpi
       requestBody:
         content:
@@ -600,7 +600,7 @@ paths:
   /kpis/{id}:
     get:
       tags:
-      - catalog
+      - dashboard
       operationId: get_kpi
       parameters:
       - name: id

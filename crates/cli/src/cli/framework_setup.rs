@@ -689,6 +689,8 @@ const DATA_GET_LONG_ABOUT: &str =
      newton data get eval-runs\n  \
      newton data get eval-run <id> --json\n  \
      newton data get grades\n  \
+     newton data get grades --run-id <runId>\n  \
+     newton data get grades --kpi-id <kpiId>\n  \
      newton data get grade <id>";
 
 const DATA_POST_LONG_ABOUT: &str =
@@ -722,7 +724,7 @@ fn data_verb_command(verb: DataVerb) -> Command {
             "Retrieve catalog entities (list or single-item)",
             DATA_GET_LONG_ABOUT,
             vec!["newton data get products", "newton data get product <id> --json"],
-            "get <resource> [ID] [--json] [--output-format FORMAT] [--workspace PATH]",
+            "get <resource> [ID] [--run-id RUNID] [--kpi-id KPIID] [--json] [--output-format FORMAT] [--workspace PATH]",
             false,
         ),
         DataVerb::Post => (
@@ -775,7 +777,7 @@ fn data_verb_command(verb: DataVerb) -> Command {
             requires: vec![],
             help: "Resource token (product, products, component, components, \
                    repo, repos, module, modules, module-dependency, module-dependencies, \
-                   grade, grades)",
+                   kpi, kpis, eval-run, eval-runs, grade, grades)",
         },
         ArgSpec {
             name: "id",
@@ -826,6 +828,33 @@ fn data_verb_command(verb: DataVerb) -> Command {
             help: "Workspace root containing .newton/state/backend.sqlite",
         },
     ];
+
+    if matches!(verb, DataVerb::Get) {
+        args.push(ArgSpec {
+            name: "run-id",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("run-id"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Filter grade listings by EvalRun id (only used with: resource=grades)",
+        });
+        args.push(ArgSpec {
+            name: "kpi-id",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("kpi-id"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Filter grade listings by KPI id (only used with: resource=grades)",
+        });
+    }
 
     if has_body_args {
         args.push(ArgSpec {
@@ -2251,6 +2280,8 @@ impl DataArgs {
                 .unwrap_or(false);
         let dry_run = get_bool(&args, "dry-run");
         let workspace = get_opt_path(&args, "workspace");
+        let run_id = args.named.get("run-id").cloned();
+        let kpi_id = args.named.get("kpi-id").cloned();
         Ok(DataArgs {
             verb,
             resource,
@@ -2260,6 +2291,8 @@ impl DataArgs {
             json,
             dry_run,
             workspace,
+            run_id,
+            kpi_id,
         })
     }
 }

@@ -27,9 +27,6 @@ fn status_from_error(e: &ApiError) -> StatusCode {
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        // KPI
-        .route("/kpis", get(list_kpis).post(create_kpi))
-        .route("/kpis/{id}", get(get_kpi))
         // EvalRun
         .route("/eval-runs", get(list_eval_runs).post(create_eval_run))
         .route("/eval-runs/{id}", get(get_eval_run))
@@ -76,7 +73,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
 #[utoipa::path(
     get,
     path = "/kpis",
-    tag = "catalog",
+    tag = "dashboard",
     responses(
         (status = 200, description = "KPI list", body = [newton_backend::KpiItem]),
         (status = 500, description = "Internal error", body = ApiError)
@@ -92,7 +89,7 @@ pub(crate) async fn list_kpis(State(state): State<Arc<AppState>>) -> Response {
 #[utoipa::path(
     get,
     path = "/kpis/{id}",
-    tag = "catalog",
+    tag = "dashboard",
     params(("id" = String, Path, description = "KPI ID")),
     responses(
         (status = 200, description = "KPI", body = newton_backend::KpiItem),
@@ -113,7 +110,7 @@ pub(crate) async fn get_kpi(
 #[utoipa::path(
     post,
     path = "/kpis",
-    tag = "catalog",
+    tag = "dashboard",
     request_body = CreateKpiBody,
     responses(
         (status = 201, description = "Created KPI", body = newton_backend::KpiItem),

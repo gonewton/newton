@@ -484,4 +484,8 @@ pub struct DataArgs {
     pub json: bool,
     pub dry_run: bool,
     pub workspace: Option<PathBuf>,
+    /// Optional filter: restrict grade listings to a single evaluation run.
+    pub run_id: Option<String>,
+    /// Optional filter: restrict grade listings to a single KPI.
+    pub kpi_id: Option<String>,
 }

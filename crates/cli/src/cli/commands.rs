@@ -2974,6 +2974,12 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
     // Normalize resource token (plural -> singular for mutations)
     let resource = args.resource.as_str();
 
+    // Validate filters (currently only supported for grade listings).
+    if (args.run_id.is_some() || args.kpi_id.is_some()) && resource != "grades" {
+        eprintln!("DATA-006: --run-id/--kpi-id are only supported with: resource=grades");
+        std::process::exit(1);
+    }
+
     // Validate resource
     let valid_resources = [
         "product",
@@ -3131,7 +3137,17 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
     }
 
     // Dispatch
-    match dispatch_data(&store, &args.verb, resource, args.id.as_deref(), body_value).await {
+    match dispatch_data(
+        &store,
+        &args.verb,
+        resource,
+        args.id.as_deref(),
+        body_value,
+        args.run_id.as_deref(),
+        args.kpi_id.as_deref(),
+    )
+    .await
+    {
         Ok(value) => {
             println!("{}", serde_json::to_string_pretty(&value)?);
             Ok(())
@@ -3149,6 +3165,8 @@ async fn dispatch_data(
     resource: &str,
     id: Option<&str>,
     body: Option<serde_json::Value>,
+    grade_run_id: Option<&str>,
+    grade_kpi_id: Option<&str>,
 ) -> std::result::Result<serde_json::Value, String> {
     fn api_err(e: newton_types::ApiError) -> String {
         format!("{}: {}", e.code, e.message)
@@ -3376,7 +3394,10 @@ async fn dispatch_data(
         }
         // -- Grade -------------------------------------------------------------
         (DataVerb::Get, "grades") => store
-            .list_grades(None, None)
+            .list_grades(
+                grade_run_id.map(str::to_string),
+                grade_kpi_id.map(str::to_string),
+            )
             .await
             .map_err(api_err)
             .and_then(to_json),

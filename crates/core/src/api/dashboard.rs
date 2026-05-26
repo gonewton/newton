@@ -16,6 +16,12 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/components", get(list_components))
         .route("/pending-approvals", get(list_pending_approvals))
         .route("/regressions", get(list_regressions))
+        // KPI catalog: now the canonical replacement for the legacy "indicators" endpoint.
+        .route(
+            "/kpis",
+            get(crate::api::catalog::list_kpis).post(crate::api::catalog::create_kpi),
+        )
+        .route("/kpis/{id}", get(crate::api::catalog::get_kpi))
         // Compatibility alias (deprecated): KPI catalog was previously served as "indicators".
         .route("/indicators", get(list_indicators))
         .route("/recent-actions", get(list_recent_actions))
