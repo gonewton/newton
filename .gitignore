@@ -29,3 +29,6 @@ auto_release_trigger.txt
 
 # insta pending snapshots (generated during test runs, never committed)
 *.pending-snap
+
+.dk
+dk.toml
