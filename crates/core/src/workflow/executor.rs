@@ -13,7 +13,6 @@ use crate::workflow::operator::{OperatorRegistry, StateView};
 use crate::workflow::schema::{
     self, BarrierParams, GoalGateFailureBehavior, TerminalKind, WorkflowDocument, WorkflowTask,
 };
-use crate::workflow::server_notifier::ServerNotifier;
 use crate::workflow::state::{
     canonicalize_workflow_path, compute_sha256_hex, redact_value, AppErrorSummary, GraphSettings,
     TaskRunRecord, WorkflowCheckpoint, WorkflowExecution, WorkflowExecutionStatus,
@@ -22,6 +21,7 @@ use crate::workflow::state::{
 use crate::workflow::task_execution;
 use crate::workflow::transform;
 use crate::workflow::value_resolve as context;
+use crate::workflow::workflow_sink::WorkflowSink;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
@@ -48,8 +48,8 @@ pub struct ExecutionOverrides {
     /// Maximum allowed workflow nesting depth for `WorkflowOperator` (default: 16 when None).
     pub max_nesting_depth: Option<u32>,
     pub verbose: bool,
-    /// Optional server notifier for registering with a newton serve instance.
-    pub server_notifier: Option<Arc<ServerNotifier>>,
+    /// Optional sink for workflow lifecycle events (DB, server notifier, fanout, etc.).
+    pub sink: Option<Arc<dyn WorkflowSink>>,
     /// Whether to pre-seed workflow nodes with Pending status on start. Defaults to true.
     pub pre_seed_nodes: bool,
 }
@@ -259,8 +259,8 @@ struct WorkflowRuntime {
     verbose: bool,
     /// Task IDs popped in the current tick, tracked for re-queue on hard batch failure.
     current_tick_tasks: Vec<String>,
-    /// Optional server notifier for pushing lifecycle events to a newton serve instance.
-    server_notifier: Option<Arc<ServerNotifier>>,
+    /// Optional sink for workflow lifecycle events.
+    sink: Option<Arc<dyn WorkflowSink>>,
     /// Serialized workflow definition JSON for API exposure.
     workflow_definition_json: Option<serde_json::Value>,
     /// Whether to pre-seed workflow nodes with Pending status on start.
@@ -439,7 +439,7 @@ impl WorkflowRuntime {
 
     /// Notify the server that a set of tasks is now running.
     fn notify_task_starts(&self, tick_tasks: &[(String, u64)]) {
-        if let Some(notifier) = &self.server_notifier {
+        if let Some(notifier) = &self.sink {
             let instance_id = self.workflow_execution.execution_id.to_string();
             let now = Utc::now();
             for (task_id, _) in tick_tasks {
@@ -461,7 +461,7 @@ impl WorkflowRuntime {
 
     /// Notify the server of all task outcomes from the current tick.
     fn notify_task_completions(&self, frontier: &[TaskOutcome]) {
-        if let Some(notifier) = &self.server_notifier {
+        if let Some(notifier) = &self.sink {
             let instance_id = self.workflow_execution.execution_id.to_string();
             for outcome in frontier {
                 let node_status = if outcome.failed {
@@ -487,7 +487,7 @@ impl WorkflowRuntime {
 
     /// Notify the server that the workflow has completed with the given status.
     fn notify_completion(&self, status: WorkflowStatus) {
-        if let Some(notifier) = &self.server_notifier {
+        if let Some(notifier) = &self.sink {
             notifier.notify_workflow_completed(
                 self.workflow_execution.execution_id.to_string(),
                 status,
@@ -519,7 +519,7 @@ impl WorkflowRuntime {
         };
 
         // Notify server that workflow has started.
-        if let Some(notifier) = &self.server_notifier {
+        if let Some(notifier) = &self.sink {
             notifier.notify_workflow_started(workflow_instance);
         }
 
@@ -1391,7 +1391,7 @@ impl ChildWorkflowRunner for InProcessChildWorkflowRunner {
 
         let mut child_overrides = input.execution_overrides.clone();
         // Child executions should not notify `newton serve` by default.
-        child_overrides.server_notifier = None;
+        child_overrides.sink = None;
 
         let parent_link = ParentRunLink {
             parent_execution_id: input.parent_execution_id,
@@ -1619,7 +1619,7 @@ fn build_workflow_runtime_with_parent(
         start_time: Instant::now(),
         verbose: overrides.verbose,
         current_tick_tasks: Vec::new(),
-        server_notifier: overrides.server_notifier.clone(),
+        sink: overrides.sink.clone(),
         workflow_definition_json: Some(workflow_definition_json),
         pre_seed_nodes: overrides.pre_seed_nodes,
     })
@@ -1808,7 +1808,7 @@ pub async fn resume_workflow(
             artifact_base_path: None,
             max_nesting_depth: None,
             verbose: false,
-            server_notifier: None,
+            sink: None,
             pre_seed_nodes: false,
         },
         artifact_store,
@@ -1823,7 +1823,7 @@ pub async fn resume_workflow(
         start_time: Instant::now(),
         verbose: false, // Resume does not support verbose mode
         current_tick_tasks: Vec::new(),
-        server_notifier: None, // Resume does not support server notification
+        sink: None, // Resume does not propagate sink
         workflow_definition_json: None,
         pre_seed_nodes: false,
     };

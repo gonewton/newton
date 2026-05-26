@@ -107,7 +107,7 @@ async fn resume_skips_completed_tasks() {
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -206,7 +206,7 @@ async fn resume_hash_mismatch_blocks_resume() {
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -251,7 +251,7 @@ async fn checkpoint_records_goal_gate_group() {
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -294,7 +294,7 @@ async fn checkpoints_list_output_format_and_sort_order() {
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -384,7 +384,7 @@ workflow:
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -537,7 +537,7 @@ workflow:
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -638,7 +638,7 @@ workflow:
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -764,7 +764,7 @@ workflow:
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -838,7 +838,7 @@ async fn test_workflow_definition_snapshot_written() {
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -875,7 +875,7 @@ async fn test_workflow_definition_snapshot_hash_matches_execution() {
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -937,7 +937,7 @@ async fn test_workflow_instance_definition_non_null_for_cli_run() {
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: Some(Arc::new(notifier)),
+        sink: Some(Arc::new(notifier)),
         pre_seed_nodes: true,
     };
 

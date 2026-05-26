@@ -161,9 +161,198 @@ impl WorkspacePaths {
     }
 }
 
+/// Resolve the state root directory using five-level precedence.
+/// Returns the state root (parent of workflows/, artifacts/, backend.sqlite).
+pub fn resolve_state_dir(
+    workspace: &std::path::Path,
+    explicit: Option<&std::path::Path>,
+) -> PathBuf {
+    // Level 1: explicit --state-dir flag
+    if let Some(p) = explicit {
+        let abs = std::fs::canonicalize(p).unwrap_or_else(|_| {
+            if p.is_absolute() {
+                p.to_path_buf()
+            } else {
+                std::env::current_dir()
+                    .map(|cwd| cwd.join(p))
+                    .unwrap_or_else(|_| p.to_path_buf())
+            }
+        });
+        return abs;
+    }
+
+    // Level 2: NEWTON_STATE_DIR env var
+    if let Ok(env_val) = std::env::var("NEWTON_STATE_DIR") {
+        if !env_val.is_empty() {
+            let p = PathBuf::from(&env_val);
+            let abs = std::fs::canonicalize(&p).unwrap_or_else(|_| {
+                if p.is_absolute() {
+                    p.clone()
+                } else {
+                    std::env::current_dir().map(|cwd| cwd.join(&p)).unwrap_or(p)
+                }
+            });
+            return abs;
+        }
+    }
+
+    // Level 3: newton.toml [workflow].state_dir
+    if let Some(state_dir) = load_toml_state_dir(workspace) {
+        return state_dir;
+    }
+
+    // Level 4: walk-up from workspace to find .newton/configs anchor
+    if let Some(state_dir) = walk_up_state_dir(workspace) {
+        return state_dir;
+    }
+
+    // Level 5: fallback — <workspace>/.newton/state
+    workspace.join(".newton").join("state")
+}
+
+fn load_toml_state_dir(workspace: &std::path::Path) -> Option<PathBuf> {
+    // Try workspace/newton.toml, then walk up
+    let mut dir = workspace.to_path_buf();
+    loop {
+        let config_path = dir.join("newton.toml");
+        if config_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&config_path) {
+                // Parse minimal subset just for workflow.state_dir
+                #[derive(serde::Deserialize, Default)]
+                struct MinWorkflow {
+                    state_dir: Option<PathBuf>,
+                }
+                #[derive(serde::Deserialize, Default)]
+                struct MinConfig {
+                    #[serde(default)]
+                    workflow: MinWorkflow,
+                }
+                if let Ok(cfg) = toml::from_str::<MinConfig>(&content) {
+                    if let Some(sd) = cfg.workflow.state_dir {
+                        let abs = if sd.is_absolute() { sd } else { dir.join(&sd) };
+                        return Some(abs);
+                    }
+                }
+            }
+            // File found but no state_dir configured — stop searching
+            return None;
+        }
+        // No newton.toml here; ascend
+        match dir.parent() {
+            Some(parent) => dir = parent.to_path_buf(),
+            None => return None,
+        }
+    }
+}
+
+fn walk_up_state_dir(workspace: &std::path::Path) -> Option<PathBuf> {
+    let mut dir = workspace.to_path_buf();
+    loop {
+        if dir.join(".newton").join("configs").is_dir() {
+            return Some(dir.join(".newton").join("state"));
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent.to_path_buf(),
+            None => return None,
+        }
+    }
+}
+
+pub fn state_checkpoints_dir(state_root: &std::path::Path) -> PathBuf {
+    state_root.join("workflows")
+}
+
+pub fn state_artifacts_dir(state_root: &std::path::Path) -> PathBuf {
+    state_root.join("artifacts").join("workflows")
+}
+
+pub fn state_backend_sqlite(state_root: &std::path::Path) -> PathBuf {
+    state_root.join("backend.sqlite")
+}
+
+pub fn state_backend_sqlite_url(state_root: &std::path::Path) -> String {
+    format!(
+        "sqlite:{}?mode=rwc",
+        state_backend_sqlite(state_root).display()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_resolve_state_dir_explicit_flag() {
+        let ws = PathBuf::from("/tmp/test-ws-resolve-1");
+        let explicit = PathBuf::from("/tmp/test-state-explicit-1");
+        let result = resolve_state_dir(&ws, Some(&explicit));
+        // explicit path is returned (canonicalized or as-is)
+        assert!(result.ends_with("test-state-explicit-1") || result == explicit);
+    }
+
+    #[test]
+    fn test_resolve_state_dir_env_var() {
+        let ws = PathBuf::from("/tmp/test-ws-resolve-env-set");
+        let env_state = PathBuf::from("/tmp/test-state-from-env-var");
+        // Set NEWTON_STATE_DIR and verify it takes precedence over fallback
+        std::env::set_var("NEWTON_STATE_DIR", &env_state);
+        let result = resolve_state_dir(&ws, None);
+        std::env::remove_var("NEWTON_STATE_DIR");
+        assert_eq!(result, env_state);
+    }
+
+    #[test]
+    fn test_resolve_state_dir_toml() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().to_path_buf();
+        let toml_state = "/tmp/test-state-from-toml";
+        std::fs::write(
+            ws.join("newton.toml"),
+            format!("[workflow]\nstate_dir = \"{toml_state}\"\n"),
+        )
+        .unwrap();
+        std::env::remove_var("NEWTON_STATE_DIR");
+        let result = resolve_state_dir(&ws, None);
+        assert_eq!(result, PathBuf::from(toml_state));
+    }
+
+    #[test]
+    fn test_resolve_state_dir_fallback() {
+        // Use a path that has no .newton/configs ancestor and no env var
+        let ws = PathBuf::from("/tmp/test-ws-resolve-fallback-999abc");
+        std::env::remove_var("NEWTON_STATE_DIR");
+        let result = resolve_state_dir(&ws, None);
+        assert_eq!(result, ws.join(".newton").join("state"));
+    }
+
+    #[test]
+    fn test_state_sub_path_helpers() {
+        let root = PathBuf::from("/tmp/state-root");
+        assert_eq!(state_checkpoints_dir(&root), root.join("workflows"));
+        assert_eq!(
+            state_artifacts_dir(&root),
+            root.join("artifacts").join("workflows")
+        );
+        assert_eq!(state_backend_sqlite(&root), root.join("backend.sqlite"));
+        let url = state_backend_sqlite_url(&root);
+        assert!(url.starts_with("sqlite:"));
+        assert!(url.ends_with("?mode=rwc"));
+        assert!(url.contains("backend.sqlite"));
+    }
+
+    #[test]
+    fn test_resolve_state_dir_walkup() {
+        // Create a temp dir with .newton/configs to test walk-up
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".newton").join("configs")).unwrap();
+        // Sub-workspace inside this root
+        let sub = root.join("sub").join("project");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::env::remove_var("NEWTON_STATE_DIR");
+        let result = resolve_state_dir(&sub, None);
+        assert_eq!(result, root.join(".newton").join("state"));
+    }
 
     #[test]
     fn test_new_derives_standard_paths() {

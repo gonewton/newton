@@ -49,9 +49,9 @@ use uuid::Uuid;
 
 use crate::cli::args::{
     ArtifactArgs, ArtifactCommand, BatchArgs, CheckpointArgs, CheckpointCommand, DataArgs,
-    DataVerb, DotArgs, ExplainArgs, GraphFormat, InitArgs, LintArgs, OutputFormat, ResumeArgs,
-    RunArgs, RunsArgs, RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand,
-    WebhookServeArgs, WebhookStatusArgs,
+    DataVerb, DotArgs, ExplainArgs, GraphFormat, ImportArgs, InitArgs, LintArgs, OutputFormat,
+    ResumeArgs, RunArgs, RunsArgs, RunsCommand, ServeArgs, ValidateArgs, WebhookArgs,
+    WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
 };
 use crate::cli::categories;
 use crate::cli::context::NewtonContext;
@@ -639,6 +639,30 @@ fn serve_command() -> Command {
                     requires: vec![],
                     help: "Path prefix where the embedded ailoop router is mounted (default: /ailoop). Must not be `/api`.",
                 },
+                ArgSpec {
+                    name: "state-dir",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("state-dir"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Override the state root directory where checkpoints, artifacts, and backend.sqlite are stored. Defaults to auto-resolved from workspace root.",
+                },
+                ArgSpec {
+                    name: "import-existing",
+                    kind: ArgKind::Flag,
+                    short: None,
+                    long: Some("import-existing"),
+                    value_type: ArgValueType::Bool,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Run import scan of existing file-based runs before the HTTP listener binds",
+                },
             ],
             ..Default::default()
         })),
@@ -893,7 +917,7 @@ fn workflow_command() -> Command {
                     long: None,
                     value_type: ArgValueType::Enum(vec![
                         "validate", "lint", "preview", "graph", "run",
-                        "resume", "runs", "checkpoint", "artifact",
+                        "resume", "runs", "checkpoint", "artifact", "import",
                     ]),
                     cardinality: Cardinality::Required,
                     default: None,
@@ -1136,6 +1160,30 @@ fn workflow_command() -> Command {
                     requires: vec![],
                     help: "Newton server URL to register this run (workflow run)",
                 },
+                ArgSpec {
+                    name: "state-dir",
+                    kind: ArgKind::Option,
+                    short: None,
+                    long: Some("state-dir"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Override the state root directory where checkpoints, artifacts, and backend.sqlite are stored. Defaults to auto-resolved from workspace root.",
+                },
+                ArgSpec {
+                    name: "recursive",
+                    kind: ArgKind::Flag,
+                    short: None,
+                    long: Some("recursive"),
+                    value_type: ArgValueType::Bool,
+                    cardinality: Cardinality::Optional,
+                    default: None,
+                    conflicts_with: vec![],
+                    requires: vec![],
+                    help: "Recursively walk workspace for all .newton/state/workflows directories (import)",
+                },
             ],
             ..Default::default()
         })),
@@ -1233,6 +1281,7 @@ fn workflow_command() -> Command {
                                 let dto = CheckpointArgs {
                                     command: CheckpointCommand::List {
                                         workspace: get_opt_path(&args, "workspace"),
+                                        state_dir: get_opt_path(&args, "state-dir"),
                                         json: get_bool(&args, "json"),
                                     },
                                 };
@@ -1249,6 +1298,7 @@ fn workflow_command() -> Command {
                                 let dto = CheckpointArgs {
                                     command: CheckpointCommand::Clean {
                                         workspace: get_opt_path(&args, "workspace"),
+                                        state_dir: get_opt_path(&args, "state-dir"),
                                         older_than,
                                     },
                                 };
@@ -1279,6 +1329,7 @@ fn workflow_command() -> Command {
                                 let dto = ArtifactArgs {
                                     command: ArtifactCommand::Clean {
                                         workspace: get_opt_path(&args, "workspace"),
+                                        state_dir: get_opt_path(&args, "state-dir"),
                                         older_than,
                                     },
                                 };
@@ -1410,8 +1461,17 @@ fn workflow_command() -> Command {
                             timeout_seconds,
                             verbose: get_bool(&args, "verbose"),
                             server: get_opt_str(&args, "server"),
+                            state_dir: get_opt_path(&args, "state-dir"),
                         };
                         commands::workflow_run(run_args).await.map_err(anyhow::Error::from)
+                    }
+                    "import" => {
+                        let import_args = ImportArgs {
+                            state_dir: get_opt_path(&args, "state-dir"),
+                            workspace: get_opt_path(&args, "workspace"),
+                            recursive: get_bool(&args, "recursive"),
+                        };
+                        commands::workflow_import(import_args).await.map_err(anyhow::Error::from)
                     }
                     _ => Err(anyhow!(
                         "{}: unknown workflow subcommand '{}'",
@@ -2035,6 +2095,7 @@ impl TryFrom<CommandArgs> for RunArgs {
             .transpose()?;
         let verbose = get_bool(&args, "verbose");
         let server = get_opt_str(&args, "server");
+        let state_dir = get_opt_path(&args, "state-dir");
         Ok(RunArgs {
             workflow,
             input_file,
@@ -2047,6 +2108,7 @@ impl TryFrom<CommandArgs> for RunArgs {
             timeout_seconds,
             verbose,
             server,
+            state_dir,
         })
     }
 }
@@ -2133,6 +2195,8 @@ impl TryFrom<CommandArgs> for ServeArgs {
             with_mcp,
             with_embedded_ailoop,
             ailoop_base_path,
+            state_dir: get_opt_path(&args, "state-dir"),
+            import_existing: get_bool(&args, "import-existing"),
         })
     }
 }
@@ -2158,6 +2222,7 @@ impl TryFrom<CommandArgs> for ResumeArgs {
             run_id,
             workspace: get_opt_path(&args, "workspace"),
             allow_workflow_change: get_bool(&args, "allow-workflow-change"),
+            state_dir: get_opt_path(&args, "state-dir"),
         })
     }
 }

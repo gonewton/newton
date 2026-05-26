@@ -2,15 +2,19 @@
 
 use crate::cli::args::{
     ArtifactArgs, ArtifactCommand, BatchArgs, CheckpointArgs, CheckpointCommand, DataArgs,
-    DataVerb, DotArgs, ExplainArgs, KeyValuePair, LintArgs, OutputFormat, ResumeArgs, RunArgs,
-    RunsArgs, RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
-    WebhookStatusArgs,
+    DataVerb, DotArgs, ExplainArgs, ImportArgs, KeyValuePair, LintArgs, OutputFormat, ResumeArgs,
+    RunArgs, RunsArgs, RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand,
+    WebhookServeArgs, WebhookStatusArgs,
+};
+use crate::cli::workspace_paths::{
+    resolve_state_dir, state_artifacts_dir, state_backend_sqlite, state_backend_sqlite_url,
+    state_checkpoints_dir,
 };
 use crate::cli::WorkspacePaths;
 use crate::Result;
 use anyhow::anyhow;
 use humantime::{format_duration, parse_duration};
-use newton_backend::BackendStore;
+use newton_backend::{BackendStore, SqliteBackendStore};
 use newton_core::core::batch_config::BatchProjectConfig;
 use newton_core::core::error::AppError;
 use newton_core::core::types::ErrorCategory;
@@ -28,6 +32,7 @@ use newton_core::workflow::{
     operators as workflow_operators, schema as workflow_schema,
     server_notifier::ServerNotifier,
     transform as workflow_transform, webhook,
+    workflow_sink::{DbSink, FanoutSink, WorkflowSink},
 };
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -103,20 +108,17 @@ fn setup_workflow_execution(
     args: &RunArgs,
     workspace: &std::path::Path,
     settings: &workflow_schema::WorkflowSettings,
+    state_dir: &std::path::Path,
+    sink: Option<Arc<dyn WorkflowSink>>,
 ) -> (ExecutionOverrides, OperatorRegistry) {
-    let server_notifier = args
-        .server
-        .as_ref()
-        .map(|url| std::sync::Arc::new(ServerNotifier::new(url.clone())));
-
     let overrides = ExecutionOverrides {
         parallel_limit: args.parallel_limit,
         max_time_seconds: args.timeout_seconds,
-        checkpoint_base_path: None,
-        artifact_base_path: None,
+        checkpoint_base_path: Some(state_checkpoints_dir(state_dir)),
+        artifact_base_path: Some(state_artifacts_dir(state_dir)),
         max_nesting_depth: None,
         verbose: args.verbose,
-        server_notifier,
+        sink,
         pre_seed_nodes: true,
     };
 
@@ -148,6 +150,35 @@ pub async fn run(args: RunArgs) -> Result<()> {
     tracing::info!("Starting Newton workflow run");
 
     let workspace = resolve_workflow_workspace(args.workspace.clone())?;
+    let state_dir = resolve_state_dir(&workspace, args.state_dir.as_deref());
+
+    // Validate state_dir
+    if state_dir.exists() && !state_dir.is_dir() {
+        return Err(anyhow::anyhow!(
+            "STATE-DIR-001: --state-dir path exists but is not a directory: {}",
+            state_dir.display()
+        ));
+    }
+    fs::create_dir_all(state_checkpoints_dir(&state_dir))
+        .map_err(|e| anyhow::anyhow!("STATE-DIR-002: failed to create state directory: {}", e))?;
+    fs::create_dir_all(state_artifacts_dir(&state_dir)).map_err(|e| {
+        anyhow::anyhow!("STATE-DIR-002: failed to create artifacts directory: {}", e)
+    })?;
+
+    let backend = SqliteBackendStore::new(&state_backend_sqlite_url(&state_dir))
+        .await
+        .map_err(|e| anyhow::anyhow!("STATE-DIR-003: backend store init failed: {}", e.message))?;
+    let backend_arc: Arc<dyn newton_backend::BackendStore> = Arc::new(backend);
+    let db_sink = Arc::new(DbSink::new(backend_arc));
+    let sink: Option<Arc<dyn WorkflowSink>> = if let Some(url) = &args.server {
+        Some(Arc::new(FanoutSink(vec![
+            db_sink as Arc<dyn WorkflowSink>,
+            Arc::new(ServerNotifier::new(url.clone())),
+        ])))
+    } else {
+        Some(db_sink as Arc<dyn WorkflowSink>)
+    };
+
     let (mut document, workflow_path) = load_and_validate_workflow(&args)?;
 
     if let Some(trigger_payload) = build_comprehensive_trigger_payload(&args, &workspace)? {
@@ -211,8 +242,13 @@ pub async fn run(args: RunArgs) -> Result<()> {
         }
     }
 
-    let (overrides, registry) =
-        setup_workflow_execution(&args, &workspace, &document.workflow.settings);
+    let (overrides, registry) = setup_workflow_execution(
+        &args,
+        &workspace,
+        &document.workflow.settings,
+        &state_dir,
+        sink,
+    );
 
     let summary_result = workflow_executor::execute_workflow(
         document,
@@ -336,7 +372,8 @@ pub async fn run(args: RunArgs) -> Result<()> {
 pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
     let emit_json = args.emit_completion_json;
     let workflow_path = args.workflow.clone();
-    let workspace = resolve_workflow_workspace(args.workspace)?;
+    let workspace = resolve_workflow_workspace(args.workspace.clone())?;
+    let state_dir = resolve_state_dir(&workspace, args.state_dir.as_deref());
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
     let lint_results = LintRegistry::new().run(&document);
@@ -417,19 +454,61 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
     let io_settings = document.workflow.settings.io_settings.clone();
     let io_block = document.workflow.settings.io.clone();
 
-    let server_notifier = args
-        .server
-        .as_ref()
-        .map(|url| std::sync::Arc::new(ServerNotifier::new(url.clone())));
+    // Validate state_dir and ensure directories exist
+    if state_dir.exists() && !state_dir.is_dir() {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "STATE-DIR-001: --state-dir path exists but is not a directory: {}",
+                state_dir.display()
+            ),
+        )
+        .with_code("STATE-DIR-001"));
+    }
+    fs::create_dir_all(state_checkpoints_dir(&state_dir)).map_err(|e| {
+        AppError::new(
+            ErrorCategory::IoError,
+            format!("STATE-DIR-002: failed to create state directory: {}", e),
+        )
+        .with_code("STATE-DIR-002")
+    })?;
+    fs::create_dir_all(state_artifacts_dir(&state_dir)).map_err(|e| {
+        AppError::new(
+            ErrorCategory::IoError,
+            format!("STATE-DIR-002: failed to create artifacts directory: {}", e),
+        )
+        .with_code("STATE-DIR-002")
+    })?;
+
+    // Build DB sink (and optional fanout with ServerNotifier)
+    let backend = SqliteBackendStore::new(&state_backend_sqlite_url(&state_dir))
+        .await
+        .map_err(|e| {
+            AppError::new(
+                ErrorCategory::IoError,
+                format!("STATE-DIR-003: backend store init failed: {}", e.message),
+            )
+            .with_code("STATE-DIR-003")
+        })?;
+    let backend_arc: Arc<dyn newton_backend::BackendStore> = Arc::new(backend);
+    let db_sink = Arc::new(DbSink::new(backend_arc));
+    let sink: Option<Arc<dyn WorkflowSink>> = if let Some(url) = &args.server {
+        Some(Arc::new(FanoutSink(vec![
+            db_sink as Arc<dyn WorkflowSink>,
+            Arc::new(ServerNotifier::new(url.clone())),
+        ])))
+    } else {
+        Some(db_sink as Arc<dyn WorkflowSink>)
+    };
 
     let overrides = ExecutionOverrides {
         parallel_limit: args.parallel_limit,
         max_time_seconds: args.timeout_seconds,
-        checkpoint_base_path: None,
-        artifact_base_path: None,
+        checkpoint_base_path: Some(state_checkpoints_dir(&state_dir)),
+        artifact_base_path: Some(state_artifacts_dir(&state_dir)),
         max_nesting_depth: None,
         verbose: false,
-        server_notifier,
+        sink,
         pre_seed_nodes: true,
     };
 
@@ -678,7 +757,9 @@ pub fn explain(args: ExplainArgs) -> StdResult<(), AppError> {
 
 pub async fn resume(args: ResumeArgs) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(args.workspace)?;
-    let execution = checkpoint::load_execution(&workspace, &args.run_id)?;
+    let state_dir = resolve_state_dir(&workspace, args.state_dir.as_deref());
+    let execution =
+        checkpoint::load_execution_from_base(&state_checkpoints_dir(&state_dir), &args.run_id)?;
     let mut builder = OperatorRegistry::builder();
     let settings = execution.settings_effective.clone();
     let interviewer = newton_core::workflow::human::lazy_interviewer_provider(
@@ -711,11 +792,16 @@ pub async fn resume(args: ResumeArgs) -> StdResult<(), AppError> {
 
 pub fn checkpoints(args: CheckpointArgs) -> StdResult<(), AppError> {
     match args.command {
-        CheckpointCommand::List { workspace, json } => workflow_checkpoints_list(workspace, json),
+        CheckpointCommand::List {
+            workspace,
+            state_dir,
+            json,
+        } => workflow_checkpoints_list(workspace, state_dir, json),
         CheckpointCommand::Clean {
             workspace,
+            state_dir,
             older_than,
-        } => workflow_checkpoints_clean(workspace, older_than),
+        } => workflow_checkpoints_clean(workspace, state_dir, older_than),
     }
 }
 
@@ -764,10 +850,12 @@ fn format_datetime_short(dt: &chrono::DateTime<chrono::Utc>) -> String {
 
 fn workflow_checkpoints_list(
     workspace: Option<PathBuf>,
+    state_dir: Option<PathBuf>,
     format_json: bool,
 ) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(workspace)?;
-    let mut entries = checkpoint::list_checkpoints(&workspace)?;
+    let state_dir = resolve_state_dir(&workspace, state_dir.as_deref());
+    let mut entries = checkpoint::list_checkpoints_at(&state_checkpoints_dir(&state_dir))?;
 
     // Sort by started_at descending (newest first)
     entries.sort_by(|a, b| b.started_at.cmp(&a.started_at));
@@ -817,11 +905,13 @@ fn workflow_checkpoints_list(
 
 fn workflow_checkpoints_clean(
     workspace: Option<PathBuf>,
+    state_dir: Option<PathBuf>,
     older_than: String,
 ) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(workspace)?;
+    let state_dir = resolve_state_dir(&workspace, state_dir.as_deref());
     let duration = parse_duration_arg(&older_than)?;
-    checkpoint::clean_checkpoints(&workspace, duration)?;
+    checkpoint::clean_checkpoints_at(&state_checkpoints_dir(&state_dir), duration)?;
     println!("Removed checkpoints older than {older_than}");
     Ok(())
 }
@@ -830,18 +920,25 @@ pub fn artifacts(args: ArtifactArgs) -> StdResult<(), AppError> {
     match args.command {
         ArtifactCommand::Clean {
             workspace,
+            state_dir,
             older_than,
-        } => workflow_artifacts_clean(workspace, older_than),
+        } => workflow_artifacts_clean(workspace, state_dir, older_than),
     }
 }
 
 fn workflow_artifacts_clean(
     workspace: Option<PathBuf>,
+    state_dir: Option<PathBuf>,
     older_than: String,
 ) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(workspace)?;
+    let state_dir = resolve_state_dir(&workspace, state_dir.as_deref());
     let duration = parse_duration_arg(&older_than)?;
-    artifacts::ArtifactStore::clean_artifacts(&workspace, duration)?;
+    artifacts::ArtifactStore::clean_artifacts_at(
+        &state_artifacts_dir(&state_dir),
+        &state_checkpoints_dir(&state_dir),
+        duration,
+    )?;
     println!("Cleaned artifacts older than {older_than}");
     Ok(())
 }
@@ -897,7 +994,7 @@ async fn workflow_webhook_serve(args: WebhookServeArgs) -> StdResult<(), AppErro
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -1793,6 +1890,218 @@ fn load_trigger_payload(path: &Path) -> StdResult<Value, AppError> {
     Ok(value)
 }
 
+/// Backfill existing file-based workflow runs into the shared database
+pub async fn workflow_import(args: ImportArgs) -> StdResult<(), AppError> {
+    let workspace = resolve_workflow_workspace(args.workspace)?;
+    let state_dir = resolve_state_dir(&workspace, args.state_dir.as_deref());
+    let checkpoints_dir = state_checkpoints_dir(&state_dir);
+
+    if !checkpoints_dir.exists() && !args.recursive {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "IMPORT-002: resolved state dir has no workflows/ subdirectory and --recursive was not supplied: {}",
+                checkpoints_dir.display()
+            ),
+        )
+        .with_code("IMPORT-002"));
+    }
+
+    if state_dir.exists() && !state_dir.is_dir() {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "STATE-DIR-001: --state-dir path is not a directory: {}",
+                state_dir.display()
+            ),
+        )
+        .with_code("STATE-DIR-001"));
+    }
+    fs::create_dir_all(&state_dir).map_err(|e| {
+        AppError::new(ErrorCategory::IoError, format!("STATE-DIR-002: {e}"))
+            .with_code("STATE-DIR-002")
+    })?;
+
+    let db_url = state_backend_sqlite_url(&state_dir);
+    let backend = SqliteBackendStore::new(&db_url).await.map_err(|e| {
+        AppError::new(
+            ErrorCategory::IoError,
+            format!("STATE-DIR-003: {}", e.message),
+        )
+        .with_code("STATE-DIR-003")
+    })?;
+    let backend_arc: Arc<dyn newton_backend::BackendStore> = Arc::new(backend);
+
+    // Collect UUID dirs to import
+    let mut uuid_dirs: Vec<(PathBuf, PathBuf)> = Vec::new(); // (base, uuid_dir_path)
+
+    if !args.recursive {
+        if checkpoints_dir.exists() {
+            for entry in fs::read_dir(&checkpoints_dir)
+                .map_err(|e| {
+                    AppError::new(
+                        ErrorCategory::IoError,
+                        format!("failed to read workflows dir: {e}"),
+                    )
+                })?
+                .flatten()
+            {
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    uuid_dirs.push((checkpoints_dir.clone(), entry.path()));
+                }
+            }
+        }
+    } else {
+        // Walk workspace, skipping node_modules/ and target/ subtrees
+        walk_workspace_for_state_dirs(&workspace, &mut uuid_dirs);
+    }
+
+    let mut found = 0usize;
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+    let mut errors = 0usize;
+
+    for (base, uuid_dir) in &uuid_dirs {
+        let file_name = uuid_dir.file_name().unwrap_or_default().to_string_lossy();
+        let uuid = match uuid::Uuid::parse_str(&file_name) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+        found += 1;
+
+        // Check if already in terminal status in DB
+        let instance_id_str = uuid.to_string();
+        if let Ok(existing) = backend_arc.get_workflow_instance(&instance_id_str).await {
+            let is_terminal = matches!(
+                existing.status,
+                newton_types::WorkflowStatus::Succeeded
+                    | newton_types::WorkflowStatus::Failed
+                    | newton_types::WorkflowStatus::Cancelled
+            );
+            if is_terminal {
+                skipped += 1;
+                continue;
+            }
+        }
+
+        // Read execution.json
+        let execution = match checkpoint::load_execution_from_base(base, &uuid) {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!(
+                    code = "IMPORT-001",
+                    error = %e.message,
+                    uuid = %uuid,
+                    "failed to read execution.json"
+                );
+                errors += 1;
+                continue;
+            }
+        };
+
+        // Build WorkflowInstance
+        use newton_core::workflow::state::WorkflowExecutionStatus;
+        let status = match execution.status {
+            WorkflowExecutionStatus::Running => newton_types::WorkflowStatus::Running,
+            WorkflowExecutionStatus::Completed => newton_types::WorkflowStatus::Succeeded,
+            WorkflowExecutionStatus::Failed => newton_types::WorkflowStatus::Failed,
+            WorkflowExecutionStatus::Cancelled => newton_types::WorkflowStatus::Cancelled,
+        };
+
+        let instance = newton_types::WorkflowInstance {
+            instance_id: instance_id_str.clone(),
+            workflow_id: execution.workflow_file.clone(),
+            status: status.clone(),
+            nodes: vec![],
+            started_at: execution.started_at,
+            ended_at: execution.completed_at,
+            definition: None,
+            linked_plan_id: None,
+        };
+
+        if let Err(e) = backend_arc.upsert_workflow_instance(&instance).await {
+            tracing::warn!(
+                code = "IMPORT-001",
+                error = %e.message,
+                uuid = %uuid,
+                "failed to upsert workflow instance"
+            );
+            errors += 1;
+            continue;
+        }
+
+        // Read checkpoint.json for node states
+        if let Ok(cp) = checkpoint::load_checkpoint_from_base(base, &uuid) {
+            for task_id in cp.completed.keys() {
+                let node = newton_types::NodeState {
+                    node_id: task_id.clone(),
+                    status: newton_types::NodeStatus::Succeeded,
+                    started_at: None,
+                    ended_at: None,
+                    operator_type: None,
+                };
+                if let Err(e) = backend_arc.upsert_node_state(&instance_id_str, &node).await {
+                    tracing::warn!(
+                        code = "IMPORT-001",
+                        error = %e.message,
+                        "failed to upsert node state"
+                    );
+                }
+            }
+            for task_id in &cp.ready_queue {
+                let node = newton_types::NodeState {
+                    node_id: task_id.clone(),
+                    status: newton_types::NodeStatus::Pending,
+                    started_at: None,
+                    ended_at: None,
+                    operator_type: None,
+                };
+                if let Err(e) = backend_arc.upsert_node_state(&instance_id_str, &node).await {
+                    tracing::warn!(
+                        code = "IMPORT-001",
+                        error = %e.message,
+                        "failed to upsert node state for ready_queue entry"
+                    );
+                }
+            }
+        }
+
+        imported += 1;
+    }
+
+    println!(
+        "Import complete: {} found, {} imported, {} skipped (already present), {} errors",
+        found, imported, skipped, errors
+    );
+    Ok(())
+}
+
+fn walk_workspace_for_state_dirs(workspace: &Path, result: &mut Vec<(PathBuf, PathBuf)>) {
+    let skip_dirs = ["node_modules", "target"];
+    if let Ok(entries) = fs::read_dir(workspace) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if skip_dirs.contains(&name.as_str()) {
+                continue;
+            }
+            if path.is_dir() {
+                let workflows_dir = path.join(".newton").join("state").join("workflows");
+                if workflows_dir.is_dir() {
+                    if let Ok(uuid_entries) = fs::read_dir(&workflows_dir) {
+                        for uuid_entry in uuid_entries.flatten() {
+                            if uuid_entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                                result.push((workflows_dir.clone(), uuid_entry.path()));
+                            }
+                        }
+                    }
+                }
+                walk_workspace_for_state_dirs(&path, result);
+            }
+        }
+    }
+}
+
 /// Prefixes reserved by the framework or Newton that `--ailoop-base-path` MUST NOT shadow.
 const NEWTON_REST_ROUTE_PREFIXES: &[&str] = &[
     "/api",
@@ -2024,27 +2333,53 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
             format!("failed to resolve workspace paths: {e}"),
         )
     })?;
-    let db_path = &workspace_paths.backend_sqlite;
-    if let Some(dir) = db_path.parent() {
-        fs::create_dir_all(dir).map_err(|e| {
-            AppError::new(
-                newton_core::core::types::ErrorCategory::IoError,
-                format!("failed to create backend state dir: {e}"),
-            )
-        })?;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| workspace_paths.workspace_root.clone());
+    let state_dir = resolve_state_dir(&cwd, args.state_dir.as_deref());
+    if state_dir.exists() && !state_dir.is_dir() {
+        return Err(AppError::new(
+            newton_core::core::types::ErrorCategory::ValidationError,
+            format!(
+                "STATE-DIR-001: --state-dir path is not a directory: {}",
+                state_dir.display()
+            ),
+        )
+        .with_code("STATE-DIR-001"));
     }
-    let db_url = workspace_paths.backend_sqlite_url();
+    fs::create_dir_all(&state_dir).map_err(|e| {
+        AppError::new(
+            newton_core::core::types::ErrorCategory::IoError,
+            format!("STATE-DIR-002: failed to create state dir: {e}"),
+        )
+        .with_code("STATE-DIR-002")
+    })?;
+    let db_path = state_backend_sqlite(&state_dir);
+    let db_url = state_backend_sqlite_url(&state_dir);
 
     let store = newton_backend::SqliteBackendStore::new(&db_url)
         .await
         .map_err(|e| {
             AppError::new(
                 newton_core::core::types::ErrorCategory::IoError,
-                format!("backend store init failed: {}", e.message),
+                format!("STATE-DIR-003: backend store init failed: {}", e.message),
             )
+            .with_code("STATE-DIR-003")
         })?;
     info!("Backend store initialized at {}", db_path.display());
     let backend: Arc<dyn newton_backend::BackendStore> = Arc::new(store);
+
+    if args.import_existing {
+        let import_args = ImportArgs {
+            state_dir: Some(state_dir.clone()),
+            workspace: None,
+            recursive: false,
+        };
+        match workflow_import(import_args).await {
+            Ok(()) => {}
+            Err(e) => {
+                tracing::warn!(error = %e.message, "import_existing scan failed at serve startup")
+            }
+        }
+    }
 
     let state = AppState::new(operator_descriptors, backend);
     let file_store = newton_core::workflow::file_store::FsWorkflowFileStore::new(
@@ -2307,7 +2642,7 @@ async fn execute_workflow_for_plan(
         artifact_base_path: Some(task_layout.state_dir.join("artifacts").join("workflows")),
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 

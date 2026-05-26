@@ -27,6 +27,10 @@ pub struct NewtonConfig {
     /// Promise configuration
     #[serde(default)]
     pub promise: PromiseConfig,
+
+    /// Workflow runtime configuration
+    #[serde(default)]
+    pub workflow: WorkflowRuntimeConfig,
 }
 
 /// Project configuration
@@ -92,6 +96,14 @@ pub struct PromiseConfig {
     /// Promise file path
     #[serde(default = "default_promise_file")]
     pub file: PathBuf,
+}
+
+/// Workflow runtime configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WorkflowRuntimeConfig {
+    /// Override the state root directory. Overridden by NEWTON_STATE_DIR env and --state-dir flag.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state_dir: Option<PathBuf>,
 }
 
 // Default functions

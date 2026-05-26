@@ -30,6 +30,7 @@ fn test_config_serialization_roundtrip() {
         promise: newton_core::core::config::PromiseConfig {
             file: std::path::PathBuf::from("test/promise.txt"),
         },
+        workflow: newton_core::core::config::WorkflowRuntimeConfig::default(),
     };
 
     // Serialize to TOML

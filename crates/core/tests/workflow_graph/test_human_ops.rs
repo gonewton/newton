@@ -44,7 +44,7 @@ fn build_execution_context(workspace: &TempDir, execution_id: String) -> Executi
             artifact_base_path: None,
             max_nesting_depth: None,
             verbose: false,
-            server_notifier: None,
+            sink: None,
             pre_seed_nodes: true,
         },
         operator_registry: OperatorRegistry::new(),

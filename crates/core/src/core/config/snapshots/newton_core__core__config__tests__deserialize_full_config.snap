@@ -28,4 +28,7 @@ NewtonConfig {
     promise: PromiseConfig {
         file: ".custom/promise.txt",
     },
+    workflow: WorkflowRuntimeConfig {
+        state_dir: None,
+    },
 }

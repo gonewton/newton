@@ -263,7 +263,7 @@ impl WorkflowTestHarness {
                 artifact_base_path: Some(self.temp_dir.path().join(".newton/artifacts")),
                 max_nesting_depth: None,
                 verbose: false,
-                server_notifier: None,
+                sink: None,
                 pre_seed_nodes: true,
             },
         )
@@ -1478,7 +1478,7 @@ async fn test_scenario_39_nested_depth_limit_enforced() {
                 artifact_base_path: Some(harness.temp_dir.path().join(".newton/artifacts")),
                 max_nesting_depth: Some(0),
                 verbose: false,
-                server_notifier: None,
+                sink: None,
                 pre_seed_nodes: true,
             },
         )
@@ -1873,7 +1873,7 @@ async fn test_scenario_47_gh_operator_branch_push() {
             artifact_base_path: None,
             max_nesting_depth: None,
             verbose: false,
-            server_notifier: None,
+            sink: None,
             pre_seed_nodes: true,
         },
     )

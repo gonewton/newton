@@ -160,7 +160,7 @@ async fn transitions_deduplicate_targets_per_tick() {
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -194,7 +194,7 @@ async fn loop_exhausts_iteration_limit() {
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -224,7 +224,7 @@ async fn higher_priority_transition_wins() {
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
@@ -256,7 +256,7 @@ async fn workflow_exhausts_global_iteration_limit() {
         artifact_base_path: None,
         max_nesting_depth: None,
         verbose: false,
-        server_notifier: None,
+        sink: None,
         pre_seed_nodes: true,
     };
 
