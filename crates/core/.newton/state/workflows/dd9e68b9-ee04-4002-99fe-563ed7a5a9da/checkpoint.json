@@ -1,0 +1,96 @@
+{
+  "format_version": "1",
+  "execution_id": "dd9e68b9-ee04-4002-99fe-563ed7a5a9da",
+  "workflow_hash": "4061f9582821f045bb768b2a6e749759f661c2b1eadee496cc6742853e717b76",
+  "created_at": "2026-05-26T18:14:14.397892648Z",
+  "ready_queue": [
+    "task_b"
+  ],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "task_a": 2,
+    "task_b": 1
+  },
+  "total_iterations": 3,
+  "completed": {
+    "task_a": {
+      "task_id": "task_a",
+      "run_seq": 2,
+      "started_at": "2026-05-26T18:14:14.397448076Z",
+      "completed_at": "2026-05-26T18:14:14.397452885Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "task_b": {
+      "task_id": "task_b",
+      "run_seq": 1,
+      "started_at": "2026-05-26T18:14:14.396844520Z",
+      "completed_at": "2026-05-26T18:14:14.396847956Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "task_b",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "task_a",
+          "when": {
+            "$expr": "true"
+          },
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    },
+    {
+      "id": "task_a",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "task_b",
+          "when": {
+            "$expr": "true"
+          },
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    }
+  ],
+  "io_snapshot": {}
+}
