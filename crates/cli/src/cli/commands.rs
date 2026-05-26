@@ -2048,6 +2048,22 @@ pub async fn workflow_import(args: ImportArgs) -> StdResult<(), AppError> {
                     );
                 }
             }
+            for task_id in &cp.ready_queue {
+                let node = newton_types::NodeState {
+                    node_id: task_id.clone(),
+                    status: newton_types::NodeStatus::Pending,
+                    started_at: None,
+                    ended_at: None,
+                    operator_type: None,
+                };
+                if let Err(e) = backend_arc.upsert_node_state(&instance_id_str, &node).await {
+                    tracing::warn!(
+                        code = "IMPORT-001",
+                        error = %e.message,
+                        "failed to upsert node state for ready_queue entry"
+                    );
+                }
+            }
         }
 
         imported += 1;
