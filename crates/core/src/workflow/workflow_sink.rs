@@ -144,7 +144,7 @@ impl WorkflowSink for FanoutSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use newton_types::WorkflowStatus;
+    use newton_types::{NodeStatus, WorkflowStatus};
 
     #[tokio::test]
     async fn test_db_sink_workflow_started() {
@@ -168,11 +168,31 @@ mod tests {
         };
         sink.notify_workflow_started(instance);
 
-        // Give background loop time to process
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        let node = NodeState {
+            node_id: "node-a".to_string(),
+            status: NodeStatus::Running,
+            started_at: Some(chrono::Utc::now()),
+            ended_at: None,
+            operator_type: None,
+        };
+        sink.notify_node_updated("test-001".to_string(), node);
+
+        let ended_at = chrono::Utc::now();
+        sink.notify_workflow_completed("test-001".to_string(), WorkflowStatus::Succeeded, ended_at);
+
+        // Give background loop time to process all three events
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         let fetched = backend.get_workflow_instance("test-001").await.unwrap();
         assert_eq!(fetched.instance_id, "test-001");
+        assert_eq!(fetched.status, WorkflowStatus::Succeeded);
+        assert!(fetched.ended_at.is_some());
+
+        let node_states = backend
+            .list_node_states_for_instance("test-001")
+            .await
+            .unwrap();
+        assert!(node_states.iter().any(|n| n.node_id == "node-a"));
     }
 
     #[tokio::test]
@@ -205,11 +225,43 @@ mod tests {
         };
         fanout.notify_workflow_started(instance);
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        let node = NodeState {
+            node_id: "node-b".to_string(),
+            status: NodeStatus::Succeeded,
+            started_at: Some(chrono::Utc::now()),
+            ended_at: Some(chrono::Utc::now()),
+            operator_type: None,
+        };
+        fanout.notify_node_updated("test-002".to_string(), node);
+
+        let ended_at = chrono::Utc::now();
+        fanout.notify_workflow_completed(
+            "test-002".to_string(),
+            WorkflowStatus::Succeeded,
+            ended_at,
+        );
+
+        // Give background loop time to process all three events in both sinks
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         let r1 = backend1.get_workflow_instance("test-002").await.unwrap();
         let r2 = backend2.get_workflow_instance("test-002").await.unwrap();
         assert_eq!(r1.instance_id, "test-002");
+        assert_eq!(r1.status, WorkflowStatus::Succeeded);
+        assert!(r1.ended_at.is_some());
         assert_eq!(r2.instance_id, "test-002");
+        assert_eq!(r2.status, WorkflowStatus::Succeeded);
+        assert!(r2.ended_at.is_some());
+
+        let nodes1 = backend1
+            .list_node_states_for_instance("test-002")
+            .await
+            .unwrap();
+        let nodes2 = backend2
+            .list_node_states_for_instance("test-002")
+            .await
+            .unwrap();
+        assert!(nodes1.iter().any(|n| n.node_id == "node-b"));
+        assert!(nodes2.iter().any(|n| n.node_id == "node-b"));
     }
 }
