@@ -3291,3 +3291,104 @@ mod fk_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod opportunity_tests {
+    use super::*;
+    use crate::models::CreateOpportunityBody;
+
+    fn make_opportunity(id: &str) -> CreateOpportunityBody {
+        CreateOpportunityBody {
+            id: id.to_string(),
+            title: "Test opportunity".to_string(),
+            origin: "test".to_string(),
+            component: None,
+            module: None,
+            repo: None,
+            indicator: None,
+            confidence: None,
+            risk: "low".to_string(),
+            expected_value: 1.0,
+            effort: None,
+            status: "awaiting_triage".to_string(),
+            rationale: None,
+            depends_on: vec![],
+            blocks: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn create_opportunity_happy_path() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let body = make_opportunity("opp-001");
+        let item = store.create_opportunity(body).await.unwrap();
+        assert_eq!(item.id, "opp-001");
+        assert_eq!(item.title, "Test opportunity");
+        assert_eq!(item.origin, "test");
+        assert_eq!(item.risk, "low");
+        assert_eq!(item.status, "awaiting_triage");
+    }
+
+    #[tokio::test]
+    async fn create_opportunity_duplicate_upsert_preserves_created_at() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let body1 = make_opportunity("opp-002");
+        store.create_opportunity(body1).await.unwrap();
+
+        let created_at_1: (String,) =
+            sqlx::query_as("SELECT createdAt FROM Opportunity WHERE id = ?")
+                .bind("opp-002")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+
+        let mut body2 = make_opportunity("opp-002");
+        body2.title = "Updated title".to_string();
+        let item2 = store.create_opportunity(body2).await.unwrap();
+
+        assert_eq!(item2.id, "opp-002");
+        assert_eq!(item2.title, "Updated title");
+
+        let created_at_2: (String,) =
+            sqlx::query_as("SELECT createdAt FROM Opportunity WHERE id = ?")
+                .bind("opp-002")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            created_at_1.0, created_at_2.0,
+            "createdAt must not change on upsert"
+        );
+
+        let all = store.list_opportunities(None).await.unwrap();
+        let count = all.iter().filter(|o| o.id == "opp-002").count();
+        assert_eq!(count, 1, "duplicate upsert must not create a second record");
+    }
+
+    #[tokio::test]
+    async fn create_opportunity_invalid_status_returns_validation_error() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let mut body = make_opportunity("opp-003");
+        body.status = "not-a-valid-status".to_string();
+        let err = store.create_opportunity(body).await.unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+    }
+
+    #[tokio::test]
+    async fn create_opportunity_confidence_above_one_returns_validation_error() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let mut body = make_opportunity("opp-004");
+        body.confidence = Some(1.5);
+        let err = store.create_opportunity(body).await.unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+    }
+
+    #[tokio::test]
+    async fn create_opportunity_negative_expected_value_returns_validation_error() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let mut body = make_opportunity("opp-005");
+        body.expected_value = -1.0;
+        let err = store.create_opportunity(body).await.unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+    }
+}
