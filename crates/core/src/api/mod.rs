@@ -1,6 +1,7 @@
 pub mod catalog;
 pub mod dashboard;
 pub mod hil;
+pub mod magic_tools;
 pub mod openapi;
 pub mod operators;
 pub mod opportunities;
@@ -37,6 +38,7 @@ pub fn api_v1_router(state: AppState) -> Router {
         .merge(catalog::routes(arc_state.clone()))
         .merge(testing_reset::routes(arc_state.clone()))
         .merge(workflow_files::routes(arc_state.clone()))
+        .merge(aikit_magictool::router(magic_tools::build_state()))
 }
 
 pub fn static_ui_router(dir: PathBuf) -> Router {

@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Add `/api/v1/aitools/*` route group (aikit-magictool v0.1.0 wiring, Part A) (issue #371)
+
+`newton serve` now exposes an interactive AI-assisted tooling surface at `/api/v1/aitools/…` via the `aikit-magictool` crate. A `ToolRegistry` with an empty (Part A) catalog is wired into `api_v1_router`; Part B will register workflow-specific `ToolDef` implementations here.
+
+**New endpoints:**
+- `GET /api/v1/aitools` — list registered tools.
+- `GET /api/v1/aitools/{ns}/{tool}/schema` — per-tool JSON schema.
+- `POST /api/v1/aitools/{ns}/{tool}` — one-shot tool execution.
+- `POST /api/v1/aitools/{ns}/{tool}/sessions` — start multi-turn session (SSE or JSON).
+- `POST /api/v1/aitools/{ns}/{tool}/sessions/{id}/messages` — continue session (SSE or JSON).
+- `POST /api/v1/aitools/{ns}/{tool}/sessions/{id}/finalize` — finalize session and extract structured output.
+
 ### Migrate `newton serve` to `ApiServerBuilder` host — BREAKING CHANGE (issue #379)
 
 `newton serve` now uses cli-framework's `ApiServerBuilder` for all HTTP hosting. Signal handling, TCP bind, CORS, and health probes are owned by the framework.

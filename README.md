@@ -210,6 +210,12 @@ newton serve --host 0.0.0.0 --port 9000
 | Endpoint | Description |
 |---|---|
 | `GET /api/v1/<resource>` | REST API routes (versioned) |
+| `GET /api/v1/aitools` | List registered AI magic tools |
+| `GET /api/v1/aitools/{ns}/{tool}/schema` | Per-tool JSON schema |
+| `POST /api/v1/aitools/{ns}/{tool}` | One-shot tool execution |
+| `POST /api/v1/aitools/{ns}/{tool}/sessions` | Start multi-turn session (SSE or JSON) |
+| `POST /api/v1/aitools/{ns}/{tool}/sessions/{id}/messages` | Continue session (SSE or JSON) |
+| `POST /api/v1/aitools/{ns}/{tool}/sessions/{id}/finalize` | Finalize session and extract output |
 | `GET /api` | 308 redirect to `/api/v1` |
 | `GET /healthz` | Liveness probe: `{"status":"ok","version":"<newton version>"}` |
 | `GET /readyz` | Readiness probe: 200 when server is ready |
