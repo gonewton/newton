@@ -2346,46 +2346,6 @@ impl BackendStore for SqliteBackendStore {
         Ok(id.to_string())
     }
 
-    async fn create_kpi(&self, body: CreateKpiBody) -> Result<KpiItem, ApiError> {
-        if body.id.trim().is_empty() {
-            return Err(err_validation("id is required"));
-        }
-        if body.name.trim().is_empty() {
-            return Err(err_validation("name is required"));
-        }
-        if body.description.trim().is_empty() {
-            return Err(err_validation("description is required"));
-        }
-        if body.scope_level.trim().is_empty() {
-            return Err(err_validation("scopeLevel is required"));
-        }
-        let now = Self::now_iso();
-        sqlx::query(
-            "INSERT INTO KPI (id, name, description, scopeLevel, threshold, weight, aggFn, createdAt, updatedAt) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&body.id)
-        .bind(&body.name)
-        .bind(&body.description)
-        .bind(&body.scope_level)
-        .bind(body.threshold)
-        .bind(body.weight)
-        .bind(&body.agg_fn)
-        .bind(&now)
-        .bind(&now)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| {
-            if e.to_string().contains("UNIQUE constraint failed") {
-                err_conflict("KPI already exists")
-            } else {
-                err_internal(&format!("insert error: {e}"))
-            }
-        })?;
-
-        self.get_kpi(&body.id).await
-    }
-
     async fn get_kpi(&self, id: &str) -> Result<KpiItem, ApiError> {
         let row: Option<KpiRow> = sqlx::query_as::<_, KpiRow>(
             "SELECT id, name, description, scopeLevel AS scope_level, threshold, weight, aggFn AS agg_fn, createdAt AS created_at, updatedAt AS updated_at \
