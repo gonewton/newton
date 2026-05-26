@@ -11,7 +11,9 @@ release/
 target
 repomix-output.xml
 .claude
-.newton
+.newton/*
+!.newton/scripts/
+!.newton/scripts/**
 specs
 tarpaulin-report.html.gitignore
 # Auto-release workflow trigger file
