@@ -22,6 +22,7 @@ newton-backend = { path = "../backend" }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 aikit-sdk = { workspace = true }
+aikit-magictool = { workspace = true }
 ailoop-core = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -187,3 +188,7 @@ path = "tests/integration/test_catalog_crud.rs"
 [[test]]
 name = "test_persistence_parity"
 path = "tests/integration/test_persistence_parity.rs"
+
+[[test]]
+name = "test_magic_tools"
+path = "tests/integration/test_magic_tools.rs"
