@@ -5,6 +5,7 @@ pub mod store;
 pub use models::*;
 pub use store::SqliteBackendStore;
 
+use chrono::{DateTime, Utc};
 use newton_types::ApiError;
 
 pub fn err_not_found(message: &str) -> ApiError {
@@ -201,6 +202,14 @@ pub trait BackendStore: Send + Sync {
         &self,
         instance_id: &str,
         node: &newton_types::NodeState,
+    ) -> Result<(), ApiError>;
+
+    /// Update the status and ended_at of an existing workflow instance.
+    async fn update_workflow_status(
+        &self,
+        instance_id: &str,
+        status: newton_types::WorkflowStatus,
+        ended_at: DateTime<Utc>,
     ) -> Result<(), ApiError>;
 
     // ── HilEvent ─────────────────────────────────────────────────────────────────

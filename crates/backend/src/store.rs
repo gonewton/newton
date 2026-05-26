@@ -2462,6 +2462,30 @@ impl BackendStore for SqliteBackendStore {
         Ok(())
     }
 
+    async fn update_workflow_status(
+        &self,
+        instance_id: &str,
+        status: newton_types::WorkflowStatus,
+        ended_at: DateTime<Utc>,
+    ) -> Result<(), ApiError> {
+        let now = Self::now_iso();
+        let affected = sqlx::query(
+            "UPDATE WorkflowInstance SET status = ?, endedAt = ?, updatedAt = ? WHERE instanceId = ?"
+        )
+        .bind(workflow_status_str(&status))
+        .bind(ended_at.to_rfc3339())
+        .bind(&now)
+        .bind(instance_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("update_workflow_status error: {e}")))?;
+
+        if affected.rows_affected() == 0 {
+            return Err(err_not_found("Workflow instance not found"));
+        }
+        Ok(())
+    }
+
     async fn get_hil_event(&self, event_id: &str) -> Result<newton_types::HilEvent, ApiError> {
         let row: Option<HilEventRow> = sqlx::query_as::<_, HilEventRow>(
             "SELECT eventId, instanceId, nodeId, channel, eventType, question, choices, timeoutSeconds, correlationId, status, timestamp FROM HilEvent WHERE eventId = ?"

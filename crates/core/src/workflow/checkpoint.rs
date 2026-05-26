@@ -153,7 +153,12 @@ pub fn load_execution(
     workspace_root: &Path,
     execution_id: &Uuid,
 ) -> Result<WorkflowExecution, AppError> {
-    let paths = WorkflowStatePaths::new(workspace_root, execution_id);
+    let base = WorkflowStatePaths::workspace_root(workspace_root);
+    load_execution_from_base(&base, execution_id)
+}
+
+pub fn load_execution_from_base(base: &Path, id: &Uuid) -> Result<WorkflowExecution, AppError> {
+    let paths = WorkflowStatePaths::from_base(base, id);
     let bytes = fs::read(&paths.execution_file).map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::IoError,
@@ -172,7 +177,12 @@ pub fn load_checkpoint(
     workspace_root: &Path,
     execution_id: &Uuid,
 ) -> Result<WorkflowCheckpoint, AppError> {
-    let paths = WorkflowStatePaths::new(workspace_root, execution_id);
+    let base = WorkflowStatePaths::workspace_root(workspace_root);
+    load_checkpoint_from_base(&base, execution_id)
+}
+
+pub fn load_checkpoint_from_base(base: &Path, id: &Uuid) -> Result<WorkflowCheckpoint, AppError> {
+    let paths = WorkflowStatePaths::from_base(base, id);
     let bytes = fs::read(&paths.checkpoint_file).map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::IoError,
@@ -200,12 +210,16 @@ pub struct CheckpointSummary {
 }
 
 pub fn list_checkpoints(workspace_root: &Path) -> Result<Vec<CheckpointSummary>, AppError> {
-    let mut entries = Vec::new();
     let base = WorkflowStatePaths::workspace_root(workspace_root);
+    list_checkpoints_at(&base)
+}
+
+pub fn list_checkpoints_at(base: &Path) -> Result<Vec<CheckpointSummary>, AppError> {
+    let mut entries = Vec::new();
     if !base.exists() {
         return Ok(entries);
     }
-    for entry in fs::read_dir(&base)
+    for entry in fs::read_dir(base)
         .map_err(|err| {
             AppError::new(
                 crate::core::types::ErrorCategory::IoError,
@@ -219,9 +233,9 @@ pub fn list_checkpoints(workspace_root: &Path) -> Result<Vec<CheckpointSummary>,
         }
         if let Ok(uuid) = Uuid::parse_str(&entry.file_name().to_string_lossy()) {
             if let (Ok(execution), Ok(metadata)) = (
-                load_execution(workspace_root, &uuid),
+                load_execution_from_base(base, &uuid),
                 fs::metadata(
-                    WorkflowStatePaths::new(workspace_root, &uuid)
+                    WorkflowStatePaths::from_base(base, &uuid)
                         .checkpoint_file
                         .clone(),
                 ),
@@ -247,11 +261,15 @@ pub fn list_checkpoints(workspace_root: &Path) -> Result<Vec<CheckpointSummary>,
 
 pub fn clean_checkpoints(workspace_root: &Path, older_than: Duration) -> Result<(), AppError> {
     let base = WorkflowStatePaths::workspace_root(workspace_root);
+    clean_checkpoints_at(&base, older_than)
+}
+
+pub fn clean_checkpoints_at(base: &Path, older_than: Duration) -> Result<(), AppError> {
     if !base.exists() {
         return Ok(());
     }
     let now = SystemTime::now();
-    for entry in fs::read_dir(&base)
+    for entry in fs::read_dir(base)
         .map_err(|err| {
             AppError::new(
                 crate::core::types::ErrorCategory::IoError,

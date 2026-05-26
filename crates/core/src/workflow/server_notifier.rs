@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use newton_types::{NodeState, WorkflowInstance, WorkflowStatus};
 use tokio::sync::mpsc;
 
+use crate::workflow::workflow_sink::WorkflowSink;
+
 enum NotifierEvent {
     WorkflowStarted(WorkflowInstance),
     NodeUpdated {
@@ -111,5 +113,24 @@ impl ServerNotifier {
                 }
             }
         }
+    }
+}
+
+impl WorkflowSink for ServerNotifier {
+    fn notify_workflow_started(&self, instance: WorkflowInstance) {
+        self.notify_workflow_started(instance);
+    }
+
+    fn notify_node_updated(&self, instance_id: String, node: NodeState) {
+        self.notify_node_updated(instance_id, node);
+    }
+
+    fn notify_workflow_completed(
+        &self,
+        instance_id: String,
+        status: WorkflowStatus,
+        ended_at: DateTime<Utc>,
+    ) {
+        self.notify_workflow_completed(instance_id, status, ended_at);
     }
 }

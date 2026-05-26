@@ -433,7 +433,7 @@ async fn run_workflow_yaml(
             artifact_base_path: Some(workspace.path().join(".newton/artifacts")),
             max_nesting_depth: None,
             verbose: false,
-            server_notifier: None,
+            sink: None,
             pre_seed_nodes: true,
         },
     )

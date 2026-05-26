@@ -108,6 +108,10 @@ pub struct RunArgs {
     /// Newton server URL to register this run (optional)
     #[arg(long, value_name = "URL")]
     pub server: Option<String>,
+
+    /// Override the state root directory where checkpoints, artifacts, and backend.sqlite are stored. Defaults to auto-resolved from workspace root.
+    #[arg(long, value_name = "PATH")]
+    pub state_dir: Option<PathBuf>,
 }
 
 // ── Webhook ───────────────────────────────────────────────────────────────────
@@ -190,6 +194,23 @@ pub enum WorkflowCommand {
         long_about = crate::cli::framework_setup::WORKFLOW_RUN_LONG_ABOUT
     )]
     Run(RunArgs),
+    #[command(about = "Backfill existing file-based workflow runs into the shared database")]
+    Import(ImportArgs),
+}
+
+#[derive(Args, Clone)]
+pub struct ImportArgs {
+    /// Override the state root directory where checkpoints, artifacts, and backend.sqlite are stored.
+    #[arg(long, value_name = "PATH")]
+    pub state_dir: Option<PathBuf>,
+
+    /// Workspace root to scan for existing runs (default: CWD)
+    #[arg(long, value_name = "PATH")]
+    pub workspace: Option<PathBuf>,
+
+    /// Recursively walk workspace for all .newton/state/workflows directories
+    #[arg(long)]
+    pub recursive: bool,
 }
 
 #[derive(Args, Clone)]
@@ -262,6 +283,10 @@ pub struct ResumeArgs {
 
     #[arg(long)]
     pub allow_workflow_change: bool,
+
+    /// Override the state root directory where checkpoints, artifacts, and backend.sqlite are stored. Defaults to auto-resolved from workspace root.
+    #[arg(long, value_name = "PATH")]
+    pub state_dir: Option<PathBuf>,
 }
 
 #[derive(Args, Clone)]
@@ -280,6 +305,9 @@ pub enum CheckpointCommand {
         #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
 
+        #[arg(long, value_name = "PATH")]
+        state_dir: Option<PathBuf>,
+
         #[arg(long = "json")]
         json: bool,
     },
@@ -290,6 +318,9 @@ pub enum CheckpointCommand {
     Clean {
         #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
+
+        #[arg(long, value_name = "PATH")]
+        state_dir: Option<PathBuf>,
 
         #[arg(long, value_name = "DURATION")]
         older_than: String,
@@ -311,6 +342,9 @@ pub enum ArtifactCommand {
     Clean {
         #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
+
+        #[arg(long, value_name = "PATH")]
+        state_dir: Option<PathBuf>,
 
         #[arg(long, value_name = "DURATION")]
         older_than: String,
@@ -401,6 +435,14 @@ pub struct ServeArgs {
     /// (used only with --with-embedded-ailoop). Must not be `/api`.
     #[arg(long = "ailoop-base-path", default_value = "/ailoop")]
     pub ailoop_base_path: String,
+
+    /// Override the state root directory where checkpoints, artifacts, and backend.sqlite are stored. Defaults to auto-resolved from workspace root.
+    #[arg(long, value_name = "PATH")]
+    pub state_dir: Option<PathBuf>,
+
+    /// Run import scan of existing file-based runs before the HTTP listener binds.
+    #[arg(long, default_value_t = false)]
+    pub import_existing: bool,
 }
 
 // ── Data ─────────────────────────────────────────────────────────────────────

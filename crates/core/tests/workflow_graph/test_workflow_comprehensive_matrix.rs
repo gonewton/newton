@@ -203,7 +203,7 @@ async fn execute_yaml(
             artifact_base_path: None,
             max_nesting_depth: None,
             verbose: false,
-            server_notifier: None,
+            sink: None,
             pre_seed_nodes: true,
         },
     )
