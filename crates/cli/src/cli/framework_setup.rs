@@ -698,6 +698,7 @@ const DATA_POST_LONG_ABOUT: &str =
      EXAMPLES:\n  \
      newton data post product -f body.json\n  \
      newton data post component -f body.json --dry-run\n  \
+     newton data post kpi -f kpi.json\n  \
      newton data post eval-run -f evalrun.json\n  \
      newton data post grade -f grade.json";
 

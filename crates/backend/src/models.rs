@@ -73,6 +73,18 @@ pub struct KpiItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateKpiBody {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub scope_level: String,
+    pub threshold: f64,
+    pub weight: f64,
+    pub agg_fn: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct EvalRunItem {
     pub id: String,
     pub source: String,
