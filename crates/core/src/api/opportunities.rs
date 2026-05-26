@@ -6,14 +6,17 @@ use axum::{
     routing::{get, patch},
     Router,
 };
-use newton_backend::PatchOpportunityBody;
+use newton_backend::{CreateOpportunityBody, PatchOpportunityBody};
 use newton_types::ApiError;
 use serde::Deserialize;
 use std::sync::Arc;
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/opportunities", get(list_opportunities))
+        .route(
+            "/opportunities",
+            get(list_opportunities).post(create_opportunity),
+        )
         .route("/opportunities/{id}", patch(patch_opportunity))
         .with_state(state)
 }
@@ -40,6 +43,33 @@ pub(crate) async fn list_opportunities(
     match state.backend.list_opportunities(query.status).await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/opportunities",
+    tag = "opportunities",
+    request_body = CreateOpportunityBody,
+    responses(
+        (status = 201, description = "Created or upserted opportunity", body = newton_backend::OpportunityItem),
+        (status = 422, description = "Validation error", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn create_opportunity(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateOpportunityBody>,
+) -> Response {
+    match state.backend.create_opportunity(body).await {
+        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
+        Err(e) => {
+            let status = match e.code.as_str() {
+                "ERR_VALIDATION" => StatusCode::UNPROCESSABLE_ENTITY,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            (status, Json(e)).into_response()
+        }
     }
 }
 

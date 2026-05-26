@@ -1109,6 +1109,129 @@ impl BackendStore for SqliteBackendStore {
             .ok_or_else(|| err_internal("Failed to read back updated opportunity"))
     }
 
+    async fn create_opportunity(
+        &self,
+        body: CreateOpportunityBody,
+    ) -> Result<OpportunityItem, ApiError> {
+        let valid_statuses = [
+            "awaiting_triage",
+            "triaged",
+            "approved_for_planning",
+            "structured",
+            "deferred",
+            "rejected",
+        ];
+        if !valid_statuses.contains(&body.status.as_str()) {
+            return Err(err_validation("Invalid opportunity status"));
+        }
+        if let Some(c) = body.confidence {
+            if !(0.0..=1.0).contains(&c) {
+                return Err(err_validation("confidence must be between 0.0 and 1.0"));
+            }
+        }
+        if body.expected_value < 0.0 {
+            return Err(err_validation("expectedValue must be non-negative"));
+        }
+        if body.id.trim().is_empty() {
+            return Err(err_validation("id must not be empty"));
+        }
+        if body.title.trim().is_empty() {
+            return Err(err_validation("title must not be empty"));
+        }
+        if body.origin.trim().is_empty() {
+            return Err(err_validation("origin must not be empty"));
+        }
+
+        let component_id = if let Some(ref cid) = body.component {
+            let count: Option<CountRow> = sqlx::query_as::<_, CountRow>(
+                "SELECT COUNT(*) as count FROM Component WHERE id = ?",
+            )
+            .bind(cid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("query error: {e}")))?;
+            if count.map(|c| c.count).unwrap_or(0) == 0 {
+                tracing::warn!("component '{}' not found, proceeding", cid);
+                None
+            } else {
+                Some(cid.clone())
+            }
+        } else {
+            None
+        };
+        let repo_id = if let Some(ref rid) = body.repo {
+            let count: Option<CountRow> =
+                sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Repo WHERE id = ?")
+                    .bind(rid)
+                    .fetch_optional(&self.pool)
+                    .await
+                    .map_err(|e| err_internal(&format!("query error: {e}")))?;
+            if count.map(|c| c.count).unwrap_or(0) == 0 {
+                tracing::warn!("repo '{}' not found, proceeding", rid);
+                None
+            } else {
+                Some(rid.clone())
+            }
+        } else {
+            None
+        };
+
+        let now = Self::now_iso();
+        let depends_on_json =
+            serde_json::to_string(&body.depends_on).unwrap_or_else(|_| "[]".to_string());
+        let blocks_json = serde_json::to_string(&body.blocks).unwrap_or_else(|_| "[]".to_string());
+
+        sqlx::query(
+            "INSERT INTO Opportunity (
+                id, title, origin, componentId, module, repoId,
+                indicator, confidence, risk, expectedValue, effort,
+                status, rationale, dependsOn, blocks, createdAt, updatedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title       = excluded.title,
+                origin      = excluded.origin,
+                componentId = excluded.componentId,
+                module      = excluded.module,
+                repoId      = excluded.repoId,
+                indicator   = excluded.indicator,
+                confidence  = excluded.confidence,
+                risk        = excluded.risk,
+                expectedValue = excluded.expectedValue,
+                effort      = excluded.effort,
+                status      = excluded.status,
+                rationale   = excluded.rationale,
+                dependsOn   = excluded.dependsOn,
+                blocks      = excluded.blocks,
+                updatedAt   = excluded.updatedAt",
+        )
+        .bind(&body.id)
+        .bind(&body.title)
+        .bind(&body.origin)
+        .bind(&component_id)
+        .bind(&body.module)
+        .bind(&repo_id)
+        .bind(&body.indicator)
+        .bind(body.confidence)
+        .bind(&body.risk)
+        .bind(body.expected_value)
+        .bind(&body.effort)
+        .bind(&body.status)
+        .bind(&body.rationale)
+        .bind(&depends_on_json)
+        .bind(&blocks_json)
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("upsert error: {e}")))?;
+
+        self.list_opportunities(None)
+            .await?
+            .into_iter()
+            .find(|o| o.id == body.id)
+            .ok_or_else(|| err_internal("Failed to read back created opportunity"))
+    }
+
     async fn list_requests(&self) -> Result<Vec<RequestItem>, ApiError> {
         let rows = sqlx::query_as::<_, RequestRow>(
             "SELECT id, title, description, componentId as component_id, repoId as repo_id, requestedBy as requested_by, status, linkedOpportunityId as linked_opportunity_id, createdAt as created_at FROM Request ORDER BY id ASC"

@@ -220,6 +220,10 @@ name = "test_grade_crud"
 path = "tests/integration/test_grade_crud.rs"
 
 [[test]]
+name = "test_opportunity_crud"
+path = "tests/integration/test_opportunity_crud.rs"
+
+[[test]]
 name = "serve_with_embedded_ailoop_health"
 path = "tests/integration/serve_with_embedded_ailoop_health.rs"
 
