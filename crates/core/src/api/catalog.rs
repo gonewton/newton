@@ -7,10 +7,9 @@ use axum::{
     Router,
 };
 use newton_backend::{
-    CreateComponentBody, CreateEvalRunBody, CreateGradeBody, CreateKpiBody, CreateModuleBody,
-    CreateProductBody, CreateRepoBody, DeletedItem, PatchComponentBody, PatchModuleBody,
-    PatchModuleDependencyBody, PatchProductBody, PatchRepoBody, PutComponentBody, PutModuleBody,
-    PutProductBody, PutRepoBody,
+    CreateComponentBody, CreateEvalRunBody, CreateGradeBody, CreateModuleBody, CreateProductBody,
+    CreateRepoBody, DeletedItem, PatchComponentBody, PatchModuleBody, PatchModuleDependencyBody,
+    PatchProductBody, PatchRepoBody, PutComponentBody, PutModuleBody, PutProductBody, PutRepoBody,
 };
 use newton_types::ApiError;
 use serde::Deserialize;
@@ -27,6 +26,9 @@ fn status_from_error(e: &ApiError) -> StatusCode {
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
+        // KPI (read-only)
+        .route("/kpis", get(list_kpis))
+        .route("/kpis/{id}", get(get_kpi))
         // EvalRun
         .route("/eval-runs", get(list_eval_runs).post(create_eval_run))
         .route("/eval-runs/{id}", get(get_eval_run))
@@ -103,28 +105,6 @@ pub(crate) async fn get_kpi(
 ) -> Response {
     match state.backend.get_kpi(&id).await {
         Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
-}
-
-#[utoipa::path(
-    post,
-    path = "/kpis",
-    tag = "dashboard",
-    request_body = CreateKpiBody,
-    responses(
-        (status = 201, description = "Created KPI", body = newton_backend::KpiItem),
-        (status = 409, description = "Conflict", body = ApiError),
-        (status = 422, description = "Validation error", body = ApiError),
-        (status = 500, description = "Internal error", body = ApiError)
-    )
-)]
-pub(crate) async fn create_kpi(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<CreateKpiBody>,
-) -> Response {
-    match state.backend.create_kpi(body).await {
-        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
         Err(e) => (status_from_error(&e), Json(e)).into_response(),
     }
 }

@@ -694,11 +694,10 @@ const DATA_GET_LONG_ABOUT: &str =
      newton data get grade <id>";
 
 const DATA_POST_LONG_ABOUT: &str =
-    "Create a new catalog entity. For KPI, EvalRun, and Grade, the caller MUST provide a stable `id`.\n\n\
+    "Create a new catalog entity. For EvalRun and Grade, the caller MUST provide a stable `id`.\n\n\
      EXAMPLES:\n  \
      newton data post product -f body.json\n  \
      newton data post component -f body.json --dry-run\n  \
-     newton data post kpi -f kpi.json\n  \
      newton data post eval-run -f evalrun.json\n  \
      newton data post grade -f grade.json";
 
