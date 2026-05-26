@@ -1,4 +1,7 @@
-use aikit_magictool::{ChatEvent, MagicToolState, MockChat, MockExecutor, ToolDef, ToolRegistry};
+use aikit_magictool::{
+    backend::{PipelineExecutor, SessionChat},
+    MagicToolState, ToolDef, ToolRegistry,
+};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -24,15 +27,7 @@ pub fn build_state() -> MagicToolState {
 
     MagicToolState {
         registry: Arc::new(registry),
-        executor: Arc::new(MockExecutor::ok(json!({"pong": true}))),
-        chat: Some(Arc::new(MockChat::new(
-            vec![
-                ChatEvent::Started {
-                    session_id: "ping-session".to_owned(),
-                },
-                ChatEvent::Final(r#"{"pong":true}"#.to_owned()),
-            ],
-            json!({"pong": true}),
-        ))),
+        executor: Arc::new(PipelineExecutor),
+        chat: Some(Arc::new(SessionChat)),
     }
 }
