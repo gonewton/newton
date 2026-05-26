@@ -26,9 +26,6 @@ fn status_from_error(e: &ApiError) -> StatusCode {
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        // KPI
-        .route("/kpis", get(list_kpis))
-        .route("/kpis/{id}", get(get_kpi))
         // EvalRun
         .route("/eval-runs", get(list_eval_runs).post(create_eval_run))
         .route("/eval-runs/{id}", get(get_eval_run))
@@ -68,45 +65,6 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/grades", get(list_grades).post(create_grade))
         .route("/grades/{id}", get(get_grade))
         .with_state(state)
-}
-
-// ── KPI ───────────────────────────────────────────────────────────────────────
-
-#[utoipa::path(
-    get,
-    path = "/kpis",
-    tag = "catalog",
-    responses(
-        (status = 200, description = "KPI list", body = [newton_backend::KpiItem]),
-        (status = 500, description = "Internal error", body = ApiError)
-    )
-)]
-pub(crate) async fn list_kpis(State(state): State<Arc<AppState>>) -> Response {
-    match state.backend.list_kpis().await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
-}
-
-#[utoipa::path(
-    get,
-    path = "/kpis/{id}",
-    tag = "catalog",
-    params(("id" = String, Path, description = "KPI ID")),
-    responses(
-        (status = 200, description = "KPI", body = newton_backend::KpiItem),
-        (status = 404, description = "Not found", body = ApiError),
-        (status = 500, description = "Internal error", body = ApiError)
-    )
-)]
-pub(crate) async fn get_kpi(
-    Path(id): Path<String>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    match state.backend.get_kpi(&id).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
 }
 
 // ── EvalRun ───────────────────────────────────────────────────────────────────

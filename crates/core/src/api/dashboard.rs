@@ -1,6 +1,6 @@
 use crate::api::state::AppState;
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Json, Response},
     routing::get,
@@ -16,6 +16,9 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/components", get(list_components))
         .route("/pending-approvals", get(list_pending_approvals))
         .route("/regressions", get(list_regressions))
+        // KPI catalog (canonical).
+        .route("/kpis", get(list_kpis))
+        .route("/kpis/{id}", get(get_kpi))
         // Compatibility alias (deprecated): KPI catalog was previously served as "indicators".
         .route("/indicators", get(list_indicators))
         .route("/recent-actions", get(list_recent_actions))
@@ -99,6 +102,50 @@ pub(crate) async fn list_indicators(State(state): State<Arc<AppState>>) -> Respo
     match state.backend.list_kpis().await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/kpis",
+    tag = "dashboard",
+    responses(
+        (status = 200, description = "KPI list", body = [newton_backend::KpiItem]),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_kpis(State(state): State<Arc<AppState>>) -> Response {
+    match state.backend.list_kpis().await {
+        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/kpis/{id}",
+    tag = "dashboard",
+    params(("id" = String, Path, description = "KPI ID")),
+    responses(
+        (status = 200, description = "KPI", body = newton_backend::KpiItem),
+        (status = 404, description = "Not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn get_kpi(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.get_kpi(&id).await {
+        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => {
+            let status = if e.code == "ERR_NOT_FOUND" {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (status, Json(e)).into_response()
+        }
     }
 }
 
