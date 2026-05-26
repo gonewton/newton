@@ -16,7 +16,6 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/components", get(list_components))
         .route("/pending-approvals", get(list_pending_approvals))
         .route("/regressions", get(list_regressions))
-        .route("/kpis", get(list_kpis))
         // Compatibility alias (deprecated): KPI catalog was previously served as "indicators".
         .route("/indicators", get(list_indicators))
         .route("/recent-actions", get(list_recent_actions))
@@ -89,22 +88,6 @@ pub(crate) async fn list_regressions(State(state): State<Arc<AppState>>) -> Resp
 
 #[utoipa::path(
     get,
-    path = "/kpis",
-    tag = "dashboard",
-    responses(
-        (status = 200, description = "KPI list", body = [newton_backend::KpiItem]),
-        (status = 500, description = "Internal error", body = ApiError)
-    )
-)]
-pub(crate) async fn list_kpis(State(state): State<Arc<AppState>>) -> Response {
-    match state.backend.list_kpis().await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
-    }
-}
-
-#[utoipa::path(
-    get,
     path = "/indicators",
     tag = "dashboard",
     responses(
@@ -113,7 +96,10 @@ pub(crate) async fn list_kpis(State(state): State<Arc<AppState>>) -> Response {
     )
 )]
 pub(crate) async fn list_indicators(State(state): State<Arc<AppState>>) -> Response {
-    list_kpis(State(state)).await
+    match state.backend.list_kpis().await {
+        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
+    }
 }
 
 #[derive(Debug, Deserialize)]
