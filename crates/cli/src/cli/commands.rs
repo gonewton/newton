@@ -7,7 +7,8 @@ use crate::cli::args::{
     WebhookServeArgs, WebhookStatusArgs,
 };
 use crate::cli::workspace_paths::{
-    resolve_state_dir, state_artifacts_dir, state_backend_sqlite_url, state_checkpoints_dir,
+    resolve_state_dir, state_artifacts_dir, state_backend_sqlite, state_backend_sqlite_url,
+    state_checkpoints_dir,
 };
 use crate::cli::WorkspacePaths;
 use crate::Result;
@@ -910,9 +911,13 @@ fn workflow_artifacts_clean(
     older_than: String,
 ) -> StdResult<(), AppError> {
     let workspace = resolve_workflow_workspace(workspace)?;
-    let _state_dir = resolve_state_dir(&workspace, state_dir.as_deref());
+    let state_dir = resolve_state_dir(&workspace, state_dir.as_deref());
     let duration = parse_duration_arg(&older_than)?;
-    artifacts::ArtifactStore::clean_artifacts(&workspace, duration)?;
+    artifacts::ArtifactStore::clean_artifacts_at(
+        &state_artifacts_dir(&state_dir),
+        &state_checkpoints_dir(&state_dir),
+        duration,
+    )?;
     println!("Cleaned artifacts older than {older_than}");
     Ok(())
 }
@@ -2291,27 +2296,53 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
             format!("failed to resolve workspace paths: {e}"),
         )
     })?;
-    let db_path = &workspace_paths.backend_sqlite;
-    if let Some(dir) = db_path.parent() {
-        fs::create_dir_all(dir).map_err(|e| {
-            AppError::new(
-                newton_core::core::types::ErrorCategory::IoError,
-                format!("failed to create backend state dir: {e}"),
-            )
-        })?;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| workspace_paths.workspace_root.clone());
+    let state_dir = resolve_state_dir(&cwd, args.state_dir.as_deref());
+    if state_dir.exists() && !state_dir.is_dir() {
+        return Err(AppError::new(
+            newton_core::core::types::ErrorCategory::ValidationError,
+            format!(
+                "STATE-DIR-001: --state-dir path is not a directory: {}",
+                state_dir.display()
+            ),
+        )
+        .with_code("STATE-DIR-001"));
     }
-    let db_url = workspace_paths.backend_sqlite_url();
+    fs::create_dir_all(&state_dir).map_err(|e| {
+        AppError::new(
+            newton_core::core::types::ErrorCategory::IoError,
+            format!("STATE-DIR-002: failed to create state dir: {e}"),
+        )
+        .with_code("STATE-DIR-002")
+    })?;
+    let db_path = state_backend_sqlite(&state_dir);
+    let db_url = state_backend_sqlite_url(&state_dir);
 
     let store = newton_backend::SqliteBackendStore::new(&db_url)
         .await
         .map_err(|e| {
             AppError::new(
                 newton_core::core::types::ErrorCategory::IoError,
-                format!("backend store init failed: {}", e.message),
+                format!("STATE-DIR-003: backend store init failed: {}", e.message),
             )
+            .with_code("STATE-DIR-003")
         })?;
     info!("Backend store initialized at {}", db_path.display());
     let backend: Arc<dyn newton_backend::BackendStore> = Arc::new(store);
+
+    if args.import_existing {
+        let import_args = ImportArgs {
+            state_dir: Some(state_dir.clone()),
+            workspace: None,
+            recursive: false,
+        };
+        match workflow_import(import_args).await {
+            Ok(()) => {}
+            Err(e) => {
+                tracing::warn!(error = %e.message, "import_existing scan failed at serve startup")
+            }
+        }
+    }
 
     let state = AppState::new(operator_descriptors, backend);
     let file_store = newton_core::workflow::file_store::FsWorkflowFileStore::new(

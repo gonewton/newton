@@ -147,7 +147,12 @@ impl TempWorkspace {
     /// Create a non-empty file under `.newton/artifacts/<sub>/` and
     /// return its path. Used by artifact-clean integration tests.
     pub fn write_artifact(&self, sub: &str, name: &str, contents: &[u8]) -> PathBuf {
-        let dir = self.path().join(".newton/artifacts").join(sub);
+        // Artifacts are stored under the centralized state dir path:
+        // <workspace>/.newton/state/artifacts/workflows/<sub>/<name>
+        let dir = self
+            .path()
+            .join(".newton/state/artifacts/workflows")
+            .join(sub);
         fs::create_dir_all(&dir).unwrap();
         let p = dir.join(name);
         fs::write(&p, contents).unwrap();

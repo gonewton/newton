@@ -177,6 +177,39 @@ impl ArtifactStore {
         }
         Ok(())
     }
+
+    /// Clean artifacts rooted directly at `artifact_dir`, using `checkpoint_base` for
+    /// determining which artifacts are still live.
+    pub fn clean_artifacts_at(
+        artifact_dir: &Path,
+        checkpoint_base: &Path,
+        older_than: Duration,
+    ) -> Result<(), AppError> {
+        let live = checkpoint::collect_live_artifact_paths_from_base(
+            checkpoint_base,
+            artifact_dir,
+            older_than,
+        )?;
+        let files = collect_artifact_files(artifact_dir)?;
+        for file in files {
+            if live.contains(
+                &file
+                    .path
+                    .canonicalize()
+                    .unwrap_or_else(|_| file.path.clone()),
+            ) {
+                continue;
+            }
+            if SystemTime::now()
+                .duration_since(file.modified)
+                .unwrap_or_else(|_| Duration::from_secs(0))
+                >= older_than
+            {
+                let _ = fs::remove_file(&file.path);
+            }
+        }
+        Ok(())
+    }
 }
 
 fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {

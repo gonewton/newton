@@ -292,15 +292,28 @@ mod tests {
 
     #[test]
     fn test_resolve_state_dir_env_var() {
-        // Clean up after test using serial, but we can test the logic path
-        let ws = PathBuf::from("/tmp/test-ws-resolve-env");
-        // Without env var set (assuming it's not set), should fall through
-        std::env::remove_var("NEWTON_STATE_DIR");
-        // Fallback should be workspace/.newton/state
+        let ws = PathBuf::from("/tmp/test-ws-resolve-env-set");
+        let env_state = PathBuf::from("/tmp/test-state-from-env-var");
+        // Set NEWTON_STATE_DIR and verify it takes precedence over fallback
+        std::env::set_var("NEWTON_STATE_DIR", &env_state);
         let result = resolve_state_dir(&ws, None);
-        // Should end with .newton/state (unless walk-up finds something)
-        // At minimum, it should not panic
-        assert!(result.is_absolute() || !result.as_os_str().is_empty());
+        std::env::remove_var("NEWTON_STATE_DIR");
+        assert_eq!(result, env_state);
+    }
+
+    #[test]
+    fn test_resolve_state_dir_toml() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().to_path_buf();
+        let toml_state = "/tmp/test-state-from-toml";
+        std::fs::write(
+            ws.join("newton.toml"),
+            format!("[workflow]\nstate_dir = \"{toml_state}\"\n"),
+        )
+        .unwrap();
+        std::env::remove_var("NEWTON_STATE_DIR");
+        let result = resolve_state_dir(&ws, None);
+        assert_eq!(result, PathBuf::from(toml_state));
     }
 
     #[test]

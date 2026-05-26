@@ -311,13 +311,23 @@ pub fn collect_live_artifact_paths(
     workspace_root: &Path,
     retention: Duration,
 ) -> Result<HashSet<PathBuf>, AppError> {
-    let mut live = HashSet::new();
     let base = WorkflowStatePaths::workspace_root(workspace_root);
-    if !base.exists() {
+    collect_live_artifact_paths_from_base(&base, workspace_root, retention)
+}
+
+/// Like `collect_live_artifact_paths` but takes the checkpoint base dir directly
+/// instead of deriving it from a workspace root.
+pub fn collect_live_artifact_paths_from_base(
+    checkpoint_base: &Path,
+    artifact_path_root: &Path,
+    retention: Duration,
+) -> Result<HashSet<PathBuf>, AppError> {
+    let mut live = HashSet::new();
+    if !checkpoint_base.exists() {
         return Ok(live);
     }
     let now = SystemTime::now();
-    for entry in fs::read_dir(&base)
+    for entry in fs::read_dir(checkpoint_base)
         .map_err(|err| {
             AppError::new(
                 crate::core::types::ErrorCategory::IoError,
@@ -328,7 +338,7 @@ pub fn collect_live_artifact_paths(
     {
         let file_name = entry.file_name().to_string_lossy().to_string();
         if let Ok(exec_id) = Uuid::parse_str(&file_name) {
-            let paths = WorkflowStatePaths::new(workspace_root, &exec_id);
+            let paths = WorkflowStatePaths::from_base(checkpoint_base, &exec_id);
             let checkpoint_meta = match fs::metadata(&paths.checkpoint_file) {
                 Ok(meta) => meta,
                 Err(_) => continue,
@@ -336,7 +346,8 @@ pub fn collect_live_artifact_paths(
             let checkpoint_age = now
                 .duration_since(checkpoint_meta.modified().unwrap_or(SystemTime::UNIX_EPOCH))
                 .unwrap_or_else(|_| Duration::from_secs(0));
-            let execution_status = load_execution(workspace_root, &exec_id).map(|exec| exec.status);
+            let execution_status =
+                load_execution_from_base(checkpoint_base, &exec_id).map(|exec| exec.status);
             let status_protect = matches!(
                 execution_status,
                 Ok(WorkflowExecutionStatus::Running | WorkflowExecutionStatus::Cancelled)
@@ -344,10 +355,10 @@ pub fn collect_live_artifact_paths(
             if !status_protect {
                 continue;
             }
-            if let Ok(checkpoint) = load_checkpoint(workspace_root, &exec_id) {
+            if let Ok(checkpoint) = load_checkpoint_from_base(checkpoint_base, &exec_id) {
                 for record in checkpoint.completed.values() {
                     if let OutputRef::Artifact { path, .. } = &record.output_ref {
-                        let absolute = workspace_root.join(path);
+                        let absolute = artifact_path_root.join(path);
                         if let Ok(canonical) = absolute.canonicalize() {
                             live.insert(canonical);
                         }
