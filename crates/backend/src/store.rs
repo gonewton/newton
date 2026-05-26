@@ -46,6 +46,8 @@ impl SqliteBackendStore {
             .await
             .map_err(|e| err_internal(&format!("migration 003 failed: {e}")))?;
 
+        Self::upgrade_legacy_grade_schema(&pool).await?;
+
         Ok(Self { pool })
     }
 
@@ -55,6 +57,87 @@ impl SqliteBackendStore {
 
     fn now_iso() -> String {
         Utc::now().to_rfc3339()
+    }
+
+    async fn upgrade_legacy_grade_schema(pool: &SqlitePool) -> Result<(), ApiError> {
+        #[derive(Debug, FromRow)]
+        struct TableInfoRow {
+            name: String,
+        }
+
+        let info: Vec<TableInfoRow> = sqlx::query_as::<_, TableInfoRow>("PRAGMA table_info(Grade)")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| err_internal(&format!("schema check failed: {e}")))?;
+
+        // If the table doesn't exist yet, PRAGMA returns empty. 002_grades.sql should have
+        // created it, but treat this as non-fatal.
+        if info.is_empty() {
+            return Ok(());
+        }
+
+        let has_run_id = info.iter().any(|r| r.name == "runId");
+        let has_dimension = info.iter().any(|r| r.name == "dimension");
+        if has_run_id && has_dimension {
+            return Ok(());
+        }
+
+        // Legacy Grade schema detected. Rebuild to the new append-only schema.
+        // This intentionally drops any existing Grade data because it cannot be mapped
+        // losslessly to (runId, dimension) evidence rows.
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+
+        sqlx::query("PRAGMA foreign_keys = OFF;")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("pragma error: {e}")))?;
+
+        sqlx::query("DROP TABLE IF EXISTS Grade;")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("drop Grade failed: {e}")))?;
+
+        sqlx::query(
+            "CREATE TABLE Grade (\
+              id          TEXT PRIMARY KEY,\
+              runId       TEXT NOT NULL,\
+              kpiId       TEXT NULL,\
+              dimension   TEXT NOT NULL,\
+              score       REAL NOT NULL CHECK(score >= 0 AND score <= 100),\
+              evidence    TEXT NULL,\
+              evaluatedAt TEXT NOT NULL,\
+              ingestedAt  TEXT NOT NULL,\
+              UNIQUE(runId, dimension),\
+              FOREIGN KEY(runId) REFERENCES EvalRun(id) ON DELETE CASCADE,\
+              FOREIGN KEY(kpiId) REFERENCES KPI(id)\
+            );",
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| err_internal(&format!("create Grade failed: {e}")))?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_grade_runId ON Grade(runId);")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("create index failed: {e}")))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_grade_kpiId ON Grade(kpiId);")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("create index failed: {e}")))?;
+
+        sqlx::query("PRAGMA foreign_keys = ON;")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("pragma error: {e}")))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| err_internal(&format!("commit tx error: {e}")))?;
+
+        Ok(())
     }
 }
 

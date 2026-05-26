@@ -1,4 +1,8 @@
 -- Grade: per-run, per-dimension evidence (append-only).
+--
+-- Note: This file is executed on every store open (not a one-time migration table),
+-- so it must be idempotent and must not destroy existing data. Legacy schema
+-- upgrades are handled in Rust during store initialization.
 CREATE TABLE IF NOT EXISTS Grade (
   id          TEXT PRIMARY KEY,
   runId       TEXT NOT NULL,
