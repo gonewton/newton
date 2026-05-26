@@ -1,0 +1,106 @@
+{
+  "format_version": "1",
+  "execution_id": "f5fe93f6-fff0-4b93-ac7f-59fe8f9b2ba2",
+  "workflow_hash": "ac5f79fd6d5e8fe7a00ef80da0ec9fc47816ca850fe73f4770a1a764b5c1b525",
+  "created_at": "2026-05-11T23:07:27.218128575Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "high_prio_target": 1,
+    "start": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "high_prio_target": {
+      "task_id": "high_prio_target",
+      "run_seq": 1,
+      "started_at": "2026-05-11T23:07:27.217513705Z",
+      "completed_at": "2026-05-11T23:07:27.217520378Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-11T23:07:27.216713382Z",
+      "completed_at": "2026-05-11T23:07:27.216720906Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "low_prio_target",
+          "when": {
+            "$expr": "true"
+          },
+          "priority": 10,
+          "label": null
+        },
+        {
+          "to": "high_prio_target",
+          "when": {
+            "$expr": "true"
+          },
+          "priority": 1,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    },
+    {
+      "id": "high_prio_target",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false
+    },
+    {
+      "id": "low_prio_target",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false
+    }
+  ],
+  "io_snapshot": {}
+}
