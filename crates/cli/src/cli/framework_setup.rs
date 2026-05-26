@@ -684,14 +684,19 @@ const DATA_GET_LONG_ABOUT: &str =
      EXAMPLES:\n  \
      newton data get products\n  \
      newton data get product <id> --json\n  \
+     newton data get kpis\n  \
+     newton data get kpi <id> --json\n  \
+     newton data get eval-runs\n  \
+     newton data get eval-run <id> --json\n  \
      newton data get grades\n  \
      newton data get grade <id>";
 
 const DATA_POST_LONG_ABOUT: &str =
-    "Create a new catalog entity.  Do not pass an id; the server assigns one.\n\n\
+    "Create a new catalog entity. Some resources (e.g. eval-run, grade) require a caller-provided id.\n\n\
      EXAMPLES:\n  \
      newton data post product -f body.json\n  \
      newton data post component -f body.json --dry-run\n  \
+     newton data post eval-run -f evalrun.json\n  \
      newton data post grade -f grade.json";
 
 const DATA_PUT_LONG_ABOUT: &str =
@@ -702,13 +707,11 @@ const DATA_PUT_LONG_ABOUT: &str =
 const DATA_PATCH_LONG_ABOUT: &str =
     "Partially update an existing catalog entity.  The entity id is required.\n\n\
      EXAMPLES:\n  \
-     newton data patch product <id> --body '{\"name\":\"X\"}'\n  \
-     newton data patch grade <id> --body '{\"score\":88}'";
+     newton data patch product <id> --body '{\"name\":\"X\"}'";
 
 const DATA_DELETE_LONG_ABOUT: &str = "Delete a catalog entity by id.\n\n\
      EXAMPLES:\n  \
-     newton data delete product <id>\n  \
-     newton data delete grade <id>";
+     newton data delete product <id>";
 
 /// Build a clap-registered leaf `Command` for a single HTTP verb.
 fn data_verb_command(verb: DataVerb) -> Command {

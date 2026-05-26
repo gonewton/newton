@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 # Ingest dk review findings into Newton as Opportunity records.
-# Usage: ingest-dk-review.sh -w <workspace> -s <scope-id> [--with-opportunities] [-u <server-url>]
+# Usage: ingest-dk-review.sh -w <workspace> -s <scope-id> [--with-opportunities] [--with-evalrun] [-u <server-url>]
 set -euo pipefail
 
 WORKSPACE=""
 SCOPE_ID=""
 WITH_OPPORTUNITIES=false
+WITH_EVALRUN=false
 SERVER_URL="${NEWTON_SERVER_URL:-http://localhost:8080}"
 
 usage() {
-    echo "Usage: $0 -w <workspace> -s <scope-id> [--with-opportunities] [-u <server-url>]"
+    echo "Usage: $0 -w <workspace> -s <scope-id> [--with-opportunities] [--with-evalrun] [-u <server-url>]"
     echo ""
     echo "  -w <workspace>       Path to the Newton workspace"
     echo "  -s <scope-id>        Component scope id for dk review"
     echo "  --with-opportunities POST findings to Newton as opportunities"
+    echo "  --with-evalrun       Write one EvalRun + per-dimension Grades via 'newton data' (no server required)"
     echo "  -u <url>             Newton server base URL (default: \$NEWTON_SERVER_URL or http://localhost:8080)"
     exit 1
 }
@@ -23,6 +25,7 @@ while [[ $# -gt 0 ]]; do
         -w) WORKSPACE="$2"; shift 2 ;;
         -s) SCOPE_ID="$2"; shift 2 ;;
         --with-opportunities) WITH_OPPORTUNITIES=true; shift ;;
+        --with-evalrun) WITH_EVALRUN=true; shift ;;
         -u) SERVER_URL="$2"; shift 2 ;;
         *) echo "Unknown argument: $1"; usage ;;
     esac
@@ -33,14 +36,21 @@ if [[ -z "$SCOPE_ID" ]]; then
     usage
 fi
 
+if [[ "$WITH_EVALRUN" == true && -z "$WORKSPACE" ]]; then
+    echo "Error: -w <workspace> is required when using --with-evalrun"
+    usage
+fi
+
 if ! command -v jq &>/dev/null; then
     echo "Error: jq is required but not found in PATH"
     exit 1
 fi
 
-if ! command -v curl &>/dev/null; then
-    echo "Error: curl is required but not found in PATH"
-    exit 1
+if [[ "$WITH_OPPORTUNITIES" == true ]]; then
+    if ! command -v curl &>/dev/null; then
+        echo "Error: curl is required but not found in PATH"
+        exit 1
+    fi
 fi
 
 # Run dk review and capture JSON output
@@ -54,12 +64,80 @@ fi
 FINDING_COUNT=$(echo "$DK_JSON" | jq 'length' 2>/dev/null || echo 0)
 echo "Found $FINDING_COUNT finding(s) for scope '$SCOPE_ID'"
 
-if [[ "$WITH_OPPORTUNITIES" != true ]]; then
+if [[ "$WITH_OPPORTUNITIES" != true && "$WITH_EVALRUN" != true ]]; then
     echo "$DK_JSON" | jq .
     exit 0
 fi
 
+if [[ "$WITH_EVALRUN" == true ]]; then
+    if ! command -v newton &>/dev/null; then
+        echo "Error: 'newton' CLI is required but not found in PATH"
+        exit 1
+    fi
+
+    EVALUATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    RUN_ID="evalrun.dk-review.component.${SCOPE_ID}.${EVALUATED_AT}"
+
+    RUN_PAYLOAD=$(jq -n \
+        --arg id "$RUN_ID" \
+        --arg source "dk-review" \
+        --arg scope "component" \
+        --arg scopeId "$SCOPE_ID" \
+        --arg summary "dk review findings: ${FINDING_COUNT}" \
+        --arg evaluatedAt "$EVALUATED_AT" \
+        '{
+            id: $id,
+            source: $source,
+            scope: $scope,
+            scopeId: $scopeId,
+            score: null,
+            verdict: null,
+            summary: $summary,
+            evaluatedAt: $evaluatedAt
+        }')
+
+    echo "[eval-run] creating $RUN_ID"
+    newton data post eval-run --workspace "$WORKSPACE" --body "$RUN_PAYLOAD" --json >/dev/null
+
+    # Group findings by dimension (fallback "general" if missing).
+    DIMENSIONS=$(echo "$DK_JSON" | jq -r 'map(.dimension // "general") | unique | .[]')
+    while IFS= read -r dim; do
+        [[ -z "$dim" ]] && continue
+        DIM_FINDINGS=$(echo "$DK_JSON" | jq --arg d "$dim" '[ .[] | select((.dimension // "general") == $d) ]')
+        COUNT=$(echo "$DIM_FINDINGS" | jq 'length')
+        # Simple heuristic: more findings -> lower score, clamped to [0,100].
+        SCORE=$((100 - (COUNT * 10)))
+        if (( SCORE < 0 )); then SCORE=0; fi
+        if (( SCORE > 100 )); then SCORE=100; fi
+
+        GRADE_ID="grade.${RUN_ID}.${dim}"
+        GRADE_PAYLOAD=$(jq -n \
+            --arg id "$GRADE_ID" \
+            --arg runId "$RUN_ID" \
+            --arg dimension "$dim" \
+            --arg evaluatedAt "$EVALUATED_AT" \
+            --argjson score "$SCORE" \
+            --argjson evidence "$DIM_FINDINGS" \
+            '{
+                id: $id,
+                runId: $runId,
+                kpiId: null,
+                dimension: $dimension,
+                score: $score,
+                evidence: { findings: $evidence },
+                evaluatedAt: $evaluatedAt
+            }')
+
+        echo "[grade] creating $GRADE_ID (dimension=$dim findings=$COUNT)"
+        newton data post grade --workspace "$WORKSPACE" --body "$GRADE_PAYLOAD" --json >/dev/null
+    done <<<"$DIMENSIONS"
+fi
+
 # POST each finding as an opportunity
+if [[ "$WITH_OPPORTUNITIES" != true ]]; then
+    exit 0
+fi
+
 echo "$DK_JSON" | jq -c '.[]' | while read -r finding; do
     FINDING_ID=$(echo "$finding" | jq -r '.id // empty')
     FINDING_TITLE=$(echo "$finding" | jq -r '.title // empty')
