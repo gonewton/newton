@@ -454,30 +454,51 @@ pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
     let io_settings = document.workflow.settings.io_settings.clone();
     let io_block = document.workflow.settings.io.clone();
 
+    // Validate state_dir and ensure directories exist
+    if state_dir.exists() && !state_dir.is_dir() {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "STATE-DIR-001: --state-dir path exists but is not a directory: {}",
+                state_dir.display()
+            ),
+        )
+        .with_code("STATE-DIR-001"));
+    }
+    fs::create_dir_all(state_checkpoints_dir(&state_dir)).map_err(|e| {
+        AppError::new(
+            ErrorCategory::IoError,
+            format!("STATE-DIR-002: failed to create state directory: {}", e),
+        )
+        .with_code("STATE-DIR-002")
+    })?;
+    fs::create_dir_all(state_artifacts_dir(&state_dir)).map_err(|e| {
+        AppError::new(
+            ErrorCategory::IoError,
+            format!("STATE-DIR-002: failed to create artifacts directory: {}", e),
+        )
+        .with_code("STATE-DIR-002")
+    })?;
+
     // Build DB sink (and optional fanout with ServerNotifier)
-    let backend_init_result = SqliteBackendStore::new(&state_backend_sqlite_url(&state_dir)).await;
-    let sink: Option<Arc<dyn WorkflowSink>> = match backend_init_result {
-        Ok(backend) => {
-            let backend_arc: Arc<dyn newton_backend::BackendStore> = Arc::new(backend);
-            let db_sink = Arc::new(DbSink::new(backend_arc));
-            if let Some(url) = &args.server {
-                Some(Arc::new(FanoutSink(vec![
-                    db_sink as Arc<dyn WorkflowSink>,
-                    Arc::new(ServerNotifier::new(url.clone())),
-                ])))
-            } else {
-                Some(db_sink as Arc<dyn WorkflowSink>)
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                error = %e.message,
-                "workflow_run: backend store init failed; continuing without DB sink"
-            );
-            args.server
-                .as_ref()
-                .map(|url| Arc::new(ServerNotifier::new(url.clone())) as Arc<dyn WorkflowSink>)
-        }
+    let backend = SqliteBackendStore::new(&state_backend_sqlite_url(&state_dir))
+        .await
+        .map_err(|e| {
+            AppError::new(
+                ErrorCategory::IoError,
+                format!("STATE-DIR-003: backend store init failed: {}", e.message),
+            )
+            .with_code("STATE-DIR-003")
+        })?;
+    let backend_arc: Arc<dyn newton_backend::BackendStore> = Arc::new(backend);
+    let db_sink = Arc::new(DbSink::new(backend_arc));
+    let sink: Option<Arc<dyn WorkflowSink>> = if let Some(url) = &args.server {
+        Some(Arc::new(FanoutSink(vec![
+            db_sink as Arc<dyn WorkflowSink>,
+            Arc::new(ServerNotifier::new(url.clone())),
+        ])))
+    } else {
+        Some(db_sink as Arc<dyn WorkflowSink>)
     };
 
     let overrides = ExecutionOverrides {
