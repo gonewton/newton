@@ -1,0 +1,84 @@
+{
+  "format_version": "1",
+  "execution_id": "71cf8029-10d9-4f05-92dc-7527968358a4",
+  "workflow_hash": "c211580f344ff64a641a0ce0a1c87e4b88f5f7b5e0e4d7a5a55a77721b12a358",
+  "created_at": "2026-05-04T21:10:53.536504876Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "security_scan": 1,
+    "start": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-04T21:10:53.534897330Z",
+      "completed_at": "2026-05-04T21:10:53.534902449Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "security_scan": {
+      "task_id": "security_scan",
+      "run_seq": 1,
+      "started_at": "2026-05-04T21:10:53.535271145Z",
+      "completed_at": "2026-05-04T21:10:53.535278408Z",
+      "status": "failed",
+      "output_ref": {
+        "type": "inline",
+        "value": "intentional failure from FailOperator"
+      },
+      "error": {
+        "code": "ERR-ef3dbdd7-26f5-4614-a671-0691c46946e9",
+        "category": "ValidationError",
+        "message": "intentional failure from FailOperator"
+      },
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "security_scan",
+      "operator": "FailOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": true
+    },
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "security_scan",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    }
+  ]
+}

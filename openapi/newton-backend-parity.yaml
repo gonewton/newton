@@ -834,6 +834,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+      - opportunities
+      operationId: create_opportunity
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOpportunityBody'
+        required: true
+      responses:
+        '201':
+          description: Created or upserted opportunity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpportunityItem'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /opportunities/{id}:
     patch:
       tags:
@@ -2169,6 +2198,65 @@ components:
         toModuleId:
           type: string
         type:
+          type: string
+    CreateOpportunityBody:
+      type: object
+      required:
+      - id
+      - title
+      - origin
+      - risk
+      - expectedValue
+      properties:
+        blocks:
+          type: array
+          items:
+            type: string
+        component:
+          type:
+          - string
+          - 'null'
+        confidence:
+          type:
+          - number
+          - 'null'
+          format: double
+        dependsOn:
+          type: array
+          items:
+            type: string
+        effort:
+          type:
+          - string
+          - 'null'
+        expectedValue:
+          type: number
+          format: double
+        id:
+          type: string
+        indicator:
+          type:
+          - string
+          - 'null'
+        module:
+          type:
+          - string
+          - 'null'
+        origin:
+          type: string
+        rationale:
+          type:
+          - string
+          - 'null'
+        repo:
+          type:
+          - string
+          - 'null'
+        risk:
+          type: string
+        status:
+          type: string
+        title:
           type: string
     CreateProductBody:
       type: object

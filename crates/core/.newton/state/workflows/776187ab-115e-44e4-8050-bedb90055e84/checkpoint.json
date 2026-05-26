@@ -1,0 +1,86 @@
+{
+  "format_version": "1",
+  "execution_id": "776187ab-115e-44e4-8050-bedb90055e84",
+  "workflow_hash": "df087e759c78a994465204303b49f0abc0bf2a196b830935da8fa68c867e0ee3",
+  "created_at": "2026-05-05T19:02:31.062120654Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "security_scan": 1,
+    "start": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-05T19:02:31.061258059Z",
+      "completed_at": "2026-05-05T19:02:31.061264792Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "security_scan": {
+      "task_id": "security_scan",
+      "run_seq": 1,
+      "started_at": "2026-05-05T19:02:31.061673998Z",
+      "completed_at": "2026-05-05T19:02:31.061681883Z",
+      "status": "failed",
+      "goal_gate_group": "critical",
+      "output_ref": {
+        "type": "inline",
+        "value": "intentional failure from FailOperator"
+      },
+      "error": {
+        "code": "ERR-ef065dff-3cfd-4f4a-8b70-97a7300e552c",
+        "category": "ValidationError",
+        "message": "intentional failure from FailOperator"
+      },
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "security_scan",
+      "operator": "FailOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": true,
+      "goal_gate_group": "critical"
+    },
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "security_scan",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    }
+  ]
+}

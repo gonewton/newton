@@ -1,0 +1,119 @@
+{
+  "format_version": "1",
+  "execution_id": "c00bd3c2-3a85-4e95-a8ea-41a8d7b0bd21",
+  "workflow_hash": "43da731e6838e8b13fe7a7646b8aae9f6635d8d77c54c887974e6dabaeef214b",
+  "created_at": "2026-05-05T18:38:48.008132277Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "security_scan": 1,
+    "start": 1,
+    "done": 1
+  },
+  "total_iterations": 3,
+  "completed": {
+    "done": {
+      "task_id": "done",
+      "run_seq": 1,
+      "started_at": "2026-05-05T18:38:48.007667407Z",
+      "completed_at": "2026-05-05T18:38:48.007673188Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "security_scan": {
+      "task_id": "security_scan",
+      "run_seq": 1,
+      "started_at": "2026-05-05T18:38:48.007201405Z",
+      "completed_at": "2026-05-05T18:38:48.007207246Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-05T18:38:48.006700008Z",
+      "completed_at": "2026-05-05T18:38:48.006709355Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "security_scan",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "done",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": true
+    },
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "security_scan",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    },
+    {
+      "id": "done",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false,
+      "terminal": "success"
+    }
+  ]
+}

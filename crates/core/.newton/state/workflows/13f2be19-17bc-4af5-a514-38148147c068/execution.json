@@ -1,0 +1,79 @@
+{
+  "format_version": "1",
+  "execution_id": "13f2be19-17bc-4af5-a514-38148147c068",
+  "nesting_depth": 0,
+  "workflow_file": "/tmp/.tmpBYvNDD",
+  "workflow_version": "2.0",
+  "workflow_hash": "b6b3e5d5f4de174b91ec0f2b97498395d7c2ebaa0ff6e148c24f542405eb98c9",
+  "started_at": "2026-05-03T22:32:23.959466373Z",
+  "completed_at": "2026-05-03T22:32:23.994398737Z",
+  "status": "Completed",
+  "settings_effective": {
+    "entry_task": "start",
+    "max_time_seconds": 30,
+    "parallel_limit": 4,
+    "continue_on_error": true,
+    "max_task_iterations": 5,
+    "max_workflow_iterations": 20,
+    "artifact_storage": {
+      "base_path": ".newton/artifacts",
+      "max_inline_bytes": 65536,
+      "max_artifact_bytes": 104857600,
+      "max_total_bytes": 1073741824,
+      "retention_hours": 168,
+      "cleanup_policy": "lru"
+    },
+    "checkpoint": {
+      "checkpoint_enabled": true,
+      "checkpoint_interval_seconds": 30,
+      "checkpoint_on_task_complete": true,
+      "checkpoint_keep_history": false
+    },
+    "redaction": {
+      "redact_keys": [
+        "token",
+        "password",
+        "secret"
+      ]
+    },
+    "command_operator": {
+      "allow_shell": false
+    },
+    "required_triggers": [],
+    "human": {
+      "default_timeout_seconds": 86400,
+      "audit_path": ".newton/state/workflows"
+    },
+    "webhook": {
+      "enabled": false,
+      "bind": "127.0.0.1:8787",
+      "auth_token_env": "NEWTON_WEBHOOK_TOKEN",
+      "max_body_bytes": 1048576
+    },
+    "completion": {
+      "stop_on_terminal": true,
+      "require_goal_gates": false,
+      "goal_gate_failure_behavior": "fail",
+      "success_requires_no_task_failures": false
+    },
+    "stream_agent_stdout": false
+  },
+  "trigger_payload": {},
+  "task_runs": [
+    {
+      "task_id": "start",
+      "run_seq": 1,
+      "status": "failed",
+      "duration_ms": 0,
+      "error_code": "ERR-bdd276b2-5980-4843-8e56-0b2cb0c199b4"
+    },
+    {
+      "task_id": "terminal_success",
+      "run_seq": 1,
+      "status": "success",
+      "duration_ms": 0,
+      "error_code": null
+    }
+  ],
+  "warnings": []
+}

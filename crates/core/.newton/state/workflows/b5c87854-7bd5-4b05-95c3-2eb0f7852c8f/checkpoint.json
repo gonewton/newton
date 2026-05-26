@@ -1,0 +1,98 @@
+{
+  "format_version": "1",
+  "execution_id": "b5c87854-7bd5-4b05-95c3-2eb0f7852c8f",
+  "workflow_hash": "8ae5b893e304ac9b39369caf85f3ef0ea8a506db260a65d1c879e938c414900a",
+  "created_at": "2026-05-26T18:04:50.832539265Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "start": 1,
+    "will_fail": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "will_fail": {
+      "task_id": "will_fail",
+      "run_seq": 1,
+      "started_at": "2026-05-26T18:04:50.832477220Z",
+      "completed_at": "2026-05-26T18:04:50.832484955Z",
+      "status": "failed",
+      "output_ref": {
+        "type": "inline",
+        "value": "intentional failure from FailOperator"
+      },
+      "error": {
+        "code": "ERR-95acb672-6209-4fb6-9af0-2b04c01c4bdb",
+        "category": "ValidationError",
+        "message": "intentional failure from FailOperator"
+      },
+      "resolved_params_snapshot": {}
+    },
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-26T18:04:50.832138702Z",
+      "completed_at": "2026-05-26T18:04:50.832143341Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "will_fail",
+      "operator": "FailOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false
+    },
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "will_fail",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    },
+    {
+      "id": "never_runs",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false
+    }
+  ],
+  "io_snapshot": {}
+}

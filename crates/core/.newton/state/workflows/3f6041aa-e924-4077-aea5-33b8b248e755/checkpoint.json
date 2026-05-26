@@ -1,0 +1,85 @@
+{
+  "format_version": "1",
+  "execution_id": "3f6041aa-e924-4077-aea5-33b8b248e755",
+  "workflow_hash": "4a846621ea9790b95f0ce7a4565cf63ccc6fb93bacf3c351c646ba431947fa03",
+  "created_at": "2026-05-11T16:56:53.024766635Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "gate": 1,
+    "start": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-11T16:56:53.023663956Z",
+      "completed_at": "2026-05-11T16:56:53.023667653Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "gate": {
+      "task_id": "gate",
+      "run_seq": 1,
+      "started_at": "2026-05-11T16:56:53.024407931Z",
+      "completed_at": "2026-05-11T16:56:53.024413361Z",
+      "status": "failed",
+      "output_ref": {
+        "type": "inline",
+        "value": "intentional failure from FailOperator"
+      },
+      "error": {
+        "code": "ERR-08a49c93-bd93-4924-93f8-34a1277bd3ae",
+        "category": "ValidationError",
+        "message": "intentional failure from FailOperator"
+      },
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "gate",
+      "operator": "FailOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": true
+    },
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "gate",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    }
+  ],
+  "io_snapshot": {}
+}

@@ -1,0 +1,60 @@
+{
+  "format_version": "1",
+  "execution_id": "59bf0c85-c569-44d6-bc0a-caa4fb79789d",
+  "workflow_hash": "6f24128a6c2b947ef396c1c3427c04f1933fea95bfc1257569be9e8c25204992",
+  "created_at": "2026-05-05T21:12:05.366085680Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "start": 1
+  },
+  "total_iterations": 1,
+  "completed": {
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-05T21:12:05.365725253Z",
+      "completed_at": "2026-05-05T21:12:05.365730272Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false,
+      "terminal": "success"
+    },
+    {
+      "id": "unreached_gate",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": true
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "format_version": "1",
+  "execution_id": "b43ebeff-00cc-4ac0-9468-febe590cc2f7",
+  "workflow_hash": "74c28b2ca7dcfc00dbc59943c72bd65c8b4a14b4bc67e587fb573e275b72b034",
+  "created_at": "2026-05-03T16:18:38.294208381Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "term_b": 1,
+    "start": 1,
+    "term_a": 1
+  },
+  "total_iterations": 3,
+  "completed": {
+    "term_a": {
+      "task_id": "term_a",
+      "run_seq": 1,
+      "started_at": "2026-05-03T16:18:38.283302514Z",
+      "completed_at": "2026-05-03T16:18:38.283309827Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-03T16:18:38.280101504Z",
+      "completed_at": "2026-05-03T16:18:38.280104720Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "term_b": {
+      "task_id": "term_b",
+      "run_seq": 1,
+      "started_at": "2026-05-03T16:18:38.283322100Z",
+      "completed_at": "2026-05-03T16:18:38.283324975Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "term_a",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false,
+      "terminal": "success"
+    },
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "term_a",
+          "when": null,
+          "priority": 100,
+          "label": null
+        },
+        {
+          "to": "term_b",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    },
+    {
+      "id": "term_b",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false,
+      "terminal": "success"
+    }
+  ]
+}

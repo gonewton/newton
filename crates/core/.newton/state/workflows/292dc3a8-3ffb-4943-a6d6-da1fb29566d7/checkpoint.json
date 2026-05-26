@@ -1,0 +1,85 @@
+{
+  "format_version": "1",
+  "execution_id": "292dc3a8-3ffb-4943-a6d6-da1fb29566d7",
+  "workflow_hash": "8a255122395250eaf585d4d3892e57854953983de2b6bc5caf52ea5131464beb",
+  "created_at": "2026-05-26T16:58:08.827027387Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "start": 1,
+    "gate": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-26T16:58:08.825856022Z",
+      "completed_at": "2026-05-26T16:58:08.825863726Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "gate": {
+      "task_id": "gate",
+      "run_seq": 1,
+      "started_at": "2026-05-26T16:58:08.826613782Z",
+      "completed_at": "2026-05-26T16:58:08.826627608Z",
+      "status": "failed",
+      "output_ref": {
+        "type": "inline",
+        "value": "intentional failure from FailOperator"
+      },
+      "error": {
+        "code": "ERR-57f86cfe-3648-4c94-ab62-75cc2c2803a1",
+        "category": "ValidationError",
+        "message": "intentional failure from FailOperator"
+      },
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "gate",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    },
+    {
+      "id": "gate",
+      "operator": "FailOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": true
+    }
+  ],
+  "io_snapshot": {}
+}

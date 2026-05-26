@@ -1,0 +1,85 @@
+{
+  "format_version": "1",
+  "execution_id": "366690d3-b146-4dc6-a48e-f8bda5851169",
+  "workflow_hash": "b6b3e5d5f4de174b91ec0f2b97498395d7c2ebaa0ff6e148c24f542405eb98c9",
+  "created_at": "2026-05-05T19:09:21.602195869Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "start": 1,
+    "terminal_success": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-05T19:09:21.601329878Z",
+      "completed_at": "2026-05-05T19:09:21.601336631Z",
+      "status": "failed",
+      "output_ref": {
+        "type": "inline",
+        "value": "intentional failure from FailOperator"
+      },
+      "error": {
+        "code": "ERR-44a35bf4-0479-43e6-b6f4-f244714c494f",
+        "category": "ValidationError",
+        "message": "intentional failure from FailOperator"
+      },
+      "resolved_params_snapshot": {}
+    },
+    "terminal_success": {
+      "task_id": "terminal_success",
+      "run_seq": 1,
+      "started_at": "2026-05-05T19:09:21.601750070Z",
+      "completed_at": "2026-05-05T19:09:21.601757022Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "terminal_success",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false,
+      "terminal": "success"
+    },
+    {
+      "id": "start",
+      "operator": "FailOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "terminal_success",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    }
+  ]
+}

@@ -1,0 +1,152 @@
+{
+  "format_version": "1",
+  "execution_id": "2c6ef19b-1f83-457d-a286-d4d64c04cf4d",
+  "workflow_hash": "323b9b3b425ee24d102707d196708a3a35680477a598d8d52a5660e2f60e48b3",
+  "created_at": "2026-05-08T19:43:45.048829771Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "start": 1,
+    "branch_a": 1,
+    "done": 1
+  },
+  "total_iterations": 3,
+  "completed": {
+    "done": {
+      "task_id": "done",
+      "run_seq": 1,
+      "started_at": "2026-05-08T19:43:45.045786610Z",
+      "completed_at": "2026-05-08T19:43:45.045796699Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-08T19:43:45.037206376Z",
+      "completed_at": "2026-05-08T19:43:45.037213229Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "branch_a": {
+      "task_id": "branch_a",
+      "run_seq": 1,
+      "started_at": "2026-05-08T19:43:45.041189289Z",
+      "completed_at": "2026-05-08T19:43:45.041196632Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "branch_a",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "done",
+          "when": {
+            "$expr": "true"
+          },
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    },
+    {
+      "id": "branch_b",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "done",
+          "when": {
+            "$expr": "true"
+          },
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    },
+    {
+      "id": "done",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false
+    },
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "branch_a",
+          "when": {
+            "$expr": "true"
+          },
+          "priority": 100,
+          "label": null
+        },
+        {
+          "to": "branch_b",
+          "when": {
+            "$expr": "true"
+          },
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    }
+  ]
+}

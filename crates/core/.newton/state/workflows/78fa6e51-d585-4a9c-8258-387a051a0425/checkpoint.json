@@ -1,0 +1,84 @@
+{
+  "format_version": "1",
+  "execution_id": "78fa6e51-d585-4a9c-8258-387a051a0425",
+  "workflow_hash": "4a846621ea9790b95f0ce7a4565cf63ccc6fb93bacf3c351c646ba431947fa03",
+  "created_at": "2026-05-05T20:04:08.080185596Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "start": 1,
+    "gate": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "gate": {
+      "task_id": "gate",
+      "run_seq": 1,
+      "started_at": "2026-05-05T20:04:08.079905938Z",
+      "completed_at": "2026-05-05T20:04:08.079910807Z",
+      "status": "failed",
+      "output_ref": {
+        "type": "inline",
+        "value": "intentional failure from FailOperator"
+      },
+      "error": {
+        "code": "ERR-ede35779-d6e8-430d-b562-0fffd3dfdb83",
+        "category": "ValidationError",
+        "message": "intentional failure from FailOperator"
+      },
+      "resolved_params_snapshot": {}
+    },
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-05T20:04:08.079576819Z",
+      "completed_at": "2026-05-05T20:04:08.079587328Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "gate",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    },
+    {
+      "id": "gate",
+      "operator": "FailOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": true
+    }
+  ]
+}

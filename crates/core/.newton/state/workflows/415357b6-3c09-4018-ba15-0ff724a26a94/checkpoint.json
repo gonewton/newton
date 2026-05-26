@@ -1,0 +1,84 @@
+{
+  "format_version": "1",
+  "execution_id": "415357b6-3c09-4018-ba15-0ff724a26a94",
+  "workflow_hash": "17cef8d95834812d1ef6806d74da0f9d91bda3f94e2afa4f97e87f76c0c2fb8e",
+  "created_at": "2026-05-26T18:36:47.976587053Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "abort": 1,
+    "start": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "abort": {
+      "task_id": "abort",
+      "run_seq": 1,
+      "started_at": "2026-05-26T18:36:47.976198884Z",
+      "completed_at": "2026-05-26T18:36:47.976202420Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-26T18:36:47.975841111Z",
+      "completed_at": "2026-05-26T18:36:47.975846811Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "abort",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    },
+    {
+      "id": "abort",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false,
+      "terminal": "failure"
+    }
+  ],
+  "io_snapshot": {}
+}

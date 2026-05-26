@@ -80,6 +80,10 @@ pub trait BackendStore: Send + Sync {
         id: &str,
         body: PatchOpportunityBody,
     ) -> Result<OpportunityItem, ApiError>;
+    async fn create_opportunity(
+        &self,
+        body: CreateOpportunityBody,
+    ) -> Result<OpportunityItem, ApiError>;
 
     async fn list_requests(&self) -> Result<Vec<RequestItem>, ApiError>;
     async fn create_request(&self, body: CreateRequestBody) -> Result<RequestItem, ApiError>;

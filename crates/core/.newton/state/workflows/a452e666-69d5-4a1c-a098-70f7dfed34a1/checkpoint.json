@@ -1,0 +1,86 @@
+{
+  "format_version": "1",
+  "execution_id": "a452e666-69d5-4a1c-a098-70f7dfed34a1",
+  "workflow_hash": "caea0acd1628e6ca064ba26e3609a09685fdcd7e903b546bb3f516960e656cef",
+  "created_at": "2026-05-26T18:39:06.735728582Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "terminal_success": 1,
+    "start": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "terminal_success": {
+      "task_id": "terminal_success",
+      "run_seq": 1,
+      "started_at": "2026-05-26T18:39:06.735229391Z",
+      "completed_at": "2026-05-26T18:39:06.735234250Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-26T18:39:06.734805468Z",
+      "completed_at": "2026-05-26T18:39:06.734813022Z",
+      "status": "failed",
+      "output_ref": {
+        "type": "inline",
+        "value": "intentional failure from FailOperator"
+      },
+      "error": {
+        "code": "ERR-1385f06e-c997-4da3-b3f1-d139e41df44a",
+        "category": "ValidationError",
+        "message": "intentional failure from FailOperator"
+      },
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "start",
+      "operator": "FailOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "terminal_success",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    },
+    {
+      "id": "terminal_success",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false,
+      "terminal": "success"
+    }
+  ],
+  "io_snapshot": {}
+}

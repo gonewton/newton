@@ -1,0 +1,72 @@
+{
+  "format_version": "1",
+  "execution_id": "f3e6e6d6-1560-442d-9277-daf60129a71b",
+  "nesting_depth": 0,
+  "workflow_file": "/home/sysuser/ws001/gonewton/newton/crates/cli/tests/fixtures/workflows/minimal_smoke.yaml",
+  "workflow_version": "2.0",
+  "workflow_hash": "540bb7797e3d08d53620d3ca2b7954423e71d725f6c0acf4cb7ab94a772d490d",
+  "started_at": "2026-05-22T09:41:39.920771843Z",
+  "completed_at": "2026-05-22T09:41:39.921523061Z",
+  "status": "Completed",
+  "settings_effective": {
+    "entry_task": "noop",
+    "max_time_seconds": 30,
+    "parallel_limit": 1,
+    "continue_on_error": false,
+    "max_task_iterations": 1,
+    "max_workflow_iterations": 5,
+    "artifact_storage": {
+      "base_path": ".newton/artifacts",
+      "max_inline_bytes": 65536,
+      "max_artifact_bytes": 104857600,
+      "max_total_bytes": 1073741824,
+      "retention_hours": 168,
+      "cleanup_policy": "lru"
+    },
+    "checkpoint": {
+      "checkpoint_enabled": true,
+      "checkpoint_interval_seconds": 30,
+      "checkpoint_on_task_complete": true,
+      "checkpoint_keep_history": false
+    },
+    "redaction": {
+      "redact_keys": [
+        "token",
+        "password",
+        "secret"
+      ]
+    },
+    "command_operator": {
+      "allow_shell": false
+    },
+    "required_triggers": [],
+    "human": {
+      "default_timeout_seconds": 86400,
+      "audit_path": ".newton/state/workflows"
+    },
+    "webhook": {
+      "enabled": false,
+      "bind": "127.0.0.1:8787",
+      "auth_token_env": "NEWTON_WEBHOOK_TOKEN",
+      "max_body_bytes": 1048576
+    },
+    "completion": {
+      "stop_on_terminal": true,
+      "require_goal_gates": true,
+      "goal_gate_failure_behavior": "fail",
+      "success_requires_no_task_failures": true
+    },
+    "stream_agent_stdout": false
+  },
+  "trigger_payload": {},
+  "task_runs": [
+    {
+      "task_id": "noop",
+      "run_seq": 1,
+      "status": "success",
+      "duration_ms": 0,
+      "error_code": null
+    }
+  ],
+  "warnings": []
+}

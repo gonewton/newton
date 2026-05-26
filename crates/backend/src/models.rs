@@ -219,6 +219,39 @@ pub struct PatchOpportunityBody {
     pub status: String,
 }
 
+fn default_opportunity_status() -> String {
+    "awaiting_triage".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateOpportunityBody {
+    pub id: String,
+    pub title: String,
+    pub origin: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indicator: Option<String>,
+    pub confidence: Option<f64>,
+    pub risk: String,
+    pub expected_value: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default = "default_opportunity_status")]
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub blocks: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestItem {

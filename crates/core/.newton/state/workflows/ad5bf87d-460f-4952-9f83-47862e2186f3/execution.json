@@ -1,0 +1,79 @@
+{
+  "format_version": "1",
+  "execution_id": "ad5bf87d-460f-4952-9f83-47862e2186f3",
+  "nesting_depth": 0,
+  "workflow_file": "/tmp/newton-target/tmp/.tmpf0P8Xo",
+  "workflow_version": "2.0",
+  "workflow_hash": "17cef8d95834812d1ef6806d74da0f9d91bda3f94e2afa4f97e87f76c0c2fb8e",
+  "started_at": "2026-05-25T21:30:32.131032141Z",
+  "completed_at": "2026-05-25T21:30:32.132297612Z",
+  "status": "Failed",
+  "settings_effective": {
+    "entry_task": "start",
+    "max_time_seconds": 30,
+    "parallel_limit": 4,
+    "continue_on_error": false,
+    "max_task_iterations": 5,
+    "max_workflow_iterations": 20,
+    "artifact_storage": {
+      "base_path": ".newton/artifacts",
+      "max_inline_bytes": 65536,
+      "max_artifact_bytes": 104857600,
+      "max_total_bytes": 1073741824,
+      "retention_hours": 168,
+      "cleanup_policy": "lru"
+    },
+    "checkpoint": {
+      "checkpoint_enabled": true,
+      "checkpoint_interval_seconds": 30,
+      "checkpoint_on_task_complete": true,
+      "checkpoint_keep_history": false
+    },
+    "redaction": {
+      "redact_keys": [
+        "token",
+        "password",
+        "secret"
+      ]
+    },
+    "command_operator": {
+      "allow_shell": false
+    },
+    "required_triggers": [],
+    "human": {
+      "default_timeout_seconds": 86400,
+      "audit_path": ".newton/state/workflows"
+    },
+    "webhook": {
+      "enabled": false,
+      "bind": "127.0.0.1:8787",
+      "auth_token_env": "NEWTON_WEBHOOK_TOKEN",
+      "max_body_bytes": 1048576
+    },
+    "completion": {
+      "stop_on_terminal": true,
+      "require_goal_gates": false,
+      "goal_gate_failure_behavior": "fail",
+      "success_requires_no_task_failures": false
+    },
+    "stream_agent_stdout": false
+  },
+  "trigger_payload": {},
+  "task_runs": [
+    {
+      "task_id": "start",
+      "run_seq": 1,
+      "status": "success",
+      "duration_ms": 0,
+      "error_code": null
+    },
+    {
+      "task_id": "abort",
+      "run_seq": 1,
+      "status": "success",
+      "duration_ms": 0,
+      "error_code": null
+    }
+  ],
+  "warnings": []
+}

@@ -1,0 +1,105 @@
+{
+  "format_version": "1",
+  "execution_id": "fa41cd60-7f8d-40f6-a6e5-e89420f25ffd",
+  "workflow_hash": "94d927623e12f146644543a028ab4498439efbad955f4f3756bed4f5fd9f3417",
+  "created_at": "2026-05-09T16:51:59.334688842Z",
+  "ready_queue": [
+    "slow_task"
+  ],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "quick_exit": 1,
+    "start": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "quick_exit": {
+      "task_id": "quick_exit",
+      "run_seq": 1,
+      "started_at": "2026-05-09T16:51:59.332671417Z",
+      "completed_at": "2026-05-09T16:51:59.332675675Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-09T16:51:59.332279887Z",
+      "completed_at": "2026-05-09T16:51:59.332286279Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "quick_exit",
+          "when": null,
+          "priority": 100,
+          "label": null
+        },
+        {
+          "to": "slow_task",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    },
+    {
+      "id": "quick_exit",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false,
+      "terminal": "success"
+    },
+    {
+      "id": "slow_task",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false
+    }
+  ],
+  "io_snapshot": {}
+}

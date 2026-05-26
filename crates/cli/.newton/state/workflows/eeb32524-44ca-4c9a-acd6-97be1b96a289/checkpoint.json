@@ -1,0 +1,48 @@
+{
+  "format_version": "1",
+  "execution_id": "eeb32524-44ca-4c9a-acd6-97be1b96a289",
+  "workflow_hash": "130449a2e25d2e18ceb1ec0b4e523429c9b55744e3d5ef483d24f172751ab09c",
+  "created_at": "2026-05-25T21:33:12.100420056Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "noop": 1
+  },
+  "total_iterations": 1,
+  "completed": {
+    "noop": {
+      "task_id": "noop",
+      "run_seq": 1,
+      "started_at": "2026-05-25T21:33:12.100066321Z",
+      "completed_at": "2026-05-25T21:33:12.100074506Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "noop",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false,
+      "terminal": "success"
+    }
+  ],
+  "io_snapshot": {}
+}

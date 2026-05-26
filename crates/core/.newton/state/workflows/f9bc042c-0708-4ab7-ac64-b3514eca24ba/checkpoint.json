@@ -1,0 +1,105 @@
+{
+  "format_version": "1",
+  "execution_id": "f9bc042c-0708-4ab7-ac64-b3514eca24ba",
+  "workflow_hash": "94d927623e12f146644543a028ab4498439efbad955f4f3756bed4f5fd9f3417",
+  "created_at": "2026-05-15T19:18:18.301245635Z",
+  "ready_queue": [
+    "slow_task"
+  ],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "quick_exit": 1,
+    "start": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "quick_exit": {
+      "task_id": "quick_exit",
+      "run_seq": 1,
+      "started_at": "2026-05-15T19:18:18.300570762Z",
+      "completed_at": "2026-05-15T19:18:18.300576603Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-15T19:18:18.300023695Z",
+      "completed_at": "2026-05-15T19:18:18.300029415Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "slow_task",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false
+    },
+    {
+      "id": "quick_exit",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false,
+      "terminal": "success"
+    },
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "quick_exit",
+          "when": null,
+          "priority": 100,
+          "label": null
+        },
+        {
+          "to": "slow_task",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    }
+  ],
+  "io_snapshot": {}
+}

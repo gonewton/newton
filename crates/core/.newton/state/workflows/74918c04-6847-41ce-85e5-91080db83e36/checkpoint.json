@@ -1,0 +1,106 @@
+{
+  "format_version": "1",
+  "execution_id": "74918c04-6847-41ce-85e5-91080db83e36",
+  "workflow_hash": "ac5f79fd6d5e8fe7a00ef80da0ec9fc47816ca850fe73f4770a1a764b5c1b525",
+  "created_at": "2026-05-11T22:19:14.600896631Z",
+  "ready_queue": [],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "start": 1,
+    "high_prio_target": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-11T22:19:14.600297985Z",
+      "completed_at": "2026-05-11T22:19:14.600300790Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "high_prio_target": {
+      "task_id": "high_prio_target",
+      "run_seq": 1,
+      "started_at": "2026-05-11T22:19:14.600616013Z",
+      "completed_at": "2026-05-11T22:19:14.600619048Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "high_prio_target",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false
+    },
+    {
+      "id": "low_prio_target",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false
+    },
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "low_prio_target",
+          "when": {
+            "$expr": "true"
+          },
+          "priority": 10,
+          "label": null
+        },
+        {
+          "to": "high_prio_target",
+          "when": {
+            "$expr": "true"
+          },
+          "priority": 1,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    }
+  ],
+  "io_snapshot": {}
+}

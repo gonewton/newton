@@ -1,0 +1,58 @@
+{
+  "format_version": "1",
+  "execution_id": "933bf8f0-9002-4b43-88e3-d645db26351e",
+  "workflow_hash": "765fcc4a26a5f990ae7098ab7f7fb9f41b1547aab571432bc172ff04ad776ee4",
+  "created_at": "2026-05-21T20:56:49.891811043Z",
+  "ready_queue": [
+    "loop_task"
+  ],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "loop_task": 1
+  },
+  "total_iterations": 1,
+  "completed": {
+    "loop_task": {
+      "task_id": "loop_task",
+      "run_seq": 1,
+      "started_at": "2026-05-21T20:56:49.891154610Z",
+      "completed_at": "2026-05-21T20:56:49.891159028Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "loop_task",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "loop_task",
+          "when": {
+            "$expr": "true"
+          },
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    }
+  ],
+  "io_snapshot": {}
+}

@@ -1,0 +1,72 @@
+{
+  "format_version": "1",
+  "execution_id": "1421b6f8-65ba-49ce-91b7-75270ac8a2df",
+  "nesting_depth": 0,
+  "workflow_file": "/tmp/newton-target/tmp/.tmpwxmiMI",
+  "workflow_version": "2.0",
+  "workflow_hash": "765fcc4a26a5f990ae7098ab7f7fb9f41b1547aab571432bc172ff04ad776ee4",
+  "started_at": "2026-05-11T23:07:42.959140528Z",
+  "completed_at": "2026-05-11T23:07:42.961103095Z",
+  "status": "Failed",
+  "settings_effective": {
+    "entry_task": "loop_task",
+    "max_time_seconds": 60,
+    "parallel_limit": 1,
+    "continue_on_error": false,
+    "max_task_iterations": 1,
+    "max_workflow_iterations": 10,
+    "artifact_storage": {
+      "base_path": ".newton/artifacts",
+      "max_inline_bytes": 65536,
+      "max_artifact_bytes": 104857600,
+      "max_total_bytes": 1073741824,
+      "retention_hours": 168,
+      "cleanup_policy": "lru"
+    },
+    "checkpoint": {
+      "checkpoint_enabled": true,
+      "checkpoint_interval_seconds": 30,
+      "checkpoint_on_task_complete": true,
+      "checkpoint_keep_history": false
+    },
+    "redaction": {
+      "redact_keys": [
+        "token",
+        "password",
+        "secret"
+      ]
+    },
+    "command_operator": {
+      "allow_shell": false
+    },
+    "required_triggers": [],
+    "human": {
+      "default_timeout_seconds": 86400,
+      "audit_path": ".newton/state/workflows"
+    },
+    "webhook": {
+      "enabled": false,
+      "bind": "127.0.0.1:8787",
+      "auth_token_env": "NEWTON_WEBHOOK_TOKEN",
+      "max_body_bytes": 1048576
+    },
+    "completion": {
+      "stop_on_terminal": true,
+      "require_goal_gates": true,
+      "goal_gate_failure_behavior": "fail",
+      "success_requires_no_task_failures": true
+    },
+    "stream_agent_stdout": false
+  },
+  "trigger_payload": {},
+  "task_runs": [
+    {
+      "task_id": "loop_task",
+      "run_seq": 1,
+      "status": "success",
+      "duration_ms": 0,
+      "error_code": null
+    }
+  ],
+  "warnings": []
+}

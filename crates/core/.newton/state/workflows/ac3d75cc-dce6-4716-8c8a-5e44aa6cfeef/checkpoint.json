@@ -1,0 +1,104 @@
+{
+  "format_version": "1",
+  "execution_id": "ac3d75cc-dce6-4716-8c8a-5e44aa6cfeef",
+  "workflow_hash": "94d927623e12f146644543a028ab4498439efbad955f4f3756bed4f5fd9f3417",
+  "created_at": "2026-05-05T18:53:46.868104747Z",
+  "ready_queue": [
+    "slow_task"
+  ],
+  "context": {},
+  "trigger_payload": {},
+  "task_iterations": {
+    "start": 1,
+    "quick_exit": 1
+  },
+  "total_iterations": 2,
+  "completed": {
+    "quick_exit": {
+      "task_id": "quick_exit",
+      "run_seq": 1,
+      "started_at": "2026-05-05T18:53:46.867648313Z",
+      "completed_at": "2026-05-05T18:53:46.867653382Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    },
+    "start": {
+      "task_id": "start",
+      "run_seq": 1,
+      "started_at": "2026-05-05T18:53:46.867181700Z",
+      "completed_at": "2026-05-05T18:53:46.867188292Z",
+      "status": "success",
+      "output_ref": {
+        "type": "inline",
+        "value": {
+          "status": "ok"
+        }
+      },
+      "error": null,
+      "resolved_params_snapshot": {}
+    }
+  },
+  "version": 2,
+  "runtime_tasks": [
+    {
+      "id": "slow_task",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false
+    },
+    {
+      "id": "start",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [
+        {
+          "to": "quick_exit",
+          "when": null,
+          "priority": 100,
+          "label": null
+        },
+        {
+          "to": "slow_task",
+          "when": null,
+          "priority": 100,
+          "label": null
+        }
+      ],
+      "goal_gate": false
+    },
+    {
+      "id": "quick_exit",
+      "operator": "NoOpOperator",
+      "params": {},
+      "name": null,
+      "classes": [],
+      "timeout_ms": null,
+      "retry": null,
+      "max_iterations": null,
+      "parallel_group": null,
+      "transitions": [],
+      "goal_gate": false,
+      "terminal": "success"
+    }
+  ]
+}

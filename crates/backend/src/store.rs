@@ -1109,6 +1109,129 @@ impl BackendStore for SqliteBackendStore {
             .ok_or_else(|| err_internal("Failed to read back updated opportunity"))
     }
 
+    async fn create_opportunity(
+        &self,
+        body: CreateOpportunityBody,
+    ) -> Result<OpportunityItem, ApiError> {
+        let valid_statuses = [
+            "awaiting_triage",
+            "triaged",
+            "approved_for_planning",
+            "structured",
+            "deferred",
+            "rejected",
+        ];
+        if !valid_statuses.contains(&body.status.as_str()) {
+            return Err(err_validation("Invalid opportunity status"));
+        }
+        if let Some(c) = body.confidence {
+            if !(0.0..=1.0).contains(&c) {
+                return Err(err_validation("confidence must be between 0.0 and 1.0"));
+            }
+        }
+        if body.expected_value < 0.0 {
+            return Err(err_validation("expectedValue must be non-negative"));
+        }
+        if body.id.trim().is_empty() {
+            return Err(err_validation("id must not be empty"));
+        }
+        if body.title.trim().is_empty() {
+            return Err(err_validation("title must not be empty"));
+        }
+        if body.origin.trim().is_empty() {
+            return Err(err_validation("origin must not be empty"));
+        }
+
+        let component_id = if let Some(ref cid) = body.component {
+            let count: Option<CountRow> = sqlx::query_as::<_, CountRow>(
+                "SELECT COUNT(*) as count FROM Component WHERE id = ?",
+            )
+            .bind(cid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("query error: {e}")))?;
+            if count.map(|c| c.count).unwrap_or(0) == 0 {
+                tracing::warn!("component '{}' not found, proceeding", cid);
+                None
+            } else {
+                Some(cid.clone())
+            }
+        } else {
+            None
+        };
+        let repo_id = if let Some(ref rid) = body.repo {
+            let count: Option<CountRow> =
+                sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Repo WHERE id = ?")
+                    .bind(rid)
+                    .fetch_optional(&self.pool)
+                    .await
+                    .map_err(|e| err_internal(&format!("query error: {e}")))?;
+            if count.map(|c| c.count).unwrap_or(0) == 0 {
+                tracing::warn!("repo '{}' not found, proceeding", rid);
+                None
+            } else {
+                Some(rid.clone())
+            }
+        } else {
+            None
+        };
+
+        let now = Self::now_iso();
+        let depends_on_json =
+            serde_json::to_string(&body.depends_on).unwrap_or_else(|_| "[]".to_string());
+        let blocks_json = serde_json::to_string(&body.blocks).unwrap_or_else(|_| "[]".to_string());
+
+        sqlx::query(
+            "INSERT INTO Opportunity (
+                id, title, origin, componentId, module, repoId,
+                indicator, confidence, risk, expectedValue, effort,
+                status, rationale, dependsOn, blocks, createdAt, updatedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title       = excluded.title,
+                origin      = excluded.origin,
+                componentId = excluded.componentId,
+                module      = excluded.module,
+                repoId      = excluded.repoId,
+                indicator   = excluded.indicator,
+                confidence  = excluded.confidence,
+                risk        = excluded.risk,
+                expectedValue = excluded.expectedValue,
+                effort      = excluded.effort,
+                status      = excluded.status,
+                rationale   = excluded.rationale,
+                dependsOn   = excluded.dependsOn,
+                blocks      = excluded.blocks,
+                updatedAt   = excluded.updatedAt",
+        )
+        .bind(&body.id)
+        .bind(&body.title)
+        .bind(&body.origin)
+        .bind(&component_id)
+        .bind(&body.module)
+        .bind(&repo_id)
+        .bind(&body.indicator)
+        .bind(body.confidence)
+        .bind(&body.risk)
+        .bind(body.expected_value)
+        .bind(&body.effort)
+        .bind(&body.status)
+        .bind(&body.rationale)
+        .bind(&depends_on_json)
+        .bind(&blocks_json)
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("upsert error: {e}")))?;
+
+        self.list_opportunities(None)
+            .await?
+            .into_iter()
+            .find(|o| o.id == body.id)
+            .ok_or_else(|| err_internal("Failed to read back created opportunity"))
+    }
+
     async fn list_requests(&self) -> Result<Vec<RequestItem>, ApiError> {
         let rows = sqlx::query_as::<_, RequestRow>(
             "SELECT id, title, description, componentId as component_id, repoId as repo_id, requestedBy as requested_by, status, linkedOpportunityId as linked_opportunity_id, createdAt as created_at FROM Request ORDER BY id ASC"
@@ -3166,5 +3289,106 @@ mod fk_tests {
             result.is_err(),
             "raw insert with missing FK target must fail; FK enforcement is off"
         );
+    }
+}
+
+#[cfg(test)]
+mod opportunity_tests {
+    use super::*;
+    use crate::models::CreateOpportunityBody;
+
+    fn make_opportunity(id: &str) -> CreateOpportunityBody {
+        CreateOpportunityBody {
+            id: id.to_string(),
+            title: "Test opportunity".to_string(),
+            origin: "test".to_string(),
+            component: None,
+            module: None,
+            repo: None,
+            indicator: None,
+            confidence: None,
+            risk: "low".to_string(),
+            expected_value: 1.0,
+            effort: None,
+            status: "awaiting_triage".to_string(),
+            rationale: None,
+            depends_on: vec![],
+            blocks: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn create_opportunity_happy_path() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let body = make_opportunity("opp-001");
+        let item = store.create_opportunity(body).await.unwrap();
+        assert_eq!(item.id, "opp-001");
+        assert_eq!(item.title, "Test opportunity");
+        assert_eq!(item.origin, "test");
+        assert_eq!(item.risk, "low");
+        assert_eq!(item.status, "awaiting_triage");
+    }
+
+    #[tokio::test]
+    async fn create_opportunity_duplicate_upsert_preserves_created_at() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let body1 = make_opportunity("opp-002");
+        store.create_opportunity(body1).await.unwrap();
+
+        let created_at_1: (String,) =
+            sqlx::query_as("SELECT createdAt FROM Opportunity WHERE id = ?")
+                .bind("opp-002")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+
+        let mut body2 = make_opportunity("opp-002");
+        body2.title = "Updated title".to_string();
+        let item2 = store.create_opportunity(body2).await.unwrap();
+
+        assert_eq!(item2.id, "opp-002");
+        assert_eq!(item2.title, "Updated title");
+
+        let created_at_2: (String,) =
+            sqlx::query_as("SELECT createdAt FROM Opportunity WHERE id = ?")
+                .bind("opp-002")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            created_at_1.0, created_at_2.0,
+            "createdAt must not change on upsert"
+        );
+
+        let all = store.list_opportunities(None).await.unwrap();
+        let count = all.iter().filter(|o| o.id == "opp-002").count();
+        assert_eq!(count, 1, "duplicate upsert must not create a second record");
+    }
+
+    #[tokio::test]
+    async fn create_opportunity_invalid_status_returns_validation_error() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let mut body = make_opportunity("opp-003");
+        body.status = "not-a-valid-status".to_string();
+        let err = store.create_opportunity(body).await.unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+    }
+
+    #[tokio::test]
+    async fn create_opportunity_confidence_above_one_returns_validation_error() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let mut body = make_opportunity("opp-004");
+        body.confidence = Some(1.5);
+        let err = store.create_opportunity(body).await.unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+    }
+
+    #[tokio::test]
+    async fn create_opportunity_negative_expected_value_returns_validation_error() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let mut body = make_opportunity("opp-005");
+        body.expected_value = -1.0;
+        let err = store.create_opportunity(body).await.unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
     }
 }

@@ -2988,9 +2988,11 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
         "module-dependencies",
         "grade",
         "grades",
+        "opportunity",
+        "opportunities",
     ];
     if !valid_resources.contains(&resource) {
-        eprintln!("DATA-003: unknown resource '{resource}'; must be one of: product, products, component, components, repo, repos, module, modules, module-dependency, module-dependencies, grade, grades");
+        eprintln!("DATA-003: unknown resource '{resource}'; must be one of: product, products, component, components, repo, repos, module, modules, module-dependency, module-dependencies, grade, grades, opportunity, opportunities");
         std::process::exit(1);
     }
 
@@ -3005,7 +3007,13 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
     let needs_id = match args.verb {
         DataVerb::Get => !matches!(
             resource,
-            "products" | "components" | "repos" | "modules" | "module-dependencies" | "grades"
+            "products"
+                | "components"
+                | "repos"
+                | "modules"
+                | "module-dependencies"
+                | "grades"
+                | "opportunities"
         ),
         DataVerb::Post => false,
         DataVerb::Put | DataVerb::Patch | DataVerb::Delete => true,
@@ -3309,6 +3317,28 @@ async fn dispatch_data(
             .await
             .map_err(api_err)
             .and_then(|deleted_id| to_json(serde_json::json!({"id": deleted_id}))),
+        // -- Opportunity -------------------------------------------------------
+        (DataVerb::Get, "opportunities") => store
+            .list_opportunities(None)
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Post, "opportunity" | "opportunities") => {
+            let b = parse_body::<newton_backend::CreateOpportunityBody>(body)?;
+            store
+                .create_opportunity(b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Patch, "opportunity" | "opportunities") => {
+            let b = parse_body::<newton_backend::PatchOpportunityBody>(body)?;
+            store
+                .patch_opportunity(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
         (v, r) => Err(format!("unsupported combination: {v} {r}")),
     }
 }

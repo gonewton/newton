@@ -210,6 +210,7 @@ newton serve --host 0.0.0.0 --port 9000
 | Endpoint | Description |
 |---|---|
 | `GET /api/v1/<resource>` | REST API routes (versioned) |
+| `POST /api/v1/opportunities` | Create or upsert an opportunity record |
 | `GET /api/v1/aitools` | List registered AI magic tools |
 | `GET /api/v1/aitools/{ns}/{tool}/schema` | Per-tool JSON schema |
 | `POST /api/v1/aitools/{ns}/{tool}` | One-shot tool execution |
