@@ -2318,6 +2318,15 @@ impl BackendStore for SqliteBackendStore {
     }
 
     async fn create_eval_run(&self, body: CreateEvalRunBody) -> Result<EvalRunItem, ApiError> {
+        if body.id.trim().is_empty() {
+            return Err(err_validation("id is required"));
+        }
+        if body.source.trim().is_empty() {
+            return Err(err_validation("source is required"));
+        }
+        if body.scope_id.trim().is_empty() {
+            return Err(err_validation("scopeId is required"));
+        }
         let allowed_scopes = ["product", "component", "repo", "module"];
         if !allowed_scopes.contains(&body.scope.as_str()) {
             return Err(err_validation(
@@ -2475,6 +2484,17 @@ impl BackendStore for SqliteBackendStore {
     }
 
     async fn create_grade(&self, body: CreateGradeBody) -> Result<GradeItem, ApiError> {
+        if body.id.trim().is_empty() {
+            return Err(err_validation("id is required"));
+        }
+        if body.run_id.trim().is_empty() {
+            return Err(err_validation("runId is required"));
+        }
+        if let Some(kpi_id) = body.kpi_id.as_ref() {
+            if kpi_id.trim().is_empty() {
+                return Err(err_validation("kpiId must be non-empty when provided"));
+            }
+        }
         if body.dimension.trim().is_empty() {
             return Err(err_validation("dimension is required"));
         }
@@ -3561,6 +3581,57 @@ mod kpi_evalrun_grade_tests {
     }
 
     #[tokio::test]
+    async fn create_eval_run_missing_required_fields_returns_validation() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let repo_id = seed_repo(&store).await;
+
+        let err = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "".to_string(),
+                source: "test".to_string(),
+                scope: "repo".to_string(),
+                scope_id: repo_id.clone(),
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+
+        let err = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "evalrun.missing-source".to_string(),
+                source: "   ".to_string(),
+                scope: "repo".to_string(),
+                scope_id: repo_id.clone(),
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+
+        let err = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "evalrun.missing-scope-id".to_string(),
+                source: "test".to_string(),
+                scope: "repo".to_string(),
+                scope_id: "".to_string(),
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+    }
+
+    #[tokio::test]
     async fn create_grade_missing_run_id_returns_not_found() {
         let store = SqliteBackendStore::new_in_memory().await.unwrap();
         let err = store
@@ -3576,6 +3647,39 @@ mod kpi_evalrun_grade_tests {
             .await
             .unwrap_err();
         assert_eq!(err.code, "ERR_NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn create_grade_missing_required_fields_returns_validation() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+
+        let err = store
+            .create_grade(CreateGradeBody {
+                id: "".to_string(),
+                run_id: "some-run".to_string(),
+                kpi_id: None,
+                dimension: "tests".to_string(),
+                score: 50.0,
+                evidence: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+
+        let err = store
+            .create_grade(CreateGradeBody {
+                id: "grade.missing-run".to_string(),
+                run_id: "   ".to_string(),
+                kpi_id: None,
+                dimension: "tests".to_string(),
+                score: 50.0,
+                evidence: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
     }
 
     #[tokio::test]
