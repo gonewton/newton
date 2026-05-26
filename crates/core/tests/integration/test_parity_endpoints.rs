@@ -64,6 +64,7 @@ parity_test!(
     "/indicators",
     StatusCode::OK
 );
+parity_test!(test_list_kpis, Method::GET, "/kpis", StatusCode::OK);
 parity_test!(
     test_list_recent_actions,
     Method::GET,
