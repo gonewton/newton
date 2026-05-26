@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### feat: POST /opportunities — create/upsert opportunity records from external analysis tools (issue #388)
 
-`POST /api/v1/opportunities` accepts a `CreateOpportunityBody` and upserts by `id`, returning the upserted `OpportunityItem` with HTTP 201. Repeated POSTs with the same `id` update all fields except `createdAt` (idempotent ingest). `newton data post opportunity` and `newton data get opportunities` CLI dispatch now works against a local workspace. A companion ingest script `.newton/scripts/ingest-dk-review.sh` supports feeding `dk review --output-format json` findings directly into Newton's opportunity surface.
+`POST /api/v1/opportunities` accepts a `CreateOpportunityBody` and upserts by `id`, returning the upserted `OpportunityItem` with HTTP 201. Repeated POSTs with the same `id` update all fields except `createdAt` (idempotent ingest). `newton data post opportunity` and `newton data get opportunities` CLI dispatch now works against a local workspace. A companion ingest script `scripts/ingest-dk-review.sh` supports feeding `dk review --output-format json` findings directly into Newton's opportunity surface.
 
 ### Add `/api/v1/aitools/*` route group (aikit-magictool v0.1.0 wiring, Part A) (issue #371)
 

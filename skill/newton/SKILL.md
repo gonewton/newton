@@ -16,7 +16,7 @@ Newton is a **workflow-first** CLI: YAML workflow graphs with operators, checkpo
 - Validating or explaining workflow YAML; cleaning checkpoints or artifacts.
 - Operating `newton serve` for HTTP or WebSocket APIs.
 - Creating or upserting opportunity records via `POST /api/v1/opportunities` or `newton data post opportunity`.
-- Ingesting `dk review` findings via `.newton/scripts/ingest-dk-review.sh --with-opportunities`.
+- Ingesting `dk review` findings via `scripts/ingest-dk-review.sh --with-opportunities`.
 
 ## Installation
 
@@ -66,7 +66,7 @@ There is **no** `step`, `status`, `report`, or `error` subcommand in current rel
 2. **Queue of plans**: Configure `.newton/configs/<project_id>.conf` with `project_root` and `workflow_file`; place plans in `.newton/plan/<project_id>/todo/`; run `newton batch <project_id>`.
 3. **Live HIL**: Use `HumanApprovalOperator` or `HumanDecisionOperator` in your workflow YAML to pause for human input via [ailoop](https://github.com/goailoop/ailoop). Interact with ailoop channels using ailoop's own clients.
 4. **API / dashboards**: `newton serve` exposes REST, WebSocket, and SSE endpoints for workflow instances and streams (see `newton serve --help` and the Newton repository `README.md` when updated).
-5. **Opportunity ingest**: `POST /api/v1/opportunities` creates or upserts an opportunity record (idempotent by `id`). The companion script `.newton/scripts/ingest-dk-review.sh -s <scope-id> --with-opportunities` runs `dk review` and POSTs each finding to a live `newton serve` instance. Server URL defaults to `$NEWTON_SERVER_URL` or `http://localhost:8080`; override with `-u <url>`.
+5. **Opportunity ingest**: `POST /api/v1/opportunities` creates or upserts an opportunity record (idempotent by `id`). The companion script `scripts/ingest-dk-review.sh -s <scope-id> --with-opportunities` runs `dk review` and POSTs each finding to a live `newton serve` instance. Server URL defaults to `$NEWTON_SERVER_URL` or `http://localhost:8080`; override with `-u <url>`.
 
 ## Usage notes
 
