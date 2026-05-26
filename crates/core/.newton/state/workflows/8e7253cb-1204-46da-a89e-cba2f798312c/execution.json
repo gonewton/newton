@@ -1,0 +1,79 @@
+{
+  "format_version": "1",
+  "execution_id": "8e7253cb-1204-46da-a89e-cba2f798312c",
+  "nesting_depth": 0,
+  "workflow_file": "/tmp/newton-target/tmp/.tmpzw56ac",
+  "workflow_version": "2.0",
+  "workflow_hash": "8ae5b893e304ac9b39369caf85f3ef0ea8a506db260a65d1c879e938c414900a",
+  "started_at": "2026-05-26T17:33:16.870403971Z",
+  "completed_at": "2026-05-26T17:33:16.871073044Z",
+  "status": "Failed",
+  "settings_effective": {
+    "entry_task": "start",
+    "max_time_seconds": 30,
+    "parallel_limit": 4,
+    "continue_on_error": false,
+    "max_task_iterations": 5,
+    "max_workflow_iterations": 20,
+    "artifact_storage": {
+      "base_path": ".newton/artifacts",
+      "max_inline_bytes": 65536,
+      "max_artifact_bytes": 104857600,
+      "max_total_bytes": 1073741824,
+      "retention_hours": 168,
+      "cleanup_policy": "lru"
+    },
+    "checkpoint": {
+      "checkpoint_enabled": true,
+      "checkpoint_interval_seconds": 30,
+      "checkpoint_on_task_complete": true,
+      "checkpoint_keep_history": false
+    },
+    "redaction": {
+      "redact_keys": [
+        "token",
+        "password",
+        "secret"
+      ]
+    },
+    "command_operator": {
+      "allow_shell": false
+    },
+    "required_triggers": [],
+    "human": {
+      "default_timeout_seconds": 86400,
+      "audit_path": ".newton/state/workflows"
+    },
+    "webhook": {
+      "enabled": false,
+      "bind": "127.0.0.1:8787",
+      "auth_token_env": "NEWTON_WEBHOOK_TOKEN",
+      "max_body_bytes": 1048576
+    },
+    "completion": {
+      "stop_on_terminal": true,
+      "require_goal_gates": true,
+      "goal_gate_failure_behavior": "fail",
+      "success_requires_no_task_failures": true
+    },
+    "stream_agent_stdout": false
+  },
+  "trigger_payload": {},
+  "task_runs": [
+    {
+      "task_id": "start",
+      "run_seq": 1,
+      "status": "success",
+      "duration_ms": 0,
+      "error_code": null
+    },
+    {
+      "task_id": "will_fail",
+      "run_seq": 1,
+      "status": "failed",
+      "duration_ms": 0,
+      "error_code": "ERR-a2491e00-b599-4f51-bfe8-87d8e83797e5"
+    }
+  ],
+  "warnings": []
+}
