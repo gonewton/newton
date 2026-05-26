@@ -526,6 +526,8 @@ paths:
     get:
       tags:
       - dashboard
+      summary: 'DEPRECATED: alias for /kpis'
+      description: Deprecated alias for KPI list. Prefer GET /kpis.
       operationId: list_indicators
       responses:
         '200':
@@ -545,7 +547,7 @@ paths:
   /kpis:
     get:
       tags:
-      - dashboard
+      - catalog
       operationId: list_kpis
       responses:
         '200':

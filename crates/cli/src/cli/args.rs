@@ -488,4 +488,12 @@ pub struct DataArgs {
     pub run_id: Option<String>,
     /// Optional filter: restrict grade listings to a single KPI.
     pub kpi_id: Option<String>,
+    /// Optional filter: restrict eval run listings by scope.
+    pub scope: Option<String>,
+    /// Optional filter: restrict eval run listings by scope id.
+    pub scope_id: Option<String>,
+    /// Optional filter: restrict eval run listings by source.
+    pub source: Option<String>,
+    /// Optional filter: restrict eval run listings to N results.
+    pub limit: Option<u32>,
 }

@@ -687,6 +687,8 @@ const DATA_GET_LONG_ABOUT: &str =
      newton data get kpis\n  \
      newton data get kpi <id> --json\n  \
      newton data get eval-runs\n  \
+     newton data get eval-runs --scope repo --scope-id gonewton-newton\n  \
+     newton data get eval-runs --source dk-review --limit 25\n  \
      newton data get eval-run <id> --json\n  \
      newton data get grades\n  \
      newton data get grades --run-id <runId>\n  \
@@ -723,7 +725,7 @@ fn data_verb_command(verb: DataVerb) -> Command {
             "Retrieve catalog entities (list or single-item)",
             DATA_GET_LONG_ABOUT,
             vec!["newton data get products", "newton data get product <id> --json"],
-            "get <resource> [ID] [--run-id RUNID] [--kpi-id KPIID] [--json] [--output-format FORMAT] [--workspace PATH]",
+            "get <resource> [ID] [--run-id RUNID] [--kpi-id KPIID] [--scope SCOPE] [--scope-id SCOPEID] [--source SOURCE] [--limit N] [--json] [--output-format FORMAT] [--workspace PATH]",
             false,
         ),
         DataVerb::Post => (
@@ -852,6 +854,54 @@ fn data_verb_command(verb: DataVerb) -> Command {
             conflicts_with: vec![],
             requires: vec![],
             help: "Filter grade listings by KPI id (only used with: resource=grades)",
+        });
+        args.push(ArgSpec {
+            name: "scope",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("scope"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Filter EvalRun listings by scope (only used with: resource=eval-runs)",
+        });
+        args.push(ArgSpec {
+            name: "scope-id",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("scope-id"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Filter EvalRun listings by scope id (only used with: resource=eval-runs)",
+        });
+        args.push(ArgSpec {
+            name: "source",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("source"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Filter EvalRun listings by source (only used with: resource=eval-runs)",
+        });
+        args.push(ArgSpec {
+            name: "limit",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("limit"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Limit EvalRun listings (only used with: resource=eval-runs)",
         });
     }
 
@@ -2281,6 +2331,24 @@ impl DataArgs {
         let workspace = get_opt_path(&args, "workspace");
         let run_id = args.named.get("run-id").cloned();
         let kpi_id = args.named.get("kpi-id").cloned();
+        let scope = args.named.get("scope").cloned();
+        let scope_id = args.named.get("scope-id").cloned();
+        let source = args.named.get("source").cloned();
+        let limit = args
+            .named
+            .get("limit")
+            .map(|s| {
+                s.parse::<u32>()
+                    .map_err(|_| anyhow!("DATA-007: --limit must be a positive integer"))
+                    .and_then(|n| {
+                        if n == 0 {
+                            Err(anyhow!("DATA-007: --limit must be a positive integer"))
+                        } else {
+                            Ok(n)
+                        }
+                    })
+            })
+            .transpose()?;
         Ok(DataArgs {
             verb,
             resource,
@@ -2292,6 +2360,10 @@ impl DataArgs {
             workspace,
             run_id,
             kpi_id,
+            scope,
+            scope_id,
+            source,
+            limit,
         })
     }
 }

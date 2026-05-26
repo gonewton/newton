@@ -2974,9 +2974,20 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
     // Normalize resource token (plural -> singular for mutations)
     let resource = args.resource.as_str();
 
-    // Validate filters (currently only supported for grade listings).
+    // Validate filters.
     if (args.run_id.is_some() || args.kpi_id.is_some()) && resource != "grades" {
         eprintln!("DATA-006: --run-id/--kpi-id are only supported with: resource=grades");
+        std::process::exit(1);
+    }
+    if (args.scope.is_some()
+        || args.scope_id.is_some()
+        || args.source.is_some()
+        || args.limit.is_some())
+        && resource != "eval-runs"
+    {
+        eprintln!(
+            "DATA-008: --scope/--scope-id/--source/--limit are only supported with: resource=eval-runs"
+        );
         std::process::exit(1);
     }
 
@@ -3137,17 +3148,7 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
     }
 
     // Dispatch
-    match dispatch_data(
-        &store,
-        &args.verb,
-        resource,
-        args.id.as_deref(),
-        body_value,
-        args.run_id.as_deref(),
-        args.kpi_id.as_deref(),
-    )
-    .await
-    {
+    match dispatch_data(&store, &args, body_value).await {
         Ok(value) => {
             println!("{}", serde_json::to_string_pretty(&value)?);
             Ok(())
@@ -3161,12 +3162,8 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
 
 async fn dispatch_data(
     store: &newton_backend::SqliteBackendStore,
-    verb: &DataVerb,
-    resource: &str,
-    id: Option<&str>,
+    args: &DataArgs,
     body: Option<serde_json::Value>,
-    grade_run_id: Option<&str>,
-    grade_kpi_id: Option<&str>,
 ) -> std::result::Result<serde_json::Value, String> {
     fn api_err(e: newton_types::ApiError) -> String {
         format!("{}: {}", e.code, e.message)
@@ -3187,7 +3184,15 @@ async fn dispatch_data(
         }
     }
 
-    let id = id.unwrap_or("");
+    let verb = &args.verb;
+    let resource = args.resource.as_str();
+    let id = args.id.as_deref().unwrap_or("");
+    let grade_run_id = args.run_id.as_deref();
+    let grade_kpi_id = args.kpi_id.as_deref();
+    let eval_scope = args.scope.as_deref();
+    let eval_scope_id = args.scope_id.as_deref();
+    let eval_source = args.source.as_deref();
+    let eval_limit = args.limit;
 
     match (verb, resource) {
         // -- Product -----------------------------------------------------------
@@ -3371,7 +3376,12 @@ async fn dispatch_data(
         (DataVerb::Get, "kpi") => store.get_kpi(id).await.map_err(api_err).and_then(to_json),
         // -- EvalRun ------------------------------------------------------------
         (DataVerb::Get, "eval-runs") => store
-            .list_eval_runs(None, None, None, None)
+            .list_eval_runs(
+                eval_scope.map(str::to_string),
+                eval_scope_id.map(str::to_string),
+                eval_source.map(str::to_string),
+                eval_limit,
+            )
             .await
             .map_err(api_err)
             .and_then(to_json),
