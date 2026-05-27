@@ -7,9 +7,10 @@ use axum::{
     Router,
 };
 use newton_backend::{
-    CreateComponentBody, CreateEvalRunBody, CreateGradeBody, CreateModuleBody, CreateProductBody,
-    CreateRepoBody, DeletedItem, PatchComponentBody, PatchModuleBody, PatchModuleDependencyBody,
-    PatchProductBody, PatchRepoBody, PutComponentBody, PutModuleBody, PutProductBody, PutRepoBody,
+    CreateComponentBody, CreateEvalRunBody, CreateGradeBody, CreateKpiBody, CreateModuleBody,
+    CreateProductBody, CreateRepoBody, DeletedItem, PatchComponentBody, PatchModuleBody,
+    PatchModuleDependencyBody, PatchProductBody, PatchRepoBody, PutComponentBody, PutModuleBody,
+    PutProductBody, PutRepoBody,
 };
 use newton_types::ApiError;
 use serde::Deserialize;
@@ -26,12 +27,13 @@ fn status_from_error(e: &ApiError) -> StatusCode {
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        // KPI (read-only)
-        .route("/kpis", get(list_kpis))
+        // KPI
+        .route("/kpis", get(list_kpis).post(create_kpi))
         .route("/kpis/{id}", get(get_kpi))
         // EvalRun
         .route("/eval-runs", get(list_eval_runs).post(create_eval_run))
         .route("/eval-runs/{id}", get(get_eval_run))
+        .route("/eval-runs/{id}/grades", get(list_eval_run_grades))
         // Product
         .route("/products/{id}", get(get_product))
         .route("/products", post(create_product))
@@ -103,6 +105,28 @@ pub(crate) async fn get_kpi(
 ) -> Response {
     match state.backend.get_kpi(&id).await {
         Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/kpis",
+    tag = "catalog",
+    request_body = CreateKpiBody,
+    responses(
+        (status = 201, description = "Created or upserted KPI", body = newton_backend::KpiItem),
+        (status = 409, description = "Conflict (name uniqueness violated)", body = ApiError),
+        (status = 422, description = "Validation error", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn create_kpi(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateKpiBody>,
+) -> Response {
+    match state.backend.create_kpi(body).await {
+        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
         Err(e) => (status_from_error(&e), Json(e)).into_response(),
     }
 }
@@ -187,6 +211,30 @@ pub(crate) async fn get_eval_run(
 ) -> Response {
     match state.backend.get_eval_run(&id).await {
         Ok(item) => (StatusCode::OK, Json(item)).into_response(),
+        Err(e) => (status_from_error(&e), Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/eval-runs/{id}/grades",
+    tag = "catalog",
+    params(("id" = String, Path, description = "EvalRun ID")),
+    responses(
+        (status = 200, description = "Grades for the EvalRun", body = [newton_backend::GradeItem]),
+        (status = 404, description = "EvalRun not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_eval_run_grades(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if let Err(e) = state.backend.get_eval_run(&id).await {
+        return (status_from_error(&e), Json(e)).into_response();
+    }
+    match state.backend.list_grades(Some(id), None).await {
+        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (status_from_error(&e), Json(e)).into_response(),
     }
 }

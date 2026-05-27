@@ -78,6 +78,20 @@ if [[ "$WITH_EVALRUN" == true ]]; then
     EVALUATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     RUN_ID="evalrun.dk-review.component.${SCOPE_ID}.${EVALUATED_AT}"
 
+    # Build inline grades array: one grade per unique dimension.
+    GRADES_JSON=$(echo "$DK_JSON" | jq -c '
+        [
+            to_entries
+            | group_by(.value.dimension // "general")[]
+            | {
+                dimension: (.[0].value.dimension // "general"),
+                score: ([100 - (length * 10), 0] | max | [., 100] | min),
+                kpiId: null,
+                evidence: { findings: map(.value) }
+              }
+        ]
+    ')
+
     RUN_PAYLOAD=$(jq -n \
         --arg id "$RUN_ID" \
         --arg source "dk-review" \
@@ -85,6 +99,7 @@ if [[ "$WITH_EVALRUN" == true ]]; then
         --arg scopeId "$SCOPE_ID" \
         --arg summary "dk review findings: ${FINDING_COUNT}" \
         --arg evaluatedAt "$EVALUATED_AT" \
+        --argjson grades "$GRADES_JSON" \
         '{
             id: $id,
             source: $source,
@@ -93,44 +108,12 @@ if [[ "$WITH_EVALRUN" == true ]]; then
             score: null,
             verdict: null,
             summary: $summary,
-            evaluatedAt: $evaluatedAt
+            evaluatedAt: $evaluatedAt,
+            grades: $grades
         }')
 
-    echo "[eval-run] creating $RUN_ID"
+    echo "[eval-run] creating $RUN_ID with ${#GRADES_JSON} inline grades"
     newton data post eval-run --workspace "$WORKSPACE" --body "$RUN_PAYLOAD" --json >/dev/null
-
-    # Group findings by dimension (fallback "general" if missing).
-    DIMENSIONS=$(echo "$DK_JSON" | jq -r 'map(.dimension // "general") | unique | .[]')
-    while IFS= read -r dim; do
-        [[ -z "$dim" ]] && continue
-        DIM_FINDINGS=$(echo "$DK_JSON" | jq --arg d "$dim" '[ .[] | select((.dimension // "general") == $d) ]')
-        COUNT=$(echo "$DIM_FINDINGS" | jq 'length')
-        # Simple heuristic: more findings -> lower score, clamped to [0,100].
-        SCORE=$((100 - (COUNT * 10)))
-        if (( SCORE < 0 )); then SCORE=0; fi
-        if (( SCORE > 100 )); then SCORE=100; fi
-
-        GRADE_ID="grade.${RUN_ID}.${dim}"
-        GRADE_PAYLOAD=$(jq -n \
-            --arg id "$GRADE_ID" \
-            --arg runId "$RUN_ID" \
-            --arg dimension "$dim" \
-            --arg evaluatedAt "$EVALUATED_AT" \
-            --argjson score "$SCORE" \
-            --argjson evidence "$DIM_FINDINGS" \
-            '{
-                id: $id,
-                runId: $runId,
-                kpiId: null,
-                dimension: $dimension,
-                score: $score,
-                evidence: { findings: $evidence },
-                evaluatedAt: $evaluatedAt
-            }')
-
-        echo "[grade] creating $GRADE_ID (dimension=$dim findings=$COUNT)"
-        newton data post grade --workspace "$WORKSPACE" --body "$GRADE_PAYLOAD" --json >/dev/null
-    done <<<"$DIMENSIONS"
 fi
 
 # POST each finding as an opportunity
