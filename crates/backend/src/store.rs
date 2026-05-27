@@ -46,6 +46,8 @@ impl SqliteBackendStore {
             .await
             .map_err(|e| err_internal(&format!("migration 003 failed: {e}")))?;
 
+        Self::upgrade_legacy_grade_schema(&pool).await?;
+
         Ok(Self { pool })
     }
 
@@ -55,6 +57,87 @@ impl SqliteBackendStore {
 
     fn now_iso() -> String {
         Utc::now().to_rfc3339()
+    }
+
+    async fn upgrade_legacy_grade_schema(pool: &SqlitePool) -> Result<(), ApiError> {
+        #[derive(Debug, FromRow)]
+        struct TableInfoRow {
+            name: String,
+        }
+
+        let info: Vec<TableInfoRow> = sqlx::query_as::<_, TableInfoRow>("PRAGMA table_info(Grade)")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| err_internal(&format!("schema check failed: {e}")))?;
+
+        // If the table doesn't exist yet, PRAGMA returns empty. 002_grades.sql should have
+        // created it, but treat this as non-fatal.
+        if info.is_empty() {
+            return Ok(());
+        }
+
+        let has_run_id = info.iter().any(|r| r.name == "runId");
+        let has_dimension = info.iter().any(|r| r.name == "dimension");
+        if has_run_id && has_dimension {
+            return Ok(());
+        }
+
+        // Legacy Grade schema detected. Rebuild to the new append-only schema.
+        // This intentionally drops any existing Grade data because it cannot be mapped
+        // losslessly to (runId, dimension) evidence rows.
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+
+        sqlx::query("PRAGMA foreign_keys = OFF;")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("pragma error: {e}")))?;
+
+        sqlx::query("DROP TABLE IF EXISTS Grade;")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("drop Grade failed: {e}")))?;
+
+        sqlx::query(
+            "CREATE TABLE Grade (\
+              id          TEXT PRIMARY KEY,\
+              runId       TEXT NOT NULL,\
+              kpiId       TEXT NULL,\
+              dimension   TEXT NOT NULL,\
+              score       REAL NOT NULL CHECK(score >= 0 AND score <= 100),\
+              evidence    TEXT NULL,\
+              evaluatedAt TEXT NOT NULL,\
+              ingestedAt  TEXT NOT NULL,\
+              UNIQUE(runId, dimension),\
+              FOREIGN KEY(runId) REFERENCES EvalRun(id) ON DELETE CASCADE,\
+              FOREIGN KEY(kpiId) REFERENCES KPI(id)\
+            );",
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| err_internal(&format!("create Grade failed: {e}")))?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_grade_runId ON Grade(runId);")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("create index failed: {e}")))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_grade_kpiId ON Grade(kpiId);")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("create index failed: {e}")))?;
+
+        sqlx::query("PRAGMA foreign_keys = ON;")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("pragma error: {e}")))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| err_internal(&format!("commit tx error: {e}")))?;
+
+        Ok(())
     }
 }
 
@@ -110,30 +193,71 @@ struct RegressionRow {
 }
 
 #[derive(Debug, FromRow)]
-struct IndicatorRow {
+struct KpiRow {
     id: String,
     name: String,
     description: String,
-    scope: String,
-    weight: f64,
+    scope_level: String,
     threshold: f64,
-    current: f64,
-    trend: f64,
-    reports: i64,
-    mode: String,
-    last_run: String,
+    weight: f64,
+    agg_fn: String,
+    created_at: String,
+    updated_at: String,
+}
+
+impl KpiRow {
+    fn into_item(self) -> KpiItem {
+        KpiItem {
+            id: self.id,
+            name: self.name,
+            description: self.description,
+            scope_level: self.scope_level,
+            threshold: self.threshold,
+            weight: self.weight,
+            agg_fn: self.agg_fn,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, FromRow)]
+struct EvalRunRow {
+    id: String,
+    source: String,
+    scope: String,
+    scope_id: String,
+    score: Option<f64>,
+    verdict: Option<String>,
+    summary: Option<String>,
+    evaluated_at: String,
+    ingested_at: String,
+}
+
+impl EvalRunRow {
+    fn into_item(self) -> EvalRunItem {
+        EvalRunItem {
+            id: self.id,
+            source: self.source,
+            scope: self.scope,
+            scope_id: self.scope_id,
+            score: self.score,
+            verdict: self.verdict,
+            summary: self.summary,
+            evaluated_at: self.evaluated_at,
+            ingested_at: self.ingested_at,
+        }
+    }
 }
 
 #[derive(Debug, FromRow)]
 struct GradeRow {
     id: String,
-    scope: String,
-    scope_id: String,
-    indicator: String,
+    run_id: String,
+    kpi_id: Option<String>,
+    dimension: String,
     score: f64,
-    metrics: Option<String>,
-    details_url: Option<String>,
-    raw_output: Option<String>,
+    evidence: Option<String>,
     evaluated_at: String,
     ingested_at: String,
 }
@@ -142,13 +266,11 @@ impl GradeRow {
     fn into_item(self) -> GradeItem {
         GradeItem {
             id: self.id,
-            scope: self.scope,
-            scope_id: self.scope_id,
-            indicator: self.indicator,
+            run_id: self.run_id,
+            kpi_id: self.kpi_id,
+            dimension: self.dimension,
             score: self.score,
-            metrics: self.metrics.and_then(|s| serde_json::from_str(&s).ok()),
-            details_url: self.details_url,
-            raw_output: self.raw_output,
+            evidence: self.evidence.and_then(|s| serde_json::from_str(&s).ok()),
             evaluated_at: self.evaluated_at,
             ingested_at: self.ingested_at,
             warnings: vec![],
@@ -702,42 +824,16 @@ impl BackendStore for SqliteBackendStore {
             .collect())
     }
 
-    async fn list_indicators(&self) -> Result<Vec<IndicatorItem>, ApiError> {
-        let rows = sqlx::query_as::<_, IndicatorRow>(
-            "SELECT i.id, i.name, i.description, i.scope, i.weight, i.threshold, \
-             COALESCE(g.score, i.current) AS current, \
-             i.trend, \
-             COALESCE(g.report_count, i.reports) AS reports, \
-             i.mode, \
-             COALESCE(g.last_eval, i.lastRun) AS last_run \
-             FROM Indicator i \
-             LEFT JOIN ( \
-               SELECT indicator, score, MAX(evaluatedAt) AS last_eval, COUNT(*) AS report_count \
-               FROM Grade \
-               GROUP BY indicator \
-             ) g ON g.indicator = i.id \
-             ORDER BY i.id ASC",
+    async fn list_kpis(&self) -> Result<Vec<KpiItem>, ApiError> {
+        let rows = sqlx::query_as::<_, KpiRow>(
+            "SELECT id, name, description, scopeLevel AS scope_level, threshold, weight, aggFn AS agg_fn, createdAt AS created_at, updatedAt AS updated_at \
+             FROM KPI ORDER BY id ASC",
         )
         .fetch_all(&self.pool)
         .await
         .map_err(|e| err_internal(&format!("query error: {e}")))?;
 
-        Ok(rows
-            .into_iter()
-            .map(|r| IndicatorItem {
-                id: r.id,
-                name: r.name,
-                description: r.description,
-                scope: r.scope,
-                weight: r.weight,
-                threshold: r.threshold,
-                current: r.current,
-                trend: r.trend,
-                reports: r.reports,
-                mode: r.mode,
-                last_run: r.last_run,
-            })
-            .collect())
+        Ok(rows.into_iter().map(|r| r.into_item()).collect())
     }
 
     async fn list_recent_actions(&self, limit: u32) -> Result<Vec<RecentActionItem>, ApiError> {
@@ -1680,6 +1776,9 @@ impl BackendStore for SqliteBackendStore {
             "PendingApproval",
             "Regression",
             "Indicator",
+            "Grade",
+            "EvalRun",
+            "KPI",
             "Module",
             "Repo",
             "Component",
@@ -2247,24 +2346,327 @@ impl BackendStore for SqliteBackendStore {
         Ok(id.to_string())
     }
 
-    async fn list_grades(&self) -> Result<Vec<GradeItem>, ApiError> {
-        let rows = sqlx::query_as::<_, GradeRow>(
-            "SELECT id, scope, scopeId AS scope_id, indicator, score, metrics, \
-             detailsUrl AS details_url, rawOutput AS raw_output, \
-             evaluatedAt AS evaluated_at, ingestedAt AS ingested_at \
-             FROM Grade ORDER BY ingestedAt DESC",
+    async fn get_kpi(&self, id: &str) -> Result<KpiItem, ApiError> {
+        let row: Option<KpiRow> = sqlx::query_as::<_, KpiRow>(
+            "SELECT id, name, description, scopeLevel AS scope_level, threshold, weight, aggFn AS agg_fn, createdAt AS created_at, updatedAt AS updated_at \
+             FROM KPI WHERE id = ?",
         )
-        .fetch_all(&self.pool)
+        .bind(id)
+        .fetch_optional(&self.pool)
         .await
         .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        row.map(|r| r.into_item())
+            .ok_or_else(|| err_not_found("KPI not found"))
+    }
+
+    async fn create_eval_run(&self, body: CreateEvalRunBody) -> Result<EvalRunItem, ApiError> {
+        if body.id.trim().is_empty() {
+            return Err(err_validation("id is required"));
+        }
+        if body.source.trim().is_empty() {
+            return Err(err_validation("source is required"));
+        }
+        if body.scope_id.trim().is_empty() {
+            return Err(err_validation("scopeId is required"));
+        }
+        let allowed_scopes = ["product", "component", "repo", "module"];
+        if !allowed_scopes.contains(&body.scope.as_str()) {
+            return Err(err_validation(
+                "scope must be one of: product, component, repo, module",
+            ));
+        }
+        if let Some(score) = body.score {
+            if !(0.0..=100.0).contains(&score) {
+                return Err(err_validation("score must be between 0 and 100"));
+            }
+        }
+
+        let now = Self::now_iso();
+        let evaluated_at = body.evaluated_at.clone().unwrap_or_else(|| now.clone());
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+
+        let scope_id_exists: bool = match body.scope.as_str() {
+            "product" => {
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Product WHERE id = ?")
+                    .bind(&body.scope_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| err_internal(&format!("query error: {e}")))?
+                    > 0
+            }
+            "component" => {
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Component WHERE id = ?")
+                    .bind(&body.scope_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| err_internal(&format!("query error: {e}")))?
+                    > 0
+            }
+            "repo" => {
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Repo WHERE id = ?")
+                    .bind(&body.scope_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| err_internal(&format!("query error: {e}")))?
+                    > 0
+            }
+            "module" => {
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Module WHERE id = ?")
+                    .bind(&body.scope_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| err_internal(&format!("query error: {e}")))?
+                    > 0
+            }
+            _ => false,
+        };
+        if !scope_id_exists {
+            return Err(err_not_found(&format!(
+                "{} '{}' not found",
+                body.scope, body.scope_id
+            )));
+        }
+
+        sqlx::query(
+            "INSERT INTO EvalRun (id, source, scope, scopeId, score, verdict, summary, evaluatedAt, ingestedAt) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&body.id)
+        .bind(&body.source)
+        .bind(&body.scope)
+        .bind(&body.scope_id)
+        .bind(body.score)
+        .bind(&body.verdict)
+        .bind(&body.summary)
+        .bind(&evaluated_at)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("UNIQUE constraint failed") {
+                err_conflict("EvalRun id already exists")
+            } else {
+                err_internal(&format!("insert error: {e}"))
+            }
+        })?;
+
+        tx.commit()
+            .await
+            .map_err(|e| err_internal(&format!("commit tx error: {e}")))?;
+
+        self.get_eval_run(&body.id).await
+    }
+
+    async fn list_eval_runs(
+        &self,
+        scope: Option<String>,
+        scope_id: Option<String>,
+        source: Option<String>,
+        limit: Option<u32>,
+    ) -> Result<Vec<EvalRunItem>, ApiError> {
+        let mut sql = String::from(
+            "SELECT id, source, scope, scopeId AS scope_id, score, verdict, summary, evaluatedAt AS evaluated_at, ingestedAt AS ingested_at FROM EvalRun",
+        );
+        let mut conditions = Vec::new();
+        if scope.is_some() {
+            conditions.push("scope = ?");
+        }
+        if scope_id.is_some() {
+            conditions.push("scopeId = ?");
+        }
+        if source.is_some() {
+            conditions.push("source = ?");
+        }
+        if !conditions.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conditions.join(" AND "));
+        }
+        sql.push_str(" ORDER BY ingestedAt DESC");
+        if limit.is_some() {
+            sql.push_str(" LIMIT ?");
+        }
+
+        let mut q = sqlx::query_as::<_, EvalRunRow>(&sql);
+        if let Some(scope) = scope {
+            q = q.bind(scope);
+        }
+        if let Some(scope_id) = scope_id {
+            q = q.bind(scope_id);
+        }
+        if let Some(source) = source {
+            q = q.bind(source);
+        }
+        if let Some(limit) = limit {
+            q = q.bind(limit as i64);
+        }
+
+        let rows = q
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        Ok(rows.into_iter().map(|r| r.into_item()).collect())
+    }
+
+    async fn get_eval_run(&self, id: &str) -> Result<EvalRunItem, ApiError> {
+        let row: Option<EvalRunRow> = sqlx::query_as::<_, EvalRunRow>(
+            "SELECT id, source, scope, scopeId AS scope_id, score, verdict, summary, evaluatedAt AS evaluated_at, ingestedAt AS ingested_at \
+             FROM EvalRun WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        row.map(|r| r.into_item())
+            .ok_or_else(|| err_not_found("EvalRun not found"))
+    }
+
+    async fn create_grade(&self, body: CreateGradeBody) -> Result<GradeItem, ApiError> {
+        if body.id.trim().is_empty() {
+            return Err(err_validation("id is required"));
+        }
+        if body.run_id.trim().is_empty() {
+            return Err(err_validation("runId is required"));
+        }
+        if let Some(kpi_id) = body.kpi_id.as_ref() {
+            if kpi_id.trim().is_empty() {
+                return Err(err_validation("kpiId must be non-empty when provided"));
+            }
+        }
+        if body.dimension.trim().is_empty() {
+            return Err(err_validation("dimension is required"));
+        }
+        if !(0.0..=100.0).contains(&body.score) {
+            return Err(err_validation("score must be between 0 and 100"));
+        }
+
+        let now = Self::now_iso();
+        let evaluated_at = body.evaluated_at.clone().unwrap_or_else(|| now.clone());
+        let evidence_str = body
+            .evidence
+            .as_ref()
+            .map(|m| serde_json::to_string(m).unwrap_or_default());
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+
+        let run_exists: bool =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM EvalRun WHERE id = ?")
+                .bind(&body.run_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| err_internal(&format!("query error: {e}")))?
+                > 0;
+        if !run_exists {
+            return Err(err_not_found(&format!(
+                "EvalRun '{}' not found",
+                body.run_id
+            )));
+        }
+
+        if let Some(ref kpi_id) = body.kpi_id {
+            let kpi_exists: bool =
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM KPI WHERE id = ?")
+                    .bind(kpi_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| err_internal(&format!("query error: {e}")))?
+                    > 0;
+            if !kpi_exists {
+                return Err(err_not_found(&format!("KPI '{}' not found", kpi_id)));
+            }
+        }
+
+        // Enforce append-only semantics at the application layer so we never overwrite
+        // evidence for an existing (runId, dimension), regardless of SQLite conflict policy.
+        let exists_for_dimension: bool = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM Grade WHERE runId = ? AND dimension = ?",
+        )
+        .bind(&body.run_id)
+        .bind(&body.dimension)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| err_internal(&format!("query error: {e}")))?
+            > 0;
+        if exists_for_dimension {
+            return Err(err_conflict("Grade already exists for (runId, dimension)"));
+        }
+
+        sqlx::query(
+            "INSERT INTO Grade (id, runId, kpiId, dimension, score, evidence, evaluatedAt, ingestedAt) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&body.id)
+        .bind(&body.run_id)
+        .bind(&body.kpi_id)
+        .bind(&body.dimension)
+        .bind(body.score)
+        .bind(&evidence_str)
+        .bind(&evaluated_at)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("UNIQUE constraint failed") {
+                err_conflict("Grade already exists for (runId, dimension) or id")
+            } else {
+                err_internal(&format!("insert error: {e}"))
+            }
+        })?;
+
+        tx.commit()
+            .await
+            .map_err(|e| err_internal(&format!("commit tx error: {e}")))?;
+
+        self.get_grade(&body.id).await
+    }
+
+    async fn list_grades(
+        &self,
+        run_id: Option<String>,
+        kpi_id: Option<String>,
+    ) -> Result<Vec<GradeItem>, ApiError> {
+        let mut sql = String::from(
+            "SELECT id, runId AS run_id, kpiId AS kpi_id, dimension, score, evidence, evaluatedAt AS evaluated_at, ingestedAt AS ingested_at FROM Grade",
+        );
+        let mut conditions = Vec::new();
+        if run_id.is_some() {
+            conditions.push("runId = ?");
+        }
+        if kpi_id.is_some() {
+            conditions.push("kpiId = ?");
+        }
+        if !conditions.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conditions.join(" AND "));
+        }
+        sql.push_str(" ORDER BY ingestedAt DESC");
+
+        let mut q = sqlx::query_as::<_, GradeRow>(&sql);
+        if let Some(run_id) = run_id {
+            q = q.bind(run_id);
+        }
+        if let Some(kpi_id) = kpi_id {
+            q = q.bind(kpi_id);
+        }
+
+        let rows = q
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| err_internal(&format!("query error: {e}")))?;
         Ok(rows.into_iter().map(|r| r.into_item()).collect())
     }
 
     async fn get_grade(&self, id: &str) -> Result<GradeItem, ApiError> {
         let row: Option<GradeRow> = sqlx::query_as::<_, GradeRow>(
-            "SELECT id, scope, scopeId AS scope_id, indicator, score, metrics, \
-             detailsUrl AS details_url, rawOutput AS raw_output, \
-             evaluatedAt AS evaluated_at, ingestedAt AS ingested_at \
+            "SELECT id, runId AS run_id, kpiId AS kpi_id, dimension, score, evidence, evaluatedAt AS evaluated_at, ingestedAt AS ingested_at \
              FROM Grade WHERE id = ?",
         )
         .bind(id)
@@ -2273,142 +2675,6 @@ impl BackendStore for SqliteBackendStore {
         .map_err(|e| err_internal(&format!("query error: {e}")))?;
         row.map(|r| r.into_item())
             .ok_or_else(|| err_not_found("Grade not found"))
-    }
-
-    async fn create_grade(&self, body: CreateGradeBody) -> Result<GradeItem, ApiError> {
-        if body.scope != "component" && body.scope != "module" {
-            return Err(err_validation("scope must be 'component' or 'module'"));
-        }
-        if !(0.0..=100.0).contains(&body.score) {
-            return Err(err_validation("score must be between 0 and 100"));
-        }
-        // FK check
-        let fk_ok: bool = if body.scope == "component" {
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Component WHERE id = ?")
-                .bind(&body.scope_id)
-                .fetch_one(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?
-                > 0
-        } else {
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Module WHERE id = ?")
-                .bind(&body.scope_id)
-                .fetch_one(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?
-                > 0
-        };
-        if !fk_ok {
-            return Err(err_not_found(&format!(
-                "{} '{}' not found",
-                body.scope, body.scope_id
-            )));
-        }
-        // Soft-warn if indicator unknown
-        let indicator_known: bool =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Indicator WHERE id = ?")
-                .bind(&body.indicator)
-                .fetch_one(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?
-                > 0;
-
-        let id = format!("{}.{}.{}", body.scope, body.scope_id, body.indicator);
-        let now = Self::now_iso();
-        let evaluated_at = body.evaluated_at.unwrap_or_else(|| now.clone());
-        let metrics_str = body
-            .metrics
-            .as_ref()
-            .map(|m| serde_json::to_string(m).unwrap_or_default());
-
-        sqlx::query(
-            "INSERT INTO Grade (id, scope, scopeId, indicator, score, metrics, detailsUrl, rawOutput, evaluatedAt, ingestedAt) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
-             ON CONFLICT(scope, scopeId, indicator) DO UPDATE SET \
-               id = excluded.id, \
-               score = excluded.score, \
-               metrics = excluded.metrics, \
-               detailsUrl = excluded.detailsUrl, \
-               rawOutput = excluded.rawOutput, \
-               evaluatedAt = excluded.evaluatedAt, \
-               ingestedAt = excluded.ingestedAt"
-        )
-        .bind(&id)
-        .bind(&body.scope)
-        .bind(&body.scope_id)
-        .bind(&body.indicator)
-        .bind(body.score)
-        .bind(&metrics_str)
-        .bind(&body.details_url)
-        .bind(&body.raw_output)
-        .bind(&evaluated_at)
-        .bind(&now)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| err_internal(&format!("upsert error: {e}")))?;
-
-        let mut item = self.get_grade(&id).await?;
-        if !indicator_known {
-            item.warnings.push(format!(
-                "indicator '{}' does not exist in the Indicator table",
-                body.indicator
-            ));
-        }
-        Ok(item)
-    }
-
-    async fn patch_grade(&self, id: &str, body: PatchGradeBody) -> Result<GradeItem, ApiError> {
-        let existing = self.get_grade(id).await?;
-        if let Some(score) = body.score {
-            if !(0.0..=100.0).contains(&score) {
-                return Err(err_validation("score must be between 0 and 100"));
-            }
-        }
-        let score = body.score.unwrap_or(existing.score);
-        let metrics_str = if body.metrics.is_some() {
-            body.metrics
-                .as_ref()
-                .map(|m| serde_json::to_string(m).unwrap_or_default())
-        } else {
-            existing
-                .metrics
-                .as_ref()
-                .map(|m| serde_json::to_string(m).unwrap_or_default())
-        };
-        let details_url = if body.details_url.is_some() {
-            body.details_url
-        } else {
-            existing.details_url
-        };
-        let raw_output = if body.raw_output.is_some() {
-            body.raw_output
-        } else {
-            existing.raw_output
-        };
-        sqlx::query(
-            "UPDATE Grade SET score = ?, metrics = ?, detailsUrl = ?, rawOutput = ? WHERE id = ?",
-        )
-        .bind(score)
-        .bind(&metrics_str)
-        .bind(&details_url)
-        .bind(&raw_output)
-        .bind(id)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| err_internal(&format!("update error: {e}")))?;
-        self.get_grade(id).await
-    }
-
-    async fn delete_grade(&self, id: &str) -> Result<String, ApiError> {
-        let affected = sqlx::query("DELETE FROM Grade WHERE id = ?")
-            .bind(id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| err_internal(&format!("delete error: {e}")))?;
-        if affected.rows_affected() == 0 {
-            return Err(err_not_found("Grade not found"));
-        }
-        Ok(id.to_string())
     }
 
     // ── Workflow runtime methods ───────────────────────────────────────────
@@ -3251,6 +3517,276 @@ mod store_tests {
         assert_eq!(tail.len(), 5);
         assert_eq!(tail[0].message, "line-5");
         assert_eq!(tail[4].message, "line-9");
+    }
+}
+
+#[cfg(test)]
+mod kpi_evalrun_grade_tests {
+    use super::*;
+
+    async fn seed_repo(store: &SqliteBackendStore) -> String {
+        let now = SqliteBackendStore::now_iso();
+
+        let product = store
+            .create_product(CreateProductBody {
+                name: "Test Product".to_string(),
+            })
+            .await
+            .unwrap();
+        let component = store
+            .create_component(CreateComponentBody {
+                name: "Test Component".to_string(),
+                product_id: product.id,
+                domain: "platform".to_string(),
+                owner: "owner".to_string(),
+                criticality: "low".to_string(),
+                autonomy: "semi".to_string(),
+                health: 0,
+                trend: 0,
+                last_eval: now.clone(),
+            })
+            .await
+            .unwrap();
+        let repo = store
+            .create_repo(CreateRepoBody {
+                name: "test-repo".to_string(),
+                component_id: component.id,
+                owner: "owner".to_string(),
+                criticality: "low".to_string(),
+                autonomy: "semi".to_string(),
+                quality_score: 0,
+                coverage: 0,
+                sec_score: 0,
+                exec_status: "idle".to_string(),
+                last_eval: now,
+            })
+            .await
+            .unwrap();
+        repo.id
+    }
+
+    #[tokio::test]
+    async fn create_two_eval_runs_for_same_scope_and_scope_id_preserves_history() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let repo_id = seed_repo(&store).await;
+
+        let run1 = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "evalrun.1".to_string(),
+                source: "test".to_string(),
+                scope: "repo".to_string(),
+                scope_id: repo_id.clone(),
+                score: Some(70.0),
+                verdict: Some("ok".to_string()),
+                summary: Some("first".to_string()),
+                evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
+            })
+            .await
+            .unwrap();
+        let run2 = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "evalrun.2".to_string(),
+                source: "test".to_string(),
+                scope: "repo".to_string(),
+                scope_id: repo_id.clone(),
+                score: Some(72.0),
+                verdict: Some("ok".to_string()),
+                summary: Some("second".to_string()),
+                evaluated_at: Some("2026-05-26T00:05:00Z".to_string()),
+            })
+            .await
+            .unwrap();
+        assert_ne!(run1.id, run2.id);
+
+        let list = store
+            .list_eval_runs(Some("repo".to_string()), Some(repo_id), None, None)
+            .await
+            .unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn create_eval_run_missing_required_fields_returns_validation() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let repo_id = seed_repo(&store).await;
+
+        let err = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "".to_string(),
+                source: "test".to_string(),
+                scope: "repo".to_string(),
+                scope_id: repo_id.clone(),
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+
+        let err = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "evalrun.missing-source".to_string(),
+                source: "   ".to_string(),
+                scope: "repo".to_string(),
+                scope_id: repo_id.clone(),
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+
+        let err = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "evalrun.missing-scope-id".to_string(),
+                source: "test".to_string(),
+                scope: "repo".to_string(),
+                scope_id: "".to_string(),
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+    }
+
+    #[tokio::test]
+    async fn create_grade_missing_run_id_returns_not_found() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let err = store
+            .create_grade(CreateGradeBody {
+                id: "grade.1".to_string(),
+                run_id: "no-such-run".to_string(),
+                kpi_id: None,
+                dimension: "tests".to_string(),
+                score: 50.0,
+                evidence: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn create_grade_missing_required_fields_returns_validation() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+
+        let err = store
+            .create_grade(CreateGradeBody {
+                id: "".to_string(),
+                run_id: "some-run".to_string(),
+                kpi_id: None,
+                dimension: "tests".to_string(),
+                score: 50.0,
+                evidence: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+
+        let err = store
+            .create_grade(CreateGradeBody {
+                id: "grade.missing-run".to_string(),
+                run_id: "   ".to_string(),
+                kpi_id: None,
+                dimension: "tests".to_string(),
+                score: 50.0,
+                evidence: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+    }
+
+    #[tokio::test]
+    async fn create_grade_out_of_range_score_returns_validation() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let repo_id = seed_repo(&store).await;
+        store
+            .create_eval_run(CreateEvalRunBody {
+                id: "evalrun.score".to_string(),
+                source: "test".to_string(),
+                scope: "repo".to_string(),
+                scope_id: repo_id,
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
+            })
+            .await
+            .unwrap();
+
+        let err = store
+            .create_grade(CreateGradeBody {
+                id: "grade.bad-score".to_string(),
+                run_id: "evalrun.score".to_string(),
+                kpi_id: None,
+                dimension: "tests".to_string(),
+                score: 101.0,
+                evidence: None,
+                evaluated_at: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+    }
+
+    #[tokio::test]
+    async fn create_grade_duplicate_dimension_returns_conflict_and_does_not_overwrite() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let repo_id = seed_repo(&store).await;
+        store
+            .create_eval_run(CreateEvalRunBody {
+                id: "evalrun.dupe".to_string(),
+                source: "test".to_string(),
+                scope: "repo".to_string(),
+                scope_id: repo_id,
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
+            })
+            .await
+            .unwrap();
+
+        let first = store
+            .create_grade(CreateGradeBody {
+                id: "grade.dupe.1".to_string(),
+                run_id: "evalrun.dupe".to_string(),
+                kpi_id: None,
+                dimension: "tests".to_string(),
+                score: 60.0,
+                evidence: Some(serde_json::json!({"findings": 1})),
+                evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
+            })
+            .await
+            .unwrap();
+
+        let err = store
+            .create_grade(CreateGradeBody {
+                id: "grade.dupe.2".to_string(),
+                run_id: "evalrun.dupe".to_string(),
+                kpi_id: None,
+                dimension: "tests".to_string(),
+                score: 10.0,
+                evidence: Some(serde_json::json!({"findings": 999})),
+                evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_CONFLICT");
+
+        let fetched = store.get_grade(&first.id).await.unwrap();
+        assert_eq!(fetched.score, 60.0);
     }
 }
 

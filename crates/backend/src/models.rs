@@ -59,31 +59,54 @@ pub struct RegressionItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct IndicatorItem {
+pub struct KpiItem {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub scope: String,
-    pub weight: f64,
+    pub scope_level: String,
     pub threshold: f64,
-    pub current: f64,
-    pub trend: f64,
-    pub reports: i64,
-    pub mode: String,
-    pub last_run: String,
+    pub weight: f64,
+    pub agg_fn: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EvalRunItem {
+    pub id: String,
+    pub source: String,
+    pub scope: String,
+    pub scope_id: String,
+    pub score: Option<f64>,
+    pub verdict: Option<String>,
+    pub summary: Option<String>,
+    pub evaluated_at: String,
+    pub ingested_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateEvalRunBody {
+    pub id: String,
+    pub source: String,
+    pub scope: String,
+    pub scope_id: String,
+    pub score: Option<f64>,
+    pub verdict: Option<String>,
+    pub summary: Option<String>,
+    pub evaluated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GradeItem {
     pub id: String,
-    pub scope: String,
-    pub scope_id: String,
-    pub indicator: String,
+    pub run_id: String,
+    pub kpi_id: Option<String>,
+    pub dimension: String,
     pub score: f64,
-    pub metrics: Option<serde_json::Value>,
-    pub details_url: Option<String>,
-    pub raw_output: Option<String>,
+    pub evidence: Option<serde_json::Value>,
     pub evaluated_at: String,
     pub ingested_at: String,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
@@ -93,23 +116,13 @@ pub struct GradeItem {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateGradeBody {
-    pub scope: String,
-    pub scope_id: String,
-    pub indicator: String,
+    pub id: String,
+    pub run_id: String,
+    pub kpi_id: Option<String>,
+    pub dimension: String,
     pub score: f64,
-    pub metrics: Option<serde_json::Value>,
-    pub details_url: Option<String>,
-    pub raw_output: Option<String>,
+    pub evidence: Option<serde_json::Value>,
     pub evaluated_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct PatchGradeBody {
-    pub score: Option<f64>,
-    pub metrics: Option<serde_json::Value>,
-    pub details_url: Option<String>,
-    pub raw_output: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

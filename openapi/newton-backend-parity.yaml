@@ -198,6 +198,125 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /eval-runs:
+    get:
+      tags:
+      - catalog
+      operationId: list_eval_runs
+      parameters:
+      - name: scope
+        in: query
+        description: Filter by scope
+        required: false
+        schema:
+          type: string
+      - name: scopeId
+        in: query
+        description: Filter by scope id
+        required: false
+        schema:
+          type: string
+      - name: source
+        in: query
+        description: Filter by source
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        description: Limit results
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      responses:
+        '200':
+          description: EvalRun list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EvalRunItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+      - catalog
+      operationId: create_eval_run
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvalRunBody'
+        required: true
+      responses:
+        '201':
+          description: Created EvalRun
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalRunItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /eval-runs/{id}:
+    get:
+      tags:
+      - catalog
+      operationId: get_eval_run
+      parameters:
+      - name: id
+        in: path
+        description: EvalRun ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: EvalRun
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalRunItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /executions:
     get:
       tags:
@@ -230,6 +349,19 @@ paths:
       tags:
       - catalog
       operationId: list_grades
+      parameters:
+      - name: runId
+        in: query
+        description: Filter by EvalRun id
+        required: false
+        schema:
+          type: string
+      - name: kpiId
+        in: query
+        description: Filter by KPI id
+        required: false
+        schema:
+          type: string
       responses:
         '200':
           description: List of grades
@@ -239,6 +371,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/GradeItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     post:
       tags:
       - catalog
@@ -256,14 +394,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GradeItem'
-        '400':
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
           description: Validation error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-        '404':
-          description: Not found
+        '500':
+          description: Internal error
           content:
             application/json:
               schema:
@@ -283,60 +433,6 @@ paths:
       responses:
         '200':
           description: Grade
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GradeItem'
-        '404':
-          description: Not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-    delete:
-      tags:
-      - catalog
-      operationId: delete_grade
-      parameters:
-      - name: id
-        in: path
-        description: Grade id
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: Deleted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DeletedItem'
-        '404':
-          description: Not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-    patch:
-      tags:
-      - catalog
-      operationId: patch_grade
-      parameters:
-      - name: id
-        in: path
-        description: Grade id
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PatchGradeBody'
-        required: true
-      responses:
-        '200':
-          description: Updated grade
           content:
             application/json:
               schema:
@@ -430,16 +526,69 @@ paths:
     get:
       tags:
       - dashboard
+      summary: 'DEPRECATED: alias for /kpis'
+      description: Deprecated alias for KPI list. Prefer GET /kpis.
       operationId: list_indicators
       responses:
         '200':
-          description: Indicator list
+          description: Deprecated alias for KPI list
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/IndicatorItem'
+                  $ref: '#/components/schemas/KpiItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /kpis:
+    get:
+      tags:
+      - catalog
+      operationId: list_kpis
+      responses:
+        '200':
+          description: KPI list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/KpiItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /kpis/{id}:
+    get:
+      tags:
+      - catalog
+      operationId: get_kpi
+      parameters:
+      - name: id
+        in: path
+        description: KPI ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: KPI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KpiItem'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Internal error
           content:
@@ -2140,32 +2289,61 @@ components:
         trend:
           type: integer
           format: int64
-    CreateGradeBody:
+    CreateEvalRunBody:
       type: object
       required:
+      - id
+      - source
       - scope
       - scopeId
-      - indicator
-      - score
       properties:
-        detailsUrl:
-          type:
-          - string
-          - 'null'
         evaluatedAt:
           type:
           - string
           - 'null'
-        indicator:
+        id:
           type: string
-        metrics: {}
-        rawOutput:
-          type:
-          - string
-          - 'null'
         scope:
           type: string
         scopeId:
+          type: string
+        score:
+          type:
+          - number
+          - 'null'
+          format: double
+        source:
+          type: string
+        summary:
+          type:
+          - string
+          - 'null'
+        verdict:
+          type:
+          - string
+          - 'null'
+    CreateGradeBody:
+      type: object
+      required:
+      - id
+      - runId
+      - dimension
+      - score
+      properties:
+        dimension:
+          type: string
+        evaluatedAt:
+          type:
+          - string
+          - 'null'
+        evidence: {}
+        id:
+          type: string
+        kpiId:
+          type:
+          - string
+          - 'null'
+        runId:
           type: string
         score:
           type: number
@@ -2335,6 +2513,41 @@ components:
       properties:
         id:
           type: string
+    EvalRunItem:
+      type: object
+      required:
+      - id
+      - source
+      - scope
+      - scopeId
+      - evaluatedAt
+      - ingestedAt
+      properties:
+        evaluatedAt:
+          type: string
+        id:
+          type: string
+        ingestedAt:
+          type: string
+        scope:
+          type: string
+        scopeId:
+          type: string
+        score:
+          type:
+          - number
+          - 'null'
+          format: double
+        source:
+          type: string
+        summary:
+          type:
+          - string
+          - 'null'
+        verdict:
+          type:
+          - string
+          - 'null'
     ExecutionItem:
       type: object
       required:
@@ -2412,33 +2625,26 @@ components:
       type: object
       required:
       - id
-      - scope
-      - scopeId
-      - indicator
+      - runId
+      - dimension
       - score
       - evaluatedAt
       - ingestedAt
       properties:
-        detailsUrl:
-          type:
-          - string
-          - 'null'
+        dimension:
+          type: string
         evaluatedAt:
           type: string
+        evidence: {}
         id:
-          type: string
-        indicator:
           type: string
         ingestedAt:
           type: string
-        metrics: {}
-        rawOutput:
+        kpiId:
           type:
           - string
           - 'null'
-        scope:
-          type: string
-        scopeId:
+        runId:
           type: string
         score:
           type: number
@@ -2516,45 +2722,36 @@ components:
       - resolved
       - timedout
       - cancelled
-    IndicatorItem:
+    KpiItem:
       type: object
       required:
       - id
       - name
       - description
-      - scope
-      - weight
+      - scopeLevel
       - threshold
-      - current
-      - trend
-      - reports
-      - mode
-      - lastRun
+      - weight
+      - aggFn
+      - createdAt
+      - updatedAt
       properties:
-        current:
-          type: number
-          format: double
+        aggFn:
+          type: string
+        createdAt:
+          type: string
         description:
           type: string
         id:
           type: string
-        lastRun:
-          type: string
-        mode:
-          type: string
         name:
           type: string
-        reports:
-          type: integer
-          format: int64
-        scope:
+        scopeLevel:
           type: string
         threshold:
           type: number
           format: double
-        trend:
-          type: number
-          format: double
+        updatedAt:
+          type: string
         weight:
           type: number
           format: double
@@ -2830,23 +3027,6 @@ components:
           - integer
           - 'null'
           format: int64
-    PatchGradeBody:
-      type: object
-      properties:
-        detailsUrl:
-          type:
-          - string
-          - 'null'
-        metrics: {}
-        rawOutput:
-          type:
-          - string
-          - 'null'
-        score:
-          type:
-          - number
-          - 'null'
-          format: double
     PatchModuleBody:
       type: object
       properties:
@@ -3501,7 +3681,7 @@ components:
           - 'null'
 tags:
 - name: dashboard
-  description: Product, component, indicator, and activity aggregate endpoints
+  description: Product, component, KPI, and activity aggregate endpoints
 - name: portfolio
   description: Repository, module graph, and saved view endpoints
 - name: opportunities

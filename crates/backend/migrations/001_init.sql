@@ -224,6 +224,36 @@ CREATE TABLE IF NOT EXISTS Indicator (
   updatedAt TEXT NOT NULL
 );
 
+-- KPI: stable catalog of monitored KPIs.
+CREATE TABLE IF NOT EXISTS KPI (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL,
+  scopeLevel TEXT NOT NULL,
+  threshold REAL NOT NULL,
+  weight REAL NOT NULL,
+  aggFn TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kpi_scopeLevel ON KPI(scopeLevel);
+
+-- EvalRun: point-in-time evaluation events.
+CREATE TABLE IF NOT EXISTS EvalRun (
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK(scope IN ('product', 'component', 'repo', 'module')),
+  scopeId TEXT NOT NULL,
+  score REAL NULL CHECK(score IS NULL OR (score >= 0 AND score <= 100)),
+  verdict TEXT NULL,
+  summary TEXT NULL,
+  evaluatedAt TEXT NOT NULL,
+  ingestedAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_evalrun_scope_scopeId ON EvalRun(scope, scopeId);
+CREATE INDEX IF NOT EXISTS idx_evalrun_source ON EvalRun(source);
+CREATE INDEX IF NOT EXISTS idx_evalrun_ingestedAt ON EvalRun(ingestedAt);
+
 CREATE TABLE IF NOT EXISTS Regression (
   id TEXT PRIMARY KEY,
   repoName TEXT NOT NULL,

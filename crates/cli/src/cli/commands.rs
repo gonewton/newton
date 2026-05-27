@@ -2974,6 +2974,23 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
     // Normalize resource token (plural -> singular for mutations)
     let resource = args.resource.as_str();
 
+    // Validate filters.
+    if (args.run_id.is_some() || args.kpi_id.is_some()) && resource != "grades" {
+        eprintln!("DATA-006: --run-id/--kpi-id are only supported with: resource=grades");
+        std::process::exit(1);
+    }
+    if (args.scope.is_some()
+        || args.scope_id.is_some()
+        || args.source.is_some()
+        || args.limit.is_some())
+        && resource != "eval-runs"
+    {
+        eprintln!(
+            "DATA-008: --scope/--scope-id/--source/--limit are only supported with: resource=eval-runs"
+        );
+        std::process::exit(1);
+    }
+
     // Validate resource
     let valid_resources = [
         "product",
@@ -2986,13 +3003,17 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
         "modules",
         "module-dependency",
         "module-dependencies",
+        "kpi",
+        "kpis",
+        "eval-run",
+        "eval-runs",
         "grade",
         "grades",
         "opportunity",
         "opportunities",
     ];
     if !valid_resources.contains(&resource) {
-        eprintln!("DATA-003: unknown resource '{resource}'; must be one of: product, products, component, components, repo, repos, module, modules, module-dependency, module-dependencies, grade, grades, opportunity, opportunities");
+        eprintln!("DATA-003: unknown resource '{resource}'; must be one of: product, products, component, components, repo, repos, module, modules, module-dependency, module-dependencies, kpi, kpis, eval-run, eval-runs, grade, grades, opportunity, opportunities");
         std::process::exit(1);
     }
 
@@ -3012,6 +3033,8 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
                 | "repos"
                 | "modules"
                 | "module-dependencies"
+                | "kpis"
+                | "eval-runs"
                 | "grades"
                 | "opportunities"
         ),
@@ -3059,6 +3082,55 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
                             }
                         }
                     }
+                    "eval-run" | "eval-runs" => {
+                        let scope = v.get("scope").and_then(|s| s.as_str()).unwrap_or("");
+                        let scope_id = v.get("scopeId").and_then(|s| s.as_str()).unwrap_or("");
+                        if scope.is_empty() || scope_id.is_empty() {
+                            eprintln!(
+                                "[dry-run] FK validation failed: scope and scopeId are required"
+                            );
+                            std::process::exit(1);
+                        }
+                        let fk_result = match scope {
+                            "product" => store.get_product(scope_id).await.map(|_| ()),
+                            "component" => store.get_component(scope_id).await.map(|_| ()),
+                            "repo" => store.get_repo(scope_id).await.map(|_| ()),
+                            "module" => store.get_module(scope_id).await.map(|_| ()),
+                            _ => Err(newton_backend::err_validation(
+                                "scope must be one of: product, component, repo, module",
+                            )),
+                        };
+                        if let Err(e) = fk_result {
+                            eprintln!(
+                                "[dry-run] FK validation failed: {} '{}' not found: {}",
+                                scope, scope_id, e.message
+                            );
+                            std::process::exit(1);
+                        }
+                    }
+                    "grade" | "grades" => {
+                        let run_id = v.get("runId").and_then(|r| r.as_str());
+                        let Some(run_id) = run_id else {
+                            eprintln!("[dry-run] FK validation failed: runId is required");
+                            std::process::exit(1);
+                        };
+                        if let Err(e) = store.get_eval_run(run_id).await {
+                            eprintln!(
+                                "[dry-run] FK validation failed: runId '{}' not found: {}",
+                                run_id, e.message
+                            );
+                            std::process::exit(1);
+                        }
+                        if let Some(kpi_id) = v.get("kpiId").and_then(|k| k.as_str()) {
+                            if let Err(e) = store.get_kpi(kpi_id).await {
+                                eprintln!(
+                                    "[dry-run] FK validation failed: kpiId '{}' not found: {}",
+                                    kpi_id, e.message
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    }
                     _ => {}
                 }
                 eprintln!("[dry-run] validated payload (no DB write):");
@@ -3076,7 +3148,7 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
     }
 
     // Dispatch
-    match dispatch_data(&store, &args.verb, resource, args.id.as_deref(), body_value).await {
+    match dispatch_data(&store, &args, body_value).await {
         Ok(value) => {
             println!("{}", serde_json::to_string_pretty(&value)?);
             Ok(())
@@ -3090,9 +3162,7 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
 
 async fn dispatch_data(
     store: &newton_backend::SqliteBackendStore,
-    verb: &DataVerb,
-    resource: &str,
-    id: Option<&str>,
+    args: &DataArgs,
     body: Option<serde_json::Value>,
 ) -> std::result::Result<serde_json::Value, String> {
     fn api_err(e: newton_types::ApiError) -> String {
@@ -3114,7 +3184,15 @@ async fn dispatch_data(
         }
     }
 
-    let id = id.unwrap_or("");
+    let verb = &args.verb;
+    let resource = args.resource.as_str();
+    let id = args.id.as_deref().unwrap_or("");
+    let grade_run_id = args.run_id.as_deref();
+    let grade_kpi_id = args.kpi_id.as_deref();
+    let eval_scope = args.scope.as_deref();
+    let eval_scope_id = args.scope_id.as_deref();
+    let eval_source = args.source.as_deref();
+    let eval_limit = args.limit;
 
     match (verb, resource) {
         // -- Product -----------------------------------------------------------
@@ -3293,8 +3371,42 @@ async fn dispatch_data(
             .await
             .map_err(api_err)
             .and_then(|deleted_id| to_json(serde_json::json!({"id": deleted_id}))),
+        // -- KPI ---------------------------------------------------------------
+        (DataVerb::Get, "kpis") => store.list_kpis().await.map_err(api_err).and_then(to_json),
+        (DataVerb::Get, "kpi") => store.get_kpi(id).await.map_err(api_err).and_then(to_json),
+        // -- EvalRun ------------------------------------------------------------
+        (DataVerb::Get, "eval-runs") => store
+            .list_eval_runs(
+                eval_scope.map(str::to_string),
+                eval_scope_id.map(str::to_string),
+                eval_source.map(str::to_string),
+                eval_limit,
+            )
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Get, "eval-run") => store
+            .get_eval_run(id)
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Post, "eval-run" | "eval-runs") => {
+            let b = parse_body::<newton_backend::CreateEvalRunBody>(body)?;
+            store
+                .create_eval_run(b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
         // -- Grade -------------------------------------------------------------
-        (DataVerb::Get, "grades") => store.list_grades().await.map_err(api_err).and_then(to_json),
+        (DataVerb::Get, "grades") => store
+            .list_grades(
+                grade_run_id.map(str::to_string),
+                grade_kpi_id.map(str::to_string),
+            )
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
         (DataVerb::Get, "grade") => store.get_grade(id).await.map_err(api_err).and_then(to_json),
         (DataVerb::Post, "grade" | "grades") => {
             let b = parse_body::<newton_backend::CreateGradeBody>(body)?;
@@ -3304,19 +3416,6 @@ async fn dispatch_data(
                 .map_err(api_err)
                 .and_then(to_json)
         }
-        (DataVerb::Patch, "grade" | "grades") => {
-            let b = parse_body::<newton_backend::PatchGradeBody>(body)?;
-            store
-                .patch_grade(id, b)
-                .await
-                .map_err(api_err)
-                .and_then(to_json)
-        }
-        (DataVerb::Delete, "grade" | "grades") => store
-            .delete_grade(id)
-            .await
-            .map_err(api_err)
-            .and_then(|deleted_id| to_json(serde_json::json!({"id": deleted_id}))),
         // -- Opportunity -------------------------------------------------------
         (DataVerb::Get, "opportunities") => store
             .list_opportunities(None)

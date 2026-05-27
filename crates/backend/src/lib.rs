@@ -59,7 +59,7 @@ pub trait BackendStore: Send + Sync {
     async fn list_components(&self) -> Result<Vec<ComponentItem>, ApiError>;
     async fn list_pending_approvals(&self) -> Result<Vec<PendingApprovalItem>, ApiError>;
     async fn list_regressions(&self) -> Result<Vec<RegressionItem>, ApiError>;
-    async fn list_indicators(&self) -> Result<Vec<IndicatorItem>, ApiError>;
+    async fn list_kpis(&self) -> Result<Vec<KpiItem>, ApiError>;
     async fn list_recent_actions(&self, limit: u32) -> Result<Vec<RecentActionItem>, ApiError>;
 
     async fn list_repos(&self) -> Result<Vec<RepoItem>, ApiError>;
@@ -158,12 +158,28 @@ pub trait BackendStore: Send + Sync {
     ) -> Result<ModuleDependencyItem, ApiError>;
     async fn delete_module_dependency(&self, id: &str) -> Result<String, ApiError>;
 
-    // Grade
-    async fn list_grades(&self) -> Result<Vec<GradeItem>, ApiError>;
-    async fn get_grade(&self, id: &str) -> Result<GradeItem, ApiError>;
+    // KPI catalog
+    async fn get_kpi(&self, id: &str) -> Result<KpiItem, ApiError>;
+
+    // EvalRun
+    async fn create_eval_run(&self, body: CreateEvalRunBody) -> Result<EvalRunItem, ApiError>;
+    async fn list_eval_runs(
+        &self,
+        scope: Option<String>,
+        scope_id: Option<String>,
+        source: Option<String>,
+        limit: Option<u32>,
+    ) -> Result<Vec<EvalRunItem>, ApiError>;
+    async fn get_eval_run(&self, id: &str) -> Result<EvalRunItem, ApiError>;
+
+    // Grade (append-only)
     async fn create_grade(&self, body: CreateGradeBody) -> Result<GradeItem, ApiError>;
-    async fn patch_grade(&self, id: &str, body: PatchGradeBody) -> Result<GradeItem, ApiError>;
-    async fn delete_grade(&self, id: &str) -> Result<String, ApiError>;
+    async fn list_grades(
+        &self,
+        run_id: Option<String>,
+        kpi_id: Option<String>,
+    ) -> Result<Vec<GradeItem>, ApiError>;
+    async fn get_grade(&self, id: &str) -> Result<GradeItem, ApiError>;
 
     // ── WorkflowInstance ────────────────────────────────────────────────────────
 

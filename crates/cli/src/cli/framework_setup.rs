@@ -684,14 +684,23 @@ const DATA_GET_LONG_ABOUT: &str =
      EXAMPLES:\n  \
      newton data get products\n  \
      newton data get product <id> --json\n  \
+     newton data get kpis\n  \
+     newton data get kpi <id> --json\n  \
+     newton data get eval-runs\n  \
+     newton data get eval-runs --scope repo --scope-id gonewton-newton\n  \
+     newton data get eval-runs --source dk-review --limit 25\n  \
+     newton data get eval-run <id> --json\n  \
      newton data get grades\n  \
+     newton data get grades --run-id <runId>\n  \
+     newton data get grades --kpi-id <kpiId>\n  \
      newton data get grade <id>";
 
 const DATA_POST_LONG_ABOUT: &str =
-    "Create a new catalog entity.  Do not pass an id; the server assigns one.\n\n\
+    "Create a new catalog entity. For EvalRun and Grade, the caller MUST provide a stable `id`.\n\n\
      EXAMPLES:\n  \
      newton data post product -f body.json\n  \
      newton data post component -f body.json --dry-run\n  \
+     newton data post eval-run -f evalrun.json\n  \
      newton data post grade -f grade.json";
 
 const DATA_PUT_LONG_ABOUT: &str =
@@ -702,13 +711,11 @@ const DATA_PUT_LONG_ABOUT: &str =
 const DATA_PATCH_LONG_ABOUT: &str =
     "Partially update an existing catalog entity.  The entity id is required.\n\n\
      EXAMPLES:\n  \
-     newton data patch product <id> --body '{\"name\":\"X\"}'\n  \
-     newton data patch grade <id> --body '{\"score\":88}'";
+     newton data patch product <id> --body '{\"name\":\"X\"}'";
 
 const DATA_DELETE_LONG_ABOUT: &str = "Delete a catalog entity by id.\n\n\
      EXAMPLES:\n  \
-     newton data delete product <id>\n  \
-     newton data delete grade <id>";
+     newton data delete product <id>";
 
 /// Build a clap-registered leaf `Command` for a single HTTP verb.
 fn data_verb_command(verb: DataVerb) -> Command {
@@ -718,7 +725,7 @@ fn data_verb_command(verb: DataVerb) -> Command {
             "Retrieve catalog entities (list or single-item)",
             DATA_GET_LONG_ABOUT,
             vec!["newton data get products", "newton data get product <id> --json"],
-            "get <resource> [ID] [--json] [--output-format FORMAT] [--workspace PATH]",
+            "get <resource> [ID] [--run-id RUNID] [--kpi-id KPIID] [--scope SCOPE] [--scope-id SCOPEID] [--source SOURCE] [--limit N] [--json] [--output-format FORMAT] [--workspace PATH]",
             false,
         ),
         DataVerb::Post => (
@@ -771,7 +778,7 @@ fn data_verb_command(verb: DataVerb) -> Command {
             requires: vec![],
             help: "Resource token (product, products, component, components, \
                    repo, repos, module, modules, module-dependency, module-dependencies, \
-                   grade, grades)",
+                   kpi, kpis, eval-run, eval-runs, grade, grades)",
         },
         ArgSpec {
             name: "id",
@@ -822,6 +829,81 @@ fn data_verb_command(verb: DataVerb) -> Command {
             help: "Workspace root containing .newton/state/backend.sqlite",
         },
     ];
+
+    if matches!(verb, DataVerb::Get) {
+        args.push(ArgSpec {
+            name: "run-id",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("run-id"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Filter grade listings by EvalRun id (only used with: resource=grades)",
+        });
+        args.push(ArgSpec {
+            name: "kpi-id",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("kpi-id"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Filter grade listings by KPI id (only used with: resource=grades)",
+        });
+        args.push(ArgSpec {
+            name: "scope",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("scope"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Filter EvalRun listings by scope (only used with: resource=eval-runs)",
+        });
+        args.push(ArgSpec {
+            name: "scope-id",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("scope-id"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Filter EvalRun listings by scope id (only used with: resource=eval-runs)",
+        });
+        args.push(ArgSpec {
+            name: "source",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("source"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Filter EvalRun listings by source (only used with: resource=eval-runs)",
+        });
+        args.push(ArgSpec {
+            name: "limit",
+            kind: ArgKind::Option,
+            short: None,
+            long: Some("limit"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            default: None,
+            conflicts_with: vec![],
+            requires: vec![],
+            help: "Limit EvalRun listings (only used with: resource=eval-runs)",
+        });
+    }
 
     if has_body_args {
         args.push(ArgSpec {
@@ -2247,6 +2329,26 @@ impl DataArgs {
                 .unwrap_or(false);
         let dry_run = get_bool(&args, "dry-run");
         let workspace = get_opt_path(&args, "workspace");
+        let run_id = args.named.get("run-id").cloned();
+        let kpi_id = args.named.get("kpi-id").cloned();
+        let scope = args.named.get("scope").cloned();
+        let scope_id = args.named.get("scope-id").cloned();
+        let source = args.named.get("source").cloned();
+        let limit = args
+            .named
+            .get("limit")
+            .map(|s| {
+                s.parse::<u32>()
+                    .map_err(|_| anyhow!("DATA-007: --limit must be a positive integer"))
+                    .and_then(|n| {
+                        if n == 0 {
+                            Err(anyhow!("DATA-007: --limit must be a positive integer"))
+                        } else {
+                            Ok(n)
+                        }
+                    })
+            })
+            .transpose()?;
         Ok(DataArgs {
             verb,
             resource,
@@ -2256,6 +2358,12 @@ impl DataArgs {
             json,
             dry_run,
             workspace,
+            run_id,
+            kpi_id,
+            scope,
+            scope_id,
+            source,
+            limit,
         })
     }
 }

@@ -117,7 +117,7 @@ mod tests {
             "Module",
             "ModuleDependency",
             "PendingApproval",
-            "Indicator",
+            "KPI",
             "Regression",
             "Opportunity",
             "Request",
