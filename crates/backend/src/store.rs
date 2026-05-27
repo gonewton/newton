@@ -36,6 +36,10 @@ impl SqliteBackendStore {
             .await
             .map_err(|e| err_internal(&format!("migration failed: {e}")))?;
 
+        // Must run before 002_grades.sql: the migration's CREATE INDEX on runId
+        // will fail if Grade already exists with the old schema (no runId column).
+        Self::upgrade_legacy_grade_schema(&pool).await?;
+
         sqlx::query(include_str!("../migrations/002_grades.sql"))
             .execute(&pool)
             .await
@@ -47,7 +51,6 @@ impl SqliteBackendStore {
             .map_err(|e| err_internal(&format!("migration 003 failed: {e}")))?;
 
         Self::upgrade_legacy_indicator_schema(&pool).await?;
-        Self::upgrade_legacy_grade_schema(&pool).await?;
 
         Ok(Self { pool })
     }
