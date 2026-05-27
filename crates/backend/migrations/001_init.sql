@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS Opportunity (
   componentId TEXT NULL,
   module TEXT NULL,
   repoId TEXT NULL,
-  indicator TEXT NULL,
+  kpiId TEXT NULL,
   confidence REAL NULL,
   risk TEXT NOT NULL,
   expectedValue REAL NOT NULL,
@@ -109,7 +109,8 @@ CREATE TABLE IF NOT EXISTS Opportunity (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   FOREIGN KEY(componentId) REFERENCES Component(id),
-  FOREIGN KEY(repoId) REFERENCES Repo(id)
+  FOREIGN KEY(repoId) REFERENCES Repo(id),
+  FOREIGN KEY(kpiId) REFERENCES KPI(id)
 );
 CREATE INDEX IF NOT EXISTS idx_opportunity_status ON Opportunity(status);
 CREATE INDEX IF NOT EXISTS idx_opportunity_componentId ON Opportunity(componentId);
@@ -208,22 +209,6 @@ CREATE TABLE IF NOT EXISTS ExecutionRecord (
 CREATE INDEX IF NOT EXISTS idx_executionrecord_planId ON ExecutionRecord(planId);
 CREATE INDEX IF NOT EXISTS idx_executionrecord_status ON ExecutionRecord(status);
 
-CREATE TABLE IF NOT EXISTS Indicator (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  description TEXT NOT NULL,
-  scope TEXT NOT NULL,
-  weight REAL NOT NULL,
-  threshold REAL NOT NULL,
-  current REAL NOT NULL,
-  trend REAL NOT NULL,
-  reports INTEGER NOT NULL,
-  mode TEXT NOT NULL,
-  lastRun TEXT NOT NULL,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL
-);
-
 -- KPI: stable catalog of monitored KPIs.
 CREATE TABLE IF NOT EXISTS KPI (
   id TEXT PRIMARY KEY,
@@ -257,13 +242,14 @@ CREATE INDEX IF NOT EXISTS idx_evalrun_ingestedAt ON EvalRun(ingestedAt);
 CREATE TABLE IF NOT EXISTS Regression (
   id TEXT PRIMARY KEY,
   repoName TEXT NOT NULL,
-  indicator TEXT NOT NULL,
+  kpiId TEXT NULL,
   delta REAL NOT NULL,
   severity TEXT NOT NULL,
   since TEXT NOT NULL,
   trend TEXT NOT NULL,
   createdAt TEXT NOT NULL,
-  FOREIGN KEY(repoName) REFERENCES Repo(name)
+  FOREIGN KEY(repoName) REFERENCES Repo(name),
+  FOREIGN KEY(kpiId) REFERENCES KPI(id)
 );
 CREATE INDEX IF NOT EXISTS idx_regression_repoName ON Regression(repoName);
 

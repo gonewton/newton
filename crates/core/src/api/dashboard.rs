@@ -16,8 +16,6 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/components", get(list_components))
         .route("/pending-approvals", get(list_pending_approvals))
         .route("/regressions", get(list_regressions))
-        // Compatibility alias (deprecated): KPI catalog was previously served as "indicators".
-        .route("/indicators", get(list_indicators))
         .route("/recent-actions", get(list_recent_actions))
         .with_state(state)
 }
@@ -81,24 +79,6 @@ pub(crate) async fn list_pending_approvals(State(state): State<Arc<AppState>>) -
 )]
 pub(crate) async fn list_regressions(State(state): State<Arc<AppState>>) -> Response {
     match state.backend.list_regressions().await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
-    }
-}
-
-#[utoipa::path(
-    get,
-    path = "/indicators",
-    tag = "dashboard",
-    summary = "DEPRECATED: alias for /kpis",
-    description = "Deprecated alias for KPI list. Prefer GET /kpis.",
-    responses(
-        (status = 200, description = "Deprecated alias for KPI list", body = [newton_backend::KpiItem]),
-        (status = 500, description = "Internal error", body = ApiError)
-    )
-)]
-pub(crate) async fn list_indicators(State(state): State<Arc<AppState>>) -> Response {
-    match state.backend.list_kpis().await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }

@@ -18,3 +18,4 @@ indexmap = { version = "2", features = ["serde"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
+tempfile = { workspace = true }

@@ -48,9 +48,11 @@ pub struct PendingApprovalItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct RegressionItem {
     pub repo: String,
-    pub indicator: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kpi_id: Option<String>,
     pub delta: f64,
     pub severity: String,
     pub since: String,
@@ -212,7 +214,7 @@ pub struct OpportunityItem {
     pub module: Option<String>,
     pub repo: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub indicator: Option<String>,
+    pub kpi_id: Option<String>,
     pub confidence: Option<f64>,
     pub risk: String,
     pub expected_value: f64,
@@ -249,7 +251,7 @@ pub struct CreateOpportunityBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub indicator: Option<String>,
+    pub kpi_id: Option<String>,
     pub confidence: Option<f64>,
     pub risk: String,
     pub expected_value: f64,
