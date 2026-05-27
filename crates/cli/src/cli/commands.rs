@@ -3374,6 +3374,10 @@ async fn dispatch_data(
         // -- KPI ---------------------------------------------------------------
         (DataVerb::Get, "kpis") => store.list_kpis().await.map_err(api_err).and_then(to_json),
         (DataVerb::Get, "kpi") => store.get_kpi(id).await.map_err(api_err).and_then(to_json),
+        (DataVerb::Post, "kpi" | "kpis") => {
+            let b = parse_body::<newton_backend::CreateKpiBody>(body)?;
+            store.create_kpi(b).await.map_err(api_err).and_then(to_json)
+        }
         // -- EvalRun ------------------------------------------------------------
         (DataVerb::Get, "eval-runs") => store
             .list_eval_runs(

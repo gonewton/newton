@@ -19,7 +19,6 @@ pub struct ComponentItem {
     pub domain: String,
     pub repos: i64,
     pub modules: i64,
-    pub health: i64,
     pub trend: i64,
     pub owner: String,
     pub criticality: String,
@@ -75,6 +74,18 @@ pub struct KpiItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateKpiBody {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub scope_level: String,
+    pub threshold: f64,
+    pub weight: f64,
+    pub agg_fn: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct EvalRunItem {
     pub id: String,
     pub source: String,
@@ -89,6 +100,16 @@ pub struct EvalRunItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateGradeInlineBody {
+    pub kpi_id: Option<String>,
+    pub dimension: String,
+    pub score: f64,
+    pub evidence: Option<serde_json::Value>,
+    pub evaluated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateEvalRunBody {
     pub id: String,
     pub source: String,
@@ -98,6 +119,8 @@ pub struct CreateEvalRunBody {
     pub verdict: Option<String>,
     pub summary: Option<String>,
     pub evaluated_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grades: Option<Vec<CreateGradeInlineBody>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -145,13 +168,10 @@ pub struct RepoItem {
     pub owner: String,
     pub criticality: String,
     pub autonomy: String,
-    pub quality_score: i64,
     pub regressions: i64,
     pub open_plans: i64,
     pub exec_status: String,
     pub last_eval: String,
-    pub coverage: i64,
-    pub sec_score: i64,
     pub depends_on: Vec<String>,
     pub depended_on_by: Vec<String>,
 }
@@ -451,8 +471,6 @@ pub struct CreateComponentBody {
     pub criticality: String,
     pub autonomy: String,
     #[serde(default)]
-    pub health: i64,
-    #[serde(default)]
     pub trend: i64,
     pub last_eval: String,
 }
@@ -466,7 +484,6 @@ pub struct PutComponentBody {
     pub owner: String,
     pub criticality: String,
     pub autonomy: String,
-    pub health: i64,
     pub trend: i64,
     pub last_eval: String,
 }
@@ -487,8 +504,6 @@ pub struct PatchComponentBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub autonomy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub health: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub trend: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_eval: Option<String>,
@@ -504,9 +519,6 @@ pub struct CreateRepoBody {
     pub owner: String,
     pub criticality: String,
     pub autonomy: String,
-    pub quality_score: i64,
-    pub coverage: i64,
-    pub sec_score: i64,
     pub exec_status: String,
     pub last_eval: String,
 }
@@ -519,9 +531,6 @@ pub struct PutRepoBody {
     pub owner: String,
     pub criticality: String,
     pub autonomy: String,
-    pub quality_score: i64,
-    pub coverage: i64,
-    pub sec_score: i64,
     pub exec_status: String,
     pub last_eval: String,
 }
@@ -539,12 +548,6 @@ pub struct PatchRepoBody {
     pub criticality: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub autonomy: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub quality_score: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub coverage: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sec_score: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exec_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -51,6 +51,8 @@ impl SqliteBackendStore {
             .map_err(|e| err_internal(&format!("migration 003 failed: {e}")))?;
 
         Self::upgrade_legacy_indicator_schema(&pool).await?;
+        Self::upgrade_legacy_component_schema(&pool).await?;
+        Self::upgrade_legacy_repo_schema(&pool).await?;
 
         Ok(Self { pool })
     }
@@ -327,6 +329,177 @@ impl SqliteBackendStore {
 
         Ok(())
     }
+
+    async fn upgrade_legacy_component_schema(pool: &SqlitePool) -> Result<(), ApiError> {
+        #[derive(Debug, FromRow)]
+        struct ColRow {
+            name: String,
+        }
+
+        let cols: Vec<ColRow> = sqlx::query_as::<_, ColRow>("PRAGMA table_info(Component)")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| err_internal(&format!("schema check failed: {e}")))?;
+
+        if cols.is_empty() || !cols.iter().any(|r| r.name == "health") {
+            return Ok(());
+        }
+
+        // PRAGMA foreign_keys = OFF is a no-op inside a transaction (SQLite docs), and it is
+        // per-connection. Acquire a single connection so all DDL runs on the same connection.
+        let mut conn = pool
+            .acquire()
+            .await
+            .map_err(|e| err_internal(&format!("acquire conn error: {e}")))?;
+
+        sqlx::query("PRAGMA foreign_keys = OFF;")
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| err_internal(&format!("pragma error: {e}")))?;
+
+        sqlx::query(
+            "CREATE TABLE Component_new (\
+              id TEXT PRIMARY KEY,\
+              name TEXT NOT NULL,\
+              domain TEXT NOT NULL,\
+              repos INTEGER NOT NULL,\
+              modules INTEGER NOT NULL,\
+              trend INTEGER NOT NULL,\
+              owner TEXT NOT NULL,\
+              criticality TEXT NOT NULL,\
+              autonomy TEXT NOT NULL,\
+              openPlans INTEGER NOT NULL DEFAULT 0,\
+              openRequests INTEGER NOT NULL DEFAULT 0,\
+              lastEval TEXT NOT NULL,\
+              productId TEXT NOT NULL,\
+              createdAt TEXT NOT NULL,\
+              updatedAt TEXT NOT NULL,\
+              FOREIGN KEY(productId) REFERENCES Product(id)\
+            );",
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| err_internal(&format!("create Component_new failed: {e}")))?;
+
+        sqlx::query(
+            "INSERT INTO Component_new \
+              (id, name, domain, repos, modules, trend, owner, criticality, autonomy, \
+               openPlans, openRequests, lastEval, productId, createdAt, updatedAt) \
+             SELECT \
+              id, name, domain, repos, modules, trend, owner, criticality, autonomy, \
+              openPlans, openRequests, lastEval, productId, createdAt, updatedAt \
+             FROM Component;",
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| err_internal(&format!("copy Component failed: {e}")))?;
+
+        sqlx::query("DROP TABLE Component;")
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| err_internal(&format!("drop Component failed: {e}")))?;
+
+        sqlx::query("ALTER TABLE Component_new RENAME TO Component;")
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| err_internal(&format!("rename Component failed: {e}")))?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_component_productId ON Component(productId);")
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| err_internal(&format!("index Component productId failed: {e}")))?;
+
+        sqlx::query("PRAGMA foreign_keys = ON;")
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| err_internal(&format!("pragma error: {e}")))?;
+
+        Ok(())
+    }
+
+    async fn upgrade_legacy_repo_schema(pool: &SqlitePool) -> Result<(), ApiError> {
+        #[derive(Debug, FromRow)]
+        struct ColRow {
+            name: String,
+        }
+
+        let cols: Vec<ColRow> = sqlx::query_as::<_, ColRow>("PRAGMA table_info(Repo)")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| err_internal(&format!("schema check failed: {e}")))?;
+
+        if cols.is_empty() || !cols.iter().any(|r| r.name == "qualityScore") {
+            return Ok(());
+        }
+
+        // PRAGMA foreign_keys = OFF is a no-op inside a transaction (SQLite docs), and it is
+        // per-connection. Acquire a single connection so all DDL runs on the same connection.
+        let mut conn = pool
+            .acquire()
+            .await
+            .map_err(|e| err_internal(&format!("acquire conn error: {e}")))?;
+
+        sqlx::query("PRAGMA foreign_keys = OFF;")
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| err_internal(&format!("pragma error: {e}")))?;
+
+        sqlx::query(
+            "CREATE TABLE Repo_new (\
+              id TEXT PRIMARY KEY,\
+              name TEXT NOT NULL UNIQUE,\
+              componentId TEXT NOT NULL,\
+              owner TEXT NOT NULL,\
+              criticality TEXT NOT NULL,\
+              autonomy TEXT NOT NULL,\
+              regressions INTEGER NOT NULL DEFAULT 0,\
+              openPlans INTEGER NOT NULL DEFAULT 0,\
+              execStatus TEXT NOT NULL,\
+              lastEval TEXT NOT NULL,\
+              createdAt TEXT NOT NULL,\
+              updatedAt TEXT NOT NULL,\
+              FOREIGN KEY(componentId) REFERENCES Component(id)\
+            );",
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| err_internal(&format!("create Repo_new failed: {e}")))?;
+
+        sqlx::query(
+            "INSERT INTO Repo_new \
+              (id, name, componentId, owner, criticality, autonomy, \
+               regressions, openPlans, execStatus, lastEval, createdAt, updatedAt) \
+             SELECT \
+              id, name, componentId, owner, criticality, autonomy, \
+              regressions, openPlans, execStatus, lastEval, createdAt, updatedAt \
+             FROM Repo;",
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| err_internal(&format!("copy Repo failed: {e}")))?;
+
+        sqlx::query("DROP TABLE Repo;")
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| err_internal(&format!("drop Repo failed: {e}")))?;
+
+        sqlx::query("ALTER TABLE Repo_new RENAME TO Repo;")
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| err_internal(&format!("rename Repo failed: {e}")))?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_repo_componentId ON Repo(componentId);")
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| err_internal(&format!("index Repo componentId failed: {e}")))?;
+
+        sqlx::query("PRAGMA foreign_keys = ON;")
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| err_internal(&format!("pragma error: {e}")))?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, FromRow)]
@@ -343,7 +516,6 @@ struct ComponentRow {
     domain: String,
     repos: i64,
     modules: i64,
-    health: i64,
     trend: i64,
     owner: String,
     criticality: String,
@@ -482,13 +654,10 @@ struct RepoRow {
     owner: String,
     criticality: String,
     autonomy: String,
-    quality_score: i64,
     regressions: i64,
     open_plans: i64,
     exec_status: String,
     last_eval: String,
-    coverage: i64,
-    sec_score: i64,
 }
 
 #[derive(Debug, FromRow)]
@@ -917,7 +1086,7 @@ impl BackendStore for SqliteBackendStore {
 
     async fn list_components(&self) -> Result<Vec<ComponentItem>, ApiError> {
         let rows = sqlx::query_as::<_, ComponentRow>(
-            "SELECT id, name, domain, repos, modules, health, trend, owner, criticality, autonomy, openPlans as open_plans, openRequests as open_requests, lastEval as last_eval, productId as product_id FROM Component ORDER BY id ASC"
+            "SELECT id, name, domain, repos, modules, trend, owner, criticality, autonomy, openPlans as open_plans, openRequests as open_requests, lastEval as last_eval, productId as product_id FROM Component ORDER BY id ASC"
         )
         .fetch_all(&self.pool)
         .await
@@ -939,7 +1108,6 @@ impl BackendStore for SqliteBackendStore {
                 domain: row.domain,
                 repos: row.repos,
                 modules: row.modules,
-                health: row.health,
                 trend: row.trend,
                 owner: row.owner,
                 criticality: row.criticality,
@@ -1046,7 +1214,7 @@ impl BackendStore for SqliteBackendStore {
 
     async fn list_repos(&self) -> Result<Vec<RepoItem>, ApiError> {
         let rows = sqlx::query_as::<_, RepoRow>(
-            "SELECT r.id, r.name, r.componentId as component_id, r.owner, r.criticality, r.autonomy, r.qualityScore as quality_score, r.regressions, r.openPlans as open_plans, r.execStatus as exec_status, r.lastEval as last_eval, r.coverage, r.secScore as sec_score FROM Repo r ORDER BY r.id ASC"
+            "SELECT r.id, r.name, r.componentId as component_id, r.owner, r.criticality, r.autonomy, r.regressions, r.openPlans as open_plans, r.execStatus as exec_status, r.lastEval as last_eval FROM Repo r ORDER BY r.id ASC"
         )
         .fetch_all(&self.pool)
         .await
@@ -1071,13 +1239,10 @@ impl BackendStore for SqliteBackendStore {
                 owner: row.owner.clone(),
                 criticality: row.criticality.clone(),
                 autonomy: row.autonomy.clone(),
-                quality_score: row.quality_score,
                 regressions: row.regressions,
                 open_plans: row.open_plans,
                 exec_status: row.exec_status.clone(),
                 last_eval: row.last_eval.clone(),
-                coverage: row.coverage,
-                sec_score: row.sec_score,
                 depends_on,
                 depended_on_by,
             });
@@ -2107,10 +2272,10 @@ impl BackendStore for SqliteBackendStore {
         let id = Uuid::new_v4().to_string();
         let now = Self::now_iso();
         sqlx::query(
-            "INSERT INTO Component (id, name, domain, repos, modules, health, trend, owner, criticality, autonomy, openPlans, openRequests, lastEval, productId, createdAt, updatedAt) VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)"
+            "INSERT INTO Component (id, name, domain, repos, modules, trend, owner, criticality, autonomy, openPlans, openRequests, lastEval, productId, createdAt, updatedAt) VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)"
         )
         .bind(&id).bind(&body.name).bind(&body.domain)
-        .bind(body.health).bind(body.trend)
+        .bind(body.trend)
         .bind(&body.owner).bind(&body.criticality).bind(&body.autonomy)
         .bind(&body.last_eval).bind(&body.product_id)
         .bind(&now).bind(&now)
@@ -2145,10 +2310,10 @@ impl BackendStore for SqliteBackendStore {
         }
         let now = Self::now_iso();
         sqlx::query(
-            "UPDATE Component SET name = ?, domain = ?, repos = 0, modules = 0, health = ?, trend = ?, owner = ?, criticality = ?, autonomy = ?, openPlans = 0, openRequests = 0, lastEval = ?, productId = ?, updatedAt = ? WHERE id = ?"
+            "UPDATE Component SET name = ?, domain = ?, repos = 0, modules = 0, trend = ?, owner = ?, criticality = ?, autonomy = ?, openPlans = 0, openRequests = 0, lastEval = ?, productId = ?, updatedAt = ? WHERE id = ?"
         )
         .bind(&body.name).bind(&body.domain)
-        .bind(body.health).bind(body.trend)
+        .bind(body.trend)
         .bind(&body.owner).bind(&body.criticality).bind(&body.autonomy)
         .bind(&body.last_eval).bind(&body.product_id)
         .bind(&now).bind(id)
@@ -2181,14 +2346,13 @@ impl BackendStore for SqliteBackendStore {
         let owner = body.owner.unwrap_or(existing.owner);
         let criticality = body.criticality.unwrap_or(existing.criticality);
         let autonomy = body.autonomy.unwrap_or(existing.autonomy);
-        let health = body.health.unwrap_or(existing.health);
         let trend = body.trend.unwrap_or(existing.trend);
         let last_eval = body.last_eval.unwrap_or(existing.last_eval);
         let now = Self::now_iso();
         sqlx::query(
-            "UPDATE Component SET name = ?, domain = ?, health = ?, trend = ?, owner = ?, criticality = ?, autonomy = ?, lastEval = ?, productId = ?, updatedAt = ? WHERE id = ?"
+            "UPDATE Component SET name = ?, domain = ?, trend = ?, owner = ?, criticality = ?, autonomy = ?, lastEval = ?, productId = ?, updatedAt = ? WHERE id = ?"
         )
-        .bind(&name).bind(&domain).bind(health).bind(trend)
+        .bind(&name).bind(&domain).bind(trend)
         .bind(&owner).bind(&criticality).bind(&autonomy)
         .bind(&last_eval).bind(&product_id)
         .bind(&now).bind(id)
@@ -2239,12 +2403,11 @@ impl BackendStore for SqliteBackendStore {
         let id = Uuid::new_v4().to_string();
         let now = Self::now_iso();
         sqlx::query(
-            "INSERT INTO Repo (id, name, componentId, owner, criticality, autonomy, qualityScore, regressions, openPlans, execStatus, lastEval, coverage, secScore, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO Repo (id, name, componentId, owner, criticality, autonomy, regressions, openPlans, execStatus, lastEval, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)"
         )
         .bind(&id).bind(&body.name).bind(&body.component_id)
         .bind(&body.owner).bind(&body.criticality).bind(&body.autonomy)
-        .bind(body.quality_score).bind(&body.exec_status)
-        .bind(&body.last_eval).bind(body.coverage).bind(body.sec_score)
+        .bind(&body.exec_status).bind(&body.last_eval)
         .bind(&now).bind(&now)
         .execute(&self.pool)
         .await
@@ -2279,12 +2442,11 @@ impl BackendStore for SqliteBackendStore {
         }
         let now = Self::now_iso();
         sqlx::query(
-            "UPDATE Repo SET name = ?, componentId = ?, owner = ?, criticality = ?, autonomy = ?, qualityScore = ?, regressions = 0, openPlans = 0, execStatus = ?, lastEval = ?, coverage = ?, secScore = ?, updatedAt = ? WHERE id = ?"
+            "UPDATE Repo SET name = ?, componentId = ?, owner = ?, criticality = ?, autonomy = ?, regressions = 0, openPlans = 0, execStatus = ?, lastEval = ?, updatedAt = ? WHERE id = ?"
         )
         .bind(&body.name).bind(&body.component_id)
         .bind(&body.owner).bind(&body.criticality).bind(&body.autonomy)
-        .bind(body.quality_score).bind(&body.exec_status)
-        .bind(&body.last_eval).bind(body.coverage).bind(body.sec_score)
+        .bind(&body.exec_status).bind(&body.last_eval)
         .bind(&now).bind(id)
         .execute(&self.pool)
         .await
@@ -2328,19 +2490,15 @@ impl BackendStore for SqliteBackendStore {
         let owner = body.owner.unwrap_or(existing.owner);
         let criticality = body.criticality.unwrap_or(existing.criticality);
         let autonomy = body.autonomy.unwrap_or(existing.autonomy);
-        let quality_score = body.quality_score.unwrap_or(existing.quality_score);
-        let coverage = body.coverage.unwrap_or(existing.coverage);
-        let sec_score = body.sec_score.unwrap_or(existing.sec_score);
         let exec_status = body.exec_status.unwrap_or(existing.exec_status);
         let last_eval = body.last_eval.unwrap_or(existing.last_eval);
         let now = Self::now_iso();
         sqlx::query(
-            "UPDATE Repo SET name = ?, componentId = ?, owner = ?, criticality = ?, autonomy = ?, qualityScore = ?, execStatus = ?, lastEval = ?, coverage = ?, secScore = ?, updatedAt = ? WHERE id = ?"
+            "UPDATE Repo SET name = ?, componentId = ?, owner = ?, criticality = ?, autonomy = ?, execStatus = ?, lastEval = ?, updatedAt = ? WHERE id = ?"
         )
         .bind(&name).bind(&component_id)
         .bind(&owner).bind(&criticality).bind(&autonomy)
-        .bind(quality_score).bind(&exec_status)
-        .bind(&last_eval).bind(coverage).bind(sec_score)
+        .bind(&exec_status).bind(&last_eval)
         .bind(&now).bind(id)
         .execute(&self.pool)
         .await
@@ -2533,6 +2691,67 @@ impl BackendStore for SqliteBackendStore {
         Ok(id.to_string())
     }
 
+    async fn create_kpi(&self, body: CreateKpiBody) -> Result<KpiItem, ApiError> {
+        if body.id.trim().is_empty() {
+            return Err(err_validation("id is required"));
+        }
+        if body.name.trim().is_empty() {
+            return Err(err_validation("name is required"));
+        }
+        let allowed_agg_fns = ["latest", "avg", "p50", "p90"];
+        if !allowed_agg_fns.contains(&body.agg_fn.as_str()) {
+            return Err(err_validation(
+                "aggFn must be one of: latest, avg, p50, p90",
+            ));
+        }
+        let allowed_scope_levels = ["product", "component", "repo", "module"];
+        if !allowed_scope_levels.contains(&body.scope_level.as_str()) {
+            return Err(err_validation(
+                "scopeLevel must be one of: product, component, repo, module",
+            ));
+        }
+        if !(0.0..=100.0).contains(&body.threshold) {
+            return Err(err_validation("threshold must be between 0 and 100"));
+        }
+        if body.weight <= 0.0 {
+            return Err(err_validation("weight must be greater than 0"));
+        }
+
+        let now = Self::now_iso();
+        sqlx::query(
+            "INSERT INTO KPI (id, name, description, scopeLevel, threshold, weight, aggFn, createdAt, updatedAt) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
+             ON CONFLICT(id) DO UPDATE SET \
+               name = excluded.name, \
+               description = excluded.description, \
+               scopeLevel = excluded.scopeLevel, \
+               threshold = excluded.threshold, \
+               weight = excluded.weight, \
+               aggFn = excluded.aggFn, \
+               updatedAt = excluded.updatedAt",
+        )
+        .bind(&body.id)
+        .bind(&body.name)
+        .bind(&body.description)
+        .bind(&body.scope_level)
+        .bind(body.threshold)
+        .bind(body.weight)
+        .bind(&body.agg_fn)
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("UNIQUE constraint failed") {
+                err_conflict("KPI name already exists")
+            } else {
+                err_internal(&format!("insert error: {e}"))
+            }
+        })?;
+
+        self.get_kpi(&body.id).await
+    }
+
     async fn get_kpi(&self, id: &str) -> Result<KpiItem, ApiError> {
         let row: Option<KpiRow> = sqlx::query_as::<_, KpiRow>(
             "SELECT id, name, description, scopeLevel AS scope_level, threshold, weight, aggFn AS agg_fn, createdAt AS created_at, updatedAt AS updated_at \
@@ -2619,6 +2838,27 @@ impl BackendStore for SqliteBackendStore {
             )));
         }
 
+        // Validate inline grades before inserting anything
+        if let Some(ref grades) = body.grades {
+            let mut seen_dims = std::collections::HashSet::new();
+            for g in grades {
+                if g.dimension.trim().is_empty() {
+                    return Err(err_validation("inline grade dimension must not be empty"));
+                }
+                if !(0.0..=100.0).contains(&g.score) {
+                    return Err(err_validation(
+                        "inline grade score must be between 0 and 100",
+                    ));
+                }
+                if !seen_dims.insert(g.dimension.trim().to_string()) {
+                    return Err(err_conflict(&format!(
+                        "duplicate dimension '{}' in inline grades",
+                        g.dimension
+                    )));
+                }
+            }
+        }
+
         sqlx::query(
             "INSERT INTO EvalRun (id, source, scope, scopeId, score, verdict, summary, evaluatedAt, ingestedAt) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -2641,6 +2881,60 @@ impl BackendStore for SqliteBackendStore {
                 err_internal(&format!("insert error: {e}"))
             }
         })?;
+
+        if let Some(grades) = body.grades {
+            for g in grades {
+                // Validate kpi_id FK if provided
+                if let Some(ref kpi_id) = g.kpi_id {
+                    let kpi_exists: bool =
+                        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM KPI WHERE id = ?")
+                            .bind(kpi_id)
+                            .fetch_one(&mut *tx)
+                            .await
+                            .map_err(|e| err_internal(&format!("query error: {e}")))?
+                            > 0;
+                    if !kpi_exists {
+                        return Err(err_not_found(&format!("KPI '{}' not found", kpi_id)));
+                    }
+                }
+
+                let grade_id = Uuid::new_v4().to_string();
+                let grade_evaluated_at = g
+                    .evaluated_at
+                    .as_deref()
+                    .unwrap_or(&evaluated_at)
+                    .to_string();
+                let evidence_str = g
+                    .evidence
+                    .as_ref()
+                    .map(|v| serde_json::to_string(v).unwrap_or_default());
+
+                sqlx::query(
+                    "INSERT INTO Grade (id, runId, kpiId, dimension, score, evidence, evaluatedAt, ingestedAt) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .bind(&grade_id)
+                .bind(&body.id)
+                .bind(&g.kpi_id)
+                .bind(g.dimension.trim())
+                .bind(g.score)
+                .bind(&evidence_str)
+                .bind(&grade_evaluated_at)
+                .bind(&now)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    if e.to_string().contains("UNIQUE constraint failed") {
+                        err_conflict(&format!(
+                            "Grade already exists for (runId, dimension={})",
+                            g.dimension
+                        ))
+                    } else {
+                        err_internal(&format!("insert grade error: {e}"))
+                    }
+                })?;
+            }
+        }
 
         tx.commit()
             .await
@@ -3384,7 +3678,7 @@ impl SqliteBackendStore {
 
     async fn fetch_component_item(&self, id: &str) -> Result<ComponentItem, ApiError> {
         let row: Option<ComponentRow> = sqlx::query_as::<_, ComponentRow>(
-            "SELECT id, name, domain, repos, modules, health, trend, owner, criticality, autonomy, openPlans as open_plans, openRequests as open_requests, lastEval as last_eval, productId as product_id FROM Component WHERE id = ?"
+            "SELECT id, name, domain, repos, modules, trend, owner, criticality, autonomy, openPlans as open_plans, openRequests as open_requests, lastEval as last_eval, productId as product_id FROM Component WHERE id = ?"
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -3406,7 +3700,6 @@ impl SqliteBackendStore {
             domain: row.domain,
             repos: row.repos,
             modules: row.modules,
-            health: row.health,
             trend: row.trend,
             owner: row.owner,
             criticality: row.criticality,
@@ -3419,7 +3712,7 @@ impl SqliteBackendStore {
 
     async fn fetch_repo_item(&self, id: &str) -> Result<RepoItem, ApiError> {
         let row: Option<RepoRow> = sqlx::query_as::<_, RepoRow>(
-            "SELECT r.id, r.name, r.componentId as component_id, r.owner, r.criticality, r.autonomy, r.qualityScore as quality_score, r.regressions, r.openPlans as open_plans, r.execStatus as exec_status, r.lastEval as last_eval, r.coverage, r.secScore as sec_score FROM Repo r WHERE r.id = ?"
+            "SELECT r.id, r.name, r.componentId as component_id, r.owner, r.criticality, r.autonomy, r.regressions, r.openPlans as open_plans, r.execStatus as exec_status, r.lastEval as last_eval FROM Repo r WHERE r.id = ?"
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -3442,13 +3735,10 @@ impl SqliteBackendStore {
             owner: row.owner,
             criticality: row.criticality,
             autonomy: row.autonomy,
-            quality_score: row.quality_score,
             regressions: row.regressions,
             open_plans: row.open_plans,
             exec_status: row.exec_status,
             last_eval: row.last_eval,
-            coverage: row.coverage,
-            sec_score: row.sec_score,
             depends_on,
             depended_on_by,
         })
@@ -3728,7 +4018,6 @@ mod kpi_evalrun_grade_tests {
                 owner: "owner".to_string(),
                 criticality: "low".to_string(),
                 autonomy: "semi".to_string(),
-                health: 0,
                 trend: 0,
                 last_eval: now.clone(),
             })
@@ -3741,9 +4030,6 @@ mod kpi_evalrun_grade_tests {
                 owner: "owner".to_string(),
                 criticality: "low".to_string(),
                 autonomy: "semi".to_string(),
-                quality_score: 0,
-                coverage: 0,
-                sec_score: 0,
                 exec_status: "idle".to_string(),
                 last_eval: now,
             })
@@ -3767,6 +4053,7 @@ mod kpi_evalrun_grade_tests {
                 verdict: Some("ok".to_string()),
                 summary: Some("first".to_string()),
                 evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
+                grades: None,
             })
             .await
             .unwrap();
@@ -3780,6 +4067,7 @@ mod kpi_evalrun_grade_tests {
                 verdict: Some("ok".to_string()),
                 summary: Some("second".to_string()),
                 evaluated_at: Some("2026-05-26T00:05:00Z".to_string()),
+                grades: None,
             })
             .await
             .unwrap();
@@ -3807,6 +4095,7 @@ mod kpi_evalrun_grade_tests {
                 verdict: None,
                 summary: None,
                 evaluated_at: None,
+                grades: None,
             })
             .await
             .unwrap_err();
@@ -3822,6 +4111,7 @@ mod kpi_evalrun_grade_tests {
                 verdict: None,
                 summary: None,
                 evaluated_at: None,
+                grades: None,
             })
             .await
             .unwrap_err();
@@ -3837,6 +4127,7 @@ mod kpi_evalrun_grade_tests {
                 verdict: None,
                 summary: None,
                 evaluated_at: None,
+                grades: None,
             })
             .await
             .unwrap_err();
@@ -3908,6 +4199,7 @@ mod kpi_evalrun_grade_tests {
                 verdict: None,
                 summary: None,
                 evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
+                grades: None,
             })
             .await
             .unwrap();
@@ -3941,6 +4233,7 @@ mod kpi_evalrun_grade_tests {
                 verdict: None,
                 summary: None,
                 evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
+                grades: None,
             })
             .await
             .unwrap();
@@ -4140,6 +4433,82 @@ mod legacy_indicator_migration_tests {
             .await
             .unwrap();
 
+        // Rebuild Component/Repo with legacy schemas OUTSIDE a transaction because
+        // PRAGMA foreign_keys = OFF is a no-op inside a transaction per SQLite docs.
+        sqlx::query("PRAGMA foreign_keys = OFF;")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("DROP TABLE Component;")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE Component (\
+              id TEXT PRIMARY KEY,\
+              name TEXT NOT NULL,\
+              domain TEXT NOT NULL,\
+              repos INTEGER NOT NULL,\
+              modules INTEGER NOT NULL,\
+              health INTEGER NOT NULL,\
+              trend INTEGER NOT NULL,\
+              owner TEXT NOT NULL,\
+              criticality TEXT NOT NULL,\
+              autonomy TEXT NOT NULL,\
+              openPlans INTEGER NOT NULL DEFAULT 0,\
+              openRequests INTEGER NOT NULL DEFAULT 0,\
+              lastEval TEXT NOT NULL,\
+              productId TEXT NOT NULL,\
+              createdAt TEXT NOT NULL,\
+              updatedAt TEXT NOT NULL\
+            );",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_component_productId ON Component(productId);")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("DROP TABLE Repo;")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE Repo (\
+              id TEXT PRIMARY KEY,\
+              name TEXT NOT NULL UNIQUE,\
+              componentId TEXT NOT NULL,\
+              owner TEXT NOT NULL,\
+              criticality TEXT NOT NULL,\
+              autonomy TEXT NOT NULL,\
+              qualityScore INTEGER NOT NULL,\
+              regressions INTEGER NOT NULL DEFAULT 0,\
+              openPlans INTEGER NOT NULL DEFAULT 0,\
+              execStatus TEXT NOT NULL,\
+              lastEval TEXT NOT NULL,\
+              coverage INTEGER NOT NULL,\
+              secScore INTEGER NOT NULL,\
+              createdAt TEXT NOT NULL,\
+              updatedAt TEXT NOT NULL\
+            );",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_repo_componentId ON Repo(componentId);")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("PRAGMA foreign_keys = ON;")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Rebuild Opportunity and Regression with legacy indicator columns.
         let mut tx = pool.begin().await.unwrap();
         sqlx::query("PRAGMA foreign_keys = OFF;")
             .execute(&mut *tx)
@@ -4461,6 +4830,404 @@ mod legacy_indicator_migration_tests {
             preserved_component_id.as_deref(),
             Some("comp-legacy"),
             "non-legacy columns must be preserved"
+        );
+
+        let (component_has_health,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('Component') WHERE name = 'health'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            component_has_health, 0,
+            "Component.health must be removed after upgrade"
+        );
+
+        let (repo_has_quality_score,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('Repo') WHERE name = 'qualityScore'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            repo_has_quality_score, 0,
+            "Repo.qualityScore must be removed after upgrade"
+        );
+
+        let (repo_has_coverage,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('Repo') WHERE name = 'coverage'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            repo_has_coverage, 0,
+            "Repo.coverage must be removed after upgrade"
+        );
+
+        let (repo_has_sec_score,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('Repo') WHERE name = 'secScore'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            repo_has_sec_score, 0,
+            "Repo.secScore must be removed after upgrade"
+        );
+    }
+}
+
+#[cfg(test)]
+mod kpi_create_inline_grade_tests {
+    use super::*;
+
+    async fn seed_component(store: &SqliteBackendStore) -> String {
+        let now = SqliteBackendStore::now_iso();
+        let product = store
+            .create_product(CreateProductBody {
+                name: "Product for KPI tests".to_string(),
+            })
+            .await
+            .unwrap();
+        let component = store
+            .create_component(CreateComponentBody {
+                name: "Component for KPI tests".to_string(),
+                product_id: product.id,
+                domain: "platform".to_string(),
+                owner: "owner".to_string(),
+                criticality: "low".to_string(),
+                autonomy: "semi".to_string(),
+                trend: 0,
+                last_eval: now,
+            })
+            .await
+            .unwrap();
+        component.id
+    }
+
+    #[tokio::test]
+    async fn create_kpi_inserts_and_returns_item() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let item = store
+            .create_kpi(CreateKpiBody {
+                id: "kpi-001".to_string(),
+                name: "Test KPI".to_string(),
+                description: "A test KPI".to_string(),
+                scope_level: "component".to_string(),
+                threshold: 70.0,
+                weight: 1.0,
+                agg_fn: "latest".to_string(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(item.id, "kpi-001");
+        assert_eq!(item.agg_fn, "latest");
+        assert_eq!(item.scope_level, "component");
+        assert!(!item.created_at.is_empty());
+        assert!(!item.updated_at.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_kpi_upsert_updates_fields_preserves_created_at() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let first = store
+            .create_kpi(CreateKpiBody {
+                id: "kpi-upsert".to_string(),
+                name: "Original Name".to_string(),
+                description: "orig".to_string(),
+                scope_level: "repo".to_string(),
+                threshold: 50.0,
+                weight: 1.0,
+                agg_fn: "avg".to_string(),
+            })
+            .await
+            .unwrap();
+        let second = store
+            .create_kpi(CreateKpiBody {
+                id: "kpi-upsert".to_string(),
+                name: "Original Name".to_string(),
+                description: "updated".to_string(),
+                scope_level: "repo".to_string(),
+                threshold: 60.0,
+                weight: 2.0,
+                agg_fn: "p90".to_string(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(second.description, "updated");
+        assert_eq!(second.threshold, 60.0);
+        assert_eq!(second.agg_fn, "p90");
+        assert_eq!(
+            first.created_at, second.created_at,
+            "createdAt must not change on upsert"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_kpi_invalid_agg_fn_returns_validation() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let err = store
+            .create_kpi(CreateKpiBody {
+                id: "kpi-bad".to_string(),
+                name: "Bad KPI".to_string(),
+                description: "".to_string(),
+                scope_level: "repo".to_string(),
+                threshold: 50.0,
+                weight: 1.0,
+                agg_fn: "median".to_string(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+        assert!(err.message.contains("aggFn"));
+    }
+
+    #[tokio::test]
+    async fn create_kpi_invalid_scope_level_returns_validation() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let err = store
+            .create_kpi(CreateKpiBody {
+                id: "kpi-bad2".to_string(),
+                name: "Bad KPI 2".to_string(),
+                description: "".to_string(),
+                scope_level: "team".to_string(),
+                threshold: 50.0,
+                weight: 1.0,
+                agg_fn: "latest".to_string(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+        assert!(err.message.contains("scopeLevel"));
+    }
+
+    #[tokio::test]
+    async fn create_kpi_threshold_out_of_range_returns_validation() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let err = store
+            .create_kpi(CreateKpiBody {
+                id: "kpi-bad3".to_string(),
+                name: "Bad KPI 3".to_string(),
+                description: "".to_string(),
+                scope_level: "repo".to_string(),
+                threshold: 150.0,
+                weight: 1.0,
+                agg_fn: "latest".to_string(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+        assert!(err.message.contains("threshold"));
+    }
+
+    #[tokio::test]
+    async fn create_kpi_zero_weight_returns_validation() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let err = store
+            .create_kpi(CreateKpiBody {
+                id: "kpi-bad4".to_string(),
+                name: "Bad KPI 4".to_string(),
+                description: "".to_string(),
+                scope_level: "repo".to_string(),
+                threshold: 50.0,
+                weight: 0.0,
+                agg_fn: "latest".to_string(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_VALIDATION");
+        assert!(err.message.contains("weight"));
+    }
+
+    #[tokio::test]
+    async fn create_eval_run_with_inline_grades_inserts_atomically() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let component_id = seed_component(&store).await;
+
+        let item = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "run-inline-001".to_string(),
+                source: "test".to_string(),
+                scope: "component".to_string(),
+                scope_id: component_id.clone(),
+                score: Some(75.0),
+                verdict: None,
+                summary: None,
+                evaluated_at: None,
+                grades: Some(vec![
+                    CreateGradeInlineBody {
+                        kpi_id: None,
+                        dimension: "tests".to_string(),
+                        score: 80.0,
+                        evidence: None,
+                        evaluated_at: None,
+                    },
+                    CreateGradeInlineBody {
+                        kpi_id: None,
+                        dimension: "security".to_string(),
+                        score: 70.0,
+                        evidence: Some(serde_json::json!({"findings": []})),
+                        evaluated_at: None,
+                    },
+                ]),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(item.id, "run-inline-001");
+
+        let grades = store
+            .list_grades(Some("run-inline-001".to_string()), None)
+            .await
+            .unwrap();
+        assert_eq!(grades.len(), 2, "must have exactly 2 grade rows");
+        let dims: std::collections::HashSet<&str> =
+            grades.iter().map(|g| g.dimension.as_str()).collect();
+        assert!(dims.contains("tests"));
+        assert!(dims.contains("security"));
+        for g in &grades {
+            assert_eq!(g.run_id, "run-inline-001");
+            assert!(!g.id.is_empty(), "grade id must be server-generated");
+        }
+    }
+
+    #[tokio::test]
+    async fn create_eval_run_inline_grade_rollback_on_bad_kpi() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let component_id = seed_component(&store).await;
+
+        let err = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "run-rollback-001".to_string(),
+                source: "test".to_string(),
+                scope: "component".to_string(),
+                scope_id: component_id,
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: None,
+                grades: Some(vec![CreateGradeInlineBody {
+                    kpi_id: Some("nonexistent-kpi".to_string()),
+                    dimension: "tests".to_string(),
+                    score: 50.0,
+                    evidence: None,
+                    evaluated_at: None,
+                }]),
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code, "ERR_NOT_FOUND");
+
+        // EvalRun must not exist (rollback)
+        let run_err = store.get_eval_run("run-rollback-001").await.unwrap_err();
+        assert_eq!(run_err.code, "ERR_NOT_FOUND");
+
+        // No grades must exist
+        let grades = store
+            .list_grades(Some("run-rollback-001".to_string()), None)
+            .await
+            .unwrap();
+        assert_eq!(grades.len(), 0, "rollback must leave no grade rows");
+    }
+
+    #[tokio::test]
+    async fn create_eval_run_inline_grade_duplicate_dimension_returns_conflict() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let component_id = seed_component(&store).await;
+
+        let err = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "run-dup-dim".to_string(),
+                source: "test".to_string(),
+                scope: "component".to_string(),
+                scope_id: component_id,
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: None,
+                grades: Some(vec![
+                    CreateGradeInlineBody {
+                        kpi_id: None,
+                        dimension: "tests".to_string(),
+                        score: 50.0,
+                        evidence: None,
+                        evaluated_at: None,
+                    },
+                    CreateGradeInlineBody {
+                        kpi_id: None,
+                        dimension: "tests".to_string(),
+                        score: 60.0,
+                        evidence: None,
+                        evaluated_at: None,
+                    },
+                ]),
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code, "ERR_CONFLICT");
+    }
+
+    #[tokio::test]
+    async fn create_eval_run_inline_grade_empty_dimension_returns_validation() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let component_id = seed_component(&store).await;
+
+        let err = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "run-empty-dim".to_string(),
+                source: "test".to_string(),
+                scope: "component".to_string(),
+                scope_id: component_id,
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: None,
+                grades: Some(vec![CreateGradeInlineBody {
+                    kpi_id: None,
+                    dimension: "  ".to_string(),
+                    score: 50.0,
+                    evidence: None,
+                    evaluated_at: None,
+                }]),
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code, "ERR_VALIDATION");
+    }
+
+    #[tokio::test]
+    async fn create_eval_run_without_grades_preserves_current_behavior() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let component_id = seed_component(&store).await;
+
+        let item = store
+            .create_eval_run(CreateEvalRunBody {
+                id: "run-no-grades".to_string(),
+                source: "test".to_string(),
+                scope: "component".to_string(),
+                scope_id: component_id,
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: None,
+                grades: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(item.id, "run-no-grades");
+        let grades = store
+            .list_grades(Some("run-no-grades".to_string()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            grades.len(),
+            0,
+            "no grades must be created when grades is None"
         );
     }
 }
