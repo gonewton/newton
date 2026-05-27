@@ -253,7 +253,10 @@ impl SqliteBackendStore {
             .await
             .map_err(|e| err_internal(&format!("index Opportunity component failed: {e}")))?;
         } else if has_opportunity_kpi {
-            // Nothing to do. Leave any existing kpiId values intact.
+            sqlx::query("UPDATE Opportunity SET kpiId = NULL WHERE kpiId IS NOT NULL;")
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| err_internal(&format!("clear Opportunity kpiId failed: {e}")))?;
         }
 
         if has_regression_indicator || (has_regression_kpi && regression_kpi_not_null) {
