@@ -317,6 +317,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /eval-runs/{id}/grades:
+    get:
+      tags:
+      - catalog
+      operationId: list_eval_run_grades
+      parameters:
+      - name: id
+        in: path
+        description: EvalRun ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Grades for the EvalRun
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GradeItem'
+        '404':
+          description: EvalRun not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /executions:
     get:
       tags:
@@ -536,6 +569,41 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/KpiItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+      - catalog
+      operationId: create_kpi
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateKpiBody'
+        required: true
+      responses:
+        '201':
+          description: Created or upserted KPI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KpiItem'
+        '409':
+          description: Conflict (name uniqueness violated)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Internal error
           content:
@@ -2191,7 +2259,6 @@ components:
       - domain
       - repos
       - modules
-      - health
       - trend
       - owner
       - criticality
@@ -2206,9 +2273,6 @@ components:
           type: string
         domain:
           type: string
-        health:
-          type: integer
-          format: int64
         id:
           type: string
         lastEval:
@@ -2253,9 +2317,6 @@ components:
           type: string
         domain:
           type: string
-        health:
-          type: integer
-          format: int64
         lastEval:
           type: string
         name:
@@ -2279,6 +2340,12 @@ components:
           type:
           - string
           - 'null'
+        grades:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/CreateGradeInlineBody'
         id:
           type: string
         scope:
@@ -2324,6 +2391,53 @@ components:
         runId:
           type: string
         score:
+          type: number
+          format: double
+    CreateGradeInlineBody:
+      type: object
+      required:
+      - dimension
+      - score
+      properties:
+        dimension:
+          type: string
+        evaluatedAt:
+          type:
+          - string
+          - 'null'
+        evidence: {}
+        kpiId:
+          type:
+          - string
+          - 'null'
+        score:
+          type: number
+          format: double
+    CreateKpiBody:
+      type: object
+      required:
+      - id
+      - name
+      - description
+      - scopeLevel
+      - threshold
+      - weight
+      - aggFn
+      properties:
+        aggFn:
+          type: string
+        description:
+          type: string
+        id:
+          type: string
+        name:
+          type: string
+        scopeLevel:
+          type: string
+        threshold:
+          type: number
+          format: double
+        weight:
           type: number
           format: double
     CreateModuleBody:
@@ -2429,9 +2543,6 @@ components:
       - owner
       - criticality
       - autonomy
-      - qualityScore
-      - coverage
-      - secScore
       - execStatus
       - lastEval
       properties:
@@ -2439,9 +2550,6 @@ components:
           type: string
         componentId:
           type: string
-        coverage:
-          type: integer
-          format: int64
         criticality:
           type: string
         execStatus:
@@ -2452,12 +2560,6 @@ components:
           type: string
         owner:
           type: string
-        qualityScore:
-          type: integer
-          format: int64
-        secScore:
-          type: integer
-          format: int64
     CreateRequestBody:
       type: object
       required:
@@ -2979,11 +3081,6 @@ components:
           type:
           - string
           - 'null'
-        health:
-          type:
-          - integer
-          - 'null'
-          format: int64
         lastEval:
           type:
           - string
@@ -3056,11 +3153,6 @@ components:
           type:
           - string
           - 'null'
-        coverage:
-          type:
-          - integer
-          - 'null'
-          format: int64
         criticality:
           type:
           - string
@@ -3081,16 +3173,6 @@ components:
           type:
           - string
           - 'null'
-        qualityScore:
-          type:
-          - integer
-          - 'null'
-          format: int64
-        secScore:
-          type:
-          - integer
-          - 'null'
-          format: int64
     PendingApprovalItem:
       type: object
       required:
@@ -3268,7 +3350,6 @@ components:
       - owner
       - criticality
       - autonomy
-      - health
       - trend
       - lastEval
       properties:
@@ -3278,9 +3359,6 @@ components:
           type: string
         domain:
           type: string
-        health:
-          type: integer
-          format: int64
         lastEval:
           type: string
         name:
@@ -3320,9 +3398,6 @@ components:
       - owner
       - criticality
       - autonomy
-      - qualityScore
-      - coverage
-      - secScore
       - execStatus
       - lastEval
       properties:
@@ -3330,9 +3405,6 @@ components:
           type: string
         componentId:
           type: string
-        coverage:
-          type: integer
-          format: int64
         criticality:
           type: string
         execStatus:
@@ -3343,12 +3415,6 @@ components:
           type: string
         owner:
           type: string
-        qualityScore:
-          type: integer
-          format: int64
-        secScore:
-          type: integer
-          format: int64
     PutWorkflowFileBody:
       type: object
       required:
@@ -3425,13 +3491,10 @@ components:
       - owner
       - criticality
       - autonomy
-      - qualityScore
       - regressions
       - openPlans
       - execStatus
       - lastEval
-      - coverage
-      - secScore
       - dependsOn
       - dependedOnBy
       properties:
@@ -3439,9 +3502,6 @@ components:
           type: string
         component:
           type: string
-        coverage:
-          type: integer
-          format: int64
         criticality:
           type: string
         dependedOnBy:
@@ -3465,13 +3525,7 @@ components:
           format: int64
         owner:
           type: string
-        qualityScore:
-          type: integer
-          format: int64
         regressions:
-          type: integer
-          format: int64
-        secScore:
           type: integer
           format: int64
     RequestItem:
