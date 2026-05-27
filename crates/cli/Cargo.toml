@@ -238,3 +238,7 @@ path = "tests/integration/serve_with_mcp_and_ailoop.rs"
 [[test]]
 name = "test_streaming_parity"
 path = "tests/integration/test_streaming_parity.rs"
+
+[[test]]
+name = "test_data_post_grade_local_store"
+path = "tests/integration/test_data_post_grade_local_store.rs"

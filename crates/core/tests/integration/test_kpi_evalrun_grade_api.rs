@@ -79,7 +79,7 @@ async fn test_grade_roundtrip_get_by_id() {
     assert_eq!(item["id"], grade_id);
     assert_eq!(item["runId"], run_id);
     assert_eq!(item["dimension"], "tests");
-    assert_eq!(item["score"], 60);
+    assert_eq!(item["score"].as_f64().unwrap(), 60.0);
 }
 
 #[tokio::test]
