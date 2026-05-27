@@ -522,28 +522,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /indicators:
-    get:
-      tags:
-      - dashboard
-      summary: 'DEPRECATED: alias for /kpis'
-      description: Deprecated alias for KPI list. Prefer GET /kpis.
-      operationId: list_indicators
-      responses:
-        '200':
-          description: Deprecated alias for KPI list
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/KpiItem'
-        '500':
-          description: Internal error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
   /kpis:
     get:
       tags:
@@ -2412,7 +2390,7 @@ components:
           format: double
         id:
           type: string
-        indicator:
+        kpiId:
           type:
           - string
           - 'null'
@@ -2964,7 +2942,7 @@ components:
           format: double
         id:
           type: string
-        indicator:
+        kpiId:
           type:
           - string
           - 'null'
@@ -3402,7 +3380,6 @@ components:
       type: object
       required:
       - repo
-      - indicator
       - delta
       - severity
       - since
@@ -3411,8 +3388,10 @@ components:
         delta:
           type: number
           format: double
-        indicator:
-          type: string
+        kpiId:
+          type:
+          - string
+          - 'null'
         repo:
           type: string
         severity:

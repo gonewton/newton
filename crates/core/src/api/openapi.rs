@@ -8,7 +8,6 @@ use utoipa::OpenApi;
         crate::api::dashboard::list_components,
         crate::api::dashboard::list_pending_approvals,
         crate::api::dashboard::list_regressions,
-        crate::api::dashboard::list_indicators,
         crate::api::dashboard::list_recent_actions,
         crate::api::portfolio::list_repos,
         crate::api::portfolio::list_repo_dependencies,

@@ -46,6 +46,7 @@ impl SqliteBackendStore {
             .await
             .map_err(|e| err_internal(&format!("migration 003 failed: {e}")))?;
 
+        Self::upgrade_legacy_indicator_schema(&pool).await?;
         Self::upgrade_legacy_grade_schema(&pool).await?;
 
         Ok(Self { pool })
@@ -139,6 +140,190 @@ impl SqliteBackendStore {
 
         Ok(())
     }
+
+    async fn upgrade_legacy_indicator_schema(pool: &SqlitePool) -> Result<(), ApiError> {
+        #[derive(Debug, FromRow)]
+        struct TableInfoRow {
+            name: String,
+            notnull: i64,
+        }
+
+        async fn table_info(pool: &SqlitePool, table: &str) -> Result<Vec<TableInfoRow>, ApiError> {
+            sqlx::query_as::<_, TableInfoRow>(&format!("PRAGMA table_info({table})"))
+                .fetch_all(pool)
+                .await
+                .map_err(|e| err_internal(&format!("schema check failed: {e}")))
+        }
+
+        let opportunity_info = table_info(pool, "Opportunity").await?;
+        let has_opportunity_indicator = opportunity_info.iter().any(|r| r.name == "indicator");
+        let has_opportunity_kpi = opportunity_info.iter().any(|r| r.name == "kpiId");
+
+        let regression_info = table_info(pool, "Regression").await?;
+        let has_regression_indicator = regression_info.iter().any(|r| r.name == "indicator");
+        let has_regression_kpi = regression_info.iter().any(|r| r.name == "kpiId");
+        let regression_kpi_not_null = regression_info
+            .iter()
+            .find(|r| r.name == "kpiId")
+            .map(|r| r.notnull != 0)
+            .unwrap_or(false);
+
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+
+        sqlx::query("PRAGMA foreign_keys = OFF;")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("pragma error: {e}")))?;
+
+        sqlx::query("DROP TABLE IF EXISTS Indicator;")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("drop Indicator failed: {e}")))?;
+
+        if has_opportunity_indicator {
+            sqlx::query(
+                "CREATE TABLE Opportunity_new (\
+                  id TEXT PRIMARY KEY,\
+                  title TEXT NOT NULL,\
+                  origin TEXT NOT NULL,\
+                  componentId TEXT NULL,\
+                  module TEXT NULL,\
+                  repoId TEXT NULL,\
+                  kpiId TEXT NULL,\
+                  confidence REAL NULL,\
+                  risk TEXT NOT NULL,\
+                  expectedValue REAL NOT NULL,\
+                  effort TEXT NULL,\
+                  status TEXT NOT NULL,\
+                  age TEXT NULL,\
+                  rationale TEXT NULL,\
+                  dependsOn TEXT NOT NULL DEFAULT '[]',\
+                  blocks TEXT NOT NULL DEFAULT '[]',\
+                  createdAt TEXT NOT NULL,\
+                  updatedAt TEXT NOT NULL,\
+                  FOREIGN KEY(componentId) REFERENCES Component(id),\
+                  FOREIGN KEY(repoId) REFERENCES Repo(id),\
+                  FOREIGN KEY(kpiId) REFERENCES KPI(id)\
+                );",
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("create Opportunity_new failed: {e}")))?;
+
+            sqlx::query(
+                "INSERT INTO Opportunity_new (
+                    id, title, origin, componentId, module, repoId, kpiId,
+                    confidence, risk, expectedValue, effort, status, age, rationale,
+                    dependsOn, blocks, createdAt, updatedAt
+                )
+                SELECT
+                    id, title, origin, componentId, module, repoId, NULL as kpiId,
+                    confidence, risk, expectedValue, effort, status, age, rationale,
+                    dependsOn, blocks, createdAt, updatedAt
+                FROM Opportunity;",
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("copy Opportunity failed: {e}")))?;
+
+            sqlx::query("DROP TABLE Opportunity;")
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| err_internal(&format!("drop Opportunity failed: {e}")))?;
+
+            sqlx::query("ALTER TABLE Opportunity_new RENAME TO Opportunity;")
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| err_internal(&format!("rename Opportunity failed: {e}")))?;
+
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_opportunity_status ON Opportunity(status);",
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("index Opportunity status failed: {e}")))?;
+
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_opportunity_componentId ON Opportunity(componentId);",
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("index Opportunity component failed: {e}")))?;
+        } else if has_opportunity_kpi {
+            sqlx::query("UPDATE Opportunity SET kpiId = NULL WHERE kpiId IS NOT NULL;")
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| err_internal(&format!("clear Opportunity kpiId failed: {e}")))?;
+        }
+
+        if has_regression_indicator || (has_regression_kpi && regression_kpi_not_null) {
+            sqlx::query(
+                "CREATE TABLE Regression_new (\
+                  id TEXT PRIMARY KEY,\
+                  repoName TEXT NOT NULL,\
+                  kpiId TEXT NULL,\
+                  delta REAL NOT NULL,\
+                  severity TEXT NOT NULL,\
+                  since TEXT NOT NULL,\
+                  trend TEXT NOT NULL,\
+                  createdAt TEXT NOT NULL,\
+                  FOREIGN KEY(repoName) REFERENCES Repo(name),\
+                  FOREIGN KEY(kpiId) REFERENCES KPI(id)\
+                );",
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("create Regression_new failed: {e}")))?;
+
+            sqlx::query(
+                "INSERT INTO Regression_new (
+                    id, repoName, kpiId, delta, severity, since, trend, createdAt
+                )
+                SELECT
+                    id, repoName, NULL as kpiId, delta, severity, since, trend, createdAt
+                FROM Regression;",
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("copy Regression failed: {e}")))?;
+
+            sqlx::query("DROP TABLE Regression;")
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| err_internal(&format!("drop Regression failed: {e}")))?;
+
+            sqlx::query("ALTER TABLE Regression_new RENAME TO Regression;")
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| err_internal(&format!("rename Regression failed: {e}")))?;
+
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_regression_repoName ON Regression(repoName);",
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("index Regression repoName failed: {e}")))?;
+        } else if has_regression_kpi {
+            sqlx::query("UPDATE Regression SET kpiId = NULL WHERE kpiId IS NOT NULL;")
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| err_internal(&format!("clear Regression kpiId failed: {e}")))?;
+        }
+
+        sqlx::query("PRAGMA foreign_keys = ON;")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| err_internal(&format!("pragma error: {e}")))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| err_internal(&format!("commit error: {e}")))?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, FromRow)]
@@ -185,7 +370,7 @@ struct PendingApprovalRow {
 #[derive(Debug, FromRow)]
 struct RegressionRow {
     repo: String,
-    indicator: String,
+    kpi_id: Option<String>,
     delta: f64,
     severity: String,
     since: String,
@@ -360,7 +545,7 @@ struct OpportunityRow {
     component_id: Option<String>,
     module: Option<String>,
     repo_id: Option<String>,
-    indicator: Option<String>,
+    kpi_id: Option<String>,
     confidence: Option<f64>,
     risk: String,
     expected_value: f64,
@@ -805,7 +990,7 @@ impl BackendStore for SqliteBackendStore {
 
     async fn list_regressions(&self) -> Result<Vec<RegressionItem>, ApiError> {
         let rows = sqlx::query_as::<_, RegressionRow>(
-            "SELECT repoName as repo, indicator, delta, severity, since, trend FROM Regression ORDER BY id ASC"
+            "SELECT repoName as repo, kpiId as kpi_id, delta, severity, since, trend FROM Regression ORDER BY id ASC"
         )
         .fetch_all(&self.pool)
         .await
@@ -815,7 +1000,7 @@ impl BackendStore for SqliteBackendStore {
             .into_iter()
             .map(|r| RegressionItem {
                 repo: r.repo,
-                indicator: r.indicator,
+                kpi_id: r.kpi_id,
                 delta: r.delta,
                 severity: r.severity,
                 since: r.since,
@@ -1093,14 +1278,14 @@ impl BackendStore for SqliteBackendStore {
     ) -> Result<Vec<OpportunityItem>, ApiError> {
         let rows = if let Some(ref s) = status {
             sqlx::query_as::<_, OpportunityRow>(
-                "SELECT id, title, origin, componentId as component_id, module, repoId as repo_id, indicator, confidence, risk, expectedValue as expected_value, effort, status, age, rationale, dependsOn as depends_on, blocks FROM Opportunity WHERE status = ? ORDER BY id ASC"
+                "SELECT id, title, origin, componentId as component_id, module, repoId as repo_id, kpiId as kpi_id, confidence, risk, expectedValue as expected_value, effort, status, age, rationale, dependsOn as depends_on, blocks FROM Opportunity WHERE status = ? ORDER BY id ASC"
             ).bind(s)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| err_internal(&format!("query error: {e}")))?
         } else {
             sqlx::query_as::<_, OpportunityRow>(
-                "SELECT id, title, origin, componentId as component_id, module, repoId as repo_id, indicator, confidence, risk, expectedValue as expected_value, effort, status, age, rationale, dependsOn as depends_on, blocks FROM Opportunity ORDER BY id ASC"
+                "SELECT id, title, origin, componentId as component_id, module, repoId as repo_id, kpiId as kpi_id, confidence, risk, expectedValue as expected_value, effort, status, age, rationale, dependsOn as depends_on, blocks FROM Opportunity ORDER BY id ASC"
             )
             .fetch_all(&self.pool)
             .await
@@ -1147,7 +1332,7 @@ impl BackendStore for SqliteBackendStore {
                 component,
                 module: row.module,
                 repo,
-                indicator: row.indicator,
+                kpi_id: row.kpi_id,
                 confidence: row.confidence,
                 risk: row.risk,
                 expected_value: row.expected_value,
@@ -1280,7 +1465,7 @@ impl BackendStore for SqliteBackendStore {
         sqlx::query(
             "INSERT INTO Opportunity (
                 id, title, origin, componentId, module, repoId,
-                indicator, confidence, risk, expectedValue, effort,
+                kpiId, confidence, risk, expectedValue, effort,
                 status, rationale, dependsOn, blocks, createdAt, updatedAt
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
@@ -1289,7 +1474,7 @@ impl BackendStore for SqliteBackendStore {
                 componentId = excluded.componentId,
                 module      = excluded.module,
                 repoId      = excluded.repoId,
-                indicator   = excluded.indicator,
+                kpiId       = excluded.kpiId,
                 confidence  = excluded.confidence,
                 risk        = excluded.risk,
                 expectedValue = excluded.expectedValue,
@@ -1306,7 +1491,7 @@ impl BackendStore for SqliteBackendStore {
         .bind(&component_id)
         .bind(&body.module)
         .bind(&repo_id)
-        .bind(&body.indicator)
+        .bind(&body.kpi_id)
         .bind(body.confidence)
         .bind(&body.risk)
         .bind(body.expected_value)
@@ -1775,7 +1960,6 @@ impl BackendStore for SqliteBackendStore {
             "Opportunity",
             "PendingApproval",
             "Regression",
-            "Indicator",
             "Grade",
             "EvalRun",
             "KPI",
@@ -3841,7 +4025,7 @@ mod opportunity_tests {
             component: None,
             module: None,
             repo: None,
-            indicator: None,
+            kpi_id: None,
             confidence: None,
             risk: "low".to_string(),
             expected_value: 1.0,
@@ -3926,5 +4110,354 @@ mod opportunity_tests {
         body.expected_value = -1.0;
         let err = store.create_opportunity(body).await.unwrap_err();
         assert_eq!(err.code, "ERR_VALIDATION");
+    }
+}
+
+#[cfg(test)]
+mod legacy_indicator_migration_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    async fn create_legacy_db(url: &str) {
+        let options = SqliteConnectOptions::from_str(url)
+            .unwrap()
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+
+        // Start from the current schema for all non-legacy tables so indexes/constraints match
+        // what `SqliteBackendStore::new()` will run, then rewrite Opportunity/Regression and add
+        // the legacy Indicator table + columns.
+        sqlx::query(include_str!("../migrations/001_init.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("PRAGMA foreign_keys = OFF;")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+
+        sqlx::query("DROP TABLE Opportunity;")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE Opportunity (\
+              id TEXT PRIMARY KEY,\
+              title TEXT NOT NULL,\
+              origin TEXT NOT NULL,\
+              componentId TEXT NULL,\
+              module TEXT NULL,\
+              repoId TEXT NULL,\
+              indicator TEXT NULL,\
+              confidence REAL NULL,\
+              risk TEXT NOT NULL,\
+              expectedValue REAL NOT NULL,\
+              effort TEXT NULL,\
+              status TEXT NOT NULL,\
+              age TEXT NULL,\
+              rationale TEXT NULL,\
+              dependsOn TEXT NOT NULL DEFAULT '[]',\
+              blocks TEXT NOT NULL DEFAULT '[]',\
+              createdAt TEXT NOT NULL,\
+              updatedAt TEXT NOT NULL,\
+              FOREIGN KEY(componentId) REFERENCES Component(id),\
+              FOREIGN KEY(repoId) REFERENCES Repo(id)\
+            );",
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_opportunity_status ON Opportunity(status);")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_opportunity_componentId ON Opportunity(componentId);",
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+        sqlx::query("DROP TABLE Regression;")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE Regression (\
+              id TEXT PRIMARY KEY,\
+              repoName TEXT NOT NULL,\
+              indicator TEXT NOT NULL,\
+              delta REAL NOT NULL,\
+              severity TEXT NOT NULL,\
+              since TEXT NOT NULL,\
+              trend TEXT NOT NULL,\
+              createdAt TEXT NOT NULL,\
+              FOREIGN KEY(repoName) REFERENCES Repo(name)\
+            );",
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_regression_repoName ON Regression(repoName);")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS Indicator (\
+              id TEXT PRIMARY KEY,\
+              name TEXT NOT NULL UNIQUE,\
+              description TEXT NOT NULL,\
+              scope TEXT NOT NULL,\
+              weight REAL NOT NULL,\
+              threshold REAL NOT NULL,\
+              current REAL NOT NULL,\
+              trend REAL NOT NULL,\
+              reports INTEGER NOT NULL,\
+              mode TEXT NOT NULL,\
+              lastRun TEXT NOT NULL,\
+              createdAt TEXT NOT NULL,\
+              updatedAt TEXT NOT NULL\
+            );",
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+        sqlx::query("PRAGMA foreign_keys = ON;")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        // Seed required FK rows + legacy data.
+        sqlx::query("INSERT INTO Product (id, name, createdAt, updatedAt) VALUES (?, ?, ?, ?);")
+            .bind("prod-legacy")
+            .bind("Legacy Product")
+            .bind("2026-01-01T00:00:00Z")
+            .bind("2026-01-01T00:00:00Z")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT INTO Component (\
+              id, name, domain, repos, modules, health, trend, owner, criticality, autonomy,\
+              lastEval, productId, createdAt, updatedAt\
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+        )
+        .bind("comp-legacy")
+        .bind("Legacy Component")
+        .bind("legacy")
+        .bind(0_i64)
+        .bind(0_i64)
+        .bind(0_i64)
+        .bind(0_i64)
+        .bind("legacy-owner")
+        .bind("low")
+        .bind("high")
+        .bind("2026-01-01T00:00:00Z")
+        .bind("prod-legacy")
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO Repo (\
+              id, name, componentId, owner, criticality, autonomy, qualityScore, execStatus,\
+              lastEval, coverage, secScore, createdAt, updatedAt\
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+        )
+        .bind("repo-legacy")
+        .bind("legacy-repo")
+        .bind("comp-legacy")
+        .bind("legacy-owner")
+        .bind("low")
+        .bind("high")
+        .bind(0_i64)
+        .bind("idle")
+        .bind("2026-01-01T00:00:00Z")
+        .bind(0_i64)
+        .bind(0_i64)
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO KPI (\
+              id, name, description, scopeLevel, threshold, weight, aggFn, createdAt, updatedAt\
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
+        )
+        .bind("kpi-legacy")
+        .bind("Legacy KPI")
+        .bind("legacy")
+        .bind("repo")
+        .bind(0.0_f64)
+        .bind(1.0_f64)
+        .bind("latest")
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO Indicator (\
+              id, name, description, scope, weight, threshold, current, trend, reports, mode,\
+              lastRun, createdAt, updatedAt\
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+        )
+        .bind("ind-legacy")
+        .bind("Legacy Indicator")
+        .bind("legacy")
+        .bind("repo")
+        .bind(1.0_f64)
+        .bind(0.0_f64)
+        .bind(0.0_f64)
+        .bind(0.0_f64)
+        .bind(0_i64)
+        .bind("latest")
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO Opportunity (\
+              id, title, origin, componentId, module, repoId, indicator, confidence, risk,\
+              expectedValue, effort, status, age, rationale, dependsOn, blocks, createdAt, updatedAt\
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+        )
+        .bind("opp-legacy")
+        .bind("Legacy opportunity")
+        .bind("legacy")
+        .bind("comp-legacy")
+        .bind(Option::<String>::None)
+        .bind("repo-legacy")
+        .bind("Legacy Indicator")
+        .bind(Option::<f64>::None)
+        .bind("low")
+        .bind(1.0_f64)
+        .bind(Option::<String>::None)
+        .bind("awaiting_triage")
+        .bind(Option::<String>::None)
+        .bind(Option::<String>::None)
+        .bind("[]")
+        .bind("[]")
+        .bind("2026-01-01T00:00:00Z")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO Regression (\
+              id, repoName, indicator, delta, severity, since, trend, createdAt\
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
+        )
+        .bind("reg-legacy")
+        .bind("legacy-repo")
+        .bind("Legacy Indicator")
+        .bind(-1.0_f64)
+        .bind("low")
+        .bind("2026-01-01T00:00:00Z")
+        .bind("stable")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_indicator_schema_is_migrated_and_cleared() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("legacy.sqlite");
+        let url = format!("sqlite://{}", db_path.display());
+        create_legacy_db(&url).await;
+
+        let store = SqliteBackendStore::new(&url).await.unwrap();
+
+        let indicator_table: Option<(String,)> = sqlx::query_as(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'Indicator'",
+        )
+        .fetch_optional(&store.pool)
+        .await
+        .unwrap();
+        assert!(indicator_table.is_none(), "Indicator table must be dropped");
+
+        let (opportunity_has_kpi,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('Opportunity') WHERE name = 'kpiId'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        let (opportunity_has_indicator,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('Opportunity') WHERE name = 'indicator'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(opportunity_has_kpi, 1, "Opportunity.kpiId must exist");
+        assert_eq!(
+            opportunity_has_indicator, 0,
+            "Opportunity.indicator must be removed"
+        );
+
+        let (regression_has_kpi,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('Regression') WHERE name = 'kpiId'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        let (regression_has_indicator,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM pragma_table_info('Regression') WHERE name = 'indicator'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(regression_has_kpi, 1, "Regression.kpiId must exist");
+        assert_eq!(
+            regression_has_indicator, 0,
+            "Regression.indicator must be removed"
+        );
+
+        let (opp_kpi_nulls,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM Opportunity WHERE kpiId IS NULL")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(opp_kpi_nulls, 1, "migrated Opportunity.kpiId must be NULL");
+
+        let (reg_kpi_nulls,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM Regression WHERE kpiId IS NULL")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(reg_kpi_nulls, 1, "migrated Regression.kpiId must be NULL");
+
+        let (preserved_component_id,): (Option<String>,) =
+            sqlx::query_as("SELECT componentId FROM Opportunity WHERE id = ?")
+                .bind("opp-legacy")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            preserved_component_id.as_deref(),
+            Some("comp-legacy"),
+            "non-legacy columns must be preserved"
+        );
     }
 }

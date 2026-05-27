@@ -26,10 +26,10 @@
     { "id": "test-discipline", "name": "Test Discipline", "description": "Test findings and coverage discipline", "scopeLevel": "repo", "threshold": 80.0, "weight": 1.0, "aggFn": "latest", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
   ],
   "Regression": [
-    { "id": "reg-1", "repoName": "auth-api", "indicator": "Test Coverage", "delta": -2.5, "severity": "low", "since": "2026-01-01T00:00:00Z", "trend": "improving", "createdAt": "2026-01-01T00:00:00Z" }
+    { "id": "reg-1", "repoName": "auth-api", "kpiId": null, "delta": -2.5, "severity": "low", "since": "2026-01-01T00:00:00Z", "trend": "improving", "createdAt": "2026-01-01T00:00:00Z" }
   ],
   "Opportunity": [
-    { "id": "opp-1", "title": "Refactor session module", "origin": "agent", "componentId": "comp-1", "module": "auth-core", "repoId": "repo-1", "indicator": "Test Coverage", "confidence": 0.75, "risk": "low", "expectedValue": 5000.0, "effort": "M", "status": "awaiting_triage", "age": "3d", "rationale": "Coverage gap detected", "dependsOn": "[]", "blocks": "[]", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
+    { "id": "opp-1", "title": "Refactor session module", "origin": "agent", "componentId": "comp-1", "module": "auth-core", "repoId": "repo-1", "kpiId": null, "confidence": 0.75, "risk": "low", "expectedValue": 5000.0, "effort": "M", "status": "awaiting_triage", "age": "3d", "rationale": "Coverage gap detected", "dependsOn": "[]", "blocks": "[]", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
   ],
   "Request": [
     { "id": "req-1", "title": "Add MFA support", "description": "Multi-factor authentication", "componentId": "comp-1", "repoId": "repo-1", "requestedBy": "alice@example.com", "status": "draft", "linkedOpportunityId": null, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z" }
