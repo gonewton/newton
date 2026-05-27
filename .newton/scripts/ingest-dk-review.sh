@@ -1,20 +1,18 @@
 #!/usr/bin/env bash
-# Ingest dk review findings into Newton as Opportunity records.
-# Usage: ingest-dk-review.sh -w <workspace> -s <scope-id> [--with-opportunities] [--with-evalrun] [-u <server-url>]
+# Ingest dk review findings into Newton as Opportunity records + optional EvalRun/Grades.
+# Usage: ingest-dk-review.sh -w <workspace> -s <scope-id> [--with-evalrun] [-u <server-url>]
 set -euo pipefail
 
 WORKSPACE=""
 SCOPE_ID=""
-WITH_OPPORTUNITIES=false
 WITH_EVALRUN=false
 SERVER_URL="${NEWTON_SERVER_URL:-http://localhost:8080}"
 
 usage() {
-    echo "Usage: $0 -w <workspace> -s <scope-id> [--with-opportunities] [--with-evalrun] [-u <server-url>]"
+    echo "Usage: $0 -w <workspace> -s <scope-id> [--with-evalrun] [-u <server-url>]"
     echo ""
     echo "  -w <workspace>       Path to the Newton workspace"
     echo "  -s <scope-id>        Component scope id for dk review"
-    echo "  --with-opportunities POST findings to Newton as opportunities"
     echo "  --with-evalrun       Write one EvalRun + per-dimension Grades via 'newton data' (no server required)"
     echo "  -u <url>             Newton server base URL (default: \$NEWTON_SERVER_URL or http://localhost:8080)"
     exit 1
@@ -24,7 +22,6 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -w) WORKSPACE="$2"; shift 2 ;;
         -s) SCOPE_ID="$2"; shift 2 ;;
-        --with-opportunities) WITH_OPPORTUNITIES=true; shift ;;
         --with-evalrun) WITH_EVALRUN=true; shift ;;
         -u) SERVER_URL="$2"; shift 2 ;;
         *) echo "Unknown argument: $1"; usage ;;
@@ -46,11 +43,9 @@ if ! command -v jq &>/dev/null; then
     exit 1
 fi
 
-if [[ "$WITH_OPPORTUNITIES" == true ]]; then
-    if ! command -v curl &>/dev/null; then
-        echo "Error: curl is required but not found in PATH"
-        exit 1
-    fi
+if ! command -v curl &>/dev/null; then
+    echo "Error: curl is required but not found in PATH"
+    exit 1
 fi
 
 # Run dk review and capture JSON output
@@ -64,9 +59,8 @@ fi
 FINDING_COUNT=$(echo "$DK_JSON" | jq 'length' 2>/dev/null || echo 0)
 echo "Found $FINDING_COUNT finding(s) for scope '$SCOPE_ID'"
 
-if [[ "$WITH_OPPORTUNITIES" != true && "$WITH_EVALRUN" != true ]]; then
+if [[ "$WITH_EVALRUN" != true ]]; then
     echo "$DK_JSON" | jq .
-    exit 0
 fi
 
 if [[ "$WITH_EVALRUN" == true ]]; then
@@ -117,9 +111,6 @@ if [[ "$WITH_EVALRUN" == true ]]; then
 fi
 
 # POST each finding as an opportunity
-if [[ "$WITH_OPPORTUNITIES" != true ]]; then
-    exit 0
-fi
 
 echo "$DK_JSON" | jq -c '.[]' | while read -r finding; do
     FINDING_ID=$(echo "$finding" | jq -r '.id // empty')
