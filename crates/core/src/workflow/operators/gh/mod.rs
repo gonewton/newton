@@ -1,5 +1,9 @@
 #![allow(clippy::result_large_err)]
 
+mod retry;
+mod runners;
+mod utils;
+
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
@@ -8,17 +12,19 @@ use crate::workflow::operators::gh_authorization::{
     AuthorizationRequest, NoopApprover, OnUnavailable,
 };
 use async_trait::async_trait;
+use retry::RetryConfig;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::process::Command;
-use tokio::time::sleep;
-use tracing;
+use utils::{
+    extract_pr_number, get_pr_identifier, insert_status_ids, parse_pr_url, resolve_option_id,
+    validate_repository_format,
+};
 
-const MAX_RETRY_DELAY_MS: u64 = 300_000;
+pub use runners::{default_git_runner, default_runner, GhOutput, GhRunner, GitRunner};
+
 const DEFAULT_AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub struct GhOperator {
@@ -30,9 +36,9 @@ pub struct GhOperator {
 impl GhOperator {
     pub fn new() -> Self {
         Self {
-            runner: Arc::new(TokioGhRunner),
+            runner: Arc::new(default_runner()),
             approver: Arc::new(NoopApprover),
-            git_runner: Arc::new(TokioGitRunner),
+            git_runner: Arc::new(default_git_runner()),
         }
     }
 
@@ -40,7 +46,7 @@ impl GhOperator {
         Self {
             runner,
             approver: Arc::new(NoopApprover),
-            git_runner: Arc::new(TokioGitRunner),
+            git_runner: Arc::new(default_git_runner()),
         }
     }
 
@@ -51,7 +57,7 @@ impl GhOperator {
         Self {
             runner,
             approver,
-            git_runner: Arc::new(TokioGitRunner),
+            git_runner: Arc::new(default_git_runner()),
         }
     }
 
@@ -93,18 +99,12 @@ impl Operator for GhOperator {
             })?;
 
         match operation {
-            "project_resolve_board" => {
-                validate_project_resolve_board(map)?;
-            }
-            "project_item_set_status" => {
-                validate_project_item_set_status(map)?;
-            }
+            "project_resolve_board" => validate_project_resolve_board(map)?,
+            "project_item_set_status" => validate_project_item_set_status(map)?,
             "pr_create" => {
                 validate_pr_create(map)?;
             }
-            "pr_view" => {
-                validate_pr_view(map)?;
-            }
+            "pr_view" => {}
             "pr_approve" => {
                 validate_pr_approve(map)?;
             }
@@ -119,9 +119,7 @@ impl Operator for GhOperator {
             }
         }
 
-        // Validate optional authorization parameters (side-effect-free).
         parse_authorization_params(map)?;
-
         Ok(())
     }
 
@@ -403,38 +401,7 @@ fn validate_pr_create(map: &Map<String, Value>) -> Result<(), AppError> {
             "title is required for pr_create",
         ));
     }
-    if let Some(retry_count) = map.get("retry_count").and_then(Value::as_i64) {
-        if retry_count < 1 {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "retry_count must be at least 1",
-            ));
-        }
-    }
-    if let Some(delay) = map.get("retry_delay_ms").and_then(Value::as_i64) {
-        if delay < 0 {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "retry_delay_ms must be non-negative",
-            ));
-        }
-    }
-    if let Some(mult) = map.get("retry_multiplier").and_then(Value::as_f64) {
-        if mult < 1.0 {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "retry_multiplier must be >= 1.0",
-            ));
-        }
-    }
-    if let Some(jitter) = map.get("retry_jitter_ms").and_then(Value::as_i64) {
-        if jitter < 0 {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "retry_jitter_ms must be non-negative",
-            ));
-        }
-    }
+    RetryConfig::validate(map)?;
     Ok(())
 }
 
@@ -490,54 +457,7 @@ fn validate_branch_push(map: &Map<String, Value>) -> Result<(), AppError> {
         }
     }
 
-    if let Some(retry_count) = map.get("retry_count").and_then(Value::as_i64) {
-        if retry_count < 1 {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "retry_count must be at least 1",
-            ));
-        }
-    }
-    if let Some(delay) = map.get("retry_delay_ms").and_then(Value::as_i64) {
-        if delay < 0 {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "retry_delay_ms must be non-negative",
-            ));
-        }
-    }
-    if let Some(mult) = map.get("retry_multiplier").and_then(Value::as_f64) {
-        if mult < 1.0 {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "retry_multiplier must be >= 1.0",
-            ));
-        }
-    }
-    if let Some(jitter) = map.get("retry_jitter_ms").and_then(Value::as_i64) {
-        if jitter < 0 {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "retry_jitter_ms must be non-negative",
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-fn validate_pr_view(map: &Map<String, Value>) -> Result<(), AppError> {
-    let pr = map.get("pr");
-    match pr {
-        Some(Value::String(s)) if !s.is_empty() => {}
-        Some(Value::Number(_)) => {}
-        _ => {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "pr is required for pr_view (string or number)",
-            ));
-        }
-    }
+    RetryConfig::validate(map)?;
     Ok(())
 }
 
@@ -577,81 +497,6 @@ fn validate_pr_approve(map: &Map<String, Value>) -> Result<(), AppError> {
                 .with_code("WFG-GH-006")
         })?;
         parse_pr_url(url)?;
-    }
-    Ok(())
-}
-
-fn parse_pr_url(url: &str) -> Result<(String, u64), AppError> {
-    if !url.starts_with("https://") {
-        return Err(AppError::new(
-            ErrorCategory::ValidationError,
-            "pr_url must use https scheme",
-        )
-        .with_code("WFG-GH-006"));
-    }
-    let without_scheme = &url["https://".len()..];
-    let slash_pos = without_scheme.find('/').ok_or_else(|| {
-        AppError::new(
-            ErrorCategory::ValidationError,
-            "pr_url is not a valid GitHub pull request URL",
-        )
-        .with_code("WFG-GH-006")
-    })?;
-    let host = &without_scheme[..slash_pos];
-    if !host.contains("github") {
-        return Err(AppError::new(
-            ErrorCategory::ValidationError,
-            "pr_url host must contain 'github'",
-        )
-        .with_code("WFG-GH-006"));
-    }
-    let path = &without_scheme[slash_pos..];
-    let parts: Vec<&str> = path.split('/').collect();
-    // Expected: ["", owner, repo, "pull", number]
-    if parts.len() < 5 || parts[3] != "pull" {
-        return Err(AppError::new(
-            ErrorCategory::ValidationError,
-            "pr_url path must contain /pull/<number>",
-        )
-        .with_code("WFG-GH-006"));
-    }
-    let owner = parts[1];
-    let repo = parts[2];
-    let pr_number: u64 = parts[4].parse().map_err(|_| {
-        AppError::new(
-            ErrorCategory::ValidationError,
-            "pr_url pull request number must be a positive integer",
-        )
-        .with_code("WFG-GH-006")
-    })?;
-    if pr_number < 1 {
-        return Err(AppError::new(
-            ErrorCategory::ValidationError,
-            "pr_url pull request number must be >= 1",
-        )
-        .with_code("WFG-GH-006"));
-    }
-    Ok((format!("{owner}/{repo}"), pr_number))
-}
-
-fn validate_repository_format(repo: &str) -> Result<(), AppError> {
-    let slash_count = repo.chars().filter(|&c| c == '/').count();
-    if slash_count != 1 {
-        return Err(AppError::new(
-            ErrorCategory::ValidationError,
-            "repository must be in owner/repo format",
-        )
-        .with_code("WFG-GH-007"));
-    }
-    let valid = repo
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' || c == '/');
-    if !valid || repo.starts_with('/') || repo.ends_with('/') {
-        return Err(AppError::new(
-            ErrorCategory::ValidationError,
-            "repository must match owner/repo format with valid characters",
-        )
-        .with_code("WFG-GH-007"));
     }
     Ok(())
 }
@@ -701,9 +546,7 @@ impl GhOperator {
 
         Ok(Value::Object(out))
     }
-}
 
-impl GhOperator {
     async fn execute_project_resolve_board(
         &self,
         map: &Map<String, Value>,
@@ -816,22 +659,16 @@ impl GhOperator {
             "In review".to_string(),
             "Done".to_string(),
         ];
-        let required_names: Vec<String> = if let Some(arr) = map.get("required_option_names") {
-            arr.as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_str().map(std::string::ToString::to_string))
-                        .collect()
-                })
-                .unwrap_or_default()
-        } else {
-            default_required.clone()
-        };
-        let required_names = if required_names.is_empty() {
-            default_required
-        } else {
-            required_names
-        };
+        let required_names: Vec<String> = map
+            .get("required_option_names")
+            .and_then(Value::as_array)
+            .filter(|a| !a.is_empty())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_else(|| default_required.clone());
 
         let mut found_options: Vec<String> = Vec::new();
         let mut options_map: HashMap<String, String> = HashMap::new();
@@ -867,27 +704,7 @@ impl GhOperator {
                     .collect(),
             ),
         );
-        if let Some(id) = options_map.get("Ready") {
-            out.insert("ready_id".to_string(), json!(id));
-        }
-        if let Some(id) = options_map.get("In progress") {
-            out.insert("in_progress_id".to_string(), json!(id));
-        }
-        if let Some(id) = options_map.get("In review") {
-            out.insert("in_review_id".to_string(), json!(id));
-        }
-        if let Some(id) = options_map.get("Done") {
-            out.insert("done_id".to_string(), json!(id));
-        }
-        if let Some(id) = options_map.get("Backlog") {
-            out.insert("backlog_id".to_string(), json!(id));
-        }
-        if let Some(id) = options_map.get("Idea") {
-            out.insert("idea_id".to_string(), json!(id));
-        }
-        if let Some(id) = options_map.get("Draft") {
-            out.insert("draft_id".to_string(), json!(id));
-        }
+        insert_status_ids(&options_map, &mut out);
 
         Ok(Value::Object(out))
     }
@@ -981,40 +798,20 @@ impl GhOperator {
         Err(error)
     }
 
-    /// Executes `gh pr create` with bounded retries.
-    ///
-    /// Retry timing: starts at `retry_delay_ms` (default 5000), grows by
-    /// `retry_multiplier` (default 2.0) per attempt, with optional uniform
-    /// jitter in `[0, retry_jitter_ms]`. Each per-attempt delay is clamped to
-    /// `MAX_RETRY_DELAY_MS` (5 minutes). The `ailoop` approver is consulted
-    /// at most once per logical invocation (outside this retry loop).
     async fn execute_pr_create(
         &self,
         map: &Map<String, Value>,
         workspace: &std::path::Path,
     ) -> Result<Value, AppError> {
-        use rand::Rng;
         let base = map.get("base").and_then(Value::as_str).unwrap_or("main");
         let title = map.get("title").and_then(Value::as_str).unwrap();
         let body = map.get("body").and_then(Value::as_str).unwrap_or("");
-        let retry_count = map.get("retry_count").and_then(Value::as_i64).unwrap_or(3) as usize;
-        let retry_delay_ms = map
-            .get("retry_delay_ms")
-            .and_then(Value::as_i64)
-            .unwrap_or(5000) as u64;
-        let multiplier = map
-            .get("retry_multiplier")
-            .and_then(Value::as_f64)
-            .unwrap_or(2.0) as f32;
-        let jitter_ms = map
-            .get("retry_jitter_ms")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let mut delay_ms = retry_delay_ms.min(MAX_RETRY_DELAY_MS);
 
+        let config = RetryConfig::from_map(map);
+        let mut delay_ms = config.start_delay_ms();
         let mut last_error: Option<AppError> = None;
 
-        for attempt in 1..=retry_count {
+        for attempt in 1..=config.count {
             let result = self
                 .runner
                 .run(
@@ -1046,22 +843,7 @@ impl GhOperator {
                 }
             }
 
-            if attempt < retry_count {
-                let jitter = if jitter_ms > 0 {
-                    rand::thread_rng().gen_range(0..=jitter_ms)
-                } else {
-                    0
-                };
-                let sleep_ms = delay_ms.saturating_add(jitter).min(MAX_RETRY_DELAY_MS);
-                tracing::warn!(
-                    attempt,
-                    max_attempts = retry_count,
-                    delay_ms = sleep_ms,
-                    "pr create failed, retrying after delay"
-                );
-                sleep(Duration::from_millis(sleep_ms)).await;
-                delay_ms = ((delay_ms as f32) * multiplier).min(MAX_RETRY_DELAY_MS as f32) as u64;
-            }
+            config.backoff(attempt, &mut delay_ms, "pr create").await;
         }
 
         Err(last_error.unwrap_or_else(|| {
@@ -1117,7 +899,6 @@ impl GhOperator {
         map: &Map<String, Value>,
         workspace: &std::path::Path,
     ) -> Result<Value, AppError> {
-        use rand::Rng;
         let remote = map
             .get("remote")
             .and_then(Value::as_str)
@@ -1128,20 +909,8 @@ impl GhOperator {
             .and_then(Value::as_bool)
             .unwrap_or(true);
 
-        let retry_count = map.get("retry_count").and_then(Value::as_i64).unwrap_or(3) as usize;
-        let retry_delay_ms = map
-            .get("retry_delay_ms")
-            .and_then(Value::as_i64)
-            .unwrap_or(5000) as u64;
-        let multiplier = map
-            .get("retry_multiplier")
-            .and_then(Value::as_f64)
-            .unwrap_or(2.0) as f32;
-        let jitter_ms = map
-            .get("retry_jitter_ms")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let mut delay_ms = retry_delay_ms.min(MAX_RETRY_DELAY_MS);
+        let config = RetryConfig::from_map(map);
+        let mut delay_ms = config.start_delay_ms();
 
         let mut args: Vec<&str> = vec!["push"];
         if set_upstream {
@@ -1152,7 +921,7 @@ impl GhOperator {
 
         let mut last_error: Option<AppError> = None;
 
-        for attempt in 1..=retry_count {
+        for attempt in 1..=config.count {
             let result = self.git_runner.run(&args, workspace).await;
 
             match result {
@@ -1169,22 +938,7 @@ impl GhOperator {
                 }
             }
 
-            if attempt < retry_count {
-                let jitter = if jitter_ms > 0 {
-                    rand::thread_rng().gen_range(0..=jitter_ms)
-                } else {
-                    0
-                };
-                let sleep_ms = delay_ms.saturating_add(jitter).min(MAX_RETRY_DELAY_MS);
-                tracing::warn!(
-                    attempt,
-                    max_attempts = retry_count,
-                    delay_ms = sleep_ms,
-                    "git push failed, retrying after delay"
-                );
-                sleep(Duration::from_millis(sleep_ms)).await;
-                delay_ms = ((delay_ms as f32) * multiplier).min(MAX_RETRY_DELAY_MS as f32) as u64;
-            }
+            config.backoff(attempt, &mut delay_ms, "git push").await;
         }
 
         Err(last_error
@@ -1192,187 +946,9 @@ impl GhOperator {
     }
 }
 
-fn resolve_option_id(board: &Map<String, Value>, status: &str) -> Result<String, AppError> {
-    if let Some(options) = board.get("options").and_then(Value::as_object) {
-        if let Some(id) = options.get(status).and_then(Value::as_str) {
-            return Ok(id.to_string());
-        }
-    }
-
-    let flat_key = match status {
-        "Idea" => Some("idea_id"),
-        "Draft" => Some("draft_id"),
-        "Ready" => Some("ready_id"),
-        "In progress" => Some("in_progress_id"),
-        "In review" => Some("in_review_id"),
-        "Done" => Some("done_id"),
-        "Backlog" => Some("backlog_id"),
-        _ => None,
-    };
-
-    if let Some(key) = flat_key {
-        if let Some(id) = board.get(key).and_then(Value::as_str) {
-            return Ok(id.to_string());
-        }
-    }
-
-    Err(AppError::new(
-        ErrorCategory::ValidationError,
-        format!(
-            "option id for status '{status}' not found in board (use board.options from project_resolve_board or pass single_select_option_id)",
-        ),
-    ))
-}
-
-fn get_pr_identifier(map: &Map<String, Value>) -> Result<String, AppError> {
-    let pr = map.get("pr").ok_or_else(|| {
-        AppError::new(ErrorCategory::ValidationError, "pr is required for pr_view")
-    })?;
-
-    match pr {
-        Value::String(s) => {
-            if s.contains("/pull/") {
-                if let Some(num) = s.rsplit('/').next() {
-                    return Ok(num.to_string());
-                }
-            }
-            Ok(s.clone())
-        }
-        Value::Number(n) => Ok(n.to_string()),
-        _ => Err(AppError::new(
-            ErrorCategory::ValidationError,
-            "pr must be a string or number",
-        )),
-    }
-}
-
-fn extract_pr_number(url: &str) -> Result<u64, AppError> {
-    let parts: Vec<&str> = url.rsplit('/').collect();
-    parts
-        .first()
-        .and_then(|s| s.parse::<u64>().ok())
-        .ok_or_else(|| {
-            AppError::new(
-                ErrorCategory::ToolExecutionError,
-                format!("failed to extract PR number from: {url}"),
-            )
-            .with_code("WFG-GH-002")
-        })
-}
-
-#[derive(Clone, Debug)]
-pub struct GhOutput {
-    pub stdout: String,
-    pub stderr: String,
-    pub exit_code: i32,
-}
-
-#[async_trait]
-pub trait GhRunner: Send + Sync + 'static {
-    async fn run(&self, args: &[&str], cwd: &std::path::Path) -> Result<GhOutput, AppError>;
-}
-
-pub struct TokioGhRunner;
-
-pub fn default_runner() -> TokioGhRunner {
-    TokioGhRunner
-}
-
-#[async_trait]
-impl GhRunner for TokioGhRunner {
-    async fn run(&self, args: &[&str], cwd: &std::path::Path) -> Result<GhOutput, AppError> {
-        let mut cmd = Command::new("gh");
-        for arg in args {
-            cmd.arg(arg);
-        }
-        cmd.current_dir(cwd)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null());
-
-        let output = cmd.output().await.map_err(|e| {
-            AppError::new(
-                ErrorCategory::ToolExecutionError,
-                format!("failed to execute gh: {e}"),
-            )
-            .with_code("WFG-GH-003")
-        })?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        let exit_code = output.status.code().unwrap_or(-1);
-
-        if exit_code != 0 {
-            return Err(AppError::new(
-                ErrorCategory::ToolExecutionError,
-                format!("gh command failed with exit code {exit_code}: {stderr}"),
-            )
-            .with_code("WFG-GH-004"));
-        }
-
-        Ok(GhOutput {
-            stdout,
-            stderr,
-            exit_code,
-        })
-    }
-}
-
-#[async_trait]
-pub trait GitRunner: Send + Sync + 'static {
-    async fn run(&self, args: &[&str], cwd: &std::path::Path) -> Result<GhOutput, AppError>;
-}
-
-pub struct TokioGitRunner;
-
-pub fn default_git_runner() -> TokioGitRunner {
-    TokioGitRunner
-}
-
-#[async_trait]
-impl GitRunner for TokioGitRunner {
-    async fn run(&self, args: &[&str], cwd: &std::path::Path) -> Result<GhOutput, AppError> {
-        let mut cmd = Command::new("git");
-        for arg in args {
-            cmd.arg(arg);
-        }
-        cmd.current_dir(cwd)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null());
-
-        let output = cmd.output().await.map_err(|e| {
-            AppError::new(
-                ErrorCategory::ToolExecutionError,
-                format!("failed to execute git: {e}"),
-            )
-            .with_code("WFG-GH-010")
-        })?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        let exit_code = output.status.code().unwrap_or(-1);
-
-        if exit_code != 0 {
-            return Err(AppError::new(
-                ErrorCategory::ToolExecutionError,
-                format!("git command failed with exit code {exit_code}: {stderr}"),
-            )
-            .with_code("WFG-GH-011"));
-        }
-
-        Ok(GhOutput {
-            stdout,
-            stderr,
-            exit_code,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn test_validate_project_resolve_board() {

@@ -58,6 +58,11 @@ use crate::cli::context::NewtonContext;
 use crate::cli::ops;
 use crate::cli::{commands, init};
 
+#[path = "help_text.rs"]
+mod help_text;
+pub use help_text::WORKFLOW_RUN_LONG_ABOUT;
+use help_text::*;
+
 #[cfg(feature = "ask")]
 use crate::cli::ask;
 
@@ -89,120 +94,6 @@ pub mod error_codes {
     /// `serve --with-embedded-ailoop`: ailoop_server::router() returned an error (issue #351).
     pub const NEWTON_SERVE_AIL_004: &str = "NEWTON-SERVE-AIL-004";
 }
-
-// ── help-text constants ───────────────────────────────────────────────────────
-
-pub const WORKFLOW_RUN_LONG_ABOUT: &str = "\
-Run executes a workflow graph defined in YAML, with optional trigger payload.
-
-EXAMPLES:
-  Basic workflow execution:
-    newton workflow run workflow.yaml
-
-  With workspace and trigger data:
-    newton workflow run workflow.yaml --workspace ./output --trigger key=value
-
-  Multiple trigger arguments:
-    newton workflow run workflow.yaml --trigger env=prod --trigger version=1.2.3
-
-  With input file and verbose output:
-    newton workflow run workflow.yaml input.txt --workspace ./workspace --verbose
-
-  With base trigger payload from a JSON file:
-    newton workflow run workflow.yaml --parameters-json payload.json --trigger override=1";
-
-const INIT_LONG_ABOUT: &str = "\
-Init creates the .newton workspace layout, installs the Newton template with \
-aikit-sdk, and writes default configs so you can run immediately.
-
-EXAMPLES:
-  Initialize current directory:
-    newton init .
-
-  Initialize a specific directory:
-    newton init ./workspace
-
-  Initialize with custom template source:
-    newton init . --template gonewton/newton-templates";
-
-const BATCH_LONG_ABOUT: &str = "\
-Batch reads plan files from .newton/plan/<project_id> and drives headless \
-workflow orchestration.
-
-EXAMPLES:
-  Process queued plans for a project:
-    newton batch project-alpha
-
-  With workspace override:
-    newton batch project-alpha --workspace ./workspace
-
-  Process one plan and exit:
-    newton batch project-alpha --once
-
-  Custom poll interval (seconds):
-    newton batch project-alpha --poll-interval 30";
-
-const SERVE_LONG_ABOUT: &str = "\
-Serve runs the Newton HTTP/WebSocket API for UIs, agents, and integrations.
-Full REST contract: openapi/newton-backend-parity.yaml.
-
-EXAMPLES:
-  Start API server on default port:
-    newton serve
-
-  Start on custom host and port:
-    newton serve --host 0.0.0.0 --port 9000
-
-  Serve a built UI from a static directory:
-    newton serve --static-ui ./ui/dist";
-
-const WORKFLOW_LONG_ABOUT: &str = "\
-Workflow groups all commands for operating on workflow YAML files and managing \
-the execution lifecycle: run, validate, lint, preview, graph, resume, runs, \
-checkpoint, and artifact.
-
-Subcommands (execution):
-  run <FILE>         Execute a workflow graph
-
-Subcommands (file-oriented):
-  validate <FILE>    Validate a workflow graph definition
-  lint <FILE>        Check workflow for best practices and issues
-  preview <FILE>     Preview what running the workflow would do
-  graph <FILE>       Render the workflow graph (default --format dot)
-
-Subcommands (execution-lifecycle):
-  resume             Continue a workflow from its last checkpoint (--run-id)
-  runs list          List workflow execution history
-  runs show          Show task-by-task detail for a specific run (--run-id)
-  checkpoint list    Display available executions and checkpoint details
-  checkpoint clean   Remove old checkpoint files (--older-than)
-  artifact clean     Remove old execution artifact files (--older-than)
-
-EXAMPLES:
-  newton workflow run workflow.yaml
-  newton workflow run workflow.yaml --workspace ./output --trigger key=value
-  newton workflow validate workflow.yaml
-  newton workflow lint workflow.yaml --format json
-  newton workflow preview workflow.yaml --trigger env=prod --format prose
-  newton workflow graph workflow.yaml --output graph.dot
-  newton workflow resume --run-id 12345678-1234-1234-1234-123456789abc
-  newton workflow runs list --workspace ./workspace
-  newton workflow runs show --run-id <RUN_ID> --task my-task --verbose
-  newton workflow checkpoint list --workspace ./workspace --json
-  newton workflow checkpoint clean --workspace ./workspace --older-than 7d
-  newton workflow artifact clean --workspace ./workspace --older-than 30d";
-
-const WEBHOOK_LONG_ABOUT: &str = "\
-Webhook provides HTTP endpoints that can trigger workflow executions in \
-response to external events.
-
-Subcommands:
-  serve   Start an HTTP server to receive webhook events
-  status  Display webhook endpoint configuration and status
-
-EXAMPLES:
-  newton webhook serve --workflow workflow.yaml --workspace ./workspace
-  newton webhook status --workflow workflow.yaml --workspace ./workspace";
 
 // ── shared helpers ────────────────────────────────────────────────────────────
 
@@ -679,45 +570,6 @@ fn serve_command() -> Command {
 
 // ── Per-verb help content ──────────────────────────────────────────────────────
 
-const DATA_GET_LONG_ABOUT: &str =
-    "Retrieve catalog entities — either a full collection or a single item by id.\n\n\
-     EXAMPLES:\n  \
-     newton data get products\n  \
-     newton data get product <id> --json\n  \
-     newton data get kpis\n  \
-     newton data get kpi <id> --json\n  \
-     newton data get eval-runs\n  \
-     newton data get eval-runs --scope repo --scope-id gonewton-newton\n  \
-     newton data get eval-runs --source dk-review --limit 25\n  \
-     newton data get eval-run <id> --json\n  \
-     newton data get grades\n  \
-     newton data get grades --run-id <runId>\n  \
-     newton data get grades --kpi-id <kpiId>\n  \
-     newton data get grade <id>";
-
-const DATA_POST_LONG_ABOUT: &str =
-    "Create a new catalog entity. For EvalRun and Grade, the caller MUST provide a stable `id`.\n\n\
-     EXAMPLES:\n  \
-     newton data post product -f body.json\n  \
-     newton data post component -f body.json --dry-run\n  \
-     newton data post eval-run -f evalrun.json\n  \
-     newton data post grade -f grade.json";
-
-const DATA_PUT_LONG_ABOUT: &str =
-    "Replace an existing catalog entity (full update).  The entity id is required.\n\n\
-     EXAMPLES:\n  \
-     newton data put product <id> -f body.json";
-
-const DATA_PATCH_LONG_ABOUT: &str =
-    "Partially update an existing catalog entity.  The entity id is required.\n\n\
-     EXAMPLES:\n  \
-     newton data patch product <id> --body '{\"name\":\"X\"}'";
-
-const DATA_DELETE_LONG_ABOUT: &str = "Delete a catalog entity by id.\n\n\
-     EXAMPLES:\n  \
-     newton data delete product <id>";
-
-/// Build a clap-registered leaf `Command` for a single HTTP verb.
 fn data_verb_command(verb: DataVerb) -> Command {
     let (id, summary, long_about, examples, syntax, has_body_args) = match verb {
         DataVerb::Get => (
@@ -1493,58 +1345,13 @@ fn workflow_command() -> Command {
                         }
                     }
                     "run" => {
-                        let workflow =
-                            get_opt_path(&args, "subcommand2").ok_or_else(|| {
-                                anyhow!(
-                                    "{}: workflow file is required for workflow run",
-                                    error_codes::CLI_MIG_002
-                                )
-                            })?;
-                        let input_file = get_opt_path(&args, "input-file");
-                        let trigger = parse_kvp_list(
-                            args.named.get("trigger").map(String::as_str).unwrap_or(""),
-                        )?;
-                        let context = parse_kvp_list(
-                            args.named.get("context").map(String::as_str).unwrap_or(""),
-                        )?;
-                        let parallel_limit = args
-                            .named
-                            .get("parallel-limit")
-                            .map(|s| {
-                                s.parse::<usize>().map_err(|_| {
-                                    anyhow!(
-                                        "{}: --parallel-limit must be a positive integer",
-                                        error_codes::CLI_MIG_002
-                                    )
-                                })
-                            })
-                            .transpose()?;
-                        let timeout_seconds = args
-                            .named
-                            .get("timeout")
-                            .map(|s| {
-                                s.parse::<u64>().map_err(|_| {
-                                    anyhow!(
-                                        "{}: --timeout must be a non-negative integer",
-                                        error_codes::CLI_MIG_002
-                                    )
-                                })
-                            })
-                            .transpose()?;
-                        let run_args = RunArgs {
-                            workflow,
-                            input_file,
-                            workspace: get_opt_path(&args, "workspace"),
-                            trigger,
-                            context,
-                            parameters_json: get_opt_path(&args, "parameters-json"),
-                            emit_completion_json: get_bool(&args, "emit-completion-json"),
-                            parallel_limit,
-                            timeout_seconds,
-                            verbose: get_bool(&args, "verbose"),
-                            server: get_opt_str(&args, "server"),
-                            state_dir: get_opt_path(&args, "state-dir"),
-                        };
+                        let mut a = args;
+                        if !a.named.contains_key("workflow") {
+                            if let Some(p) = a.named.get("subcommand2").cloned() {
+                                a.named.insert("workflow".to_string(), p);
+                            }
+                        }
+                        let run_args = RunArgs::try_from(a)?;
                         commands::workflow_run(run_args).await.map_err(anyhow::Error::from)
                     }
                     "import" => {
@@ -1867,17 +1674,7 @@ fn ask_summaries() -> Vec<ask::CommandSummary> {
             category: category.to_string(),
         }
     }
-    let cmds: Vec<Command> = vec![
-        run_command(),
-        init_command(),
-        batch_command(),
-        serve_command(),
-        workflow_command(),
-        webhook_command(),
-        health_command(),
-        doctor_command(),
-        config_command(),
-    ];
+    let cmds = all_root_commands();
     cmds.into_iter()
         .map(|c| {
             s(
@@ -1958,12 +1755,7 @@ pub fn build_mcp_router_for_serve(
 pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
     use cli_framework::mcp::McpToolExportPolicy;
     let builder = AppBuilder::new().with_version("newton", env!("CARGO_PKG_VERSION"));
-    #[allow(unused_mut)]
-    let mut builder = populate_command_registry(builder)?;
-    #[cfg(feature = "ask")]
-    {
-        builder = builder.register_command(ask_command())?;
-    }
+    let builder = populate_command_registry(builder)?;
     builder
         .with_mcp_export_policy(McpToolExportPolicy::ExposeMcpOnly)
         .build(ctx)
@@ -2012,24 +1804,24 @@ pub const MCP_EXPOSED_COMMAND_IDS: &[&str] = &[
 /// [`enumerate_tree_commands`] for complete metadata inspection.
 /// The `data` verb leaves are NOT included here; they are registered as nested
 /// tree commands under the "data" group.
-pub fn enumerate_commands() -> Vec<Command> {
-    #[allow(unused_mut)]
-    let mut cmds = vec![
+fn all_root_commands() -> Vec<Command> {
+    vec![
         run_command(),
         init_command(),
         batch_command(),
         serve_command(),
-        workflow_command(),
-        webhook_command(),
         health_command(),
         doctor_command(),
         config_command(),
-    ];
-    #[cfg(feature = "ask")]
-    {
-        cmds.push(ask_command());
-    }
-    cmds
+        webhook_command(),
+        #[cfg(feature = "ask")]
+        ask_command(),
+        workflow_command(),
+    ]
+}
+
+pub fn enumerate_commands() -> Vec<Command> {
+    all_root_commands()
 }
 
 /// Returns all leaf commands with their full path strings (slash-separated), suitable
@@ -2056,22 +1848,10 @@ pub fn build_mcp_command_registry(
 
     let mut registry = CommandRegistry::new();
 
-    // Register root-level non-data commands
-    for cmd in [
-        run_command(),
-        init_command(),
-        batch_command(),
-        serve_command(),
-        workflow_command(),
-        webhook_command(),
-        health_command(),
-        doctor_command(),
-        config_command(),
-    ] {
+    for cmd in all_root_commands() {
         registry.register(cmd);
     }
 
-    // Register `data` group and its five verb leaf commands
     let data_path = CommandPath::new(&["data"]).map_err(|e| anyhow!("CLI-PATH-001: {e}"))?;
     registry
         .register_group(
@@ -2103,16 +1883,9 @@ pub fn build_mcp_command_registry(
 /// Shared registration logic called by both [`build_app`] and (indirectly) by
 /// [`build_mcp_router_for_serve`] via [`build_mcp_command_registry`].
 fn populate_command_registry(builder: AppBuilder) -> anyhow::Result<AppBuilder> {
-    let builder = builder
-        .register_command(run_command())?
-        .register_command(init_command())?
-        .register_command(batch_command())?
-        .register_command(serve_command())?
-        .register_command(workflow_command())?
-        .register_command(webhook_command())?
-        .register_command(health_command())?
-        .register_command(doctor_command())?
-        .register_command(config_command())?;
+    let builder = all_root_commands()
+        .into_iter()
+        .try_fold(builder, |b, cmd| b.register_command(cmd))?;
 
     let data_path = CommandPath::new(&["data"]).map_err(|e| anyhow!("CLI-PATH-001: {e}"))?;
     let builder = builder.register_group(
