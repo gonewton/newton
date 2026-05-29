@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 # Ingest dk review findings into Newton as Opportunity records + optional EvalRun/Grades.
-# Usage: ingest-dk-review.sh -w <workspace> -s <scope-id> [--with-evalrun] [-u <server-url>]
+# Usage: ingest-dk-review.sh -w <workspace> -s <scope-id> [-p <path>] [--scope <type>] [--with-evalrun]
 set -euo pipefail
 
 WORKSPACE=""
 SCOPE_ID=""
+SCOPE_TYPE="repo"
+DK_PATH="."
 WITH_EVALRUN=false
-SERVER_URL="${NEWTON_SERVER_URL:-http://localhost:8080}"
 
 usage() {
-    echo "Usage: $0 -w <workspace> -s <scope-id> [--with-evalrun] [-u <server-url>]"
+    echo "Usage: $0 -w <workspace> -s <scope-id> [-p <path>] [--scope <type>] [--with-evalrun]"
     echo ""
     echo "  -w <workspace>       Path to the Newton workspace"
-    echo "  -s <scope-id>        Component scope id for dk review"
+    echo "  -s <scope-id>        Newton repo or component ID (UUID)"
+    echo "  -p <path>            Path to pass to dk review (default: current directory)"
+    echo "  --scope <type>       Scope type for EvalRun: repo, component, product, module (default: repo)"
     echo "  --with-evalrun       Write one EvalRun + per-dimension Grades via 'newton data' (no server required)"
-    echo "  -u <url>             Newton server base URL (default: \$NEWTON_SERVER_URL or http://localhost:8080)"
     exit 1
 }
 
@@ -22,8 +24,9 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -w) WORKSPACE="$2"; shift 2 ;;
         -s) SCOPE_ID="$2"; shift 2 ;;
+        -p) DK_PATH="$2"; shift 2 ;;
+        --scope) SCOPE_TYPE="$2"; shift 2 ;;
         --with-evalrun) WITH_EVALRUN=true; shift ;;
-        -u) SERVER_URL="$2"; shift 2 ;;
         *) echo "Unknown argument: $1"; usage ;;
     esac
 done
@@ -43,21 +46,37 @@ if ! command -v jq &>/dev/null; then
     exit 1
 fi
 
-if ! command -v curl &>/dev/null; then
-    echo "Error: curl is required but not found in PATH"
-    exit 1
-fi
+# Use a temp file to avoid any stdout pollution from dk
+DK_TMPFILE=$(mktemp /tmp/dk-review-XXXXXX.json)
+trap 'rm -f "$DK_TMPFILE"' EXIT
 
-# Run dk review and capture JSON output
-DK_JSON=$(dk review --scope "$SCOPE_ID" --output-format json 2>/dev/null)
+dk review "$DK_PATH" --output-format json --output-file "$DK_TMPFILE" 2>/dev/null || true
 
-if [[ -z "$DK_JSON" ]]; then
+if [[ ! -s "$DK_TMPFILE" ]]; then
     echo "No findings from dk review for scope '$SCOPE_ID'"
     exit 0
 fi
 
+# Detect output shape and extract findings array
+# dk --output-file produces: full review object {findings:[...], grades:{...}, ...}
+DK_ROOT_TYPE=$(jq -r 'type' "$DK_TMPFILE" 2>/dev/null || echo "unknown")
+
+if [[ "$DK_ROOT_TYPE" == "array" ]]; then
+    DK_JSON=$(jq -c '.' "$DK_TMPFILE")
+elif [[ "$DK_ROOT_TYPE" == "object" ]]; then
+    DK_JSON=$(jq -c '.findings // []' "$DK_TMPFILE")
+else
+    echo "Error: unexpected dk output format (type=$DK_ROOT_TYPE)"
+    exit 1
+fi
+
 FINDING_COUNT=$(echo "$DK_JSON" | jq 'length' 2>/dev/null || echo 0)
 echo "Found $FINDING_COUNT finding(s) for scope '$SCOPE_ID'"
+
+if [[ "$FINDING_COUNT" -eq 0 ]]; then
+    echo "No findings to ingest."
+    exit 0
+fi
 
 if [[ "$WITH_EVALRUN" != true ]]; then
     echo "$DK_JSON" | jq .
@@ -70,26 +89,41 @@ if [[ "$WITH_EVALRUN" == true ]]; then
     fi
 
     EVALUATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    RUN_ID="evalrun.dk-review.component.${SCOPE_ID}.${EVALUATED_AT}"
+    RUN_ID="evalrun.dk-review.${SCOPE_TYPE}.${SCOPE_ID}.${EVALUATED_AT}"
 
-    # Build inline grades array: one grade per unique dimension.
+    # Build inline grades array: one grade per unique dimension, with kpiId mapped from dimension.
     GRADES_JSON=$(echo "$DK_JSON" | jq -c '
+        def kpi_map: {
+            "overall_code_health": "kpi.dk.code-health",
+            "functionality":       "kpi.dk.code-health",
+            "design":              "kpi.dk.design-quality",
+            "change_scope":        "kpi.dk.design-quality",
+            "tests":               "kpi.dk.test-quality",
+            "complexity":          "kpi.dk.maintainability",
+            "naming":              "kpi.dk.maintainability",
+            "comments":            "kpi.dk.maintainability",
+            "consistency":         "kpi.dk.maintainability",
+            "documentation":       "kpi.dk.documentation",
+            "cl_description":      "kpi.dk.documentation",
+            "style":               "kpi.dk.documentation"
+        };
         [
-            to_entries
-            | group_by(.value.dimension // "general")[]
+            group_by(.dimension // "general")[]
             | {
-                dimension: (.[0].value.dimension // "general"),
+                dimension: (.[0].dimension // "general"),
                 score: ([100 - (length * 10), 0] | max | [., 100] | min),
-                kpiId: null,
-                evidence: { findings: map(.value) }
+                kpiId: (.[0].dimension as $d | kpi_map[$d]),
+                evidence: { findings: . }
               }
         ]
     ')
 
+    GRADE_COUNT=$(echo "$GRADES_JSON" | jq 'length')
+
     RUN_PAYLOAD=$(jq -n \
         --arg id "$RUN_ID" \
         --arg source "dk-review" \
-        --arg scope "component" \
+        --arg scope "$SCOPE_TYPE" \
         --arg scopeId "$SCOPE_ID" \
         --arg summary "dk review findings: ${FINDING_COUNT}" \
         --arg evaluatedAt "$EVALUATED_AT" \
@@ -106,20 +140,36 @@ if [[ "$WITH_EVALRUN" == true ]]; then
             grades: $grades
         }')
 
-    echo "[eval-run] creating $RUN_ID with ${#GRADES_JSON} inline grades"
+    echo "[eval-run] creating $RUN_ID with $GRADE_COUNT inline grades"
     newton data post eval-run --workspace "$WORKSPACE" --body "$RUN_PAYLOAD" --json >/dev/null
 fi
 
-# POST each finding as an opportunity
+# POST each finding as an opportunity via newton data
+if [[ -z "$WORKSPACE" ]]; then
+    echo "Error: -w <workspace> is required to post opportunities"
+    exit 1
+fi
+
+if ! command -v newton &>/dev/null; then
+    echo "Error: 'newton' CLI is required but not found in PATH"
+    exit 1
+fi
+
+# Determine opportunity scope field: repo or component
+if [[ "$SCOPE_TYPE" == "repo" ]]; then
+    SCOPE_FIELD="repo"
+else
+    SCOPE_FIELD="component"
+fi
 
 echo "$DK_JSON" | jq -c '.[]' | while read -r finding; do
     FINDING_ID=$(echo "$finding" | jq -r '.id // empty')
-    FINDING_TITLE=$(echo "$finding" | jq -r '.title // empty')
-    FINDING_RISK=$(echo "$finding" | jq -r '.risk // "medium"')
-    FINDING_RATIONALE=$(echo "$finding" | jq -r '.rationale // empty')
+    FINDING_TITLE=$(echo "$finding" | jq -r '.observation // empty')
+    FINDING_RISK=$(echo "$finding" | jq -r '.severity // "minor"')
+    FINDING_RATIONALE=$(echo "$finding" | jq -r '.why_it_matters // empty')
 
     if [[ -z "$FINDING_ID" || -z "$FINDING_TITLE" ]]; then
-        echo "[skip] finding missing id or title"
+        echo "[skip] finding missing id or observation"
         continue
     fi
 
@@ -128,7 +178,8 @@ echo "$DK_JSON" | jq -c '.[]' | while read -r finding; do
     PAYLOAD=$(jq -n \
         --arg id "$OPPORTUNITY_ID" \
         --arg title "$FINDING_TITLE" \
-        --arg scope "$SCOPE_ID" \
+        --arg scopeField "$SCOPE_FIELD" \
+        --arg scopeId "$SCOPE_ID" \
         --arg risk "$FINDING_RISK" \
         --argjson ev 0.0 \
         --arg rationale "$FINDING_RATIONALE" \
@@ -136,21 +187,15 @@ echo "$DK_JSON" | jq -c '.[]' | while read -r finding; do
             id: $id,
             title: $title,
             origin: "dk-review",
-            component: $scope,
+            ($scopeField): $scopeId,
             risk: $risk,
             expectedValue: $ev,
             rationale: (if $rationale != "" then $rationale else null end)
         }')
 
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-        -X POST \
-        -H "Content-Type: application/json" \
-        -d "$PAYLOAD" \
-        "${SERVER_URL}/api/v1/opportunities")
-
-    if [[ "$HTTP_CODE" == "201" ]]; then
+    if newton data post opportunity --workspace "$WORKSPACE" --body "$PAYLOAD" --json >/dev/null 2>&1; then
         echo "[ok] $OPPORTUNITY_ID ($FINDING_RISK)"
     else
-        echo "[error] $OPPORTUNITY_ID HTTP $HTTP_CODE"
+        echo "[error] $OPPORTUNITY_ID"
     fi
 done
