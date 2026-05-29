@@ -23,6 +23,8 @@ pub(super) struct AgentOperatorConfig {
     pub(super) engine_command: Option<Vec<String>>,
     /// Whether to stream stdout to the terminal. If None, uses workflow setting.
     pub(super) stream_stdout: Option<bool>,
+    /// When true and signals is non-empty, fail if no signal matches (WFG-AGENT-009).
+    pub(super) require_signal: bool,
 }
 
 impl AgentOperatorConfig {
@@ -54,6 +56,10 @@ impl AgentOperatorConfig {
             .map(|v| v as u32);
         let engine_command = Self::parse_engine_command(map);
         let stream_stdout = map.get("stream_stdout").and_then(Value::as_bool);
+        let require_signal = map
+            .get("require_signal")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         Ok(AgentOperatorConfig {
             engine,
@@ -67,6 +73,7 @@ impl AgentOperatorConfig {
             max_iterations,
             engine_command,
             stream_stdout,
+            require_signal,
         })
     }
 
