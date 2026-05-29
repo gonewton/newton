@@ -194,6 +194,28 @@ impl Operator for AgentOperator {
             )
         };
 
+        if config.require_signal && !config.signals.is_empty() && signal.is_none() {
+            let mut err = AppError::new(
+                ErrorCategory::ValidationError,
+                "agent did not emit any configured signal",
+            )
+            .with_code("WFG-AGENT-009");
+            err.add_context("stdout_artifact", &paths.stdout_rel);
+            err.add_context(
+                "stderr_artifact",
+                if paths.stderr_abs.exists() {
+                    &paths.stderr_rel
+                } else {
+                    "null"
+                },
+            );
+            err.add_context("engine", &engine_name);
+            if let Some(ref m) = config.model {
+                err.add_context("model", m.as_str());
+            }
+            return Err(err);
+        }
+
         Ok(output::build_agent_output(AgentOutput {
             signal,
             signal_data,

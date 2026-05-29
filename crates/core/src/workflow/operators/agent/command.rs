@@ -346,6 +346,7 @@ mod tests {
     use crate::workflow::operators::agent::AgentOperator;
     use crate::workflow::schema::WorkflowSettings;
     use serde_json::json;
+    use serde_json::Value;
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -611,5 +612,72 @@ fi"#,
         });
         let result = op.execute(params, ctx).await.unwrap();
         assert_eq!(result["signal"], json!("aaa_complete"));
+    }
+
+    #[tokio::test]
+    async fn execute_require_signal_true_fails_with_no_signal() {
+        let tmp = TempDir::new().unwrap();
+        let settings = WorkflowSettings::default();
+        let op = AgentOperator::with_default_registry(tmp.path().to_path_buf(), settings);
+        let ctx = make_ctx(&tmp);
+        let params = json!({
+            "engine": "command",
+            "engine_command": ["bash", "-c", "echo hello"],
+            "signals": { "complete": "<status>COMPLETED</status>" },
+            "require_signal": true
+        });
+        let err = op.execute(params, ctx).await.unwrap_err();
+        assert_eq!(err.code, "WFG-AGENT-009");
+    }
+
+    #[tokio::test]
+    async fn execute_require_signal_false_returns_null_on_no_match() {
+        let tmp = TempDir::new().unwrap();
+        let settings = WorkflowSettings::default();
+        let op = AgentOperator::with_default_registry(tmp.path().to_path_buf(), settings);
+        let ctx = make_ctx(&tmp);
+        let params = json!({
+            "engine": "command",
+            "engine_command": ["bash", "-c", "echo hello"],
+            "signals": { "complete": "<status>COMPLETED</status>" }
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+        assert_eq!(result["signal"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn execute_require_signal_with_matching_signal_succeeds() {
+        let tmp = TempDir::new().unwrap();
+        let settings = WorkflowSettings::default();
+        let op = AgentOperator::with_default_registry(tmp.path().to_path_buf(), settings);
+        let ctx = make_ctx(&tmp);
+        let params = json!({
+            "engine": "command",
+            "engine_command": ["bash", "-c", "echo '<status>COMPLETED</status>'"],
+            "signals": { "complete": "<status>COMPLETED</status>" },
+            "require_signal": true
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+        assert_eq!(result["signal"], json!("complete"));
+    }
+
+    #[tokio::test]
+    async fn execute_require_signal_includes_context_keys() {
+        let tmp = TempDir::new().unwrap();
+        let settings = WorkflowSettings::default();
+        let op = AgentOperator::with_default_registry(tmp.path().to_path_buf(), settings);
+        let ctx = make_ctx(&tmp);
+        let params = json!({
+            "engine": "command",
+            "engine_command": ["bash", "-c", "echo hello"],
+            "signals": { "valid": "<status>VALID</status>" },
+            "require_signal": true,
+            "model": "test-model"
+        });
+        let err = op.execute(params, ctx).await.unwrap_err();
+        assert_eq!(err.code, "WFG-AGENT-009");
+        assert!(err.context.contains_key("stdout_artifact"));
+        assert!(err.context.contains_key("engine"));
+        assert!(err.context.contains_key("model"));
     }
 }
