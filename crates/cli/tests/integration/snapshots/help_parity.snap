@@ -10,6 +10,7 @@ Usage: newton <COMMAND>
 
 Commands:
   batch       Process queued work items for a project
+  chat        In-process chat session (commands-as-tools)
   completion  Emit a shell completion stub for top-level subcommands
   config      Inspect resolved Newton configuration
   data        Catalog CRUD via HTTP-style verbs (get/post/put/patch/delete)

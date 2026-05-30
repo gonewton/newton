@@ -136,8 +136,7 @@ pub fn parse_mcp_flags(argv: &[String]) -> McpFlags {
 }
 
 /// Returns the number of Newton commands exposed as MCP tools under the
-/// ExposeMcpOnly policy (issue #309). Does not include `ask` (excluded
-/// from the curated MCP surface regardless of feature flag).
+/// ExposeMcpOnly policy (issue #309).
 pub fn tool_count() -> usize {
     MCP_EXPOSED_COMMAND_IDS.len()
 }

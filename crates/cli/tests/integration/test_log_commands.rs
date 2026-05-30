@@ -897,7 +897,7 @@ fn kind_for_command_maps_every_top_level_command() {
     );
     assert_eq!(kind_for_command("artifact"), LogInvocationKind::Artifact);
     assert_eq!(kind_for_command("webhook"), LogInvocationKind::Webhook);
-    for diag in ["health", "doctor", "config", "completion", "ask"] {
+    for diag in ["health", "doctor", "config", "completion", "chat"] {
         assert_eq!(kind_for_command(diag), LogInvocationKind::Diagnostic);
     }
 }

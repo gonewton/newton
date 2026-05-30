@@ -20,7 +20,7 @@ command.
 
 Required smoke rows: `run` (deprecated alias — remove when shim is removed), `init`, `batch`, `serve`, `workflow`,
 `resume`, `checkpoint`, `artifact`, `webhook`, `runs`, `health`, `doctor`,
-`config`, `completion`, `ask`, `spec`.
+`config`, `completion`, `chat`, `spec`.
 
 ## Coverage matrix
 
@@ -41,7 +41,7 @@ Required smoke rows: `run` (deprecated alias — remove when shim is removed), `
 | doctor | --help | smoke_doctor_help | smoke |
 | config | --help | smoke_config_help | smoke |
 | completion | --help | smoke_completion_help | smoke |
-| ask | --help | smoke_ask_help | smoke |
+| chat | --help | smoke_chat_help | smoke |
 | spec | --format json | smoke_spec_json | smoke |
 | workflow run | --workspace | integ_run_workspace_creates_state | integration |
 | workflow run | --trigger | integ_run_trigger_payload | integration |
@@ -64,7 +64,6 @@ Required smoke rows: `run` (deprecated alias — remove when shim is removed), `
 | completion | bash | integ_completion_bash | integration |
 | serve | --port | ext_serve_ephemeral_port_health | extended |
 | webhook serve | --workflow | ext_webhook_serve_starts | extended |
-| ask |  | ext_ask_with_wiremock | extended |
 | workflow run | --bogus-flag (negative) | negative_run_unknown_flag | integration |
 | run | (deprecated) | integ_run_deprecated_notice | integration |
 | workflow validate |  (missing positional) | negative_workflow_validate_missing_arg | integration |
