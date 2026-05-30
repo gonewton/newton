@@ -108,7 +108,7 @@ impl super::SqliteBackendStore {
         &self,
         id: &str,
     ) -> Result<ModuleDependencyItem, ApiError> {
-        self.list_module_dependencies_impl()
+        self.list_module_dependencies()
             .await?
             .into_iter()
             .find(|d| d.id == id)
@@ -194,8 +194,10 @@ impl super::SqliteBackendStore {
             created_at: row.created_at,
         })
     }
+}
 
-    pub(super) async fn list_products_impl(&self) -> Result<Vec<ProductItem>, ApiError> {
+impl super::SqliteBackendStore {
+    pub(super) async fn list_products(&self) -> Result<Vec<ProductItem>, ApiError> {
         let rows = sqlx::query_as::<_, ProductRow>(
             "SELECT p.id, p.name, COUNT(c.id) as component_count FROM Product p LEFT JOIN Component c ON c.productId = p.id GROUP BY p.id ORDER BY p.id ASC"
         )
@@ -213,7 +215,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn create_product_impl(
+    pub(super) async fn create_product(
         &self,
         body: CreateProductBody,
     ) -> Result<ProductItem, ApiError> {
@@ -236,7 +238,7 @@ impl super::SqliteBackendStore {
         self.fetch_product_item(&id).await
     }
 
-    pub(super) async fn put_product_impl(
+    pub(super) async fn put_product(
         &self,
         id: &str,
         body: PutProductBody,
@@ -261,7 +263,7 @@ impl super::SqliteBackendStore {
         self.fetch_product_item(id).await
     }
 
-    pub(super) async fn patch_product_impl(
+    pub(super) async fn patch_product(
         &self,
         id: &str,
         body: PatchProductBody,
@@ -285,7 +287,7 @@ impl super::SqliteBackendStore {
         self.fetch_product_item(id).await
     }
 
-    pub(super) async fn delete_product_impl(&self, id: &str) -> Result<String, ApiError> {
+    pub(super) async fn delete_product(&self, id: &str) -> Result<String, ApiError> {
         let count: Option<CountRow> = sqlx::query_as::<_, CountRow>(
             "SELECT COUNT(*) as count FROM Component WHERE productId = ?",
         )
@@ -309,7 +311,7 @@ impl super::SqliteBackendStore {
         Ok(id.to_string())
     }
 
-    pub(super) async fn list_components_impl(&self) -> Result<Vec<ComponentItem>, ApiError> {
+    pub(super) async fn list_components(&self) -> Result<Vec<ComponentItem>, ApiError> {
         let rows = sqlx::query_as::<_, ComponentRow>(
             "SELECT c.id, c.name, c.domain, c.repos, c.modules, c.trend, c.owner, c.criticality, c.autonomy, c.openPlans as open_plans, c.openRequests as open_requests, c.lastEval as last_eval, c.productId as product_id, p.name as product_name FROM Component c LEFT JOIN Product p ON c.productId = p.id ORDER BY c.id ASC"
         )
@@ -338,7 +340,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn create_component_impl(
+    pub(super) async fn create_component(
         &self,
         body: CreateComponentBody,
     ) -> Result<ComponentItem, ApiError> {
@@ -367,7 +369,7 @@ impl super::SqliteBackendStore {
         self.fetch_component_item(&id).await
     }
 
-    pub(super) async fn put_component_impl(
+    pub(super) async fn put_component(
         &self,
         id: &str,
         body: PutComponentBody,
@@ -405,7 +407,7 @@ impl super::SqliteBackendStore {
         self.fetch_component_item(id).await
     }
 
-    pub(super) async fn patch_component_impl(
+    pub(super) async fn patch_component(
         &self,
         id: &str,
         body: PatchComponentBody,
@@ -444,7 +446,7 @@ impl super::SqliteBackendStore {
         self.fetch_component_item(id).await
     }
 
-    pub(super) async fn delete_component_impl(&self, id: &str) -> Result<String, ApiError> {
+    pub(super) async fn delete_component(&self, id: &str) -> Result<String, ApiError> {
         let count: Option<CountRow> = sqlx::query_as::<_, CountRow>(
             "SELECT COUNT(*) as count FROM Repo WHERE componentId = ?",
         )
@@ -468,7 +470,7 @@ impl super::SqliteBackendStore {
         Ok(id.to_string())
     }
 
-    pub(super) async fn list_repos_impl(&self) -> Result<Vec<RepoItem>, ApiError> {
+    pub(super) async fn list_repos(&self) -> Result<Vec<RepoItem>, ApiError> {
         let rows = sqlx::query_as::<_, RepoRow>(
             "SELECT r.id, r.name, r.componentId as component_id, c.name as component_name, r.owner, r.criticality, r.autonomy, r.regressions, r.openPlans as open_plans, r.execStatus as exec_status, r.lastEval as last_eval FROM Repo r LEFT JOIN Component c ON r.componentId = c.id ORDER BY r.id ASC"
         )
@@ -499,10 +501,7 @@ impl super::SqliteBackendStore {
         Ok(result)
     }
 
-    pub(super) async fn create_repo_impl(
-        &self,
-        body: CreateRepoBody,
-    ) -> Result<RepoItem, ApiError> {
+    pub(super) async fn create_repo(&self, body: CreateRepoBody) -> Result<RepoItem, ApiError> {
         let count: Option<CountRow> =
             sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Component WHERE id = ?")
                 .bind(&body.component_id)
@@ -533,11 +532,7 @@ impl super::SqliteBackendStore {
         self.fetch_repo_item(&id).await
     }
 
-    pub(super) async fn put_repo_impl(
-        &self,
-        id: &str,
-        body: PutRepoBody,
-    ) -> Result<RepoItem, ApiError> {
+    pub(super) async fn put_repo(&self, id: &str, body: PutRepoBody) -> Result<RepoItem, ApiError> {
         let count: Option<CountRow> =
             sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Repo WHERE id = ?")
                 .bind(id)
@@ -576,7 +571,7 @@ impl super::SqliteBackendStore {
         self.fetch_repo_item(id).await
     }
 
-    pub(super) async fn patch_repo_impl(
+    pub(super) async fn patch_repo(
         &self,
         id: &str,
         body: PatchRepoBody,
@@ -631,7 +626,7 @@ impl super::SqliteBackendStore {
         self.fetch_repo_item(id).await
     }
 
-    pub(super) async fn delete_repo_impl(&self, id: &str) -> Result<String, ApiError> {
+    pub(super) async fn delete_repo(&self, id: &str) -> Result<String, ApiError> {
         let count: Option<CountRow> =
             sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Module WHERE repoId = ?")
                 .bind(id)
@@ -654,7 +649,7 @@ impl super::SqliteBackendStore {
         Ok(id.to_string())
     }
 
-    pub(super) async fn list_modules_impl(&self) -> Result<Vec<ModuleItem>, ApiError> {
+    pub(super) async fn list_modules(&self) -> Result<Vec<ModuleItem>, ApiError> {
         let rows = sqlx::query_as::<_, ModuleRow>(
             "SELECT m.id, m.name, m.kind, m.repoId as repo_id, r.name as repo_name, r.componentId as component_id, c.name as component_name FROM Module m LEFT JOIN Repo r ON m.repoId = r.id LEFT JOIN Component c ON r.componentId = c.id ORDER BY m.id ASC",
         )
@@ -676,7 +671,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn create_module_impl(
+    pub(super) async fn create_module(
         &self,
         body: CreateModuleBody,
     ) -> Result<ModuleItem, ApiError> {
@@ -701,7 +696,7 @@ impl super::SqliteBackendStore {
         self.fetch_module_item(&id).await
     }
 
-    pub(super) async fn put_module_impl(
+    pub(super) async fn put_module(
         &self,
         id: &str,
         body: PutModuleBody,
@@ -735,7 +730,7 @@ impl super::SqliteBackendStore {
         self.fetch_module_item(id).await
     }
 
-    pub(super) async fn patch_module_impl(
+    pub(super) async fn patch_module(
         &self,
         id: &str,
         body: PatchModuleBody,
@@ -766,7 +761,7 @@ impl super::SqliteBackendStore {
         self.fetch_module_item(id).await
     }
 
-    pub(super) async fn delete_module_impl(&self, id: &str) -> Result<String, ApiError> {
+    pub(super) async fn delete_module(&self, id: &str) -> Result<String, ApiError> {
         let count: Option<CountRow> = sqlx::query_as::<_, CountRow>(
             "SELECT COUNT(*) as count FROM ModuleDependency WHERE fromModuleId = ? OR toModuleId = ?"
         )
@@ -790,9 +785,7 @@ impl super::SqliteBackendStore {
         Ok(id.to_string())
     }
 
-    pub(super) async fn list_repo_dependencies_impl(
-        &self,
-    ) -> Result<Vec<RepoDependencyItem>, ApiError> {
+    pub(super) async fn list_repo_dependencies(&self) -> Result<Vec<RepoDependencyItem>, ApiError> {
         let deps = sqlx::query_as::<_, ModuleDepRow>(
             "SELECT md.id, md.fromModuleId as from_module_id, md.toModuleId as to_module_id, md.type as dep_type, md.label,
              fm.name as from_module_name, fm.kind as from_module_kind, fm.repoId as from_repo_id,
@@ -833,7 +826,7 @@ impl super::SqliteBackendStore {
         Ok(result)
     }
 
-    pub(super) async fn list_module_dependencies_impl(
+    pub(super) async fn list_module_dependencies(
         &self,
     ) -> Result<Vec<ModuleDependencyItem>, ApiError> {
         let deps = sqlx::query_as::<_, ModuleDepRow>(
@@ -883,7 +876,7 @@ impl super::SqliteBackendStore {
         Ok(result)
     }
 
-    pub(super) async fn create_module_dependency_impl(
+    pub(super) async fn create_module_dependency(
         &self,
         body: CreateModuleDependencyBody,
     ) -> Result<ModuleDependencyItem, ApiError> {
@@ -939,14 +932,14 @@ impl super::SqliteBackendStore {
         .await
         .map_err(|e| err_internal(&format!("insert error: {e}")))?;
 
-        self.list_module_dependencies_impl()
+        self.list_module_dependencies()
             .await?
             .into_iter()
             .find(|d| d.id == id)
             .ok_or_else(|| err_internal("Failed to read back created dependency"))
     }
 
-    pub(super) async fn patch_module_dependency_impl(
+    pub(super) async fn patch_module_dependency(
         &self,
         id: &str,
         body: PatchModuleDependencyBody,
@@ -964,7 +957,7 @@ impl super::SqliteBackendStore {
         self.fetch_module_dependency_item(id).await
     }
 
-    pub(super) async fn delete_module_dependency_impl(&self, id: &str) -> Result<String, ApiError> {
+    pub(super) async fn delete_module_dependency(&self, id: &str) -> Result<String, ApiError> {
         let affected = sqlx::query("DELETE FROM ModuleDependency WHERE id = ?")
             .bind(id)
             .execute(&self.pool)

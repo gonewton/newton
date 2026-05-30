@@ -8,7 +8,7 @@ use newton_types::ApiError;
 use uuid::Uuid;
 
 impl super::SqliteBackendStore {
-    pub(super) async fn list_kpis_impl(&self) -> Result<Vec<KpiItem>, ApiError> {
+    pub(super) async fn list_kpis(&self) -> Result<Vec<KpiItem>, ApiError> {
         let rows = sqlx::query_as::<_, KpiRow>(
             "SELECT id, name, description, scopeLevel AS scope_level, threshold, weight, aggFn AS agg_fn, createdAt AS created_at, updatedAt AS updated_at \
              FROM KPI ORDER BY id ASC",
@@ -20,7 +20,7 @@ impl super::SqliteBackendStore {
         Ok(rows.into_iter().map(|r| r.into_item()).collect())
     }
 
-    pub(super) async fn create_kpi_impl(&self, body: CreateKpiBody) -> Result<KpiItem, ApiError> {
+    pub(super) async fn create_kpi(&self, body: CreateKpiBody) -> Result<KpiItem, ApiError> {
         if body.id.trim().is_empty() {
             return Err(err_validation("id is required"));
         }
@@ -78,10 +78,10 @@ impl super::SqliteBackendStore {
             }
         })?;
 
-        self.get_kpi_impl(&body.id).await
+        self.get_kpi(&body.id).await
     }
 
-    pub(super) async fn get_kpi_impl(&self, id: &str) -> Result<KpiItem, ApiError> {
+    pub(super) async fn get_kpi(&self, id: &str) -> Result<KpiItem, ApiError> {
         let row: Option<KpiRow> = sqlx::query_as::<_, KpiRow>(
             "SELECT id, name, description, scopeLevel AS scope_level, threshold, weight, aggFn AS agg_fn, createdAt AS created_at, updatedAt AS updated_at \
              FROM KPI WHERE id = ?",
@@ -94,7 +94,7 @@ impl super::SqliteBackendStore {
             .ok_or_else(|| err_not_found("KPI not found"))
     }
 
-    pub(super) async fn create_eval_run_impl(
+    pub(super) async fn create_eval_run(
         &self,
         body: CreateEvalRunBody,
     ) -> Result<EvalRunItem, ApiError> {
@@ -270,10 +270,10 @@ impl super::SqliteBackendStore {
             .await
             .map_err(|e| err_internal(&format!("commit tx error: {e}")))?;
 
-        self.get_eval_run_impl(&body.id).await
+        self.get_eval_run(&body.id).await
     }
 
-    pub(super) async fn list_eval_runs_impl(
+    pub(super) async fn list_eval_runs(
         &self,
         scope: Option<String>,
         scope_id: Option<String>,
@@ -323,7 +323,7 @@ impl super::SqliteBackendStore {
         Ok(rows.into_iter().map(|r| r.into_item()).collect())
     }
 
-    pub(super) async fn get_eval_run_impl(&self, id: &str) -> Result<EvalRunItem, ApiError> {
+    pub(super) async fn get_eval_run(&self, id: &str) -> Result<EvalRunItem, ApiError> {
         let row: Option<EvalRunRow> = sqlx::query_as::<_, EvalRunRow>(
             "SELECT id, source, scope, scopeId AS scope_id, score, verdict, summary, evaluatedAt AS evaluated_at, ingestedAt AS ingested_at \
              FROM EvalRun WHERE id = ?",
@@ -336,10 +336,7 @@ impl super::SqliteBackendStore {
             .ok_or_else(|| err_not_found("EvalRun not found"))
     }
 
-    pub(super) async fn create_grade_impl(
-        &self,
-        body: CreateGradeBody,
-    ) -> Result<GradeItem, ApiError> {
+    pub(super) async fn create_grade(&self, body: CreateGradeBody) -> Result<GradeItem, ApiError> {
         if body.id.trim().is_empty() {
             return Err(err_validation("id is required"));
         }
@@ -437,10 +434,10 @@ impl super::SqliteBackendStore {
             .await
             .map_err(|e| err_internal(&format!("commit tx error: {e}")))?;
 
-        self.get_grade_impl(&body.id).await
+        self.get_grade(&body.id).await
     }
 
-    pub(super) async fn list_grades_impl(
+    pub(super) async fn list_grades(
         &self,
         run_id: Option<String>,
         kpi_id: Option<String>,
@@ -476,7 +473,7 @@ impl super::SqliteBackendStore {
         Ok(rows.into_iter().map(|r| r.into_item()).collect())
     }
 
-    pub(super) async fn get_grade_impl(&self, id: &str) -> Result<GradeItem, ApiError> {
+    pub(super) async fn get_grade(&self, id: &str) -> Result<GradeItem, ApiError> {
         let row: Option<GradeRow> = sqlx::query_as::<_, GradeRow>(
             "SELECT id, runId AS run_id, kpiId AS kpi_id, dimension, score, evidence, evaluatedAt AS evaluated_at, ingestedAt AS ingested_at \
              FROM Grade WHERE id = ?",

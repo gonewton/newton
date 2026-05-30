@@ -69,173 +69,173 @@ impl SqliteBackendStore {
 #[async_trait::async_trait]
 impl BackendStore for SqliteBackendStore {
     async fn list_products(&self) -> Result<Vec<ProductItem>, ApiError> {
-        self.list_products_impl().await
+        SqliteBackendStore::list_products(self).await
     }
     async fn list_components(&self) -> Result<Vec<ComponentItem>, ApiError> {
-        self.list_components_impl().await
+        SqliteBackendStore::list_components(self).await
     }
     async fn list_pending_approvals(&self) -> Result<Vec<PendingApprovalItem>, ApiError> {
-        self.list_pending_approvals_impl().await
+        SqliteBackendStore::list_pending_approvals(self).await
     }
     async fn list_regressions(&self) -> Result<Vec<RegressionItem>, ApiError> {
-        self.list_regressions_impl().await
+        SqliteBackendStore::list_regressions(self).await
     }
     async fn list_kpis(&self) -> Result<Vec<KpiItem>, ApiError> {
-        self.list_kpis_impl().await
+        SqliteBackendStore::list_kpis(self).await
     }
     async fn list_recent_actions(&self, limit: u32) -> Result<Vec<RecentActionItem>, ApiError> {
-        self.list_recent_actions_impl(limit).await
+        SqliteBackendStore::list_recent_actions(self, limit).await
     }
     async fn list_repos(&self) -> Result<Vec<RepoItem>, ApiError> {
-        self.list_repos_impl().await
+        SqliteBackendStore::list_repos(self).await
     }
     async fn list_repo_dependencies(&self) -> Result<Vec<RepoDependencyItem>, ApiError> {
-        self.list_repo_dependencies_impl().await
+        SqliteBackendStore::list_repo_dependencies(self).await
     }
     async fn list_module_dependencies(&self) -> Result<Vec<ModuleDependencyItem>, ApiError> {
-        self.list_module_dependencies_impl().await
+        SqliteBackendStore::list_module_dependencies(self).await
     }
     async fn create_module_dependency(
         &self,
         body: CreateModuleDependencyBody,
     ) -> Result<ModuleDependencyItem, ApiError> {
-        self.create_module_dependency_impl(body).await
+        SqliteBackendStore::create_module_dependency(self, body).await
     }
     async fn list_saved_views(&self, kind: Option<String>) -> Result<serde_json::Value, ApiError> {
-        self.list_saved_views_impl(kind).await
+        SqliteBackendStore::list_saved_views(self, kind).await
     }
     async fn list_opportunities(
         &self,
         status: Option<String>,
     ) -> Result<Vec<OpportunityItem>, ApiError> {
-        self.list_opportunities_impl(status).await
+        SqliteBackendStore::list_opportunities(self, status).await
     }
     async fn patch_opportunity(
         &self,
         id: &str,
         body: PatchOpportunityBody,
     ) -> Result<OpportunityItem, ApiError> {
-        self.patch_opportunity_impl(id, body).await
+        SqliteBackendStore::patch_opportunity(self, id, body).await
     }
     async fn create_opportunity(
         &self,
         body: CreateOpportunityBody,
     ) -> Result<OpportunityItem, ApiError> {
-        self.create_opportunity_impl(body).await
+        SqliteBackendStore::create_opportunity(self, body).await
     }
     async fn list_requests(&self) -> Result<Vec<RequestItem>, ApiError> {
-        self.list_requests_impl().await
+        SqliteBackendStore::list_requests(self).await
     }
     async fn create_request(&self, body: CreateRequestBody) -> Result<RequestItem, ApiError> {
-        self.create_request_impl(body).await
+        SqliteBackendStore::create_request(self, body).await
     }
     async fn list_plans(&self) -> Result<Vec<PlanItem>, ApiError> {
-        self.list_plans_impl().await
+        SqliteBackendStore::list_plans(self).await
     }
     async fn get_plan(&self, id: &str) -> Result<PlanDetail, ApiError> {
-        self.get_plan_impl(id).await
+        SqliteBackendStore::get_plan(self, id).await
     }
     async fn approve_plan(&self, id: &str) -> Result<ApprovedPlan, ApiError> {
-        self.approve_plan_impl(id).await
+        SqliteBackendStore::approve_plan(self, id).await
     }
     async fn reject_plan(&self, id: &str) -> Result<PlanItem, ApiError> {
-        self.reject_plan_impl(id).await
+        SqliteBackendStore::reject_plan(self, id).await
     }
     async fn list_executions(
         &self,
         plan_id: Option<String>,
     ) -> Result<Vec<ExecutionItem>, ApiError> {
-        self.list_executions_impl(plan_id).await
+        SqliteBackendStore::list_executions(self, plan_id).await
     }
     async fn list_operators(&self) -> Result<Vec<OperatorItem>, ApiError> {
-        self.list_operators_impl().await
+        SqliteBackendStore::list_operators(self).await
     }
     async fn get_persistence(&self, key: &str) -> Result<serde_json::Value, ApiError> {
-        self.get_persistence_impl(key).await
+        SqliteBackendStore::get_persistence(self, key).await
     }
     async fn put_persistence(&self, key: &str, value: serde_json::Value) -> Result<(), ApiError> {
-        self.put_persistence_impl(key, value).await
+        SqliteBackendStore::put_persistence(self, key, value).await
     }
     async fn delete_persistence(&self, key: &str) -> Result<(), ApiError> {
-        self.delete_persistence_impl(key).await
+        SqliteBackendStore::delete_persistence(self, key).await
     }
     async fn reset(&self) -> Result<(), ApiError> {
-        self.reset_impl().await
+        SqliteBackendStore::reset(self).await
     }
     async fn get_product(&self, id: &str) -> Result<ProductItem, ApiError> {
         self.fetch_product_item(id).await
     }
     async fn create_product(&self, body: CreateProductBody) -> Result<ProductItem, ApiError> {
-        self.create_product_impl(body).await
+        SqliteBackendStore::create_product(self, body).await
     }
     async fn put_product(&self, id: &str, body: PutProductBody) -> Result<ProductItem, ApiError> {
-        self.put_product_impl(id, body).await
+        SqliteBackendStore::put_product(self, id, body).await
     }
     async fn patch_product(
         &self,
         id: &str,
         body: PatchProductBody,
     ) -> Result<ProductItem, ApiError> {
-        self.patch_product_impl(id, body).await
+        SqliteBackendStore::patch_product(self, id, body).await
     }
     async fn delete_product(&self, id: &str) -> Result<String, ApiError> {
-        self.delete_product_impl(id).await
+        SqliteBackendStore::delete_product(self, id).await
     }
     async fn get_component(&self, id: &str) -> Result<ComponentItem, ApiError> {
         self.fetch_component_item(id).await
     }
     async fn create_component(&self, body: CreateComponentBody) -> Result<ComponentItem, ApiError> {
-        self.create_component_impl(body).await
+        SqliteBackendStore::create_component(self, body).await
     }
     async fn put_component(
         &self,
         id: &str,
         body: PutComponentBody,
     ) -> Result<ComponentItem, ApiError> {
-        self.put_component_impl(id, body).await
+        SqliteBackendStore::put_component(self, id, body).await
     }
     async fn patch_component(
         &self,
         id: &str,
         body: PatchComponentBody,
     ) -> Result<ComponentItem, ApiError> {
-        self.patch_component_impl(id, body).await
+        SqliteBackendStore::patch_component(self, id, body).await
     }
     async fn delete_component(&self, id: &str) -> Result<String, ApiError> {
-        self.delete_component_impl(id).await
+        SqliteBackendStore::delete_component(self, id).await
     }
     async fn get_repo(&self, id: &str) -> Result<RepoItem, ApiError> {
         self.fetch_repo_item(id).await
     }
     async fn create_repo(&self, body: CreateRepoBody) -> Result<RepoItem, ApiError> {
-        self.create_repo_impl(body).await
+        SqliteBackendStore::create_repo(self, body).await
     }
     async fn put_repo(&self, id: &str, body: PutRepoBody) -> Result<RepoItem, ApiError> {
-        self.put_repo_impl(id, body).await
+        SqliteBackendStore::put_repo(self, id, body).await
     }
     async fn patch_repo(&self, id: &str, body: PatchRepoBody) -> Result<RepoItem, ApiError> {
-        self.patch_repo_impl(id, body).await
+        SqliteBackendStore::patch_repo(self, id, body).await
     }
     async fn delete_repo(&self, id: &str) -> Result<String, ApiError> {
-        self.delete_repo_impl(id).await
+        SqliteBackendStore::delete_repo(self, id).await
     }
     async fn list_modules(&self) -> Result<Vec<ModuleItem>, ApiError> {
-        self.list_modules_impl().await
+        SqliteBackendStore::list_modules(self).await
     }
     async fn get_module(&self, id: &str) -> Result<ModuleItem, ApiError> {
         self.fetch_module_item(id).await
     }
     async fn create_module(&self, body: CreateModuleBody) -> Result<ModuleItem, ApiError> {
-        self.create_module_impl(body).await
+        SqliteBackendStore::create_module(self, body).await
     }
     async fn put_module(&self, id: &str, body: PutModuleBody) -> Result<ModuleItem, ApiError> {
-        self.put_module_impl(id, body).await
+        SqliteBackendStore::put_module(self, id, body).await
     }
     async fn patch_module(&self, id: &str, body: PatchModuleBody) -> Result<ModuleItem, ApiError> {
-        self.patch_module_impl(id, body).await
+        SqliteBackendStore::patch_module(self, id, body).await
     }
     async fn delete_module(&self, id: &str) -> Result<String, ApiError> {
-        self.delete_module_impl(id).await
+        SqliteBackendStore::delete_module(self, id).await
     }
     async fn get_module_dependency(&self, id: &str) -> Result<ModuleDependencyItem, ApiError> {
         self.fetch_module_dependency_item(id).await
@@ -245,19 +245,19 @@ impl BackendStore for SqliteBackendStore {
         id: &str,
         body: PatchModuleDependencyBody,
     ) -> Result<ModuleDependencyItem, ApiError> {
-        self.patch_module_dependency_impl(id, body).await
+        SqliteBackendStore::patch_module_dependency(self, id, body).await
     }
     async fn delete_module_dependency(&self, id: &str) -> Result<String, ApiError> {
-        self.delete_module_dependency_impl(id).await
+        SqliteBackendStore::delete_module_dependency(self, id).await
     }
     async fn create_kpi(&self, body: CreateKpiBody) -> Result<KpiItem, ApiError> {
-        self.create_kpi_impl(body).await
+        SqliteBackendStore::create_kpi(self, body).await
     }
     async fn get_kpi(&self, id: &str) -> Result<KpiItem, ApiError> {
-        self.get_kpi_impl(id).await
+        SqliteBackendStore::get_kpi(self, id).await
     }
     async fn create_eval_run(&self, body: CreateEvalRunBody) -> Result<EvalRunItem, ApiError> {
-        self.create_eval_run_impl(body).await
+        SqliteBackendStore::create_eval_run(self, body).await
     }
     async fn list_eval_runs(
         &self,
@@ -266,30 +266,29 @@ impl BackendStore for SqliteBackendStore {
         source: Option<String>,
         limit: Option<u32>,
     ) -> Result<Vec<EvalRunItem>, ApiError> {
-        self.list_eval_runs_impl(scope, scope_id, source, limit)
-            .await
+        SqliteBackendStore::list_eval_runs(self, scope, scope_id, source, limit).await
     }
     async fn get_eval_run(&self, id: &str) -> Result<EvalRunItem, ApiError> {
-        self.get_eval_run_impl(id).await
+        SqliteBackendStore::get_eval_run(self, id).await
     }
     async fn create_grade(&self, body: CreateGradeBody) -> Result<GradeItem, ApiError> {
-        self.create_grade_impl(body).await
+        SqliteBackendStore::create_grade(self, body).await
     }
     async fn list_grades(
         &self,
         run_id: Option<String>,
         kpi_id: Option<String>,
     ) -> Result<Vec<GradeItem>, ApiError> {
-        self.list_grades_impl(run_id, kpi_id).await
+        SqliteBackendStore::list_grades(self, run_id, kpi_id).await
     }
     async fn get_grade(&self, id: &str) -> Result<GradeItem, ApiError> {
-        self.get_grade_impl(id).await
+        SqliteBackendStore::get_grade(self, id).await
     }
     async fn get_workflow_instance(
         &self,
         instance_id: &str,
     ) -> Result<newton_types::WorkflowInstance, ApiError> {
-        self.get_workflow_instance_impl(instance_id).await
+        SqliteBackendStore::get_workflow_instance(self, instance_id).await
     }
     async fn list_workflow_instances(
         &self,
@@ -297,37 +296,36 @@ impl BackendStore for SqliteBackendStore {
         limit: Option<usize>,
         offset: Option<usize>,
     ) -> Result<Vec<newton_types::WorkflowInstance>, ApiError> {
-        self.list_workflow_instances_impl(status, limit, offset)
-            .await
+        SqliteBackendStore::list_workflow_instances(self, status, limit, offset).await
     }
     async fn upsert_workflow_instance(
         &self,
         instance: &newton_types::WorkflowInstance,
     ) -> Result<(), ApiError> {
-        self.upsert_workflow_instance_impl(instance).await
+        SqliteBackendStore::upsert_workflow_instance(self, instance).await
     }
     async fn delete_workflow_instance(&self, instance_id: &str) -> Result<(), ApiError> {
-        self.delete_workflow_instance_impl(instance_id).await
+        SqliteBackendStore::delete_workflow_instance(self, instance_id).await
     }
     async fn get_node_state(
         &self,
         instance_id: &str,
         node_id: &str,
     ) -> Result<newton_types::NodeState, ApiError> {
-        self.get_node_state_impl(instance_id, node_id).await
+        SqliteBackendStore::get_node_state(self, instance_id, node_id).await
     }
     async fn list_node_states_for_instance(
         &self,
         instance_id: &str,
     ) -> Result<Vec<newton_types::NodeState>, ApiError> {
-        self.list_node_states_for_instance_impl(instance_id).await
+        SqliteBackendStore::list_node_states_for_instance(self, instance_id).await
     }
     async fn upsert_node_state(
         &self,
         instance_id: &str,
         node: &newton_types::NodeState,
     ) -> Result<(), ApiError> {
-        self.upsert_node_state_impl(instance_id, node).await
+        SqliteBackendStore::upsert_node_state(self, instance_id, node).await
     }
     async fn update_workflow_status(
         &self,
@@ -335,30 +333,29 @@ impl BackendStore for SqliteBackendStore {
         status: newton_types::WorkflowStatus,
         ended_at: DateTime<Utc>,
     ) -> Result<(), ApiError> {
-        self.update_workflow_status_impl(instance_id, status, ended_at)
-            .await
+        SqliteBackendStore::update_workflow_status(self, instance_id, status, ended_at).await
     }
     async fn get_hil_event(&self, event_id: &str) -> Result<newton_types::HilEvent, ApiError> {
-        self.get_hil_event_impl(event_id).await
+        SqliteBackendStore::get_hil_event(self, event_id).await
     }
     async fn list_hil_events_for_instance(
         &self,
         instance_id: &str,
     ) -> Result<Vec<newton_types::HilEvent>, ApiError> {
-        self.list_hil_events_for_instance_impl(instance_id).await
+        SqliteBackendStore::list_hil_events_for_instance(self, instance_id).await
     }
     async fn list_hil_instances(&self) -> Result<Vec<String>, ApiError> {
-        self.list_hil_instances_impl().await
+        SqliteBackendStore::list_hil_instances(self).await
     }
     async fn insert_hil_event(&self, event: &newton_types::HilEvent) -> Result<(), ApiError> {
-        self.insert_hil_event_impl(event).await
+        SqliteBackendStore::insert_hil_event(self, event).await
     }
     async fn update_hil_event_status(
         &self,
         event_id: &str,
         status: newton_types::HilStatus,
     ) -> Result<newton_types::HilEvent, ApiError> {
-        self.update_hil_event_status_impl(event_id, status).await
+        SqliteBackendStore::update_hil_event_status(self, event_id, status).await
     }
     async fn append_log_line(
         &self,
@@ -366,7 +363,7 @@ impl BackendStore for SqliteBackendStore {
         node_id: &str,
         line: &newton_types::LogLine,
     ) -> Result<(), ApiError> {
-        self.append_log_line_impl(instance_id, node_id, line).await
+        SqliteBackendStore::append_log_line(self, instance_id, node_id, line).await
     }
     async fn list_log_lines(
         &self,
@@ -374,8 +371,7 @@ impl BackendStore for SqliteBackendStore {
         node_id: &str,
         since_seq: i64,
     ) -> Result<Vec<newton_types::LogLine>, ApiError> {
-        self.list_log_lines_impl(instance_id, node_id, since_seq)
-            .await
+        SqliteBackendStore::list_log_lines(self, instance_id, node_id, since_seq).await
     }
 }
 

@@ -11,6 +11,7 @@ pub mod file_store;
 pub mod human;
 pub mod io;
 pub mod lint;
+pub mod loader;
 pub mod operator;
 pub mod operators;
 pub mod schema;

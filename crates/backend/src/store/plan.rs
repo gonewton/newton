@@ -8,7 +8,7 @@ use newton_types::ApiError;
 use uuid::Uuid;
 
 impl super::SqliteBackendStore {
-    pub(super) async fn list_pending_approvals_impl(
+    pub(super) async fn list_pending_approvals(
         &self,
     ) -> Result<Vec<PendingApprovalItem>, ApiError> {
         let rows = sqlx::query_as::<_, PendingApprovalRow>(
@@ -37,7 +37,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn list_regressions_impl(&self) -> Result<Vec<RegressionItem>, ApiError> {
+    pub(super) async fn list_regressions(&self) -> Result<Vec<RegressionItem>, ApiError> {
         let rows = sqlx::query_as::<_, RegressionRow>(
             "SELECT repoName as repo, kpiId as kpi_id, delta, severity, since, trend FROM Regression ORDER BY id ASC"
         )
@@ -58,7 +58,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn list_recent_actions_impl(
+    pub(super) async fn list_recent_actions(
         &self,
         limit: u32,
     ) -> Result<Vec<RecentActionItem>, ApiError> {
@@ -81,7 +81,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn list_saved_views_impl(
+    pub(super) async fn list_saved_views(
         &self,
         kind: Option<String>,
     ) -> Result<serde_json::Value, ApiError> {
@@ -134,7 +134,7 @@ impl super::SqliteBackendStore {
         }
     }
 
-    pub(super) async fn list_opportunities_impl(
+    pub(super) async fn list_opportunities(
         &self,
         status: Option<String>,
     ) -> Result<Vec<OpportunityItem>, ApiError> {
@@ -189,7 +189,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn patch_opportunity_impl(
+    pub(super) async fn patch_opportunity(
         &self,
         id: &str,
         body: PatchOpportunityBody,
@@ -225,14 +225,14 @@ impl super::SqliteBackendStore {
             .await
             .map_err(|e| err_internal(&format!("update error: {e}")))?;
 
-        self.list_opportunities_impl(None)
+        self.list_opportunities(None)
             .await?
             .into_iter()
             .find(|o| o.id == id)
             .ok_or_else(|| err_internal("Failed to read back updated opportunity"))
     }
 
-    pub(super) async fn create_opportunity_impl(
+    pub(super) async fn create_opportunity(
         &self,
         body: CreateOpportunityBody,
     ) -> Result<OpportunityItem, ApiError> {
@@ -348,14 +348,14 @@ impl super::SqliteBackendStore {
         .await
         .map_err(|e| err_internal(&format!("upsert error: {e}")))?;
 
-        self.list_opportunities_impl(None)
+        self.list_opportunities(None)
             .await?
             .into_iter()
             .find(|o| o.id == body.id)
             .ok_or_else(|| err_internal("Failed to read back created opportunity"))
     }
 
-    pub(super) async fn list_requests_impl(&self) -> Result<Vec<RequestItem>, ApiError> {
+    pub(super) async fn list_requests(&self) -> Result<Vec<RequestItem>, ApiError> {
         let rows = sqlx::query_as::<_, RequestRow>(
             "SELECT req.id, req.title, req.description, req.componentId as component_id, c.name as component_name, req.repoId as repo_id, r.name as repo_name, req.requestedBy as requested_by, req.status, req.linkedOpportunityId as linked_opportunity_id, req.createdAt as created_at FROM Request req LEFT JOIN Component c ON req.componentId = c.id LEFT JOIN Repo r ON req.repoId = r.id ORDER BY req.id ASC"
         )
@@ -379,7 +379,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn create_request_impl(
+    pub(super) async fn create_request(
         &self,
         body: CreateRequestBody,
     ) -> Result<RequestItem, ApiError> {
@@ -416,14 +416,14 @@ impl super::SqliteBackendStore {
         .await
         .map_err(|e| err_internal(&format!("insert error: {e}")))?;
 
-        self.list_requests_impl()
+        self.list_requests()
             .await?
             .into_iter()
             .find(|r| r.id == id)
             .ok_or_else(|| err_internal("Failed to read back created request"))
     }
 
-    pub(super) async fn list_plans_impl(&self) -> Result<Vec<PlanItem>, ApiError> {
+    pub(super) async fn list_plans(&self) -> Result<Vec<PlanItem>, ApiError> {
         let rows = sqlx::query_as::<_, PlanRow>(
             "SELECT p.id, p.title, p.componentId as component_id, c.name as component_name, p.repoId as repo_id, r.name as repo_name, p.status, p.linkedRequestId as linked_request_id, p.confidence, p.risk, p.expectedValue as expected_value, p.agentGenerated as agent_generated, p.waitingSince as waiting_since, p.createdAt as created_at FROM Plan p LEFT JOIN Component c ON p.componentId = c.id LEFT JOIN Repo r ON p.repoId = r.id ORDER BY p.id ASC"
         )
@@ -460,9 +460,9 @@ impl super::SqliteBackendStore {
         Ok(result)
     }
 
-    pub(super) async fn get_plan_impl(&self, id: &str) -> Result<PlanDetail, ApiError> {
+    pub(super) async fn get_plan(&self, id: &str) -> Result<PlanDetail, ApiError> {
         let plan = self
-            .list_plans_impl()
+            .list_plans()
             .await?
             .into_iter()
             .find(|p| p.id == id)
@@ -530,7 +530,7 @@ impl super::SqliteBackendStore {
         })
     }
 
-    pub(super) async fn approve_plan_impl(&self, id: &str) -> Result<ApprovedPlan, ApiError> {
+    pub(super) async fn approve_plan(&self, id: &str) -> Result<ApprovedPlan, ApiError> {
         let mut tx = self
             .pool
             .begin()
@@ -580,7 +580,7 @@ impl super::SqliteBackendStore {
         })
     }
 
-    pub(super) async fn reject_plan_impl(&self, id: &str) -> Result<PlanItem, ApiError> {
+    pub(super) async fn reject_plan(&self, id: &str) -> Result<PlanItem, ApiError> {
         let mut tx = self
             .pool
             .begin()
@@ -616,7 +616,7 @@ impl super::SqliteBackendStore {
         self.fetch_plan_item(id).await
     }
 
-    pub(super) async fn list_executions_impl(
+    pub(super) async fn list_executions(
         &self,
         plan_id: Option<String>,
     ) -> Result<Vec<ExecutionItem>, ApiError> {
@@ -662,7 +662,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn list_operators_impl(&self) -> Result<Vec<OperatorItem>, ApiError> {
+    pub(super) async fn list_operators(&self) -> Result<Vec<OperatorItem>, ApiError> {
         let rows = sqlx::query_as::<_, OperatorRow>(
             "SELECT operatorType as operator_type, description, paramsSchema as params_schema, paletteLabel as palette_label, paletteIcon as palette_icon FROM Operator ORDER BY id ASC"
         )
@@ -685,10 +685,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn get_persistence_impl(
-        &self,
-        key: &str,
-    ) -> Result<serde_json::Value, ApiError> {
+    pub(super) async fn get_persistence(&self, key: &str) -> Result<serde_json::Value, ApiError> {
         let row: Option<StringValueRow> =
             sqlx::query_as::<_, StringValueRow>("SELECT value FROM Persistence WHERE key = ?")
                 .bind(key)
@@ -703,7 +700,7 @@ impl super::SqliteBackendStore {
         }
     }
 
-    pub(super) async fn put_persistence_impl(
+    pub(super) async fn put_persistence(
         &self,
         key: &str,
         value: serde_json::Value,
@@ -723,7 +720,7 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn delete_persistence_impl(&self, key: &str) -> Result<(), ApiError> {
+    pub(super) async fn delete_persistence(&self, key: &str) -> Result<(), ApiError> {
         sqlx::query("DELETE FROM Persistence WHERE key = ?")
             .bind(key)
             .execute(&self.pool)
@@ -732,7 +729,7 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn reset_impl(&self) -> Result<(), ApiError> {
+    pub(super) async fn reset(&self) -> Result<(), ApiError> {
         use sqlx::Executor;
         let tables = [
             "ExecutionRecord",

@@ -1,0 +1,15 @@
+pub const CLI_MIG_001: &str = "CLI-MIG-001";
+pub const CLI_MIG_002: &str = "CLI-MIG-002";
+pub const CLI_MIG_003: &str = "CLI-MIG-003";
+pub const CLI_MIG_004: &str = "CLI-MIG-004";
+pub const CLI_MIG_005: &str = "CLI-MIG-005";
+pub const NEWTON_MCP_001: &str = "NEWTON-MCP-001";
+pub const NEWTON_MCP_002: &str = "NEWTON-MCP-002";
+pub const NEWTON_SERVE_MCP_001: &str = "NEWTON-SERVE-MCP-001";
+pub const NEWTON_SERVE_MCP_002: &str = "NEWTON-SERVE-MCP-002";
+pub const NEWTON_SERVE_MCP_003: &str = "NEWTON-SERVE-MCP-003";
+pub const NEWTON_SERVE_MCP_004: &str = "NEWTON-SERVE-MCP-004";
+pub const NEWTON_SERVE_AIL_001: &str = "NEWTON-SERVE-AIL-001";
+pub const NEWTON_SERVE_AIL_002: &str = "NEWTON-SERVE-AIL-002";
+pub const NEWTON_SERVE_AIL_003: &str = "NEWTON-SERVE-AIL-003";
+pub const NEWTON_SERVE_AIL_004: &str = "NEWTON-SERVE-AIL-004";

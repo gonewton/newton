@@ -6,7 +6,7 @@ use newton_types::ApiError;
 use uuid::Uuid;
 
 impl super::SqliteBackendStore {
-    pub(super) async fn get_workflow_instance_impl(
+    pub(super) async fn get_workflow_instance(
         &self,
         instance_id: &str,
     ) -> Result<newton_types::WorkflowInstance, ApiError> {
@@ -19,11 +19,11 @@ impl super::SqliteBackendStore {
         .map_err(|e| err_internal(&format!("query error: {e}")))?;
 
         let row = row.ok_or_else(|| err_not_found("Workflow instance not found"))?;
-        let nodes = self.list_node_states_for_instance_impl(instance_id).await?;
+        let nodes = self.list_node_states_for_instance(instance_id).await?;
         wi_row_to_instance(row, nodes)
     }
 
-    pub(super) async fn list_workflow_instances_impl(
+    pub(super) async fn list_workflow_instances(
         &self,
         status: Option<newton_types::WorkflowStatus>,
         limit: Option<usize>,
@@ -56,13 +56,13 @@ impl super::SqliteBackendStore {
         let mut instances = Vec::with_capacity(rows.len());
         for row in rows {
             let id = row.instance_id.clone();
-            let nodes = self.list_node_states_for_instance_impl(&id).await?;
+            let nodes = self.list_node_states_for_instance(&id).await?;
             instances.push(wi_row_to_instance(row, nodes)?);
         }
         Ok(instances)
     }
 
-    pub(super) async fn upsert_workflow_instance_impl(
+    pub(super) async fn upsert_workflow_instance(
         &self,
         instance: &newton_types::WorkflowInstance,
     ) -> Result<(), ApiError> {
@@ -102,10 +102,7 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn delete_workflow_instance_impl(
-        &self,
-        instance_id: &str,
-    ) -> Result<(), ApiError> {
+    pub(super) async fn delete_workflow_instance(&self, instance_id: &str) -> Result<(), ApiError> {
         let affected = sqlx::query("DELETE FROM WorkflowInstance WHERE instanceId = ?")
             .bind(instance_id)
             .execute(&self.pool)
@@ -117,7 +114,7 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn get_node_state_impl(
+    pub(super) async fn get_node_state(
         &self,
         instance_id: &str,
         node_id: &str,
@@ -135,7 +132,7 @@ impl super::SqliteBackendStore {
         row_to_node_state(row)
     }
 
-    pub(super) async fn list_node_states_for_instance_impl(
+    pub(super) async fn list_node_states_for_instance(
         &self,
         instance_id: &str,
     ) -> Result<Vec<newton_types::NodeState>, ApiError> {
@@ -150,7 +147,7 @@ impl super::SqliteBackendStore {
         rows.into_iter().map(row_to_node_state).collect()
     }
 
-    pub(super) async fn upsert_node_state_impl(
+    pub(super) async fn upsert_node_state(
         &self,
         instance_id: &str,
         node: &newton_types::NodeState,
@@ -181,7 +178,7 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn update_workflow_status_impl(
+    pub(super) async fn update_workflow_status(
         &self,
         instance_id: &str,
         status: newton_types::WorkflowStatus,
@@ -205,7 +202,7 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn get_hil_event_impl(
+    pub(super) async fn get_hil_event(
         &self,
         event_id: &str,
     ) -> Result<newton_types::HilEvent, ApiError> {
@@ -221,7 +218,7 @@ impl super::SqliteBackendStore {
         row_to_hil_event(row)
     }
 
-    pub(super) async fn list_hil_events_for_instance_impl(
+    pub(super) async fn list_hil_events_for_instance(
         &self,
         instance_id: &str,
     ) -> Result<Vec<newton_types::HilEvent>, ApiError> {
@@ -236,7 +233,7 @@ impl super::SqliteBackendStore {
         rows.into_iter().map(row_to_hil_event).collect()
     }
 
-    pub(super) async fn list_hil_instances_impl(&self) -> Result<Vec<String>, ApiError> {
+    pub(super) async fn list_hil_instances(&self) -> Result<Vec<String>, ApiError> {
         let rows: Vec<InstanceIdRow> = sqlx::query_as::<_, InstanceIdRow>(
             "SELECT DISTINCT instanceId FROM HilEvent ORDER BY instanceId ASC",
         )
@@ -247,7 +244,7 @@ impl super::SqliteBackendStore {
         Ok(rows.into_iter().map(|r| r.instance_id).collect())
     }
 
-    pub(super) async fn insert_hil_event_impl(
+    pub(super) async fn insert_hil_event(
         &self,
         event: &newton_types::HilEvent,
     ) -> Result<(), ApiError> {
@@ -281,7 +278,7 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn update_hil_event_status_impl(
+    pub(super) async fn update_hil_event_status(
         &self,
         event_id: &str,
         status: newton_types::HilStatus,
@@ -299,10 +296,10 @@ impl super::SqliteBackendStore {
         if affected.rows_affected() == 0 {
             return Err(err_not_found("HIL event not found"));
         }
-        self.get_hil_event_impl(event_id).await
+        self.get_hil_event(event_id).await
     }
 
-    pub(super) async fn append_log_line_impl(
+    pub(super) async fn append_log_line(
         &self,
         instance_id: &str,
         node_id: &str,
@@ -336,7 +333,7 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn list_log_lines_impl(
+    pub(super) async fn list_log_lines(
         &self,
         instance_id: &str,
         node_id: &str,

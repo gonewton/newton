@@ -6,7 +6,7 @@
 //!   * Every test name referenced by the matrix exists in some test source
 //!     file (`WFG-E2EMAT-002`).
 //!   * Every flag referenced in the matrix corresponds to either `--help`,
-//!     a documented framework flag, or a flag declared in `framework_setup.rs`
+//!     a documented framework flag, or a flag declared in `framework_setup/`
 //!     (`WFG-E2EMAT-003`).
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -193,10 +193,8 @@ fn matrix_flags_exist_in_command_spec() {
     //     is a documented `spec`/framework flag)
     //   * a `(negative)` annotation
     let rows = parse_rows(&matrix_md());
-    let fw = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli/framework_setup.rs"),
-    )
-    .expect("read framework_setup.rs");
+    let fw_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli/framework_setup");
+    let fw = collect_rs_sources(&fw_dir);
     let allowed_framework_flags: BTreeSet<&str> = [
         "--help",
         "--format",
@@ -227,10 +225,31 @@ fn matrix_flags_exist_in_command_spec() {
         let appears = fw.contains(first_token);
         assert!(
             appears,
-            "WFG-E2EMAT-003: matrix flag `{first_token}` (command `{}`) not declared in framework_setup.rs",
+            "WFG-E2EMAT-003: matrix flag `{first_token}` (command `{}`) not declared in framework_setup/",
             r.command
         );
     }
+}
+
+// --- Helpers -----------------------------------------------------------------
+
+/// Concatenate all `.rs` files under `dir` recursively into a single string.
+fn collect_rs_sources(dir: &Path) -> String {
+    let mut out = String::new();
+    if let Ok(entries) = fs::read_dir(dir) {
+        let mut paths: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
+        paths.sort();
+        for path in paths {
+            if path.is_dir() {
+                out.push_str(&collect_rs_sources(&path));
+            } else if path.extension().map(|e| e == "rs").unwrap_or(false) {
+                if let Ok(s) = fs::read_to_string(&path) {
+                    out.push_str(&s);
+                }
+            }
+        }
+    }
+    out
 }
 
 // --- Self-tests for the three error codes ---------------------------------
