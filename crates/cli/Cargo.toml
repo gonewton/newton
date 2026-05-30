@@ -18,7 +18,7 @@ name = "logging_integration_helper"
 path = "tests/bin/logging_integration_helper.rs"
 
 [dependencies]
-cli-framework = { git = "https://github.com/aroff/cli-framework", rev = "6d198a2", features = ["mcp-server", "api-server", "api-swagger"] }
+cli-framework = { git = "https://github.com/aroff/cli-framework", rev = "6d198a2", default-features = false, features = ["mcp-server", "api-server", "api-swagger"] }
 rmcp = { version = "1.6", features = ["server", "transport-streamable-http-server"] }
 utoipa-swagger-ui = { version = "9.0.2", default-features = false, features = ["vendored", "url"] }
 newton-core = { path = "../core" }
@@ -58,8 +58,15 @@ regex = { workspace = true }
 openssl = { version = "0.10", optional = true, features = ["vendored"] }
 
 [features]
+# Enable `cli-framework`'s built-in `chat` command by default.
+default = ["chat"]
+
 # Feature flag to enable vendored OpenSSL for static musl builds
 vendored-openssl = ["openssl"]
+
+# Forward `chat` to `cli-framework/chat`, so `--no-default-features` builds can
+# still compile the CLI crate without pulling in the embedded agent dependency.
+chat = ["cli-framework/chat"]
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
@@ -232,3 +239,7 @@ path = "tests/integration/test_streaming_parity.rs"
 [[test]]
 name = "test_data_post_grade_local_store"
 path = "tests/integration/test_data_post_grade_local_store.rs"
+
+[[test]]
+name = "test_chat_error_codes"
+path = "tests/integration/test_chat_error_codes.rs"
