@@ -42,7 +42,7 @@ pub(super) struct PendingApprovalRow {
     pub reviewer: String,
     pub status: String,
     pub confidence: i64,
-    pub agent_generated: i64,
+    pub agent_generated: bool,
 }
 
 #[derive(Debug, FromRow)]
@@ -274,7 +274,7 @@ pub(super) struct PlanRow {
     pub confidence: i64,
     pub risk: String,
     pub expected_value: Option<String>,
-    pub agent_generated: i64,
+    pub agent_generated: bool,
     pub waiting_since: Option<String>,
     pub created_at: String,
 }
@@ -338,11 +338,6 @@ pub(super) struct OperatorRow {
 pub(super) struct DepEdge {
     pub from_id: String,
     pub to_id: String,
-}
-
-#[derive(Debug, FromRow)]
-pub(super) struct CountRow {
-    pub count: i64,
 }
 
 #[derive(Debug, FromRow)]

@@ -1,8 +1,9 @@
 use crate::api::state::AppState;
+use crate::api::{created_json, ok_json};
 use axum::{
+    extract::Json,
     extract::{Path, Query, State},
-    http::StatusCode,
-    response::{IntoResponse, Json, Response},
+    response::Response,
     routing::{get, patch},
     Router,
 };
@@ -40,10 +41,7 @@ pub(crate) async fn list_opportunities(
     Query(query): Query<OpportunityQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.list_opportunities(query.status).await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
-    }
+    ok_json(state.backend.list_opportunities(query.status).await)
 }
 
 #[utoipa::path(
@@ -61,16 +59,7 @@ pub(crate) async fn create_opportunity(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateOpportunityBody>,
 ) -> Response {
-    match state.backend.create_opportunity(body).await {
-        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
-        Err(e) => {
-            let status = match e.code.as_str() {
-                "ERR_VALIDATION" => StatusCode::UNPROCESSABLE_ENTITY,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            };
-            (status, Json(e)).into_response()
-        }
-    }
+    created_json(state.backend.create_opportunity(body).await)
 }
 
 #[utoipa::path(
@@ -91,15 +80,5 @@ pub(crate) async fn patch_opportunity(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchOpportunityBody>,
 ) -> Response {
-    match state.backend.patch_opportunity(&id, body).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => {
-            let status = match e.code.as_str() {
-                "ERR_NOT_FOUND" => StatusCode::NOT_FOUND,
-                "ERR_VALIDATION" => StatusCode::UNPROCESSABLE_ENTITY,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            };
-            (status, Json(e)).into_response()
-        }
-    }
+    ok_json(state.backend.patch_opportunity(&id, body).await)
 }

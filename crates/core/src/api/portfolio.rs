@@ -1,8 +1,9 @@
 use crate::api::state::AppState;
+use crate::api::{created_json, ok_json};
 use axum::{
+    extract::Json,
     extract::{Query, State},
-    http::StatusCode,
-    response::{IntoResponse, Json, Response},
+    response::Response,
     routing::{get, post},
     Router,
 };
@@ -31,10 +32,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
     )
 )]
 pub(crate) async fn list_repos(State(state): State<Arc<AppState>>) -> Response {
-    match state.backend.list_repos().await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
-    }
+    ok_json(state.backend.list_repos().await)
 }
 
 #[utoipa::path(
@@ -47,10 +45,7 @@ pub(crate) async fn list_repos(State(state): State<Arc<AppState>>) -> Response {
     )
 )]
 pub(crate) async fn list_repo_dependencies(State(state): State<Arc<AppState>>) -> Response {
-    match state.backend.list_repo_dependencies().await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
-    }
+    ok_json(state.backend.list_repo_dependencies().await)
 }
 
 #[utoipa::path(
@@ -63,10 +58,7 @@ pub(crate) async fn list_repo_dependencies(State(state): State<Arc<AppState>>) -
     )
 )]
 pub(crate) async fn list_module_dependencies(State(state): State<Arc<AppState>>) -> Response {
-    match state.backend.list_module_dependencies().await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
-    }
+    ok_json(state.backend.list_module_dependencies().await)
 }
 
 #[utoipa::path(
@@ -86,18 +78,7 @@ pub(crate) async fn create_module_dependency(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateModuleDependencyBody>,
 ) -> Response {
-    match state.backend.create_module_dependency(body).await {
-        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
-        Err(e) => {
-            let status = match e.code.as_str() {
-                "ERR_NOT_FOUND" => StatusCode::NOT_FOUND,
-                "ERR_CONFLICT" => StatusCode::CONFLICT,
-                "ERR_VALIDATION" => StatusCode::UNPROCESSABLE_ENTITY,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            };
-            (status, Json(e)).into_response()
-        }
-    }
+    created_json(state.backend.create_module_dependency(body).await)
 }
 
 #[derive(Debug, Deserialize)]
@@ -119,8 +100,5 @@ pub(crate) async fn list_saved_views(
     Query(query): Query<SavedViewsQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.list_saved_views(query.kind).await {
-        Ok(value) => (StatusCode::OK, Json(value)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
-    }
+    ok_json(state.backend.list_saved_views(query.kind).await)
 }

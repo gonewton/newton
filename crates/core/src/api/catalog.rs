@@ -1,9 +1,9 @@
 use crate::api::state::AppState;
+use crate::api::{api_status, created_json, ok_json};
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
     response::{IntoResponse, Json, Response},
-    routing::{delete, get, patch, post, put},
+    routing::{get, post},
     Router,
 };
 use newton_backend::{
@@ -16,15 +16,6 @@ use newton_types::ApiError;
 use serde::Deserialize;
 use std::sync::Arc;
 
-fn status_from_error(e: &ApiError) -> StatusCode {
-    match e.code.as_str() {
-        "ERR_NOT_FOUND" => StatusCode::NOT_FOUND,
-        "ERR_CONFLICT" => StatusCode::CONFLICT,
-        "ERR_VALIDATION" => StatusCode::UNPROCESSABLE_ENTITY,
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
-    }
-}
-
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
         // KPI
@@ -34,41 +25,52 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/eval-runs", get(list_eval_runs).post(create_eval_run))
         .route("/eval-runs/{id}", get(get_eval_run))
         .route("/eval-runs/{id}/grades", get(list_eval_run_grades))
-        // Product
-        .route("/products/{id}", get(get_product))
-        .route("/products", post(create_product))
-        .route("/products/{id}", put(put_product))
-        .route("/products/{id}", patch(patch_product))
-        .route("/products/{id}", delete(delete_product))
-        // Component
-        .route("/components/{id}", get(get_component))
-        .route("/components", post(create_component))
-        .route("/components/{id}", put(put_component))
-        .route("/components/{id}", patch(patch_component))
-        .route("/components/{id}", delete(delete_component))
-        // Repo
-        .route("/repos/{id}", get(get_repo))
-        .route("/repos", post(create_repo))
-        .route("/repos/{id}", put(put_repo))
-        .route("/repos/{id}", patch(patch_repo))
-        .route("/repos/{id}", delete(delete_repo))
-        // Module
-        .route("/modules", get(list_modules))
-        .route("/modules/{id}", get(get_module))
-        .route("/modules", post(create_module))
-        .route("/modules/{id}", put(put_module))
-        .route("/modules/{id}", patch(patch_module))
-        .route("/modules/{id}", delete(delete_module))
-        // ModuleDependency
-        .route("/module-dependencies/{id}", get(get_module_dependency))
-        .route("/module-dependencies/{id}", patch(patch_module_dependency))
-        .route(
-            "/module-dependencies/{id}",
-            delete(delete_module_dependency),
-        )
         // Grade
         .route("/grades", get(list_grades).post(create_grade))
         .route("/grades/{id}", get(get_grade))
+        // Product
+        .route("/products", post(create_product))
+        .route(
+            "/products/{id}",
+            get(get_product)
+                .put(put_product)
+                .patch(patch_product)
+                .delete(delete_product),
+        )
+        // Component
+        .route("/components", post(create_component))
+        .route(
+            "/components/{id}",
+            get(get_component)
+                .put(put_component)
+                .patch(patch_component)
+                .delete(delete_component),
+        )
+        // Repo
+        .route("/repos", post(create_repo))
+        .route(
+            "/repos/{id}",
+            get(get_repo)
+                .put(put_repo)
+                .patch(patch_repo)
+                .delete(delete_repo),
+        )
+        // Module
+        .route("/modules", get(list_modules).post(create_module))
+        .route(
+            "/modules/{id}",
+            get(get_module)
+                .put(put_module)
+                .patch(patch_module)
+                .delete(delete_module),
+        )
+        // ModuleDependency
+        .route(
+            "/module-dependencies/{id}",
+            get(get_module_dependency)
+                .patch(patch_module_dependency)
+                .delete(delete_module_dependency),
+        )
         .with_state(state)
 }
 
@@ -82,10 +84,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
     )
 )]
 pub(crate) async fn list_kpis(State(state): State<Arc<AppState>>) -> Response {
-    match state.backend.list_kpis().await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.list_kpis().await)
 }
 
 #[utoipa::path(
@@ -103,10 +102,7 @@ pub(crate) async fn get_kpi(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.get_kpi(&id).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.get_kpi(&id).await)
 }
 
 #[utoipa::path(
@@ -125,10 +121,7 @@ pub(crate) async fn create_kpi(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateKpiBody>,
 ) -> Response {
-    match state.backend.create_kpi(body).await {
-        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    created_json(state.backend.create_kpi(body).await)
 }
 
 // ── EvalRun ───────────────────────────────────────────────────────────────────
@@ -159,10 +152,7 @@ pub(crate) async fn create_eval_run(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateEvalRunBody>,
 ) -> Response {
-    match state.backend.create_eval_run(body).await {
-        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    created_json(state.backend.create_eval_run(body).await)
 }
 
 #[utoipa::path(
@@ -184,14 +174,12 @@ pub(crate) async fn list_eval_runs(
     Query(query): Query<ListEvalRunsQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state
-        .backend
-        .list_eval_runs(query.scope, query.scope_id, query.source, query.limit)
-        .await
-    {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(
+        state
+            .backend
+            .list_eval_runs(query.scope, query.scope_id, query.source, query.limit)
+            .await,
+    )
 }
 
 #[utoipa::path(
@@ -209,10 +197,7 @@ pub(crate) async fn get_eval_run(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.get_eval_run(&id).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.get_eval_run(&id).await)
 }
 
 #[utoipa::path(
@@ -231,12 +216,9 @@ pub(crate) async fn list_eval_run_grades(
     State(state): State<Arc<AppState>>,
 ) -> Response {
     if let Err(e) = state.backend.get_eval_run(&id).await {
-        return (status_from_error(&e), Json(e)).into_response();
+        return (api_status(&e), Json(e)).into_response();
     }
-    match state.backend.list_grades(Some(id), None).await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.list_grades(Some(id), None).await)
 }
 
 // ── Product ───────────────────────────────────────────────────────────────────
@@ -256,10 +238,7 @@ pub(crate) async fn get_product(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.get_product(&id).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.get_product(&id).await)
 }
 
 #[utoipa::path(
@@ -277,10 +256,7 @@ pub(crate) async fn create_product(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateProductBody>,
 ) -> Response {
-    match state.backend.create_product(body).await {
-        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    created_json(state.backend.create_product(body).await)
 }
 
 #[utoipa::path(
@@ -301,10 +277,7 @@ pub(crate) async fn put_product(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PutProductBody>,
 ) -> Response {
-    match state.backend.put_product(&id, body).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.put_product(&id, body).await)
 }
 
 #[utoipa::path(
@@ -324,10 +297,7 @@ pub(crate) async fn patch_product(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchProductBody>,
 ) -> Response {
-    match state.backend.patch_product(&id, body).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.patch_product(&id, body).await)
 }
 
 #[utoipa::path(
@@ -346,10 +316,13 @@ pub(crate) async fn delete_product(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.delete_product(&id).await {
-        Ok(deleted_id) => (StatusCode::OK, Json(DeletedItem { id: deleted_id })).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(
+        state
+            .backend
+            .delete_product(&id)
+            .await
+            .map(|id| DeletedItem { id }),
+    )
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -369,10 +342,7 @@ pub(crate) async fn get_component(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.get_component(&id).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.get_component(&id).await)
 }
 
 #[utoipa::path(
@@ -390,10 +360,7 @@ pub(crate) async fn create_component(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateComponentBody>,
 ) -> Response {
-    match state.backend.create_component(body).await {
-        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    created_json(state.backend.create_component(body).await)
 }
 
 #[utoipa::path(
@@ -413,10 +380,7 @@ pub(crate) async fn put_component(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PutComponentBody>,
 ) -> Response {
-    match state.backend.put_component(&id, body).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.put_component(&id, body).await)
 }
 
 #[utoipa::path(
@@ -436,10 +400,7 @@ pub(crate) async fn patch_component(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchComponentBody>,
 ) -> Response {
-    match state.backend.patch_component(&id, body).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.patch_component(&id, body).await)
 }
 
 #[utoipa::path(
@@ -458,10 +419,13 @@ pub(crate) async fn delete_component(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.delete_component(&id).await {
-        Ok(deleted_id) => (StatusCode::OK, Json(DeletedItem { id: deleted_id })).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(
+        state
+            .backend
+            .delete_component(&id)
+            .await
+            .map(|id| DeletedItem { id }),
+    )
 }
 
 // ── Repo ──────────────────────────────────────────────────────────────────────
@@ -481,10 +445,7 @@ pub(crate) async fn get_repo(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.get_repo(&id).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.get_repo(&id).await)
 }
 
 #[utoipa::path(
@@ -503,10 +464,7 @@ pub(crate) async fn create_repo(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateRepoBody>,
 ) -> Response {
-    match state.backend.create_repo(body).await {
-        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    created_json(state.backend.create_repo(body).await)
 }
 
 #[utoipa::path(
@@ -526,10 +484,7 @@ pub(crate) async fn put_repo(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PutRepoBody>,
 ) -> Response {
-    match state.backend.put_repo(&id, body).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.put_repo(&id, body).await)
 }
 
 #[utoipa::path(
@@ -549,10 +504,7 @@ pub(crate) async fn patch_repo(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchRepoBody>,
 ) -> Response {
-    match state.backend.patch_repo(&id, body).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.patch_repo(&id, body).await)
 }
 
 #[utoipa::path(
@@ -571,10 +523,13 @@ pub(crate) async fn delete_repo(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.delete_repo(&id).await {
-        Ok(deleted_id) => (StatusCode::OK, Json(DeletedItem { id: deleted_id })).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(
+        state
+            .backend
+            .delete_repo(&id)
+            .await
+            .map(|id| DeletedItem { id }),
+    )
 }
 
 // ── Module ────────────────────────────────────────────────────────────────────
@@ -589,10 +544,7 @@ pub(crate) async fn delete_repo(
     )
 )]
 pub(crate) async fn list_modules(State(state): State<Arc<AppState>>) -> Response {
-    match state.backend.list_modules().await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
-    }
+    ok_json(state.backend.list_modules().await)
 }
 
 #[utoipa::path(
@@ -610,10 +562,7 @@ pub(crate) async fn get_module(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.get_module(&id).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.get_module(&id).await)
 }
 
 #[utoipa::path(
@@ -631,10 +580,7 @@ pub(crate) async fn create_module(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateModuleBody>,
 ) -> Response {
-    match state.backend.create_module(body).await {
-        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    created_json(state.backend.create_module(body).await)
 }
 
 #[utoipa::path(
@@ -654,10 +600,7 @@ pub(crate) async fn put_module(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PutModuleBody>,
 ) -> Response {
-    match state.backend.put_module(&id, body).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.put_module(&id, body).await)
 }
 
 #[utoipa::path(
@@ -677,10 +620,7 @@ pub(crate) async fn patch_module(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchModuleBody>,
 ) -> Response {
-    match state.backend.patch_module(&id, body).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.patch_module(&id, body).await)
 }
 
 #[utoipa::path(
@@ -699,10 +639,13 @@ pub(crate) async fn delete_module(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.delete_module(&id).await {
-        Ok(deleted_id) => (StatusCode::OK, Json(DeletedItem { id: deleted_id })).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(
+        state
+            .backend
+            .delete_module(&id)
+            .await
+            .map(|id| DeletedItem { id }),
+    )
 }
 
 // ── ModuleDependency ──────────────────────────────────────────────────────────
@@ -722,10 +665,7 @@ pub(crate) async fn get_module_dependency(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.get_module_dependency(&id).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.get_module_dependency(&id).await)
 }
 
 #[utoipa::path(
@@ -745,10 +685,7 @@ pub(crate) async fn patch_module_dependency(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchModuleDependencyBody>,
 ) -> Response {
-    match state.backend.patch_module_dependency(&id, body).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.patch_module_dependency(&id, body).await)
 }
 
 #[utoipa::path(
@@ -766,10 +703,13 @@ pub(crate) async fn delete_module_dependency(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.delete_module_dependency(&id).await {
-        Ok(deleted_id) => (StatusCode::OK, Json(DeletedItem { id: deleted_id })).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(
+        state
+            .backend
+            .delete_module_dependency(&id)
+            .await
+            .map(|id| DeletedItem { id }),
+    )
 }
 
 // ── Grade ─────────────────────────────────────────────────────────────────────
@@ -798,10 +738,7 @@ pub(crate) async fn list_grades(
     Query(query): Query<ListGradesQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.list_grades(query.run_id, query.kpi_id).await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.list_grades(query.run_id, query.kpi_id).await)
 }
 
 #[utoipa::path(
@@ -821,10 +758,7 @@ pub(crate) async fn create_grade(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateGradeBody>,
 ) -> Response {
-    match state.backend.create_grade(body).await {
-        Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    created_json(state.backend.create_grade(body).await)
 }
 
 #[utoipa::path(
@@ -841,8 +775,5 @@ pub(crate) async fn get_grade(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.backend.get_grade(&id).await {
-        Ok(item) => (StatusCode::OK, Json(item)).into_response(),
-        Err(e) => (status_from_error(&e), Json(e)).into_response(),
-    }
+    ok_json(state.backend.get_grade(&id).await)
 }

@@ -1,9 +1,10 @@
+use crate::api::api_status;
 use crate::api::state::AppState;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Json, Response},
-    routing::{delete, get, put},
+    routing::get,
     Router,
 };
 use newton_types::ApiError;
@@ -12,10 +13,25 @@ use std::sync::Arc;
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/persistence/{key}", get(get_persistence))
-        .route("/persistence/{key}", put(put_persistence))
-        .route("/persistence/{key}", delete(delete_persistence))
+        .route(
+            "/persistence/{key}",
+            get(get_persistence)
+                .put(put_persistence)
+                .delete(delete_persistence),
+        )
         .with_state(state)
+}
+
+fn require_nonempty_key(key: &str) -> Result<(), Response> {
+    if key.is_empty() {
+        Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(newton_backend::err_validation("Key must not be empty")),
+        )
+            .into_response())
+    } else {
+        Ok(())
+    }
 }
 
 #[utoipa::path(
@@ -34,22 +50,12 @@ pub(crate) async fn get_persistence(
     Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    if key.is_empty() {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(newton_backend::err_validation("Key must not be empty")),
-        )
-            .into_response();
+    if let Err(r) = require_nonempty_key(&key) {
+        return r;
     }
     match state.backend.get_persistence(&key).await {
         Ok(value) => (StatusCode::OK, Json(value)).into_response(),
-        Err(e) => {
-            let status = match e.code.as_str() {
-                "ERR_NOT_FOUND" => StatusCode::NOT_FOUND,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            };
-            (status, Json(e)).into_response()
-        }
+        Err(e) => (api_status(&e), Json(e)).into_response(),
     }
 }
 
@@ -70,12 +76,8 @@ pub(crate) async fn put_persistence(
     State(state): State<Arc<AppState>>,
     Json(body): Json<serde_json::Value>,
 ) -> Response {
-    if key.is_empty() {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(newton_backend::err_validation("Key must not be empty")),
-        )
-            .into_response();
+    if let Err(r) = require_nonempty_key(&key) {
+        return r;
     }
     match state.backend.put_persistence(&key, body).await {
         Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))).into_response(),
@@ -98,12 +100,8 @@ pub(crate) async fn delete_persistence(
     Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    if key.is_empty() {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(newton_backend::err_validation("Key must not be empty")),
-        )
-            .into_response();
+    if let Err(r) = require_nonempty_key(&key) {
+        return r;
     }
     match state.backend.delete_persistence(&key).await {
         Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))).into_response(),

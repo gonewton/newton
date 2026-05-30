@@ -16,10 +16,39 @@ pub mod workflow_files;
 pub mod workflows;
 
 use crate::api::state::AppState;
-use axum::Router;
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Json, Response},
+    Router,
+};
+use newton_types::ApiError;
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tower_http::services::{ServeDir, ServeFile};
+
+pub(crate) fn api_status(e: &ApiError) -> StatusCode {
+    match e.code.as_str() {
+        "ERR_NOT_FOUND" => StatusCode::NOT_FOUND,
+        "ERR_CONFLICT" => StatusCode::CONFLICT,
+        "ERR_VALIDATION" => StatusCode::UNPROCESSABLE_ENTITY,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+pub(crate) fn ok_json<T: Serialize>(r: Result<T, ApiError>) -> Response {
+    match r {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => (api_status(&e), Json(e)).into_response(),
+    }
+}
+
+pub(crate) fn created_json<T: Serialize>(r: Result<T, ApiError>) -> Response {
+    match r {
+        Ok(v) => (StatusCode::CREATED, Json(v)).into_response(),
+        Err(e) => (api_status(&e), Json(e)).into_response(),
+    }
+}
 
 // lockstep: axum major version MUST match cli-framework (both 0.8)
 pub fn api_v1_router(state: AppState) -> Router {

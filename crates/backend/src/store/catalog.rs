@@ -1,3 +1,5 @@
+use super::helpers::{query_err, unique_err};
+use super::plan::PLAN_SELECT;
 use super::rows::*;
 use crate::err_conflict;
 use crate::err_internal;
@@ -10,14 +12,14 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use uuid::Uuid;
 
 impl super::SqliteBackendStore {
-    pub(super) async fn fetch_product_item(&self, id: &str) -> Result<ProductItem, ApiError> {
+    pub(super) async fn get_product_db(&self, id: &str) -> Result<ProductItem, ApiError> {
         let row: Option<ProductRow> = sqlx::query_as::<_, ProductRow>(
             "SELECT p.id, p.name, COUNT(c.id) as component_count FROM Product p LEFT JOIN Component c ON c.productId = p.id WHERE p.id = ? GROUP BY p.id"
         )
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         row.map(|r| ProductItem {
             id: r.id,
@@ -27,14 +29,14 @@ impl super::SqliteBackendStore {
         .ok_or_else(|| err_not_found("Product not found"))
     }
 
-    pub(super) async fn fetch_component_item(&self, id: &str) -> Result<ComponentItem, ApiError> {
+    pub(super) async fn get_component_db(&self, id: &str) -> Result<ComponentItem, ApiError> {
         let row: Option<ComponentRow> = sqlx::query_as::<_, ComponentRow>(
             "SELECT c.id, c.name, c.domain, c.repos, c.modules, c.trend, c.owner, c.criticality, c.autonomy, c.openPlans as open_plans, c.openRequests as open_requests, c.lastEval as last_eval, c.productId as product_id, p.name as product_name FROM Component c LEFT JOIN Product p ON c.productId = p.id WHERE c.id = ?"
         )
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         let row = row.ok_or_else(|| err_not_found("Component not found"))?;
         Ok(ComponentItem {
@@ -55,14 +57,14 @@ impl super::SqliteBackendStore {
         })
     }
 
-    pub(super) async fn fetch_repo_item(&self, id: &str) -> Result<RepoItem, ApiError> {
+    pub(super) async fn get_repo_db(&self, id: &str) -> Result<RepoItem, ApiError> {
         let row: Option<RepoRow> = sqlx::query_as::<_, RepoRow>(
             "SELECT r.id, r.name, r.componentId as component_id, c.name as component_name, r.owner, r.criticality, r.autonomy, r.regressions, r.openPlans as open_plans, r.execStatus as exec_status, r.lastEval as last_eval FROM Repo r LEFT JOIN Component c ON r.componentId = c.id WHERE r.id = ?"
         )
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         let row = row.ok_or_else(|| err_not_found("Repo not found"))?;
         let depends_on = compute_repo_depends_on(&self.pool, &row.name).await?;
@@ -83,14 +85,14 @@ impl super::SqliteBackendStore {
         })
     }
 
-    pub(super) async fn fetch_module_item(&self, id: &str) -> Result<ModuleItem, ApiError> {
+    pub(super) async fn get_module_db(&self, id: &str) -> Result<ModuleItem, ApiError> {
         let row: Option<ModuleRow> = sqlx::query_as::<_, ModuleRow>(
             "SELECT m.id, m.name, m.kind, m.repoId as repo_id, r.name as repo_name, r.componentId as component_id, c.name as component_name FROM Module m LEFT JOIN Repo r ON m.repoId = r.id LEFT JOIN Component c ON r.componentId = c.id WHERE m.id = ?",
         )
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         let row = row.ok_or_else(|| err_not_found("Module not found"))?;
         Ok(ModuleItem {
@@ -104,11 +106,11 @@ impl super::SqliteBackendStore {
         })
     }
 
-    pub(super) async fn fetch_module_dependency_item(
+    pub(super) async fn get_module_dependency_db(
         &self,
         id: &str,
     ) -> Result<ModuleDependencyItem, ApiError> {
-        self.list_module_dependencies()
+        self.list_module_dependencies_db()
             .await?
             .into_iter()
             .find(|d| d.id == id)
@@ -121,7 +123,7 @@ impl super::SqliteBackendStore {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         let mut adj: HashMap<String, Vec<String>> = HashMap::new();
         for d in &all_deps {
@@ -160,13 +162,12 @@ impl super::SqliteBackendStore {
     }
 
     pub(super) async fn fetch_plan_item(&self, id: &str) -> Result<PlanItem, ApiError> {
-        let row: Option<PlanRow> = sqlx::query_as::<_, PlanRow>(
-            "SELECT p.id, p.title, p.componentId as component_id, c.name as component_name, p.repoId as repo_id, r.name as repo_name, p.status, p.linkedRequestId as linked_request_id, p.confidence, p.risk, p.expectedValue as expected_value, p.agentGenerated as agent_generated, p.waitingSince as waiting_since, p.createdAt as created_at FROM Plan p LEFT JOIN Component c ON p.componentId = c.id LEFT JOIN Repo r ON p.repoId = r.id WHERE p.id = ?"
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        let row: Option<PlanRow> =
+            sqlx::query_as::<_, PlanRow>(&format!("{PLAN_SELECT} WHERE p.id = ?"))
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(query_err)?;
 
         let row = row.ok_or_else(|| err_not_found("Plan not found"))?;
 
@@ -176,7 +177,7 @@ impl super::SqliteBackendStore {
         .bind(id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         Ok(PlanItem {
             id: row.id,
@@ -189,7 +190,7 @@ impl super::SqliteBackendStore {
             confidence: row.confidence,
             risk: row.risk,
             expected_value: row.expected_value,
-            agent_generated: row.agent_generated != 0,
+            agent_generated: row.agent_generated,
             waiting_since: row.waiting_since,
             created_at: row.created_at,
         })
@@ -197,13 +198,13 @@ impl super::SqliteBackendStore {
 }
 
 impl super::SqliteBackendStore {
-    pub(super) async fn list_products(&self) -> Result<Vec<ProductItem>, ApiError> {
+    pub(super) async fn list_products_db(&self) -> Result<Vec<ProductItem>, ApiError> {
         let rows = sqlx::query_as::<_, ProductRow>(
             "SELECT p.id, p.name, COUNT(c.id) as component_count FROM Product p LEFT JOIN Component c ON c.productId = p.id GROUP BY p.id ORDER BY p.id ASC"
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         Ok(rows
             .into_iter()
@@ -215,7 +216,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn create_product(
+    pub(super) async fn create_product_db(
         &self,
         body: CreateProductBody,
     ) -> Result<ProductItem, ApiError> {
@@ -228,17 +229,11 @@ impl super::SqliteBackendStore {
             .bind(&now)
             .execute(&self.pool)
             .await
-            .map_err(|e| {
-                if e.to_string().contains("UNIQUE constraint failed") {
-                    err_conflict("name already exists")
-                } else {
-                    err_internal(&format!("insert error: {e}"))
-                }
-            })?;
-        self.fetch_product_item(&id).await
+            .map_err(|e| unique_err(e, "name already exists", "insert error"))?;
+        self.get_product_db(&id).await
     }
 
-    pub(super) async fn put_product(
+    pub(super) async fn put_product_db(
         &self,
         id: &str,
         body: PutProductBody,
@@ -250,25 +245,19 @@ impl super::SqliteBackendStore {
             .bind(id)
             .execute(&self.pool)
             .await
-            .map_err(|e| {
-                if e.to_string().contains("UNIQUE constraint failed") {
-                    err_conflict("name already exists")
-                } else {
-                    err_internal(&format!("update error: {e}"))
-                }
-            })?;
+            .map_err(|e| unique_err(e, "name already exists", "update error"))?;
         if affected.rows_affected() == 0 {
             return Err(err_not_found("Product not found"));
         }
-        self.fetch_product_item(id).await
+        self.get_product_db(id).await
     }
 
-    pub(super) async fn patch_product(
+    pub(super) async fn patch_product_db(
         &self,
         id: &str,
         body: PatchProductBody,
     ) -> Result<ProductItem, ApiError> {
-        let existing = self.fetch_product_item(id).await?;
+        let existing = self.get_product_db(id).await?;
         let name = body.name.unwrap_or(existing.name);
         let now = Self::now_iso();
         sqlx::query("UPDATE Product SET name = ?, updatedAt = ? WHERE id = ?")
@@ -277,25 +266,17 @@ impl super::SqliteBackendStore {
             .bind(id)
             .execute(&self.pool)
             .await
-            .map_err(|e| {
-                if e.to_string().contains("UNIQUE constraint failed") {
-                    err_conflict("name already exists")
-                } else {
-                    err_internal(&format!("update error: {e}"))
-                }
-            })?;
-        self.fetch_product_item(id).await
+            .map_err(|e| unique_err(e, "name already exists", "update error"))?;
+        self.get_product_db(id).await
     }
 
-    pub(super) async fn delete_product(&self, id: &str) -> Result<String, ApiError> {
-        let count: Option<CountRow> = sqlx::query_as::<_, CountRow>(
-            "SELECT COUNT(*) as count FROM Component WHERE productId = ?",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if count.map(|c| c.count).unwrap_or(0) > 0 {
+    pub(super) async fn delete_product_db(&self, id: &str) -> Result<String, ApiError> {
+        let n = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Component WHERE productId = ?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(query_err)?;
+        if n > 0 {
             return Err(err_conflict(
                 "cannot delete product: it has dependent components; remove them first",
             ));
@@ -311,13 +292,13 @@ impl super::SqliteBackendStore {
         Ok(id.to_string())
     }
 
-    pub(super) async fn list_components(&self) -> Result<Vec<ComponentItem>, ApiError> {
+    pub(super) async fn list_components_db(&self) -> Result<Vec<ComponentItem>, ApiError> {
         let rows = sqlx::query_as::<_, ComponentRow>(
             "SELECT c.id, c.name, c.domain, c.repos, c.modules, c.trend, c.owner, c.criticality, c.autonomy, c.openPlans as open_plans, c.openRequests as open_requests, c.lastEval as last_eval, c.productId as product_id, p.name as product_name FROM Component c LEFT JOIN Product p ON c.productId = p.id ORDER BY c.id ASC"
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         Ok(rows
             .into_iter()
@@ -340,17 +321,11 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn create_component(
+    pub(super) async fn create_component_db(
         &self,
         body: CreateComponentBody,
     ) -> Result<ComponentItem, ApiError> {
-        let count: Option<CountRow> =
-            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Product WHERE id = ?")
-                .bind(&body.product_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if count.map(|c| c.count).unwrap_or(0) == 0 {
+        if !self.row_exists("Product", &body.product_id).await? {
             return Err(err_not_found("referenced product not found"));
         }
         let id = Uuid::new_v4().to_string();
@@ -366,30 +341,18 @@ impl super::SqliteBackendStore {
         .execute(&self.pool)
         .await
         .map_err(|e| err_internal(&format!("insert error: {e}")))?;
-        self.fetch_component_item(&id).await
+        self.get_component_db(&id).await
     }
 
-    pub(super) async fn put_component(
+    pub(super) async fn put_component_db(
         &self,
         id: &str,
         body: PutComponentBody,
     ) -> Result<ComponentItem, ApiError> {
-        let count: Option<CountRow> =
-            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Component WHERE id = ?")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if count.map(|c| c.count).unwrap_or(0) == 0 {
+        if !self.row_exists("Component", id).await? {
             return Err(err_not_found("Component not found"));
         }
-        let pcount: Option<CountRow> =
-            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Product WHERE id = ?")
-                .bind(&body.product_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if pcount.map(|c| c.count).unwrap_or(0) == 0 {
+        if !self.row_exists("Product", &body.product_id).await? {
             return Err(err_not_found("referenced product not found"));
         }
         let now = Self::now_iso();
@@ -404,23 +367,17 @@ impl super::SqliteBackendStore {
         .execute(&self.pool)
         .await
         .map_err(|e| err_internal(&format!("update error: {e}")))?;
-        self.fetch_component_item(id).await
+        self.get_component_db(id).await
     }
 
-    pub(super) async fn patch_component(
+    pub(super) async fn patch_component_db(
         &self,
         id: &str,
         body: PatchComponentBody,
     ) -> Result<ComponentItem, ApiError> {
-        let existing = self.fetch_component_item(id).await?;
+        let existing = self.get_component_db(id).await?;
         if let Some(ref pid) = body.product_id {
-            let pcount: Option<CountRow> =
-                sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Product WHERE id = ?")
-                    .bind(pid)
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(|e| err_internal(&format!("query error: {e}")))?;
-            if pcount.map(|c| c.count).unwrap_or(0) == 0 {
+            if !self.row_exists("Product", pid).await? {
                 return Err(err_not_found("referenced product not found"));
             }
         }
@@ -443,18 +400,16 @@ impl super::SqliteBackendStore {
         .execute(&self.pool)
         .await
         .map_err(|e| err_internal(&format!("update error: {e}")))?;
-        self.fetch_component_item(id).await
+        self.get_component_db(id).await
     }
 
-    pub(super) async fn delete_component(&self, id: &str) -> Result<String, ApiError> {
-        let count: Option<CountRow> = sqlx::query_as::<_, CountRow>(
-            "SELECT COUNT(*) as count FROM Repo WHERE componentId = ?",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if count.map(|c| c.count).unwrap_or(0) > 0 {
+    pub(super) async fn delete_component_db(&self, id: &str) -> Result<String, ApiError> {
+        let n = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Repo WHERE componentId = ?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(query_err)?;
+        if n > 0 {
             return Err(err_conflict(
                 "cannot delete component: it has dependent repos; remove them first",
             ));
@@ -470,13 +425,13 @@ impl super::SqliteBackendStore {
         Ok(id.to_string())
     }
 
-    pub(super) async fn list_repos(&self) -> Result<Vec<RepoItem>, ApiError> {
+    pub(super) async fn list_repos_db(&self) -> Result<Vec<RepoItem>, ApiError> {
         let rows = sqlx::query_as::<_, RepoRow>(
             "SELECT r.id, r.name, r.componentId as component_id, c.name as component_name, r.owner, r.criticality, r.autonomy, r.regressions, r.openPlans as open_plans, r.execStatus as exec_status, r.lastEval as last_eval FROM Repo r LEFT JOIN Component c ON r.componentId = c.id ORDER BY r.id ASC"
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         let mut result = Vec::new();
         for row in &rows {
@@ -501,14 +456,8 @@ impl super::SqliteBackendStore {
         Ok(result)
     }
 
-    pub(super) async fn create_repo(&self, body: CreateRepoBody) -> Result<RepoItem, ApiError> {
-        let count: Option<CountRow> =
-            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Component WHERE id = ?")
-                .bind(&body.component_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if count.map(|c| c.count).unwrap_or(0) == 0 {
+    pub(super) async fn create_repo_db(&self, body: CreateRepoBody) -> Result<RepoItem, ApiError> {
+        if !self.row_exists("Component", &body.component_id).await? {
             return Err(err_not_found("referenced component not found"));
         }
         let id = Uuid::new_v4().to_string();
@@ -522,33 +471,19 @@ impl super::SqliteBackendStore {
         .bind(&now).bind(&now)
         .execute(&self.pool)
         .await
-        .map_err(|e| {
-            if e.to_string().contains("UNIQUE constraint failed") {
-                err_conflict("name already exists")
-            } else {
-                err_internal(&format!("insert error: {e}"))
-            }
-        })?;
-        self.fetch_repo_item(&id).await
+        .map_err(|e| unique_err(e, "name already exists", "insert error"))?;
+        self.get_repo_db(&id).await
     }
 
-    pub(super) async fn put_repo(&self, id: &str, body: PutRepoBody) -> Result<RepoItem, ApiError> {
-        let count: Option<CountRow> =
-            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Repo WHERE id = ?")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if count.map(|c| c.count).unwrap_or(0) == 0 {
+    pub(super) async fn put_repo_db(
+        &self,
+        id: &str,
+        body: PutRepoBody,
+    ) -> Result<RepoItem, ApiError> {
+        if !self.row_exists("Repo", id).await? {
             return Err(err_not_found("Repo not found"));
         }
-        let ccount: Option<CountRow> =
-            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Component WHERE id = ?")
-                .bind(&body.component_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if ccount.map(|c| c.count).unwrap_or(0) == 0 {
+        if !self.row_exists("Component", &body.component_id).await? {
             return Err(err_not_found("referenced component not found"));
         }
         let now = Self::now_iso();
@@ -561,31 +496,18 @@ impl super::SqliteBackendStore {
         .bind(&now).bind(id)
         .execute(&self.pool)
         .await
-        .map_err(|e| {
-            if e.to_string().contains("UNIQUE constraint failed") {
-                err_conflict("name already exists")
-            } else {
-                err_internal(&format!("update error: {e}"))
-            }
-        })?;
-        self.fetch_repo_item(id).await
+        .map_err(|e| unique_err(e, "name already exists", "update error"))?;
+        self.get_repo_db(id).await
     }
 
-    pub(super) async fn patch_repo(
+    pub(super) async fn patch_repo_db(
         &self,
         id: &str,
         body: PatchRepoBody,
     ) -> Result<RepoItem, ApiError> {
-        let existing = self.fetch_repo_item(id).await?;
+        let existing = self.get_repo_db(id).await?;
         if let Some(ref cid) = body.component_id {
-            let ccount: Option<CountRow> = sqlx::query_as::<_, CountRow>(
-                "SELECT COUNT(*) as count FROM Component WHERE id = ?",
-            )
-            .bind(cid)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| err_internal(&format!("query error: {e}")))?;
-            if ccount.map(|c| c.count).unwrap_or(0) == 0 {
+            if !self.row_exists("Component", cid).await? {
                 return Err(err_not_found("referenced component not found"));
             }
         }
@@ -595,7 +517,7 @@ impl super::SqliteBackendStore {
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
         let current_component_id = current_component_row
             .and_then(|c| c.component_id)
             .unwrap_or_default();
@@ -616,24 +538,17 @@ impl super::SqliteBackendStore {
         .bind(&now).bind(id)
         .execute(&self.pool)
         .await
-        .map_err(|e| {
-            if e.to_string().contains("UNIQUE constraint failed") {
-                err_conflict("name already exists")
-            } else {
-                err_internal(&format!("update error: {e}"))
-            }
-        })?;
-        self.fetch_repo_item(id).await
+        .map_err(|e| unique_err(e, "name already exists", "update error"))?;
+        self.get_repo_db(id).await
     }
 
-    pub(super) async fn delete_repo(&self, id: &str) -> Result<String, ApiError> {
-        let count: Option<CountRow> =
-            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Module WHERE repoId = ?")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if count.map(|c| c.count).unwrap_or(0) > 0 {
+    pub(super) async fn delete_repo_db(&self, id: &str) -> Result<String, ApiError> {
+        let n = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Module WHERE repoId = ?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(query_err)?;
+        if n > 0 {
             return Err(err_conflict(
                 "cannot delete repo: it has dependent modules; remove them first",
             ));
@@ -649,13 +564,13 @@ impl super::SqliteBackendStore {
         Ok(id.to_string())
     }
 
-    pub(super) async fn list_modules(&self) -> Result<Vec<ModuleItem>, ApiError> {
+    pub(super) async fn list_modules_db(&self) -> Result<Vec<ModuleItem>, ApiError> {
         let rows = sqlx::query_as::<_, ModuleRow>(
             "SELECT m.id, m.name, m.kind, m.repoId as repo_id, r.name as repo_name, r.componentId as component_id, c.name as component_name FROM Module m LEFT JOIN Repo r ON m.repoId = r.id LEFT JOIN Component c ON r.componentId = c.id ORDER BY m.id ASC",
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         Ok(rows
             .into_iter()
@@ -671,17 +586,11 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn create_module(
+    pub(super) async fn create_module_db(
         &self,
         body: CreateModuleBody,
     ) -> Result<ModuleItem, ApiError> {
-        let count: Option<CountRow> =
-            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Repo WHERE id = ?")
-                .bind(&body.repo_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if count.map(|c| c.count).unwrap_or(0) == 0 {
+        if !self.row_exists("Repo", &body.repo_id).await? {
             return Err(err_not_found("referenced repo not found"));
         }
         let id = Uuid::new_v4().to_string();
@@ -693,30 +602,18 @@ impl super::SqliteBackendStore {
             .execute(&self.pool)
             .await
             .map_err(|e| err_internal(&format!("insert error: {e}")))?;
-        self.fetch_module_item(&id).await
+        self.get_module_db(&id).await
     }
 
-    pub(super) async fn put_module(
+    pub(super) async fn put_module_db(
         &self,
         id: &str,
         body: PutModuleBody,
     ) -> Result<ModuleItem, ApiError> {
-        let count: Option<CountRow> =
-            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Module WHERE id = ?")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if count.map(|c| c.count).unwrap_or(0) == 0 {
+        if !self.row_exists("Module", id).await? {
             return Err(err_not_found("Module not found"));
         }
-        let rcount: Option<CountRow> =
-            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Repo WHERE id = ?")
-                .bind(&body.repo_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if rcount.map(|c| c.count).unwrap_or(0) == 0 {
+        if !self.row_exists("Repo", &body.repo_id).await? {
             return Err(err_not_found("referenced repo not found"));
         }
         sqlx::query("UPDATE Module SET name = ?, kind = ?, repoId = ? WHERE id = ?")
@@ -727,23 +624,17 @@ impl super::SqliteBackendStore {
             .execute(&self.pool)
             .await
             .map_err(|e| err_internal(&format!("update error: {e}")))?;
-        self.fetch_module_item(id).await
+        self.get_module_db(id).await
     }
 
-    pub(super) async fn patch_module(
+    pub(super) async fn patch_module_db(
         &self,
         id: &str,
         body: PatchModuleBody,
     ) -> Result<ModuleItem, ApiError> {
-        let existing = self.fetch_module_item(id).await?;
+        let existing = self.get_module_db(id).await?;
         if let Some(ref rid) = body.repo_id {
-            let rcount: Option<CountRow> =
-                sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Repo WHERE id = ?")
-                    .bind(rid)
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(|e| err_internal(&format!("query error: {e}")))?;
-            if rcount.map(|c| c.count).unwrap_or(0) == 0 {
+            if !self.row_exists("Repo", rid).await? {
                 return Err(err_not_found("referenced repo not found"));
             }
         }
@@ -758,18 +649,19 @@ impl super::SqliteBackendStore {
             .execute(&self.pool)
             .await
             .map_err(|e| err_internal(&format!("update error: {e}")))?;
-        self.fetch_module_item(id).await
+        self.get_module_db(id).await
     }
 
-    pub(super) async fn delete_module(&self, id: &str) -> Result<String, ApiError> {
-        let count: Option<CountRow> = sqlx::query_as::<_, CountRow>(
-            "SELECT COUNT(*) as count FROM ModuleDependency WHERE fromModuleId = ? OR toModuleId = ?"
+    pub(super) async fn delete_module_db(&self, id: &str) -> Result<String, ApiError> {
+        let n = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM ModuleDependency WHERE fromModuleId = ? OR toModuleId = ?",
         )
-        .bind(id).bind(id)
-        .fetch_optional(&self.pool)
+        .bind(id)
+        .bind(id)
+        .fetch_one(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if count.map(|c| c.count).unwrap_or(0) > 0 {
+        .map_err(query_err)?;
+        if n > 0 {
             return Err(err_conflict(
                 "cannot delete module: it has dependent module-dependencies; remove them first",
             ));
@@ -785,25 +677,32 @@ impl super::SqliteBackendStore {
         Ok(id.to_string())
     }
 
-    pub(super) async fn list_repo_dependencies(&self) -> Result<Vec<RepoDependencyItem>, ApiError> {
-        let deps = sqlx::query_as::<_, ModuleDepRow>(
-            "SELECT md.id, md.fromModuleId as from_module_id, md.toModuleId as to_module_id, md.type as dep_type, md.label,
-             fm.name as from_module_name, fm.kind as from_module_kind, fm.repoId as from_repo_id,
-             fr.name as from_repo_name, fc.name as from_component_name,
-             tm.name as to_module_name, tm.kind as to_module_kind, tm.repoId as to_repo_id,
-             tr.name as to_repo_name, tc.name as to_component_name
-             FROM ModuleDependency md
-             JOIN Module fm ON fm.id = md.fromModuleId
-             JOIN Module tm ON tm.id = md.toModuleId
-             JOIN Repo fr ON fr.id = fm.repoId
-             JOIN Repo tr ON tr.id = tm.repoId
-             LEFT JOIN Component fc ON fr.componentId = fc.id
-             LEFT JOIN Component tc ON tr.componentId = tc.id
-             ORDER BY md.id ASC"
+    async fn fetch_module_dep_rows(&self) -> Result<Vec<ModuleDepRow>, ApiError> {
+        sqlx::query_as::<_, ModuleDepRow>(
+            "SELECT md.id, md.fromModuleId as from_module_id, md.toModuleId as to_module_id, \
+             md.type as dep_type, md.label, \
+             fm.name as from_module_name, fm.kind as from_module_kind, fm.repoId as from_repo_id, \
+             fr.name as from_repo_name, fc.name as from_component_name, \
+             tm.name as to_module_name, tm.kind as to_module_kind, tm.repoId as to_repo_id, \
+             tr.name as to_repo_name, tc.name as to_component_name \
+             FROM ModuleDependency md \
+             JOIN Module fm ON fm.id = md.fromModuleId \
+             JOIN Module tm ON tm.id = md.toModuleId \
+             JOIN Repo fr ON fr.id = fm.repoId \
+             JOIN Repo tr ON tr.id = tm.repoId \
+             LEFT JOIN Component fc ON fr.componentId = fc.id \
+             LEFT JOIN Component tc ON tr.componentId = tc.id \
+             ORDER BY md.id ASC",
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)
+    }
+
+    pub(super) async fn list_repo_dependencies_db(
+        &self,
+    ) -> Result<Vec<RepoDependencyItem>, ApiError> {
+        let deps = self.fetch_module_dep_rows().await?;
 
         let mut seen = HashSet::new();
         let mut result = Vec::new();
@@ -826,27 +725,10 @@ impl super::SqliteBackendStore {
         Ok(result)
     }
 
-    pub(super) async fn list_module_dependencies(
+    pub(super) async fn list_module_dependencies_db(
         &self,
     ) -> Result<Vec<ModuleDependencyItem>, ApiError> {
-        let deps = sqlx::query_as::<_, ModuleDepRow>(
-            "SELECT md.id, md.fromModuleId as from_module_id, md.toModuleId as to_module_id, md.type as dep_type, md.label,
-             fm.name as from_module_name, fm.kind as from_module_kind, fm.repoId as from_repo_id,
-             fr.name as from_repo_name, fc.name as from_component_name,
-             tm.name as to_module_name, tm.kind as to_module_kind, tm.repoId as to_repo_id,
-             tr.name as to_repo_name, tc.name as to_component_name
-             FROM ModuleDependency md
-             JOIN Module fm ON fm.id = md.fromModuleId
-             JOIN Module tm ON tm.id = md.toModuleId
-             JOIN Repo fr ON fr.id = fm.repoId
-             JOIN Repo tr ON tr.id = tm.repoId
-             LEFT JOIN Component fc ON fr.componentId = fc.id
-             LEFT JOIN Component tc ON tr.componentId = tc.id
-             ORDER BY md.id ASC"
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        let deps = self.fetch_module_dep_rows().await?;
 
         let mut result = Vec::new();
         for dep in &deps {
@@ -876,27 +758,15 @@ impl super::SqliteBackendStore {
         Ok(result)
     }
 
-    pub(super) async fn create_module_dependency(
+    pub(super) async fn create_module_dependency_db(
         &self,
         body: CreateModuleDependencyBody,
     ) -> Result<ModuleDependencyItem, ApiError> {
-        let count: Option<CountRow> =
-            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Module WHERE id = ?")
-                .bind(&body.from_module_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if count.map(|c| c.count).unwrap_or(0) == 0 {
+        if !self.row_exists("Module", &body.from_module_id).await? {
             return Err(err_not_found("Source module not found"));
         }
 
-        let count: Option<CountRow> =
-            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Module WHERE id = ?")
-                .bind(&body.to_module_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if count.map(|c| c.count).unwrap_or(0) == 0 {
+        if !self.row_exists("Module", &body.to_module_id).await? {
             return Err(err_not_found("Target module not found"));
         }
 
@@ -904,15 +774,15 @@ impl super::SqliteBackendStore {
             return Err(err_validation("Self-dependency is not allowed"));
         }
 
-        let existing: Option<CountRow> = sqlx::query_as::<_, CountRow>(
-            "SELECT COUNT(*) as count FROM ModuleDependency WHERE fromModuleId = ? AND toModuleId = ?"
+        let existing = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM ModuleDependency WHERE fromModuleId = ? AND toModuleId = ?",
         )
         .bind(&body.from_module_id)
         .bind(&body.to_module_id)
-        .fetch_optional(&self.pool)
+        .fetch_one(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if existing.map(|c| c.count).unwrap_or(0) > 0 {
+        .map_err(query_err)?;
+        if existing > 0 {
             return Err(err_conflict("Module dependency already exists"));
         }
 
@@ -932,19 +802,19 @@ impl super::SqliteBackendStore {
         .await
         .map_err(|e| err_internal(&format!("insert error: {e}")))?;
 
-        self.list_module_dependencies()
+        self.list_module_dependencies_db()
             .await?
             .into_iter()
             .find(|d| d.id == id)
             .ok_or_else(|| err_internal("Failed to read back created dependency"))
     }
 
-    pub(super) async fn patch_module_dependency(
+    pub(super) async fn patch_module_dependency_db(
         &self,
         id: &str,
         body: PatchModuleDependencyBody,
     ) -> Result<ModuleDependencyItem, ApiError> {
-        let existing = self.fetch_module_dependency_item(id).await?;
+        let existing = self.get_module_dependency_db(id).await?;
         let dep_type = body.dep_type.unwrap_or(existing.dep_type);
         let label = body.label.unwrap_or(existing.label);
         sqlx::query("UPDATE ModuleDependency SET type = ?, label = ? WHERE id = ?")
@@ -954,10 +824,10 @@ impl super::SqliteBackendStore {
             .execute(&self.pool)
             .await
             .map_err(|e| err_internal(&format!("update error: {e}")))?;
-        self.fetch_module_dependency_item(id).await
+        self.get_module_dependency_db(id).await
     }
 
-    pub(super) async fn delete_module_dependency(&self, id: &str) -> Result<String, ApiError> {
+    pub(super) async fn delete_module_dependency_db(&self, id: &str) -> Result<String, ApiError> {
         let affected = sqlx::query("DELETE FROM ModuleDependency WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -986,7 +856,7 @@ async fn compute_repo_depends_on(
     .bind(repo_name)
     .fetch_all(pool)
     .await
-    .map_err(|e| err_internal(&format!("query error: {e}")))?;
+    .map_err(query_err)?;
 
     Ok(rows.into_iter().map(|r| r.target_repo).collect())
 }
@@ -1007,7 +877,7 @@ async fn compute_repo_depended_on_by(
     .bind(repo_name)
     .fetch_all(pool)
     .await
-    .map_err(|e| err_internal(&format!("query error: {e}")))?;
+    .map_err(query_err)?;
 
     Ok(rows.into_iter().map(|r| r.target_repo).collect())
 }

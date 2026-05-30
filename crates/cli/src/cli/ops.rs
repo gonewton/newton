@@ -321,7 +321,7 @@ pub mod config_show {
         logging.insert("level".into(), json!(env_str("RUST_LOG", "info")));
         root.insert("logging".into(), Value::Object(logging));
 
-        if workspace_paths.monitor_conf_exists {
+        if workspace_paths.monitor_conf_exists() {
             if let Ok(text) = std::fs::read_to_string(&workspace_paths.monitor_conf) {
                 let mut ailoop = Map::new();
                 for (k, v) in parse_kv(&text) {

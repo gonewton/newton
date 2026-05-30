@@ -1,7 +1,28 @@
 use super::rows::*;
+use crate::err_conflict;
 use crate::err_internal;
 
 use chrono::{DateTime, Utc};
+
+pub(super) fn query_err(e: sqlx::Error) -> newton_types::ApiError {
+    err_internal(&format!("query error: {e}"))
+}
+
+pub(super) fn unique_err(
+    e: sqlx::Error,
+    conflict_msg: &str,
+    internal_msg: &str,
+) -> newton_types::ApiError {
+    if e.to_string().contains("UNIQUE constraint failed") {
+        err_conflict(conflict_msg)
+    } else {
+        err_internal(&format!("{internal_msg}: {e}"))
+    }
+}
+
+pub(super) fn tx_err(e: sqlx::Error) -> newton_types::ApiError {
+    err_internal(&format!("transaction error: {e}"))
+}
 use newton_types::*;
 use uuid::Uuid;
 
