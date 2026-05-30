@@ -178,6 +178,21 @@ fn negative_workflow_validate_missing_arg() {
 }
 
 #[test]
+fn negative_ask_is_unrecognized() {
+    let out = newton().args(["ask", "--help"]).output().unwrap();
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
+    .to_lowercase();
+    assert!(
+        combined.contains("unrecognized") || combined.contains("unknown"),
+        "expected unknown-subcommand indication; output=`{combined}`"
+    );
+}
+
+#[test]
 fn negative_runs_show_missing_id() {
     let out = newton().args(["runs", "show"]).output().unwrap();
     let combined = format!(
