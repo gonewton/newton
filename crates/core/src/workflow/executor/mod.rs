@@ -1,4 +1,4 @@
-#![allow(clippy::result_large_err)] // Executor returns AppError to preserve full diagnostic context; boxing would discard run-time state.
+#![allow(clippy::result_large_err)]
 use serde::Serialize;
 
 use crate::core::error::AppError;
@@ -14,47 +14,53 @@ use crate::workflow::schema::{
     self, BarrierParams, GoalGateFailureBehavior, TerminalKind, WorkflowDocument, WorkflowTask,
 };
 use crate::workflow::state::{
-    canonicalize_workflow_path, compute_sha256_hex, redact_value, AppErrorSummary, GraphSettings,
-    TaskRunRecord, WorkflowCheckpoint, WorkflowExecution, WorkflowExecutionStatus,
-    WorkflowTaskRunRecord, WorkflowTaskRunSummary, WORKFLOW_EXECUTION_FORMAT_VERSION,
+    canonicalize_workflow_path, compute_sha256_hex, redact_value, GraphSettings, TaskRunRecord,
+    WorkflowCheckpoint, WorkflowExecution, WorkflowExecutionStatus, WorkflowTaskRunRecord,
+    WorkflowTaskRunSummary, WORKFLOW_EXECUTION_FORMAT_VERSION,
 };
 use crate::workflow::task_execution;
 use crate::workflow::transform;
 use crate::workflow::value_resolve as context;
 use crate::workflow::workflow_sink::WorkflowSink;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use futures::future::join_all;
 use newton_types::{NodeState, NodeStatus, WorkflowInstance, WorkflowStatus};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing;
 use uuid::Uuid;
 
-// Re-export TaskStatus for backward compatibility with existing tests
-pub use crate::workflow::state::TaskStatus;
+mod diagnosis;
+mod graph_handle;
+mod helpers;
 
-/// Optional overrides supplied by CLI flags.
+pub use crate::workflow::state::TaskStatus;
+pub use diagnosis::TaskOutcome;
+pub use graph_handle::GraphHandle;
+
+use diagnosis::{FailureDiagnosisInput::Outcome, FailureDiagnosisInput::Record};
+use helpers::{
+    extract_trigger_payload, hydrate_completed_records, shallow_merge_objects,
+    validate_required_triggers,
+};
+
 #[derive(Clone, Debug)]
 pub struct ExecutionOverrides {
     pub parallel_limit: Option<usize>,
     pub max_time_seconds: Option<u64>,
     pub checkpoint_base_path: Option<PathBuf>,
     pub artifact_base_path: Option<PathBuf>,
-    /// Maximum allowed workflow nesting depth for `WorkflowOperator` (default: 16 when None).
     pub max_nesting_depth: Option<u32>,
     pub verbose: bool,
-    /// Optional sink for workflow lifecycle events (DB, server notifier, fanout, etc.).
     pub sink: Option<Arc<dyn WorkflowSink>>,
-    /// Whether to pre-seed workflow nodes with Pending status on start. Defaults to true.
     pub pre_seed_nodes: bool,
 }
 
-/// Resolved execution configuration used by the runner.
 #[derive(Clone, Debug)]
 pub struct ExecutionConfig {
     pub parallel_limit: usize,
@@ -64,24 +70,19 @@ pub struct ExecutionConfig {
     pub max_workflow_iterations: usize,
 }
 
-/// Summary of a workflow execution run.
 #[derive(Debug, Clone, Serialize)]
 pub struct ExecutionSummary {
     pub execution_id: Uuid,
     pub total_iterations: usize,
     pub completed_tasks: BTreeMap<String, TaskRunRecord>,
-    /// Assembled result from result_map; None if no result_map defined.
     pub result: Option<Value>,
-    /// True if output_schema validation passed (or no output_schema defined).
     pub output_valid: bool,
 }
 
-/// Link metadata used to record a parent-child relationship for nested workflow runs.
 #[derive(Debug, Clone)]
 pub struct ParentRunLink {
     pub parent_execution_id: Uuid,
     pub parent_task_id: String,
-    /// Nesting depth for the workflow being built (0 = root workflow).
     pub nesting_depth: u32,
 }
 
@@ -90,150 +91,6 @@ pub struct ExecutionState {
     completed: HashMap<String, TaskRunRecord>,
     checkpoint_records: HashMap<String, WorkflowTaskRunRecord>,
     triggers: Value,
-}
-
-/// Handle providing controlled access to the runtime workflow graph.
-#[derive(Clone)]
-pub struct GraphHandle(Arc<RwLock<HashMap<String, WorkflowTask>>>);
-
-impl GraphHandle {
-    pub fn new(tasks: HashMap<String, WorkflowTask>) -> Self {
-        GraphHandle(Arc::new(RwLock::new(tasks)))
-    }
-
-    /// Add a single task to the runtime graph.
-    pub fn add_task(
-        &self,
-        task: WorkflowTask,
-        _enqueue: bool,
-        if_absent: bool,
-    ) -> Result<(), AppError> {
-        let mut graph = self.0.write().unwrap();
-
-        if let Some(existing_task) = graph.get(&task.id) {
-            if !if_absent {
-                return Err(AppError::new(
-                    ErrorCategory::ValidationError,
-                    format!("Task '{}' already exists in runtime graph", task.id),
-                )
-                .with_code("WFG-DYN-001"));
-            }
-            // If if_absent is true and task exists with identical definition, it's a no-op
-            if existing_task.operator != task.operator || existing_task.params != task.params {
-                return Err(AppError::new(
-                    ErrorCategory::ValidationError,
-                    format!(
-                        "Task '{}' already exists with different definition",
-                        task.id
-                    ),
-                )
-                .with_code("WFG-DYN-001"));
-            }
-            return Ok(()); // No-op for identical task
-        }
-
-        // Validate required fields
-        if task.id.trim().is_empty() {
-            return Err(
-                AppError::new(ErrorCategory::ValidationError, "Task ID cannot be empty")
-                    .with_code("WFG-DYN-002"),
-            );
-        }
-        if task.operator.trim().is_empty() {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "Task operator cannot be empty",
-            )
-            .with_code("WFG-DYN-002"));
-        }
-
-        graph.insert(task.id.clone(), task);
-        Ok(())
-    }
-
-    /// Add multiple tasks to the runtime graph.
-    pub fn add_tasks(
-        &self,
-        tasks: Vec<WorkflowTask>,
-        _enqueue: bool,
-        if_absent: bool,
-        barrier_task_id: Option<&str>,
-    ) -> Result<(), AppError> {
-        let mut task_ids = Vec::new();
-
-        // Add all tasks first
-        for task in tasks {
-            self.add_task(task.clone(), false, if_absent)?; // Don't enqueue individual tasks
-            task_ids.push(task.id);
-        }
-
-        // If barrier task is specified, register the added tasks with it
-        if let Some(barrier_id) = barrier_task_id {
-            self.register_barrier(barrier_id, &task_ids)?;
-        }
-
-        Ok(())
-    }
-
-    /// Register task IDs with a barrier operator.
-    pub fn register_barrier(
-        &self,
-        barrier_task_id: &str,
-        expected_ids: &[String],
-    ) -> Result<(), AppError> {
-        let mut graph = self.0.write().unwrap();
-
-        let barrier_task = graph.get_mut(barrier_task_id).ok_or_else(|| {
-            AppError::new(
-                ErrorCategory::ValidationError,
-                format!("Barrier task '{barrier_task_id}' not found in runtime graph"),
-            )
-            .with_code("WFG-DYN-004")
-        })?;
-
-        if barrier_task.operator != "barrier" {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                format!("Task '{barrier_task_id}' is not a barrier operator"),
-            )
-            .with_code("WFG-DYN-004"));
-        }
-
-        // Parse current barrier params
-        let mut barrier_params: BarrierParams = serde_json::from_value(barrier_task.params.clone())
-            .unwrap_or_else(|_| BarrierParams { expected: vec![] });
-
-        // Add new expected IDs
-        barrier_params.expected.extend_from_slice(expected_ids);
-
-        // Update the task params
-        barrier_task.params = serde_json::to_value(&barrier_params).map_err(|err| {
-            AppError::new(
-                ErrorCategory::SerializationError,
-                format!("Failed to serialize barrier params: {err}"),
-            )
-        })?;
-
-        Ok(())
-    }
-
-    /// Get a task from the runtime graph (read-only access).
-    pub fn get_task(&self, task_id: &str) -> Option<WorkflowTask> {
-        let graph = self.0.read().unwrap();
-        graph.get(task_id).cloned()
-    }
-
-    /// Get all tasks from the runtime graph (read-only access).
-    pub fn get_all_tasks(&self) -> Vec<WorkflowTask> {
-        let graph = self.0.read().unwrap();
-        graph.values().cloned().collect()
-    }
-
-    /// Check if a task exists in the runtime graph.
-    pub fn contains_task(&self, task_id: &str) -> bool {
-        let graph = self.0.read().unwrap();
-        graph.contains_key(task_id)
-    }
 }
 
 struct WorkflowRuntime {
@@ -257,13 +114,9 @@ struct WorkflowRuntime {
     last_checkpoint: Instant,
     start_time: Instant,
     verbose: bool,
-    /// Task IDs popped in the current tick, tracked for re-queue on hard batch failure.
     current_tick_tasks: Vec<String>,
-    /// Optional sink for workflow lifecycle events.
     sink: Option<Arc<dyn WorkflowSink>>,
-    /// Serialized workflow definition JSON for API exposure.
     workflow_definition_json: Option<serde_json::Value>,
-    /// Whether to pre-seed workflow nodes with Pending status on start.
     pre_seed_nodes: bool,
 }
 
@@ -277,64 +130,42 @@ impl ExecutionState {
     }
 }
 
-/// Per-stream byte cap for inline failure-diagnosis output to stderr (16 KiB).
-const FAILURE_DIAGNOSIS_STREAM_CAP_BYTES: usize = 16 * 1024;
-
-/// Input for [`WorkflowRuntime::eprint_task_failure_diagnosis`]. Distinguishes the
-/// in-tick failure path (full `TaskOutcome` available) from the deferred
-/// final-status path (only a `TaskRunRecord` is available, e.g. on resume).
-enum FailureDiagnosisInput<'a> {
-    Outcome(&'a TaskOutcome),
-    Record {
-        task_id: &'a str,
-        record: &'a TaskRunRecord,
-    },
-}
-
-#[derive(Clone)]
-pub struct TaskOutcome {
-    pub task_id: String,
-    pub record: TaskRunRecord,
-    pub context_patch: Option<Value>,
-    pub failed: bool,
-    pub started_at: DateTime<Utc>,
-    pub completed_at: DateTime<Utc>,
-    pub error_summary: Option<AppErrorSummary>,
-    /// Resolved operator parameters; passed through to WorkflowTaskRunRecord.
-    pub resolved_params: Value,
-}
-
 impl WorkflowRuntime {
-    /// Check if the workflow has exceeded the maximum allowed time.
-    /// Returns an error if the timeout is exceeded.
+    async fn fail_workflow(&mut self, err: AppError) -> Result<(), AppError> {
+        self.workflow_execution.status = WorkflowExecutionStatus::Failed;
+        self.workflow_execution.completed_at = Some(Utc::now());
+        self.persist_checkpoint_force().await?;
+        self.notify_completion(WorkflowStatus::Failed);
+        Err(err)
+    }
+
     async fn check_timeout(&mut self) -> Result<(), AppError> {
         if self.start_time.elapsed().as_secs() >= self.config.max_time_seconds {
-            self.workflow_execution.status = WorkflowExecutionStatus::Failed;
-            self.workflow_execution.completed_at = Some(Utc::now());
-            self.persist_checkpoint_force().await?;
-            return Err(AppError::new(
-                ErrorCategory::TimeoutError,
-                "workflow exceeded max_time_seconds",
-            )
-            .with_code("WFG-TIME-001"));
+            return self
+                .fail_workflow(
+                    AppError::new(
+                        ErrorCategory::TimeoutError,
+                        "workflow exceeded max_time_seconds",
+                    )
+                    .with_code("WFG-TIME-001"),
+                )
+                .await;
         }
         Ok(())
     }
 
-    /// Check if we can schedule a task without exceeding iteration limits.
-    /// Returns Ok(true) if the task can be scheduled, Ok(false) if we should stop,
-    /// or an error if limits are exceeded.
     async fn check_iteration_limits(&mut self, task_id: &str) -> Result<bool, AppError> {
         if self.total_iterations >= self.config.max_workflow_iterations {
-            self.workflow_execution.status = WorkflowExecutionStatus::Failed;
-            self.workflow_execution.completed_at = Some(Utc::now());
             self.ready_queue.push_front(task_id.to_string());
-            self.persist_checkpoint_force().await?;
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "workflow exceeded max_workflow_iterations",
+            self.fail_workflow(
+                AppError::new(
+                    ErrorCategory::ValidationError,
+                    "workflow exceeded max_workflow_iterations",
+                )
+                .with_code("WFG-ITER-001"),
             )
-            .with_code("WFG-ITER-001"));
+            .await?;
+            unreachable!()
         }
 
         let limit = self
@@ -345,25 +176,23 @@ impl WorkflowRuntime {
             });
         let entry = self.task_iterations.entry(task_id.to_string()).or_insert(0);
         if *entry >= limit {
-            self.workflow_execution.status = WorkflowExecutionStatus::Failed;
-            self.workflow_execution.completed_at = Some(Utc::now());
             self.ready_queue.push_front(task_id.to_string());
-            self.persist_checkpoint_force().await?;
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                format!("task {task_id} reached iteration cap"),
+            self.fail_workflow(
+                AppError::new(
+                    ErrorCategory::ValidationError,
+                    format!("task {task_id} reached iteration cap"),
+                )
+                .with_code("WFG-ITER-002"),
             )
-            .with_code("WFG-ITER-002"));
+            .await?;
+            unreachable!()
         }
 
-        // Update iteration count
         self.total_iterations += 1;
         *entry += 1;
         Ok(true)
     }
 
-    /// Prepare tasks for execution in the current tick.
-    /// Returns a list of (task_id, run_sequence) pairs.
     async fn prepare_tick_tasks(&mut self) -> Result<Vec<(String, u64)>, AppError> {
         let mut tick_tasks = Vec::new();
         self.current_tick_tasks.clear();
@@ -380,10 +209,7 @@ impl WorkflowRuntime {
         Ok(tick_tasks)
     }
 
-    /// Detect and handle terminal tasks in the current frontier.
-    /// Returns true if a terminal stop was triggered, false otherwise.
     async fn handle_terminal_tasks(&mut self, frontier: &[TaskOutcome]) -> Result<bool, AppError> {
-        // Detect terminal tasks in this tick before processing.
         let mut tick_terminal_ids: Vec<String> = Vec::new();
         if self.graph_settings.completion.stop_on_terminal {
             for outcome in frontier {
@@ -395,10 +221,8 @@ impl WorkflowRuntime {
             }
         }
 
-        // Handle terminal stop after processing so all outcomes are recorded.
         if !tick_terminal_ids.is_empty() {
             if tick_terminal_ids.len() > 1 {
-                // WFG-TERM-001: multiple terminal tasks in same tick (informational).
                 let affected = tick_terminal_ids[1..].to_vec();
                 let warning = serde_json::json!({
                     "code": "WFG-TERM-001",
@@ -418,7 +242,6 @@ impl WorkflowRuntime {
         Ok(false)
     }
 
-    /// Build the list of pre-seeded node states sent to the server at startup.
     fn build_preseed_nodes(&self) -> Vec<NodeState> {
         if self.pre_seed_nodes {
             self.runtime_graph
@@ -437,7 +260,6 @@ impl WorkflowRuntime {
         }
     }
 
-    /// Notify the server that a set of tasks is now running.
     fn notify_task_starts(&self, tick_tasks: &[(String, u64)]) {
         if let Some(notifier) = &self.sink {
             let instance_id = self.workflow_execution.execution_id.to_string();
@@ -459,7 +281,6 @@ impl WorkflowRuntime {
         }
     }
 
-    /// Notify the server of all task outcomes from the current tick.
     fn notify_task_completions(&self, frontier: &[TaskOutcome]) {
         if let Some(notifier) = &self.sink {
             let instance_id = self.workflow_execution.execution_id.to_string();
@@ -485,7 +306,6 @@ impl WorkflowRuntime {
         }
     }
 
-    /// Notify the server that the workflow has completed with the given status.
     fn notify_completion(&self, status: WorkflowStatus) {
         if let Some(notifier) = &self.sink {
             notifier.notify_workflow_completed(
@@ -506,7 +326,6 @@ impl WorkflowRuntime {
         );
         self.save_execution()?;
 
-        // Build instance unconditionally so definition is always populated (Phase 2).
         let workflow_instance = WorkflowInstance {
             instance_id: self.workflow_execution.execution_id.to_string(),
             workflow_id: self.workflow_execution.workflow_file.clone(),
@@ -518,7 +337,6 @@ impl WorkflowRuntime {
             definition: self.workflow_definition_json.clone(),
         };
 
-        // Notify server that workflow has started.
         if let Some(notifier) = &self.sink {
             notifier.notify_workflow_started(workflow_instance);
         }
@@ -570,34 +388,23 @@ impl WorkflowRuntime {
                     outcomes
                 }
                 Err(err) => {
-                    // Hard task error: re-queue aborted tasks in reverse order to
-                    // preserve original execution priority.
                     for task_id in self.current_tick_tasks.drain(..).rev() {
                         self.ready_queue.push_front(task_id);
                     }
-                    self.workflow_execution.status = WorkflowExecutionStatus::Failed;
-                    self.workflow_execution.completed_at = Some(Utc::now());
-                    self.persist_checkpoint_force().await?;
-                    self.notify_completion(WorkflowStatus::Failed);
-                    return Err(err);
+                    self.fail_workflow(err).await?;
+                    unreachable!()
                 }
             };
 
-            // Sort frontier by task_id alphabetically for deterministic ordering.
             frontier.sort_by(|a, b| a.task_id.cmp(&b.task_id));
 
             let frontier_len = frontier.len();
             if let Err(err) = self.process_frontier(frontier.clone()).await {
-                self.workflow_execution.status = WorkflowExecutionStatus::Failed;
-                self.workflow_execution.completed_at = Some(Utc::now());
-                self.persist_checkpoint_force().await?;
-                self.notify_completion(WorkflowStatus::Failed);
-                return Err(err);
+                self.fail_workflow(err).await?;
             }
 
             self.notify_task_completions(&frontier);
 
-            // Handle terminal tasks - check if we should stop
             if self.handle_terminal_tasks(&frontier).await? {
                 terminal_stop_triggered = true;
                 break;
@@ -606,13 +413,9 @@ impl WorkflowRuntime {
             self.maybe_checkpoint(frontier_len).await?;
         }
 
-        // Compute final status per completion policy.
         let final_state = self.state.read().await;
         let (final_exec_status, maybe_err) =
             self.compute_final_status(&final_state, terminal_stop_triggered);
-        // Collect failed task ids and their records for hint + diagnosis printing
-        // (ascending order). Records are cloned so we can drop the read lock before
-        // the printing loop below.
         let mut final_failed_records: Vec<(String, TaskRunRecord)> = final_state
             .completed
             .iter()
@@ -625,7 +428,6 @@ impl WorkflowRuntime {
         self.workflow_execution.status = final_exec_status;
         self.workflow_execution.completed_at = Some(Utc::now());
         if let Some(err) = maybe_err {
-            // Print hint lines for task failures before propagating error.
             if err.code == "WFG-EXEC-001" && !final_failed_records.is_empty() {
                 for (task_id, record) in &final_failed_records {
                     println!(
@@ -635,8 +437,8 @@ impl WorkflowRuntime {
                         self.workflow_execution.execution_id,
                         task_id
                     );
-                    Self::eprint_task_failure_diagnosis(
-                        FailureDiagnosisInput::Record {
+                    diagnosis::eprint_task_failure_diagnosis(
+                        Record {
                             task_id: task_id.as_str(),
                             record,
                         },
@@ -644,9 +446,9 @@ impl WorkflowRuntime {
                     );
                 }
             }
-            self.persist_checkpoint_force().await?;
-            self.notify_completion(WorkflowStatus::Failed);
-            // Write failure completion.json when result_map is configured and execution_id is known.
+            let Err(e) = self.fail_workflow(err).await else {
+                unreachable!()
+            };
             if self.graph_settings.io.result_map.is_some() {
                 let completion_path = self
                     .checkpoint_root
@@ -655,13 +457,13 @@ impl WorkflowRuntime {
                 let failure_envelope = crate::workflow::io::CompletionEnvelope::failure(
                     Some(self.workflow_execution.execution_id),
                     crate::workflow::io::CompletionError {
-                        code: if err.code.is_empty() {
+                        code: if e.code.is_empty() {
                             None
                         } else {
-                            Some(err.code.clone())
+                            Some(e.code.clone())
                         },
-                        category: format!("{:?}", err.category),
-                        message: err.message.clone(),
+                        category: format!("{:?}", e.category),
+                        message: e.message.clone(),
                         error_payload: None,
                     },
                 );
@@ -669,7 +471,7 @@ impl WorkflowRuntime {
                     let _ = fs::write(&completion_path, json);
                 }
             }
-            return Err(err);
+            return Err(e);
         }
         if self.graph_settings.checkpoint.checkpoint_enabled {
             self.persist_checkpoint().await?;
@@ -691,21 +493,15 @@ impl WorkflowRuntime {
             );
         }
 
-        // Notify server of workflow completion.
         let final_status = match self.workflow_execution.status {
             WorkflowExecutionStatus::Completed => WorkflowStatus::Succeeded,
             _ => WorkflowStatus::Failed,
         };
         self.notify_completion(final_status);
 
-        // Evaluate result_map if configured
         let io = &self.graph_settings.io;
         let final_state_view = StateView::new(
             final_state.context.clone(),
-            // Build tasks value from completed tasks; each entry is wrapped as
-            // {output: <raw_output>, result: <output.result if present>} so that
-            // parent workflows can access tasks['id'].output.x for regular tasks
-            // and tasks['id'].result.x for WorkflowOperator child results.
             {
                 let mut tasks_map = serde_json::Map::new();
                 for (id, record) in &final_state.completed {
@@ -734,7 +530,6 @@ impl WorkflowRuntime {
             None
         };
 
-        // Validate output_schema if present
         let output_valid =
             if let (Some(schema), Some(ref result_val)) = (&io.output_schema, &result) {
                 match validate_output_schema(schema, result_val) {
@@ -748,7 +543,6 @@ impl WorkflowRuntime {
                 true
             };
 
-        // Write completion.json when result_map is present
         if result.is_some() {
             let completion_path = self
                 .checkpoint_root
@@ -772,8 +566,6 @@ impl WorkflowRuntime {
         })
     }
 
-    /// Compute the final workflow status according to the completion policy.
-    /// Returns (status, optional error) where error is Some when the workflow fails.
     fn compute_final_status(
         &self,
         state: &ExecutionState,
@@ -781,7 +573,6 @@ impl WorkflowRuntime {
     ) -> (WorkflowExecutionStatus, Option<AppError>) {
         let completion = &self.graph_settings.completion;
 
-        // Collect all goal gate tasks.
         let goal_gate_tasks: Vec<WorkflowTask> = self
             .runtime_graph
             .get_all_tasks()
@@ -789,18 +580,15 @@ impl WorkflowRuntime {
             .filter(|t| t.goal_gate)
             .collect();
 
-        // Rules 2a and 2b: evaluate goal gates.
         if !goal_gate_tasks.is_empty() {
             let mut failing_gates: Vec<String> = Vec::new();
 
             for gate in &goal_gate_tasks {
                 if let Some(record) = state.completed.get(&gate.id) {
-                    // Gate was reached — check if it passed.
                     let passed = record.status == crate::workflow::state::TaskStatus::Success;
                     if !passed
                         && completion.goal_gate_failure_behavior == GoalGateFailureBehavior::Fail
                     {
-                        // Rule 2b: reached but not passed.
                         let status_str = record.status.as_str();
                         let entry = if let Some(group) = &gate.goal_gate_group {
                             format!("{}(group={})={}", gate.id, group, status_str)
@@ -810,7 +598,6 @@ impl WorkflowRuntime {
                         failing_gates.push(entry);
                     }
                 } else if completion.require_goal_gates {
-                    // Rule 2a: gate not reached.
                     let entry = if let Some(group) = &gate.goal_gate_group {
                         format!("{}(group={})=not_reached", gate.id, group)
                     } else {
@@ -831,7 +618,6 @@ impl WorkflowRuntime {
             }
         }
 
-        // Rule 3: success_requires_no_task_failures.
         if completion.success_requires_no_task_failures
             && state
                 .completed
@@ -846,7 +632,6 @@ impl WorkflowRuntime {
             return (WorkflowExecutionStatus::Failed, Some(err));
         }
 
-        // Rule 4: any completed terminal:failure task causes failure.
         let mut terminal_failure_task: Option<&str> = None;
         for task_id in state.completed.keys() {
             if let Some(task) = self.runtime_graph.get_task(task_id) {
@@ -865,7 +650,6 @@ impl WorkflowRuntime {
             return (WorkflowExecutionStatus::Failed, Some(err));
         }
 
-        // Rule 5: Completed.
         (WorkflowExecutionStatus::Completed, None)
     }
 
@@ -880,9 +664,8 @@ impl WorkflowRuntime {
                 context::apply_patch(&mut guard.context, patch);
             }
 
-            // Verbose output: print task stdout/stderr after completion
             if self.verbose {
-                Self::print_task_verbose_output(outcome);
+                diagnosis::print_task_verbose_output(outcome);
             }
 
             let record = task_execution::build_workflow_task_run_record(
@@ -935,10 +718,7 @@ impl WorkflowRuntime {
                     .iter()
                     .find(|o| o.task_id.as_str() == *task_id)
                 {
-                    Self::eprint_task_failure_diagnosis(
-                        FailureDiagnosisInput::Outcome(outcome),
-                        self.verbose,
-                    );
+                    diagnosis::eprint_task_failure_diagnosis(Outcome(outcome), self.verbose);
                 }
             }
             return Err(AppError::new(
@@ -956,65 +736,50 @@ impl WorkflowRuntime {
                 let mut transitions = task.transitions.clone();
                 transitions.sort_by_key(|t| t.priority);
 
-                // If any transition has a `when` condition, the task uses exclusive/priority-
-                // selection mode: transitions are evaluated in priority order and the first
-                // matching one wins (including unconditional fallbacks).
-                //
-                // If no transitions have a `when` condition, the task fans out: all
-                // unconditional transitions that pass `include_if` fire in parallel.
                 let has_conditional = transitions.iter().any(|t| t.when.is_some());
-                if has_conditional {
-                    for transition in transitions {
-                        if context::evaluate_transition(
-                            &transition,
-                            self.engine.as_ref(),
-                            &snapshot,
-                        )? {
-                            // WFG-DYN-003: Validate that transition target exists in runtime graph
-                            if !self.runtime_graph.contains_task(&transition.to) {
-                                return Err(AppError::new(
-                                    ErrorCategory::ValidationError,
-                                    format!(
-                                        "Task '{}' transition references non-existent task '{}' in runtime graph",
-                                        task.id, transition.to
-                                    ),
-                                ).with_code("WFG-DYN-003"));
-                            }
-                            if seen.insert(transition.to.clone()) {
-                                self.ready_queue.push_back(transition.to.clone());
-                            }
-                            break;
-                        }
-                    }
-                } else {
-                    for transition in transitions {
-                        if context::evaluate_transition(
-                            &transition,
-                            self.engine.as_ref(),
-                            &snapshot,
-                        )? {
-                            // WFG-DYN-003: Validate that transition target exists in runtime graph
-                            if !self.runtime_graph.contains_task(&transition.to) {
-                                return Err(AppError::new(
-                                    ErrorCategory::ValidationError,
-                                    format!(
-                                        "Task '{}' transition references non-existent task '{}' in runtime graph",
-                                        task.id, transition.to
-                                    ),
-                                ).with_code("WFG-DYN-003"));
-                            }
-                            if seen.insert(transition.to.clone()) {
-                                self.ready_queue.push_back(transition.to.clone());
-                            }
-                        }
-                    }
-                }
+                self.evaluate_transitions(
+                    &transitions,
+                    &snapshot,
+                    &mut seen,
+                    &task.id,
+                    has_conditional,
+                )?;
             }
         }
 
-        // Evaluate barrier tasks: check if they can be enqueued
         self.evaluate_barrier_tasks().await?;
 
+        Ok(())
+    }
+
+    fn evaluate_transitions(
+        &mut self,
+        transitions: &[schema::Transition],
+        snapshot: &StateView,
+        seen: &mut HashSet<String>,
+        task_id: &str,
+        exclusive: bool,
+    ) -> Result<(), AppError> {
+        for transition in transitions {
+            if context::evaluate_transition(transition, self.engine.as_ref(), snapshot)? {
+                if !self.runtime_graph.contains_task(&transition.to) {
+                    return Err(AppError::new(
+                        ErrorCategory::ValidationError,
+                        format!(
+                            "Task '{}' transition references non-existent task '{}' in runtime graph",
+                            task_id, transition.to
+                        ),
+                    )
+                    .with_code("WFG-DYN-003"));
+                }
+                if seen.insert(transition.to.clone()) {
+                    self.ready_queue.push_back(transition.to.clone());
+                }
+                if exclusive {
+                    break;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1089,13 +854,10 @@ impl WorkflowRuntime {
         )
     }
 
-    /// Evaluate barrier tasks and enqueue those that are ready.
     async fn evaluate_barrier_tasks(&mut self) -> Result<(), AppError> {
-        // Get the current state
         let guard = self.state.read().await;
         let completed_tasks = &guard.completed;
 
-        // Get all barrier tasks from the runtime graph
         let all_tasks = self.runtime_graph.get_all_tasks();
         let barrier_tasks: Vec<WorkflowTask> = all_tasks
             .into_iter()
@@ -1103,14 +865,12 @@ impl WorkflowRuntime {
             .collect();
 
         for barrier_task in barrier_tasks {
-            // Skip if this barrier is already completed or already in the ready queue
             if completed_tasks.contains_key(&barrier_task.id)
                 || self.ready_queue.contains(&barrier_task.id)
             {
                 continue;
             }
 
-            // Parse barrier parameters
             let barrier_params: BarrierParams =
                 match serde_json::from_value(barrier_task.params.clone()) {
                     Ok(params) => params,
@@ -1123,14 +883,12 @@ impl WorkflowRuntime {
                     }
                 };
 
-            // Check if all expected tasks are completed
             let all_expected_completed = barrier_params
                 .expected
                 .iter()
                 .all(|task_id| completed_tasks.contains_key(task_id));
 
             if all_expected_completed && !barrier_params.expected.is_empty() {
-                // All expected tasks are completed, enqueue the barrier
                 self.ready_queue.push_back(barrier_task.id.clone());
 
                 tracing::info!(
@@ -1143,166 +901,8 @@ impl WorkflowRuntime {
 
         Ok(())
     }
-
-    /// Tail-truncate a string at `cap` bytes, advancing to the nearest preceding char
-    /// boundary so the returned slice is valid UTF-8. Returns (slice, original_byte_len, was_truncated).
-    fn tail_truncate_utf8(s: &str, cap: usize) -> (&str, usize, bool) {
-        let len = s.len();
-        if len <= cap {
-            return (s, len, false);
-        }
-        let mut start = len - cap;
-        while start < len && !s.is_char_boundary(start) {
-            start += 1;
-        }
-        (&s[start..], len, true)
-    }
-
-    /// Print a per-task failure diagnosis block to stderr. Caller must have already
-    /// printed the existing stdout hint line. When `verbose_streams_already_printed`
-    /// is true, the helper omits the `--- stderr ---` and `--- stdout ---` body
-    /// sections (still printing id/code/exit_code/artifact lines).
-    fn eprint_task_failure_diagnosis(
-        input: FailureDiagnosisInput<'_>,
-        verbose_streams_already_printed: bool,
-    ) {
-        let mut buf: Vec<u8> = Vec::new();
-        // Writing to a Vec<u8> never errors; ignore the result.
-        let _ =
-            Self::write_task_failure_diagnosis(&mut buf, input, verbose_streams_already_printed);
-        // Single write to stderr to keep the block contiguous.
-        use std::io::Write as _;
-        let _ = std::io::stderr().write_all(&buf);
-    }
-
-    /// Write the per-task failure diagnosis block to `w`. Used by
-    /// `eprint_task_failure_diagnosis` and unit tests. Returns Ok unless the
-    /// underlying writer errors.
-    fn write_task_failure_diagnosis<W: std::io::Write>(
-        w: &mut W,
-        input: FailureDiagnosisInput<'_>,
-        verbose_streams_already_printed: bool,
-    ) -> std::io::Result<()> {
-        let (task_id, record, error_summary): (&str, &TaskRunRecord, Option<&AppErrorSummary>) =
-            match input {
-                FailureDiagnosisInput::Outcome(outcome) => (
-                    outcome.task_id.as_str(),
-                    &outcome.record,
-                    outcome.error_summary.as_ref(),
-                ),
-                FailureDiagnosisInput::Record { task_id, record } => (task_id, record, None),
-            };
-
-        writeln!(w, "--- task failed: {task_id} ---")?;
-
-        // Resolve code + message.
-        let (code_str, message_str): (String, String) = if let Some(summary) = error_summary {
-            (summary.code.clone(), summary.message.clone())
-        } else {
-            let code = record
-                .error_code
-                .clone()
-                .unwrap_or_else(|| "<unavailable>".to_string());
-            let message = record
-                .output
-                .as_object()
-                .and_then(|m| m.get("error"))
-                .and_then(|e| e.as_object())
-                .and_then(|m| m.get("message"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "<unavailable>".to_string());
-            (code, message)
-        };
-        writeln!(w, "code={code_str}")?;
-        writeln!(w, "message={message_str}")?;
-
-        let output_map = match &record.output {
-            Value::Object(m) => Some(m),
-            _ => None,
-        };
-
-        if let Some(output_map) = output_map {
-            // exit_code (CommandOperator-shaped).
-            if let Some(exit_code_val) = output_map.get("exit_code") {
-                if let Some(n) = exit_code_val.as_i64() {
-                    writeln!(w, "exit_code={n}")?;
-                } else if let Some(n) = exit_code_val.as_u64() {
-                    writeln!(w, "exit_code={n}")?;
-                } else if let Some(n) = exit_code_val.as_f64() {
-                    writeln!(w, "exit_code={n}")?;
-                }
-            }
-
-            // CommandOperator stream sections.
-            if !verbose_streams_already_printed {
-                for stream_key in &["stderr", "stdout"] {
-                    if let Some(Value::String(s)) = output_map.get(*stream_key) {
-                        let trimmed = s.trim_end();
-                        if trimmed.is_empty() {
-                            continue;
-                        }
-                        let (slice, orig_len, truncated) = Self::tail_truncate_utf8(
-                            s.as_str(),
-                            FAILURE_DIAGNOSIS_STREAM_CAP_BYTES,
-                        );
-                        if truncated {
-                            writeln!(
-                                w,
-                                "--- {stream_key} ({orig_len} bytes, truncated to {cap} bytes) ---",
-                                cap = FAILURE_DIAGNOSIS_STREAM_CAP_BYTES,
-                            )?;
-                        } else {
-                            writeln!(w, "--- {stream_key} ({orig_len} bytes) ---")?;
-                        }
-                        if slice.as_bytes().last().copied() == Some(b'\n') {
-                            write!(w, "{slice}")?;
-                        } else {
-                            writeln!(w, "{slice}")?;
-                        }
-                    }
-                }
-            }
-
-            // AgentOperator artifact paths (always printed when present).
-            if let Some(Value::String(p)) = output_map.get("stderr_artifact") {
-                writeln!(w, "stderr artifact: {p}")?;
-            }
-            if let Some(Value::String(p)) = output_map.get("stdout_artifact") {
-                writeln!(w, "stdout artifact: {p}")?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Print task stdout/stderr for verbose mode
-    fn print_task_verbose_output(outcome: &TaskOutcome) {
-        let output = &outcome.record.output;
-
-        // For CommandOperator tasks, stdout/stderr are in the task output
-        if let Value::Object(output_map) = output {
-            if let Some(Value::String(stdout)) = output_map.get("stdout") {
-                if !stdout.trim().is_empty() {
-                    print!("{stdout}");
-                }
-            }
-            if let Some(Value::String(stderr)) = output_map.get("stderr") {
-                if !stderr.trim().is_empty() {
-                    eprint!("{stderr}");
-                }
-            }
-            // For AgentOperator tasks, print artifact paths instead
-            if let Some(Value::String(artifact_path)) = output_map.get("stdout_artifact") {
-                println!("stdout artifact: {artifact_path}");
-            }
-            if let Some(Value::String(artifact_path)) = output_map.get("stderr_artifact") {
-                eprintln!("stderr artifact: {artifact_path}");
-            }
-        }
-    }
 }
 
-/// Execute a workflow document with the provided overrides.
 pub async fn execute_workflow(
     document: WorkflowDocument,
     workflow_path: PathBuf,
@@ -1335,7 +935,6 @@ pub fn spawn_workflow_execution(
     Ok((execution_id, handle))
 }
 
-/// In-process runner for nested child workflow executions.
 #[derive(Debug, Default)]
 pub struct InProcessChildWorkflowRunner;
 
@@ -1390,7 +989,6 @@ impl ChildWorkflowRunner for InProcessChildWorkflowRunner {
         document.validate(&ExpressionEngine::default())?;
 
         let mut child_overrides = input.execution_overrides.clone();
-        // Child executions should not notify `newton serve` by default.
         child_overrides.sink = None;
 
         let parent_link = ParentRunLink {
@@ -1481,7 +1079,6 @@ fn build_workflow_runtime_with_parent(
     );
     validate_required_triggers(&graph_settings.required_triggers, &trigger_payload)?;
     let workflow_file = canonicalize_workflow_path(&workflow_path)?;
-    // Hash the canonical JSON representation so whitespace-only YAML edits don't invalidate checkpoints.
     let workflow_hash = {
         let json_bytes = serde_json::to_vec(&workflow_definition_json).map_err(|e| {
             AppError::new(
@@ -1554,7 +1151,6 @@ fn build_workflow_runtime_with_parent(
     let context = eval_ctx.context.clone();
     let execution_uuid = Uuid::new_v4();
 
-    // Phase 2: write workflow_definition.json snapshot alongside execution.json
     {
         let state_paths =
             checkpoint::WorkflowStatePaths::from_base(&checkpoint_root, &execution_uuid);
@@ -1625,7 +1221,6 @@ fn build_workflow_runtime_with_parent(
     })
 }
 
-/// Resume a workflow execution from the latest checkpoint.
 pub async fn resume_workflow(
     registry: OperatorRegistry,
     workspace_root: PathBuf,
@@ -1643,8 +1238,6 @@ pub async fn resume_workflow(
         )
         .with_code("WFG-CKPT-001"));
     }
-    // Compute hash from JSON representation (same as build_workflow_runtime_with_parent)
-    // so whitespace-only YAML edits don't invalidate checkpoints.
     let current_hash = {
         let doc_json = serde_json::to_value(&document).map_err(|e| {
             AppError::new(
@@ -1668,7 +1261,6 @@ pub async fn resume_workflow(
         .with_code("WFG-CKPT-001"));
     }
 
-    // Check io_snapshot if present in checkpoint
     if let Some(io_snapshot) = &checkpoint_data.io_snapshot {
         let current_io =
             serde_json::to_value(&document.workflow.settings.io).unwrap_or(Value::Null);
@@ -1679,7 +1271,6 @@ pub async fn resume_workflow(
             )
             .with_code("WFG-CKPT-001"));
         }
-        // With allow_workflow_change: re-validate original trigger payload against new input_schema
         if allow_workflow_change {
             if let Some(schema) = &document.workflow.settings.io.input_schema {
                 let trigger_payload = &checkpoint_data.trigger_payload;
@@ -1689,10 +1280,6 @@ pub async fn resume_workflow(
         }
     }
 
-    // GUARD: Detect old-format checkpoint where a hard task abort left the queue empty
-    // but total_iterations exceeds completed task count — indicates an aborted task
-    // was never re-queued (pre-fix checkpoint). Resuming would silently succeed with
-    // no work done, so we fail fast with a clear error.
     if checkpoint_data.ready_queue.is_empty()
         && checkpoint_data.total_iterations > checkpoint_data.completed.len()
     {
@@ -1725,14 +1312,12 @@ pub async fn resume_workflow(
 
     let runtime_graph = if checkpoint_data.version >= 2 && !allow_workflow_change {
         if let Some(runtime_tasks) = checkpoint_data.runtime_tasks {
-            // Version 2+: Build runtime graph from checkpoint's runtime_tasks (unchanged workflow)
             let tasks_map: HashMap<String, WorkflowTask> = runtime_tasks
                 .into_iter()
                 .map(|task| (task.id.clone(), task))
                 .collect();
             GraphHandle::new(tasks_map)
         } else {
-            // Version 2+ but no runtime_tasks (fallback to document)
             GraphHandle::new(
                 document
                     .workflow
@@ -1753,7 +1338,6 @@ pub async fn resume_workflow(
             )
         }
     } else {
-        // Version 1, or allow_workflow_change: use current workflow document (e.g. updated max_iterations)
         GraphHandle::new(
             document
                 .workflow
@@ -1821,101 +1405,23 @@ pub async fn resume_workflow(
         redact_keys: Arc::new(graph_settings.redaction.redact_keys.clone()),
         last_checkpoint: Instant::now(),
         start_time: Instant::now(),
-        verbose: false, // Resume does not support verbose mode
+        verbose: false,
         current_tick_tasks: Vec::new(),
-        sink: None, // Resume does not propagate sink
+        sink: None,
         workflow_definition_json: None,
         pre_seed_nodes: false,
     };
     runtime.run().await
 }
 
-fn extract_trigger_payload(document: &WorkflowDocument) -> Value {
-    document.triggers.as_ref().map_or_else(
-        || Value::Object(Map::new()),
-        |trigger| trigger.payload.clone(),
-    )
-}
-
-fn json_type_name(v: &Value) -> &'static str {
-    match v {
-        Value::Null => "null",
-        Value::Bool(_) => "boolean",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
-}
-
-fn shallow_merge_objects(base: &Value, overlay: &Value) -> Result<Value, AppError> {
-    let overlay_obj = overlay.as_object().ok_or_else(|| {
-        AppError::new(
-            ErrorCategory::ValidationError,
-            "merge value must be an object",
-        )
-    })?;
-    let mut merged = base.as_object().cloned().ok_or_else(|| {
-        AppError::new(
-            ErrorCategory::ValidationError,
-            format!(
-                "merge base must be a JSON object, got {}",
-                json_type_name(base)
-            ),
-        )
-        .with_code("WFG-NEST-005")
-    })?;
-    for (key, value) in overlay_obj {
-        merged.insert(key.clone(), value.clone());
-    }
-    Ok(Value::Object(merged))
-}
-
-fn validate_required_triggers(required: &[String], payload: &Value) -> Result<(), AppError> {
-    if required.is_empty() {
-        return Ok(());
-    }
-    for key in required {
-        if payload.as_object().and_then(|map| map.get(key)).is_none() {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                format!("trigger payload missing required key '{key}'"),
-            )
-            .with_code("WFG-TRIG-001"));
-        }
-    }
-    Ok(())
-}
-
-fn hydrate_completed_records(
-    records: &HashMap<String, WorkflowTaskRunRecord>,
-    workspace_root: &Path,
-) -> Result<HashMap<String, TaskRunRecord>, AppError> {
-    let mut map = HashMap::new();
-    for (task_id, record) in records {
-        let output = record.output_ref.materialize(workspace_root)?;
-        let duration_ms = record
-            .completed_at
-            .signed_duration_since(record.started_at)
-            .num_milliseconds() as u64;
-        map.insert(
-            task_id.clone(),
-            TaskRunRecord {
-                status: record.status,
-                output,
-                error_code: record.error.as_ref().map(|err| err.code.clone()),
-                duration_ms,
-                run_seq: record.run_seq as u64,
-            },
-        );
-    }
-    Ok(map)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::workflow::state::{AppErrorSummary, TaskRunRecord, TaskStatus};
+    use diagnosis::{
+        tail_truncate_utf8, write_task_failure_diagnosis, FailureDiagnosisInput,
+        FAILURE_DIAGNOSIS_STREAM_CAP_BYTES,
+    };
     use serde_json::json;
 
     #[test]
@@ -1955,16 +1461,14 @@ mod tests {
 
     fn diagnose_to_string(input: FailureDiagnosisInput<'_>, verbose: bool) -> String {
         let mut buf: Vec<u8> = Vec::new();
-        WorkflowRuntime::write_task_failure_diagnosis(&mut buf, input, verbose).unwrap();
+        write_task_failure_diagnosis(&mut buf, input, verbose).unwrap();
         String::from_utf8(buf).unwrap()
     }
-
-    // --- Stage 1: tail_truncate_utf8 boundary tests ---
 
     #[test]
     fn tail_truncate_utf8_under_cap_is_lossless() {
         let s = "hello";
-        let (slice, len, trunc) = WorkflowRuntime::tail_truncate_utf8(s, 100);
+        let (slice, len, trunc) = tail_truncate_utf8(s, 100);
         assert_eq!(slice, "hello");
         assert_eq!(len, 5);
         assert!(!trunc);
@@ -1972,8 +1476,8 @@ mod tests {
 
     #[test]
     fn tail_truncate_utf8_ascii_returns_tail_at_exact_boundary() {
-        let s = "abcdefghij"; // 10 bytes
-        let (slice, len, trunc) = WorkflowRuntime::tail_truncate_utf8(s, 4);
+        let s = "abcdefghij";
+        let (slice, len, trunc) = tail_truncate_utf8(s, 4);
         assert_eq!(len, 10);
         assert!(trunc);
         assert_eq!(slice, "ghij");
@@ -1981,24 +1485,17 @@ mod tests {
 
     #[test]
     fn tail_truncate_utf8_never_splits_multibyte_codepoint() {
-        // Each "é" is 2 bytes in UTF-8. Build a 20-byte string of "é" repeated 10 times.
         let s: String = "é".repeat(10);
         assert_eq!(s.len(), 20);
-        // Cap at 5 bytes — naively start would be at byte 15 (mid-codepoint).
-        let (slice, len, trunc) = WorkflowRuntime::tail_truncate_utf8(&s, 5);
+        let (slice, len, trunc) = tail_truncate_utf8(&s, 5);
         assert_eq!(len, 20);
         assert!(trunc);
-        // Slice must be valid UTF-8 (already enforced by &str), and must consist of
-        // whole "é" chars only (each 2 bytes), so its length is even and <= 5.
         assert!(slice.len() <= 5);
         assert!(slice.len() % 2 == 0);
-        // Every char must be 'é'.
         for ch in slice.chars() {
             assert_eq!(ch, 'é');
         }
     }
-
-    // --- Stage 1: helper output content tests ---
 
     #[test]
     fn diagnosis_uses_error_summary_when_present() {
@@ -2144,12 +1641,9 @@ mod tests {
             out.contains("stdout artifact: /tmp/agent.stdout"),
             "got: {out}"
         );
-        // No stream sections.
         assert!(!out.contains("--- stderr ("), "got: {out}");
         assert!(!out.contains("--- stdout ("), "got: {out}");
     }
-
-    // --- Stage 4: verbose suppression ---
 
     #[test]
     fn diagnosis_with_verbose_suppresses_stream_bodies_only() {
@@ -2165,15 +1659,12 @@ mod tests {
         );
         let outcome = make_failed_outcome("tx", rec, None);
         let out = diagnose_to_string(FailureDiagnosisInput::Outcome(&outcome), true);
-        // Header still present
         assert!(out.contains("--- task failed: tx ---"), "got: {out}");
         assert!(out.contains("exit_code=1"), "got: {out}");
         assert!(out.contains("stderr artifact: /a/err"), "got: {out}");
         assert!(out.contains("stdout artifact: /a/out"), "got: {out}");
-        // Stream-body section dividers MUST be absent.
         assert!(!out.contains("--- stderr ("), "got: {out}");
         assert!(!out.contains("--- stdout ("), "got: {out}");
-        // Bodies must be absent.
         assert!(!out.contains("boom"), "got: {out}");
     }
 }
