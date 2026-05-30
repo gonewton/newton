@@ -10,7 +10,7 @@
 //! `expose_mcp: true` appear in `tools/list`. The curated allowlist is:
 //! `config`, `health`, `workflow`.
 //! All other commands (`init`, `batch`, `serve`, `checkpoint`, `artifact`,
-//! `webhook`, `doctor`, `ask`) are excluded from the MCP surface.
+//! `webhook`, `doctor`) are excluded from the MCP surface.
 //! `completion` is provided by cli-framework's built-in generator and is excluded by default.
 //! `resume` and `runs` are now subcommands of `workflow` (issue #305).
 //!
@@ -62,9 +62,6 @@ use crate::cli::{commands, init};
 mod help_text;
 pub use help_text::WORKFLOW_RUN_LONG_ABOUT;
 use help_text::*;
-
-#[cfg(feature = "ask")]
-use crate::cli::ask;
 
 /// Stable error codes for the migration adapter layer.
 pub mod error_codes {
@@ -1620,73 +1617,6 @@ fn config_command() -> Command {
     }
 }
 
-#[cfg(feature = "ask")]
-fn ask_command() -> Command {
-    Command {
-        id: "ask",
-        summary: "Match a natural-language query to the closest command",
-        syntax: Some("<QUERY>"),
-        category: Some(categories::DIAGNOSTIC),
-        spec: Some(Arc::new(CommandSpec {
-            summary: "Match a natural-language query to the closest command",
-            long_about: Some(
-                "Ask ranks every registered command's summary/syntax/category against your\n\
-                 query and prints the top 3 matches.  Substring + token-overlap scoring; no LLM.",
-            ),
-            examples: vec!["newton ask \"list checkpoints\""],
-            args: vec![ArgSpec {
-                name: "query",
-                kind: ArgKind::Positional,
-                short: None,
-                long: None,
-                value_type: ArgValueType::String,
-                cardinality: Cardinality::Required,
-                default: None,
-                conflicts_with: vec![],
-                requires: vec![],
-                help: "Free-text query (one positional arg)",
-            }],
-            ..Default::default()
-        })),
-        validator: None,
-        execute: Arc::new(|_ctx, args| {
-            Box::pin(async move {
-                let query = args
-                    .named
-                    .get("query")
-                    .cloned()
-                    .unwrap_or_else(|| args.positional.join(" "));
-                let summaries = ask_summaries();
-                ask::run(&query, &summaries)
-            })
-        }),
-        expose_mcp: false,
-    }
-}
-
-#[cfg(feature = "ask")]
-fn ask_summaries() -> Vec<ask::CommandSummary> {
-    fn s(name: &str, summary: &str, syntax: Option<&str>, category: &str) -> ask::CommandSummary {
-        ask::CommandSummary {
-            name: name.to_string(),
-            summary: summary.to_string(),
-            syntax: syntax.unwrap_or("").to_string(),
-            category: category.to_string(),
-        }
-    }
-    let cmds = all_root_commands();
-    cmds.into_iter()
-        .map(|c| {
-            s(
-                c.id,
-                c.summary,
-                c.syntax,
-                c.category.unwrap_or(categories::WORKFLOW),
-            )
-        })
-        .collect()
-}
-
 // ── public entry point ────────────────────────────────────────────────────────
 
 /// Build an `axum::Router` that mounts the cli-framework MCP HTTP transport
@@ -1814,8 +1744,6 @@ fn all_root_commands() -> Vec<Command> {
         doctor_command(),
         config_command(),
         webhook_command(),
-        #[cfg(feature = "ask")]
-        ask_command(),
         workflow_command(),
     ]
 }
@@ -1830,6 +1758,22 @@ pub fn enumerate_tree_commands() -> Vec<(String, Command)> {
     let registry = build_mcp_command_registry()
         .expect("failed to build command registry for tree enumeration");
     let mut items: Vec<(String, Command)> = registry
+        .all_tree_commands()
+        .map(|(path, cmd)| (path.to_string(), cmd.clone()))
+        .collect();
+    items.sort_by(|a, b| a.0.cmp(&b.0));
+    items
+}
+
+/// Returns all leaf commands present in the fully built app registry, including
+/// framework-provided built-ins (e.g. `spec`, `completion`, and `chat` when enabled).
+///
+/// This is intended for tests that need to assert the app's effective command surface.
+pub fn enumerate_effective_app_tree_commands() -> Vec<(String, Command)> {
+    let app =
+        build_app(NewtonContext::new()).expect("failed to build app for registry enumeration");
+    let mut items: Vec<(String, Command)> = app
+        .command_registry()
         .all_tree_commands()
         .map(|(path, cmd)| (path.to_string(), cmd.clone()))
         .collect();

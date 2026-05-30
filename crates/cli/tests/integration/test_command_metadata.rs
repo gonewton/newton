@@ -2,7 +2,9 @@
 //! the spec §4.1 requires (summary, syntax, allowed category).
 
 use newton_cli::cli::categories;
-use newton_cli::cli::framework_setup::{enumerate_tree_commands, REGISTERED_COMMAND_IDS};
+use newton_cli::cli::framework_setup::{
+    enumerate_effective_app_tree_commands, enumerate_tree_commands, REGISTERED_COMMAND_IDS,
+};
 
 #[test]
 fn registered_ids_match_expected_set() {
@@ -16,17 +18,12 @@ fn registered_ids_match_expected_set() {
             "expected `{id}` in tree registry"
         );
     }
-    // When `ask` feature is enabled, enumerate_tree_commands adds the extra `ask`
-    // command on top of REGISTERED_COMMAND_IDS — that's expected.
+    // enumerate_tree_commands reports Newton-owned commands only.
     let extras: Vec<&String> = tree_paths
         .iter()
         .filter(|p| !REGISTERED_COMMAND_IDS.contains(&p.as_str()))
         .collect();
-    if cfg!(feature = "ask") {
-        assert_eq!(extras, vec![&"ask".to_string()]);
-    } else {
-        assert!(extras.is_empty(), "unexpected extras: {extras:?}");
-    }
+    assert!(extras.is_empty(), "unexpected extras: {extras:?}");
 }
 
 #[test]
@@ -48,8 +45,6 @@ fn category_bindings_match_spec_4_1() {
         ("doctor", categories::OPERATIONAL),
         ("config", categories::OPERATIONAL),
         // "completion" removed — now provided by cli-framework built-in, not in newton's registry
-        #[cfg(feature = "ask")]
-        ("ask", categories::DIAGNOSTIC),
     ];
     let cmds = enumerate_tree_commands();
     for (name, want) in expected {
@@ -63,6 +58,20 @@ fn category_bindings_match_spec_4_1() {
             Some(*want),
             "command `{name}` should have category `{want}`, got {:?}",
             cmd.category
+        );
+    }
+}
+
+#[test]
+fn effective_app_registry_includes_framework_builtins() {
+    let paths: Vec<String> = enumerate_effective_app_tree_commands()
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect();
+    for builtin in ["completion", "spec", "chat"] {
+        assert!(
+            paths.contains(&builtin.to_string()),
+            "expected `{builtin}` in effective app tree registry"
         );
     }
 }

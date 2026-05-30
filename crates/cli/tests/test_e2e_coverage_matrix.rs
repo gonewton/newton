@@ -33,7 +33,7 @@ const REQUIRED_SMOKE_IDS: &[&str] = &[
     "doctor",
     "config",
     "completion",
-    "ask",
+    "chat",
     "spec",
 ];
 

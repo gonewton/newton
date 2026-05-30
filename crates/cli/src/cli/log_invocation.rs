@@ -19,7 +19,7 @@ pub fn kind_for_command(name: &str) -> LogInvocationKind {
         "checkpoint" => Checkpoint,
         "artifact" => Artifact,
         "webhook" => Webhook,
-        "health" | "doctor" | "config" | "completion" | "ask" => Diagnostic,
+        "health" | "doctor" | "config" | "completion" | "chat" => Diagnostic,
         _ => Run,
     }
 }

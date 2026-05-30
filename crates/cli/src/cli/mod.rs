@@ -10,9 +10,6 @@ pub mod mcp;
 pub mod ops;
 pub mod workspace_paths;
 
-#[cfg(feature = "ask")]
-pub mod ask;
-
 pub use context::NewtonContext;
 pub use framework_setup::build_app;
 pub use log_invocation::kind_for_command;

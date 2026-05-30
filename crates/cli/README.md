@@ -14,8 +14,7 @@ Each command's `CommandSpec` populates four pieces of metadata:
 - `summary` — one-line description (≤80 chars)
 - `syntax` — usage hint (e.g. `[WORKFLOW] [INPUT_FILE] [OPTIONS]`)
 - `category` — one of the constants in `src/cli/categories.rs`
-  (`workflow`, `ops`, `maintenance`, `workspace`, `operational`,
-  `diagnostic`)
+  (`workflow`, `ops`, `maintenance`, `workspace`, `operational`)
 - `args` — the `ArgSpec` array consumed by cli-framework's clap adapter
 
 `tests/integration/test_command_metadata.rs` enforces that every
@@ -34,12 +33,6 @@ The org-baseline operational commands live in `src/cli/ops.rs`:
   redacted (`token|secret|password|key` keys → `***REDACTED***`)
 - `completion <shell>` — emit a shell completion stub (bash, zsh, fish,
   powershell)
-
-## `ask` command (feature-gated)
-
-Build with `--features ask` to enable a substring-based natural-language
-router (`src/cli/ask.rs`).  Run `newton ask "<query>"` to print the
-top-3 commands ranked against `summary`/`syntax`/`category`.
 
 ## Logging invocation mapping
 
