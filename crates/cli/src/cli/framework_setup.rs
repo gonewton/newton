@@ -1834,8 +1834,6 @@ pub fn enumerate_tree_commands() -> Vec<(String, Command)> {
         .map(|(path, cmd)| (path.to_string(), cmd.clone()))
         .collect();
     items.sort_by(|a, b| a.0.cmp(&b.0));
-    #[cfg(feature = "ask")]
-    items.push(("ask".to_string(), ask_command()));
     items
 }
 
