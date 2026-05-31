@@ -41,7 +41,7 @@ async fn test_run_with_unreachable_ailoop_completes() {
     env::set_var("NEWTON_AILOOP_CHANNEL", "unreachable");
 
     let args = make_run_args(temp_dir.path(), Some(control_file.clone()));
-    let result = commands::run(args).await;
+    let result = commands::workflow_run(args).await.map_err(anyhow::Error::from);
 
     env::remove_var("NEWTON_AILOOP_INTEGRATION");
     env::remove_var("NEWTON_AILOOP_HTTP_URL");

@@ -30,8 +30,14 @@ pub async fn execute_workflow(
     workspace_root: PathBuf,
     overrides: ExecutionOverrides,
 ) -> Result<ExecutionSummary, AppError> {
-    let runtime =
-        build_workflow_runtime(document, workflow_path, registry, workspace_root, overrides)?;
+    let runtime = build_workflow_runtime(
+        document,
+        workflow_path,
+        registry,
+        workspace_root,
+        overrides,
+        None,
+    )?;
     runtime.run().await
 }
 
@@ -48,8 +54,14 @@ pub fn spawn_workflow_execution(
     ),
     AppError,
 > {
-    let runtime =
-        build_workflow_runtime(document, workflow_path, registry, workspace_root, overrides)?;
+    let runtime = build_workflow_runtime(
+        document,
+        workflow_path,
+        registry,
+        workspace_root,
+        overrides,
+        None,
+    )?;
     let execution_id = runtime.workflow_execution.execution_id;
     let handle = tokio::spawn(async move { runtime.run().await });
     Ok((execution_id, handle))

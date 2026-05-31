@@ -11,7 +11,7 @@ use crate::workflow::state::{TaskRunRecord, WorkflowTaskRunRecord};
 use crate::workflow::value_resolve as context;
 use crate::workflow::workflow_sink::WorkflowSink;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ExecutionOverrides {
     pub parallel_limit: Option<usize>,
     pub max_time_seconds: Option<u64>,

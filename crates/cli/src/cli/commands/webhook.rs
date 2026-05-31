@@ -22,21 +22,15 @@ async fn workflow_webhook_serve(args: WebhookServeArgs) -> StdResult<(), AppErro
     let (document, lint_results) =
         newton_core::workflow::loader::load_and_lint_workflow(&workflow_path)?;
     if !lint_results.is_empty() {
-        super::print_lint_results_text(&lint_results);
+        super::print_lint_results_text(&lint_results)?;
     }
     document.validate(&ExpressionEngine::default())?;
 
     let settings = document.workflow.settings.clone();
     let registry = super::build_operator_registry(workspace.clone(), &settings, None);
     let overrides = ExecutionOverrides {
-        parallel_limit: None,
-        max_time_seconds: None,
-        checkpoint_base_path: None,
-        artifact_base_path: None,
-        max_nesting_depth: None,
-        verbose: false,
-        sink: None,
         pre_seed_nodes: true,
+        ..Default::default()
     };
 
     webhook::serve_webhook(

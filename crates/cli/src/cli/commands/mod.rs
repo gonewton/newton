@@ -10,20 +10,13 @@ pub mod serve;
 pub mod webhook;
 pub mod workflow;
 
-use crate::cli::args::{KeyValuePair, RunArgs};
-use crate::cli::workspace_paths::{state_artifacts_dir, state_checkpoints_dir};
-use crate::Result;
-use anyhow::anyhow;
+use crate::cli::args::KeyValuePair;
 use newton_core::core::error::AppError;
 use newton_core::core::types::ErrorCategory;
 use newton_core::workflow::operator::OperatorRegistry;
 use newton_core::workflow::{
-    executor::ExecutionOverrides,
-    explain as workflow_explain,
-    expression::ExpressionEngine,
-    lint::{LintRegistry, LintResult, LintSeverity},
-    operators as workflow_operators, schema as workflow_schema, transform as workflow_transform,
-    workflow_sink::WorkflowSink,
+    explain as workflow_explain, lint::LintResult, operators as workflow_operators,
+    schema as workflow_schema,
 };
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -31,7 +24,6 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     result::Result as StdResult,
-    sync::Arc,
     time::Duration,
 };
 
@@ -43,7 +35,7 @@ pub use import::workflow_import;
 pub use log::log;
 pub use serve::serve;
 pub use webhook::webhook;
-pub use workflow::{dot, explain, lint, resume, run, validate, workflow_run};
+pub use workflow::{dot, explain, lint, resume, validate, workflow_run};
 
 fn resolve_workflow_workspace(path: Option<PathBuf>) -> StdResult<PathBuf, AppError> {
     match path {
@@ -101,86 +93,8 @@ fn build_operator_registry(
     builder.build()
 }
 
-#[allow(dead_code)]
-fn load_and_validate_workflow(
-    args: &RunArgs,
-) -> Result<(workflow_schema::WorkflowDocument, PathBuf)> {
-    let workflow_path = args.workflow.clone();
-    let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
-    let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
-
-    let lint_results = LintRegistry::new().run(&document);
-    if !lint_results.is_empty() {
-        print_lint_results_text(&lint_results);
-    }
-    let error_count = lint_results
-        .iter()
-        .filter(|result| result.severity == LintSeverity::Error)
-        .count();
-    if error_count > 0 {
-        return Err(anyhow!(
-            "workflow lint detected {error_count} error(s); fix before running"
-        ));
-    }
-
-    apply_context_overrides(&mut document.workflow.context, &args.context);
-    document.validate(&ExpressionEngine::default())?;
-
-    Ok((document, workflow_path))
-}
-
-#[allow(dead_code)]
-fn build_comprehensive_trigger_payload(
-    args: &RunArgs,
-    workspace: &std::path::Path,
-) -> Result<Option<Value>> {
-    let mut trigger_payload =
-        build_trigger_payload(&args.parameters_json, &args.trigger)?.unwrap_or_else(|| json!({}));
-
-    if let Some(input_file) = &args.input_file {
-        let input_file_path = if input_file.is_absolute() {
-            input_file.clone()
-        } else {
-            std::env::current_dir()?.join(input_file)
-        };
-        trigger_payload["input_file"] = json!(input_file_path.display().to_string());
-    }
-
-    trigger_payload["workspace"] = json!(workspace.display().to_string());
-
-    if trigger_payload.as_object().unwrap().is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(trigger_payload))
-    }
-}
-
-#[allow(dead_code)]
-fn setup_workflow_execution(
-    args: &RunArgs,
-    workspace: &std::path::Path,
-    settings: &workflow_schema::WorkflowSettings,
-    state_dir: &std::path::Path,
-    sink: Option<Arc<dyn WorkflowSink>>,
-) -> (ExecutionOverrides, OperatorRegistry) {
-    let overrides = ExecutionOverrides {
-        parallel_limit: args.parallel_limit,
-        max_time_seconds: args.timeout_seconds,
-        checkpoint_base_path: Some(state_checkpoints_dir(state_dir)),
-        artifact_base_path: Some(state_artifacts_dir(state_dir)),
-        max_nesting_depth: None,
-        verbose: args.verbose,
-        sink,
-        pre_seed_nodes: true,
-    };
-
-    let ailoop_ctx =
-        newton_core::integrations::ailoop::init_context_for_command_name(workspace, "run")
-            .ok()
-            .flatten();
-    let registry = build_operator_registry(workspace.to_path_buf(), settings, ailoop_ctx);
-
-    (overrides, registry)
+fn parse_kvp_value(s: &str) -> Value {
+    serde_json::from_str(s).unwrap_or_else(|_| Value::String(s.to_owned()))
 }
 
 fn apply_context_overrides(context: &mut Value, overrides: &[KeyValuePair]) {
@@ -189,14 +103,12 @@ fn apply_context_overrides(context: &mut Value, overrides: &[KeyValuePair]) {
     }
     if let Some(map) = context.as_object_mut() {
         for pair in overrides {
-            let parsed = serde_json::from_str(&pair.value)
-                .unwrap_or_else(|_| Value::String(pair.value.clone()));
-            map.insert(pair.key.clone(), parsed);
+            map.insert(pair.key.clone(), parse_kvp_value(&pair.value));
         }
     }
 }
 
-fn print_lint_results_text(results: &[LintResult]) {
+fn print_lint_results_text(results: &[LintResult]) -> StdResult<(), AppError> {
     for result in results {
         if let Some(location) = &result.location {
             println!(
@@ -210,6 +122,7 @@ fn print_lint_results_text(results: &[LintResult]) {
             println!("  Suggestion: {suggestion}");
         }
     }
+    Ok(())
 }
 
 fn print_lint_results_json(results: &[LintResult]) -> StdResult<(), AppError> {
@@ -295,19 +208,8 @@ fn pretty_json(value: &impl Serialize) -> StdResult<String, AppError> {
 fn parse_set_overrides(pairs: &[KeyValuePair]) -> Vec<(String, Value)> {
     pairs
         .iter()
-        .map(|pair| {
-            let parsed = serde_json::from_str(&pair.value)
-                .unwrap_or_else(|_| Value::String(pair.value.clone()));
-            (pair.key.clone(), parsed)
-        })
+        .map(|pair| (pair.key.clone(), parse_kvp_value(&pair.value)))
         .collect()
-}
-
-fn try_load_trigger_payload(path: &Option<PathBuf>) -> StdResult<Option<Value>, AppError> {
-    match path {
-        Some(path) => Ok(Some(load_trigger_payload(path)?)),
-        None => Ok(None),
-    }
 }
 
 pub fn build_trigger_payload(
@@ -318,8 +220,11 @@ pub fn build_trigger_payload(
         return Ok(None);
     }
 
-    let mut payload =
-        try_load_trigger_payload(trigger_json)?.unwrap_or_else(|| Value::Object(Map::new()));
+    let mut payload = trigger_json
+        .as_ref()
+        .map(|p| load_trigger_payload(p))
+        .transpose()?
+        .unwrap_or_else(|| Value::Object(Map::new()));
     let map = payload.as_object_mut().ok_or_else(|| {
         AppError::new(
             ErrorCategory::ValidationError,

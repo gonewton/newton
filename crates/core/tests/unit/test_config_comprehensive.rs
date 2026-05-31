@@ -22,7 +22,6 @@ fn test_config_serialization_roundtrip() {
             test_command: Some("./test.sh".to_string()),
             score_threshold: 85.0,
         },
-        advisor: newton_core::core::config::AdvisorConfig::default(),
         context: newton_core::core::config::ContextConfig {
             clear_after_use: false,
             file: std::path::PathBuf::from("test/context.md"),
