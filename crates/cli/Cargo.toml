@@ -76,7 +76,7 @@ tempfile = { workspace = true }
 wiremock = { workspace = true }
 wait-timeout = "0.2"
 tokio-tungstenite = { workspace = true }
-ws001-test-utils = { path = "../../../../libs/ws001-test-utils" }
+ws001-test-utils = { path = "../test-utils" }
 
 [[test]]
 name = "test_main_functionality"
