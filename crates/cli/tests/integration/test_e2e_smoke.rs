@@ -59,17 +59,26 @@ fn smoke_workflow_help() {
 
 #[test]
 fn smoke_resume_help() {
-    newton().args(["resume", "--help"]).assert().success();
+    newton()
+        .args(["workflow", "resume", "--help"])
+        .assert()
+        .success();
 }
 
 #[test]
 fn smoke_checkpoint_help() {
-    newton().args(["checkpoint", "--help"]).assert().success();
+    newton()
+        .args(["workflow", "checkpoint", "--help"])
+        .assert()
+        .success();
 }
 
 #[test]
 fn smoke_artifact_help() {
-    newton().args(["artifact", "--help"]).assert().success();
+    newton()
+        .args(["workflow", "artifact", "--help"])
+        .assert()
+        .success();
 }
 
 #[test]
@@ -79,7 +88,10 @@ fn smoke_webhook_help() {
 
 #[test]
 fn smoke_runs_help() {
-    newton().args(["runs", "--help"]).assert().success();
+    newton()
+        .args(["workflow", "runs", "--help"])
+        .assert()
+        .success();
 }
 
 #[test]

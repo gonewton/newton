@@ -661,7 +661,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 [[package]]
 name = "cli-framework"
 version = "0.4.2"
-source = "git+https://github.com/aroff/cli-framework?rev=6d198a2#6d198a219bae68a228bc4661715cf758c9230626"
+source = "git+https://github.com/aroff/cli-framework?rev=d876344#d8763444ef50187b10455fca25c0453fd26b0ffb"
 dependencies = [
  "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?rev=a22a619fa61d2fce7f7364c18199b75b72d74e4b)",
  "ailoop-core 1.0.5",
@@ -673,7 +673,6 @@ dependencies = [
  "crossterm 0.28.1",
  "dirs 5.0.1",
  "httpdate",
- "log",
  "regex",
  "reqwest 0.12.28",
  "rmcp",
@@ -686,6 +685,7 @@ dependencies = [
  "toml 0.8.23",
  "tower",
  "tower-http",
+ "tracing",
  "utoipa-swagger-ui",
  "uuid",
 ]
@@ -5951,11 +5951,13 @@ name = "ws001-test-utils"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]

@@ -821,25 +821,25 @@ workflow:
 #[test]
 fn newton_log_help_works() {
     let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
-    cmd.arg("runs").arg("--help");
+    cmd.arg("workflow").arg("runs").arg("--help");
     cmd.assert().success();
 }
 
-// --- CLI test: newton runs list --help ---
+// --- CLI test: newton workflow runs list --help ---
 
 #[test]
 fn newton_log_list_help_works() {
     let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
-    cmd.arg("runs").arg("list").arg("--help");
+    cmd.arg("workflow").arg("runs").arg("list").arg("--help");
     cmd.assert().success();
 }
 
-// --- CLI test: newton runs show --help ---
+// --- CLI test: newton workflow runs show --help ---
 
 #[test]
 fn newton_log_show_help_works() {
     let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
-    cmd.arg("runs").arg("show").arg("--help");
+    cmd.arg("workflow").arg("runs").arg("show").arg("--help");
     cmd.assert().success();
 }
 
@@ -852,6 +852,7 @@ fn log_dir_global_flag_accepted() {
     // Pass --log-dir before the subcommand (global flag behavior).
     cmd.arg("--log-dir")
         .arg(tmp.path())
+        .arg("workflow")
         .arg("runs")
         .arg("list")
         .arg("--help");
