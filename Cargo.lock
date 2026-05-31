@@ -2423,7 +2423,7 @@ dependencies = [
 
 [[package]]
 name = "newton-cli"
-version = "0.5.110"
+version = "0.5.111"
 dependencies = [
  "aikit-sdk",
  "ailoop-server",
@@ -2475,7 +2475,7 @@ dependencies = [
 
 [[package]]
 name = "newton-core"
-version = "0.5.110"
+version = "0.5.111"
 dependencies = [
  "aikit-magictool",
  "aikit-sdk",
