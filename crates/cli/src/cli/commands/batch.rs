@@ -11,18 +11,10 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use tokio::time::sleep;
-
-async fn sleep_if_needed(duration_secs: u64) {
-    sleep(Duration::from_secs(duration_secs)).await;
-}
-
 struct BatchDirs {
     todo_dir: PathBuf,
     completed_dir: PathBuf,
     failed_dir: PathBuf,
-    #[allow(dead_code)]
-    draft_dir: PathBuf,
 }
 
 fn ensure_batch_dirs(workspace_root: &Path, project_id: &str) -> Result<BatchDirs> {
@@ -38,18 +30,16 @@ fn ensure_batch_dirs(workspace_root: &Path, project_id: &str) -> Result<BatchDir
     let todo_dir = plan_project_dir.join("todo");
     let completed_dir = plan_project_dir.join("completed");
     let failed_dir = plan_project_dir.join("failed");
-    let draft_dir = plan_project_dir.join("draft");
 
     fs::create_dir_all(&todo_dir)?;
     fs::create_dir_all(&completed_dir)?;
-    fs::create_dir_all(&draft_dir)?;
+    fs::create_dir_all(plan_project_dir.join("draft"))?;
     fs::create_dir_all(&failed_dir)?;
 
     Ok(BatchDirs {
         todo_dir,
         completed_dir,
         failed_dir,
-        draft_dir,
     })
 }
 
@@ -64,12 +54,11 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
     let dirs = ensure_batch_dirs(&workspace_root, &args.project_id)?;
 
     loop {
-        let plan_file =
-            fetch_next_task(&dirs.todo_dir, args.once, args.poll_interval_seconds).await?;
-        if plan_file.is_none() {
+        let Some(plan_file) =
+            fetch_next_task(&dirs.todo_dir, args.once, args.poll_interval_seconds).await?
+        else {
             return Ok(());
-        }
-        let plan_file = plan_file.unwrap();
+        };
 
         let task_layout = prepare_task_layout(&batch_config, &plan_file)?;
         let run_result = execute_workflow_for_plan(&batch_config, &task_layout).await;
@@ -107,7 +96,7 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
         }
 
         if !args.once {
-            sleep_if_needed(args.poll_interval_seconds).await;
+            tokio::time::sleep(Duration::from_secs(args.poll_interval_seconds)).await;
         }
     }
 }
@@ -123,24 +112,16 @@ async fn execute_workflow_for_plan(
     let workflow_path = batch_config.workflow_file.clone();
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
-    document.triggers = Some(workflow_schema::WorkflowTrigger {
-        trigger_type: workflow_schema::TriggerType::Manual,
-        schema_version: "1".to_string(),
-        payload: json!({
-            "input_file": task_layout.input_file.display().to_string(),
-            "workspace": batch_config.project_root.display().to_string(),
-        }),
-    });
+    document.triggers = Some(workflow_schema::WorkflowTrigger::manual(json!({
+        "input_file": task_layout.input_file.display().to_string(),
+        "workspace": batch_config.project_root.display().to_string(),
+    })));
 
     let overrides = ExecutionOverrides {
-        parallel_limit: None,
-        max_time_seconds: None,
         checkpoint_base_path: Some(task_layout.state_dir.join("workflows")),
         artifact_base_path: Some(task_layout.state_dir.join("artifacts").join("workflows")),
-        max_nesting_depth: None,
-        verbose: false,
-        sink: None,
         pre_seed_nodes: true,
+        ..Default::default()
     };
 
     let settings = document.workflow.settings.clone();
@@ -203,7 +184,11 @@ fn prepare_task_layout(batch_config: &BatchProjectConfig, plan_file: &Path) -> R
 }
 
 fn validate_batch_workspace(workspace: Option<PathBuf>) -> Result<PathBuf> {
-    let workspace_root = workspace.unwrap_or_else(|| std::env::current_dir().unwrap());
+    let workspace_root = match workspace {
+        Some(p) => p,
+        None => std::env::current_dir()
+            .map_err(|e| anyhow!("failed to resolve current directory: {e}"))?,
+    };
     let configs_dir = workspace_root.join(".newton").join("configs");
     if !configs_dir.is_dir() {
         return Err(anyhow!(
@@ -232,6 +217,6 @@ async fn fetch_next_task(
             tracing::info!("Queue empty; exiting after --once");
             return Ok(None);
         }
-        sleep_if_needed(sleep_duration).await;
+        tokio::time::sleep(Duration::from_secs(sleep_duration)).await;
     }
 }

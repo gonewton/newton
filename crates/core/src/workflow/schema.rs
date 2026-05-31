@@ -320,6 +320,15 @@ impl WorkflowTrigger {
         self.payload.as_object()
     }
 
+    /// Construct a manual trigger with the given payload and the current schema version.
+    pub fn manual(payload: Value) -> Self {
+        Self {
+            trigger_type: TriggerType::Manual,
+            schema_version: "1".to_string(),
+            payload,
+        }
+    }
+
     pub fn to_value(&self) -> Value {
         let mut map = serde_json::Map::new();
         map.insert(

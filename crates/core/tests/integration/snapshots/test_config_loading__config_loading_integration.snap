@@ -20,7 +20,6 @@ NewtonConfig {
         ),
         score_threshold: 88.5,
     },
-    advisor: AdvisorConfig,
     context: ContextConfig {
         clear_after_use: false,
         file: ".custom/state/context.md",

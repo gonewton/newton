@@ -16,10 +16,6 @@ pub struct NewtonConfig {
     #[serde(default)]
     pub evaluator: EvaluatorConfig,
 
-    /// Advisor configuration (placeholder for future expansion)
-    #[serde(default)]
-    pub advisor: AdvisorConfig,
-
     /// Context configuration
     #[serde(default)]
     pub context: ContextConfig,
@@ -70,12 +66,6 @@ pub struct EvaluatorConfig {
     /// Score threshold for success
     #[serde(default = "default_score_threshold")]
     pub score_threshold: f64,
-}
-
-/// Advisor configuration (placeholder for future expansion)
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AdvisorConfig {
-    // Advisor-specific configuration fields will be added here
 }
 
 /// Context configuration
@@ -143,7 +133,7 @@ impl Default for ProjectConfig {
 impl Default for ExecutorConfig {
     fn default() -> Self {
         ExecutorConfig {
-            coding_agent: String::new(),
+            coding_agent: default_coding_agent(),
             coding_agent_model: default_coding_agent_model(),
             auto_commit: false,
         }
@@ -286,4 +276,4 @@ pub mod loader;
 pub mod validation;
 
 pub use loader::ConfigLoader;
-pub use validation::ConfigValidator;
+pub use validation::validate as validate_config;

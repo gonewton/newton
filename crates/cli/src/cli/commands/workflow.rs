@@ -6,11 +6,10 @@ use crate::cli::args::{
 use crate::cli::workspace_paths::{
     resolve_state_dir, state_artifacts_dir, state_backend_sqlite_url, state_checkpoints_dir,
 };
-use crate::Result;
-use anyhow::anyhow;
 use newton_backend::SqliteBackendStore;
 use newton_core::core::error::AppError;
 use newton_core::core::types::ErrorCategory;
+use newton_core::workflow::io::{CompletionEnvelope, CompletionError};
 use newton_core::workflow::{
     checkpoint, dot as workflow_dot,
     executor::{self as workflow_executor, ExecutionOverrides},
@@ -25,6 +24,19 @@ use newton_core::workflow::{
 use serde_json::Value;
 use std::{fs, result::Result as StdResult, sync::Arc};
 
+fn emit_or_return(
+    emit_json: bool,
+    envelope: CompletionEnvelope,
+    err: AppError,
+    exit_code: i32,
+) -> StdResult<(), AppError> {
+    if emit_json {
+        println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
+        std::process::exit(exit_code);
+    }
+    Err(err)
+}
+
 async fn execute_run_command(args: &RunArgs) -> StdResult<(), AppError> {
     let emit_json = args.emit_completion_json;
     let workflow_path = args.workflow.clone();
@@ -33,17 +45,13 @@ async fn execute_run_command(args: &RunArgs) -> StdResult<(), AppError> {
     let (mut document, lint_results) =
         newton_core::workflow::loader::load_and_lint_workflow(&workflow_path)?;
     if !lint_results.is_empty() {
-        super::print_lint_results_text(&lint_results);
+        super::print_lint_results_text(&lint_results)?;
     }
     super::apply_context_overrides(&mut document.workflow.context, &args.context);
     document.validate(&ExpressionEngine::default())?;
 
     if let Some(payload) = super::build_trigger_payload(&args.parameters_json, &args.trigger)? {
-        document.triggers = Some(workflow_schema::WorkflowTrigger {
-            trigger_type: workflow_schema::TriggerType::Manual,
-            schema_version: "1".to_string(),
-            payload,
-        });
+        document.triggers = Some(workflow_schema::WorkflowTrigger::manual(payload));
     }
 
     {
@@ -62,36 +70,24 @@ async fn execute_run_command(args: &RunArgs) -> StdResult<(), AppError> {
                     format!("trigger payload exceeds max_input_bytes ({})", max_bytes),
                 )
                 .with_code("WFG-IO-001");
-                if emit_json {
-                    let envelope = newton_core::workflow::io::CompletionEnvelope::internal_error(
-                        newton_core::workflow::io::CompletionError {
-                            code: Some("WFG-IO-001".to_string()),
-                            category: ErrorCategory::ValidationError.to_string(),
-                            message: err.message.clone(),
-                            error_payload: None,
-                        },
-                    );
-                    println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
-                    std::process::exit(1);
-                }
-                return Err(err);
+                let envelope = CompletionEnvelope::internal_error(CompletionError {
+                    code: Some("WFG-IO-001".to_string()),
+                    category: ErrorCategory::ValidationError.to_string(),
+                    message: err.message.clone(),
+                    error_payload: None,
+                });
+                return emit_or_return(emit_json, envelope, err, 1);
             }
         }
         if let Some(schema) = &settings.io.input_schema {
             if let Err(e) = newton_core::workflow::io::validate_input_schema(schema, payload) {
-                if emit_json {
-                    let envelope = newton_core::workflow::io::CompletionEnvelope::internal_error(
-                        newton_core::workflow::io::CompletionError {
-                            code: Some(e.code.clone()),
-                            category: e.category.to_string(),
-                            message: e.message.clone(),
-                            error_payload: None,
-                        },
-                    );
-                    println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
-                    std::process::exit(1);
-                }
-                return Err(e);
+                let envelope = CompletionEnvelope::internal_error(CompletionError {
+                    code: Some(e.code.clone()),
+                    category: e.category.to_string(),
+                    message: e.message.clone(),
+                    error_payload: None,
+                });
+                return emit_or_return(emit_json, envelope, e, 1);
             }
         }
     }
@@ -148,10 +144,9 @@ async fn execute_run_command(args: &RunArgs) -> StdResult<(), AppError> {
         max_time_seconds: args.timeout_seconds,
         checkpoint_base_path: Some(state_checkpoints_dir(&state_dir)),
         artifact_base_path: Some(state_artifacts_dir(&state_dir)),
-        max_nesting_depth: None,
-        verbose: false,
         sink,
         pre_seed_nodes: true,
+        ..Default::default()
     };
 
     let settings = document.workflow.settings.clone();
@@ -176,23 +171,17 @@ async fn execute_run_command(args: &RunArgs) -> StdResult<(), AppError> {
             {
                 use newton_core::workflow::io::validate_output_schema;
                 if let Err(e) = validate_output_schema(schema, result_val) {
-                    if emit_json {
-                        let envelope = newton_core::workflow::io::CompletionEnvelope::failure(
-                            Some(summary.execution_id),
-                            newton_core::workflow::io::CompletionError {
-                                code: Some("WFG-IO-003".to_string()),
-                                category: "ValidationError".to_string(),
-                                message: e.message.clone(),
-                                error_payload: None,
-                            },
-                        );
-                        println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
-                        std::process::exit(2);
-                    }
-                    return Err(AppError::new(
-                        ErrorCategory::ValidationError,
-                        e.message.clone(),
-                    ));
+                    let err = AppError::new(ErrorCategory::ValidationError, e.message.clone());
+                    let envelope = CompletionEnvelope::failure(
+                        Some(summary.execution_id),
+                        CompletionError {
+                            code: Some("WFG-IO-003".to_string()),
+                            category: "ValidationError".to_string(),
+                            message: e.message.clone(),
+                            error_payload: None,
+                        },
+                    );
+                    return emit_or_return(emit_json, envelope, err, 2);
                 }
             }
             if let (Some(max_bytes), Some(ref result_val)) =
@@ -200,23 +189,20 @@ async fn execute_run_command(args: &RunArgs) -> StdResult<(), AppError> {
             {
                 let serialized = serde_json::to_string(result_val).unwrap_or_default();
                 if serialized.len() > max_bytes {
-                    if emit_json {
-                        let envelope = newton_core::workflow::io::CompletionEnvelope::failure(
-                            Some(summary.execution_id),
-                            newton_core::workflow::io::CompletionError {
-                                code: Some("WFG-IO-003".to_string()),
-                                category: "ValidationError".to_string(),
-                                message: "output exceeds max_output_bytes".to_string(),
-                                error_payload: None,
-                            },
-                        );
-                        println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
-                        std::process::exit(2);
-                    }
-                    return Err(AppError::new(
+                    let err = AppError::new(
                         ErrorCategory::ValidationError,
                         "output exceeds max_output_bytes: WFG-IO-003".to_string(),
-                    ));
+                    );
+                    let envelope = CompletionEnvelope::failure(
+                        Some(summary.execution_id),
+                        CompletionError {
+                            code: Some("WFG-IO-003".to_string()),
+                            category: "ValidationError".to_string(),
+                            message: "output exceeds max_output_bytes".to_string(),
+                            error_payload: None,
+                        },
+                    );
+                    return emit_or_return(emit_json, envelope, err, 2);
                 }
             }
             if emit_json {
@@ -272,10 +258,6 @@ async fn execute_run_command(args: &RunArgs) -> StdResult<(), AppError> {
     }
 }
 
-pub async fn run(args: RunArgs) -> Result<()> {
-    execute_run_command(&args).await.map_err(|e| anyhow!("{e}"))
-}
-
 pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
     execute_run_command(&args).await
 }
@@ -319,7 +301,7 @@ pub fn lint(args: LintArgs) -> StdResult<(), AppError> {
             if results.is_empty() {
                 println!("No lint issues");
             } else {
-                super::print_lint_results_text(&results);
+                super::print_lint_results_text(&results)?;
             }
         }
         OutputFormat::Prose => {
@@ -354,11 +336,9 @@ pub fn explain(args: ExplainArgs) -> StdResult<(), AppError> {
     let trigger_payload = super::build_trigger_payload(&args.parameters_json, &args.trigger)?
         .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
     if !trigger_payload.is_null() {
-        document.triggers = Some(workflow_schema::WorkflowTrigger {
-            trigger_type: workflow_schema::TriggerType::Manual,
-            schema_version: "1".to_string(),
-            payload: trigger_payload.clone(),
-        });
+        document.triggers = Some(workflow_schema::WorkflowTrigger::manual(
+            trigger_payload.clone(),
+        ));
     }
     let outcome = explain::build_explain_outcome(&document, &overrides, &trigger_payload)?;
     match args.format {

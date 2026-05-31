@@ -66,11 +66,7 @@ impl ChildWorkflowRunner for InProcessChildWorkflowRunner {
         if let Some(merge) = input.triggers_merge.as_ref() {
             let current_payload = extract_trigger_payload(&document);
             let merged = shallow_merge_objects(&current_payload, merge)?;
-            document.triggers = Some(schema::WorkflowTrigger {
-                trigger_type: schema::TriggerType::Manual,
-                schema_version: "1".to_string(),
-                payload: merged,
-            });
+            document.triggers = Some(schema::WorkflowTrigger::manual(merged));
         }
 
         crate::workflow::loader::check_lint_errors_after_run(&document)?;
@@ -83,7 +79,7 @@ impl ChildWorkflowRunner for InProcessChildWorkflowRunner {
             parent_task_id: input.parent_task_id.clone(),
             nesting_depth: child_depth,
         };
-        let runtime = build_workflow_runtime_with_parent(
+        let runtime = build_workflow_runtime(
             document,
             input.workflow_path.clone(),
             input.operator_registry.clone(),
@@ -106,23 +102,6 @@ impl ChildWorkflowRunner for InProcessChildWorkflowRunner {
 }
 
 pub(super) fn build_workflow_runtime(
-    document: WorkflowDocument,
-    workflow_path: PathBuf,
-    registry: crate::workflow::operator::OperatorRegistry,
-    workspace_root: PathBuf,
-    overrides: ExecutionOverrides,
-) -> Result<WorkflowRuntime, AppError> {
-    build_workflow_runtime_with_parent(
-        document,
-        workflow_path,
-        registry,
-        workspace_root,
-        overrides,
-        None,
-    )
-}
-
-pub(super) fn build_workflow_runtime_with_parent(
     document: WorkflowDocument,
     workflow_path: PathBuf,
     registry: crate::workflow::operator::OperatorRegistry,
@@ -308,6 +287,24 @@ pub(super) fn build_workflow_runtime_with_parent(
     })
 }
 
+fn tasks_to_graph(tasks: Vec<schema::TaskOrMacro>) -> Result<GraphHandle, AppError> {
+    let map = tasks
+        .into_iter()
+        .map(|item| match item {
+            schema::TaskOrMacro::Task(task) => Ok((task.id.clone(), task)),
+            schema::TaskOrMacro::Macro(invocation) => Err(AppError::new(
+                ErrorCategory::ValidationError,
+                format!(
+                    "unexpanded macro invocation '{}' reached executor",
+                    invocation.macro_name
+                ),
+            )
+            .with_code("WFG-MACRO-002")),
+        })
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    Ok(GraphHandle::new(map))
+}
+
 pub async fn resume_workflow(
     registry: crate::workflow::operator::OperatorRegistry,
     workspace_root: PathBuf,
@@ -405,44 +402,10 @@ pub async fn resume_workflow(
                 .collect();
             GraphHandle::new(tasks_map)
         } else {
-            GraphHandle::new(
-                document
-                    .workflow
-                    .tasks
-                    .into_iter()
-                    .map(|task| match task {
-                        schema::TaskOrMacro::Task(task) => Ok((task.id.clone(), task)),
-                        schema::TaskOrMacro::Macro(invocation) => Err(AppError::new(
-                            ErrorCategory::ValidationError,
-                            format!(
-                                "unexpanded macro invocation '{}' reached executor",
-                                invocation.macro_name
-                            ),
-                        )
-                        .with_code("WFG-MACRO-002")),
-                    })
-                    .collect::<Result<HashMap<_, _>, _>>()?,
-            )
+            tasks_to_graph(document.workflow.tasks)?
         }
     } else {
-        GraphHandle::new(
-            document
-                .workflow
-                .tasks
-                .into_iter()
-                .map(|task| match task {
-                    schema::TaskOrMacro::Task(task) => Ok((task.id.clone(), task)),
-                    schema::TaskOrMacro::Macro(invocation) => Err(AppError::new(
-                        ErrorCategory::ValidationError,
-                        format!(
-                            "unexpanded macro invocation '{}' reached executor",
-                            invocation.macro_name
-                        ),
-                    )
-                    .with_code("WFG-MACRO-002")),
-                })
-                .collect::<Result<HashMap<_, _>, _>>()?,
-        )
+        tasks_to_graph(document.workflow.tasks)?
     };
 
     let engine = Arc::new(ExpressionEngine::default());
@@ -473,16 +436,7 @@ pub async fn resume_workflow(
         engine,
         graph_settings: graph_settings.clone(),
         config,
-        execution_overrides: ExecutionOverrides {
-            parallel_limit: None,
-            max_time_seconds: None,
-            checkpoint_base_path: None,
-            artifact_base_path: None,
-            max_nesting_depth: None,
-            verbose: false,
-            sink: None,
-            pre_seed_nodes: false,
-        },
+        execution_overrides: ExecutionOverrides::default(),
         artifact_store,
         state,
         ready_queue,
