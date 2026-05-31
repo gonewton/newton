@@ -28,7 +28,7 @@ fn expose_mcp_only_tool_count_equals_allowlist() {
 fn expose_mcp_only_includes_allowed_tools() {
     let registry = build_exposed_registry();
     for id in MCP_EXPOSED_COMMAND_IDS {
-        let tool_name = format!("newton.{}", id);
+        let tool_name = format!("newton_{}", id.replace('.', "_"));
         assert!(
             registry.resolve_tool(&tool_name).is_some(),
             "expected tool '{}' to be in MCP registry",
@@ -42,8 +42,8 @@ fn expose_mcp_only_newton_data_group_is_not_a_tool() {
     // The `data` node is a group, not a leaf — it must NOT appear as a tool.
     let registry = build_exposed_registry();
     assert!(
-        registry.resolve_tool("newton.data").is_none(),
-        "expected tool 'newton.data' to NOT be in MCP registry (it is a group, not a leaf)"
+        registry.resolve_tool("newton_data").is_none(),
+        "expected tool 'newton_data' to NOT be in MCP registry (it is a group, not a leaf)"
     );
 }
 
@@ -61,7 +61,7 @@ fn expose_mcp_only_excludes_non_allowed_tools() {
         // "completion" — now framework-provided, not in newton's CommandRegistry
         // "data" removed — it is now a group node, not a tool
     ] {
-        let tool_name = format!("newton.{}", id);
+        let tool_name = format!("newton_{}", id);
         assert!(
             registry.resolve_tool(&tool_name).is_none(),
             "expected tool '{}' to NOT be in MCP registry",

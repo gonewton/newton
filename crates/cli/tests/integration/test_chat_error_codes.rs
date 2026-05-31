@@ -3,11 +3,12 @@ mod support;
 
 use cli_framework::command::chat::HostToolExecutor;
 use cli_framework::command::chat::{
-    ChatToolCallOptions, CommandsAsToolsExecutor, CHAT_AGENT_START_FAILED,
-    CHAT_ARG_VALIDATION_FAILED, CHAT_COMMAND_EXECUTION_FAILED, CHAT_DESTRUCTIVE_BLOCKED,
-    CHAT_RISK_REQUIRES_CONFIRMATION, CHAT_TOOL_NOT_FOUND, CHAT_TOOL_REGISTRY_COLLISION,
+    ChatToolCallOptions, CHAT_AGENT_START_FAILED, CHAT_ARG_VALIDATION_FAILED,
+    CHAT_COMMAND_EXECUTION_FAILED, CHAT_DESTRUCTIVE_BLOCKED, CHAT_RISK_REQUIRES_CONFIRMATION,
+    CHAT_TOOL_NOT_FOUND,
 };
 use cli_framework::command::{Command, CommandRegistry};
+use cli_framework::mcp::McpToolRegistry;
 use cli_framework::security::command_risk::CommandRiskPolicy;
 use cli_framework::spec::arg_spec::{ArgKind, ArgSpec, ArgValueType, Cardinality};
 use cli_framework::spec::command_tree::CommandSpec;
@@ -114,7 +115,7 @@ async fn chat_tool_error_codes_are_deterministic() {
     registry.register(make_ok_command("destructive", Some("destructive"), None));
 
     let policy = CommandRiskPolicy::default();
-    let exec = CommandsAsToolsExecutor::new(&registry, "newton", policy).expect("tool executor");
+    let exec = McpToolRegistry::from_command_registry(&registry, "newton").with_risk_policy(policy);
 
     let opts = ChatToolCallOptions {
         yolo: false,
@@ -126,35 +127,35 @@ async fn chat_tool_error_codes_are_deterministic() {
 
     // Unknown tool id.
     let err = exec
-        .call_tool("newton.not_real", json!({}), &mut ctx, &opts)
+        .call_tool("newton_not_real", json!({}), &mut ctx, &opts)
         .await
         .expect_err("should fail");
     assert!(err.to_string().contains(CHAT_TOOL_NOT_FOUND));
 
     // Invalid args for a known tool.
     let err = exec
-        .call_tool("newton.needs_arg", json!({}), &mut ctx, &opts)
+        .call_tool("newton_needs_arg", json!({}), &mut ctx, &opts)
         .await
         .expect_err("should fail");
     assert!(err.to_string().contains(CHAT_ARG_VALIDATION_FAILED));
 
     // Underlying command failure.
     let err = exec
-        .call_tool("newton.fails", json!({}), &mut ctx, &opts)
+        .call_tool("newton_fails", json!({}), &mut ctx, &opts)
         .await
         .expect_err("should fail");
     assert!(err.to_string().contains(CHAT_COMMAND_EXECUTION_FAILED));
 
     // Sensitive command in non-interactive context.
     let err = exec
-        .call_tool("newton.sensitive", json!({}), &mut ctx, &opts)
+        .call_tool("newton_sensitive", json!({}), &mut ctx, &opts)
         .await
         .expect_err("should fail");
     assert!(err.to_string().contains(CHAT_RISK_REQUIRES_CONFIRMATION));
 
     // Destructive command blocked by env policy.
     let err = exec
-        .call_tool("newton.destructive", json!({}), &mut ctx, &opts)
+        .call_tool("newton_destructive", json!({}), &mut ctx, &opts)
         .await
         .expect_err("should fail");
     assert!(err.to_string().contains(CHAT_DESTRUCTIVE_BLOCKED));
@@ -162,19 +163,18 @@ async fn chat_tool_error_codes_are_deterministic() {
 
 #[test]
 #[serial(chat_error_codes)]
-fn chat_tool_registry_collision_is_reported() {
+fn chat_tool_registry_slash_and_dot_are_distinct_tool_names() {
+    // With cli-framework >= b9ebeb1, tool names use "_" separator (replace '/' -> '_').
+    // "a/b" → "newton_a_b", "a.b" → "newton_a.b" — these are distinct, no collision.
     let mut registry = CommandRegistry::new();
     registry.register(make_ok_command("a/b", None, None));
     registry.register(make_ok_command("a.b", None, None));
 
-    let err = match CommandsAsToolsExecutor::new(&registry, "newton", CommandRiskPolicy::default())
-    {
-        Ok(_) => panic!("expected collision"),
-        Err(e) => e.to_string(),
-    };
-    assert!(
-        err.contains(CHAT_TOOL_REGISTRY_COLLISION),
-        "expected {CHAT_TOOL_REGISTRY_COLLISION} in error, got:\n{err}"
+    let exec = McpToolRegistry::from_command_registry(&registry, "newton");
+    assert_eq!(
+        exec.tool_count(),
+        2,
+        "slash and dot produce distinct tool names"
     );
 }
 
