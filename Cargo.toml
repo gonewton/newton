@@ -5,6 +5,7 @@ members = [
     "crates/cli",
     "crates/types",
     "crates/backend",
+    "crates/test-utils",
 ]
 
 [workspace.package]
@@ -69,3 +70,4 @@ tokio-test = "0.4.5"
 wiremock = "0.6"
 predicates-core = "1"
 jsonschema = { version = "0.18", default-features = false }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "migrate", "chrono", "uuid"] }

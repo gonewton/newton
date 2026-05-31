@@ -16,31 +16,23 @@ pub struct WorkspacePaths {
     pub workflows_state_dir: PathBuf,
     pub artifacts_dir: PathBuf,
     pub workflows_dir: PathBuf, // <dot_newton>/workflows
-    // Exists flags, populated at construction time
-    pub dot_newton_exists: bool,
-    pub backend_sqlite_exists: bool,
-    pub configs_dir_exists: bool,
-    pub monitor_conf_exists: bool,
-    pub plan_dir_exists: bool,
-    pub workflows_state_dir_exists: bool,
-    pub artifacts_dir_exists: bool,
-    pub workflows_dir_exists: bool,
+}
+
+fn make_absolute(p: PathBuf) -> PathBuf {
+    std::fs::canonicalize(&p).unwrap_or_else(|_| {
+        if p.is_absolute() {
+            p
+        } else {
+            std::env::current_dir().map(|cwd| cwd.join(&p)).unwrap_or(p)
+        }
+    })
 }
 
 impl WorkspacePaths {
     /// Build paths from an explicit workspace root.
     /// `root` need not exist; paths are computed but existence flags reflect FS state.
     pub fn new(root: PathBuf) -> Self {
-        // Best-effort canonicalization; fall back to computed absolute path.
-        let workspace_root = std::fs::canonicalize(&root).unwrap_or_else(|_| {
-            if root.is_absolute() {
-                root.clone()
-            } else {
-                std::env::current_dir()
-                    .map(|cwd| cwd.join(&root))
-                    .unwrap_or(root.clone())
-            }
-        });
+        let workspace_root = make_absolute(root);
 
         let dot_newton = workspace_root.join(".newton");
         let workflows_state_dir = dot_newton.join("state");
@@ -50,15 +42,6 @@ impl WorkspacePaths {
         let plan_dir = dot_newton.join("plan");
         let artifacts_dir = workflows_state_dir.join("artifacts");
         let workflows_dir = dot_newton.join("workflows");
-
-        let dot_newton_exists = dot_newton.exists();
-        let backend_sqlite_exists = backend_sqlite.exists();
-        let configs_dir_exists = configs_dir.exists();
-        let monitor_conf_exists = monitor_conf.exists();
-        let plan_dir_exists = plan_dir.exists();
-        let workflows_state_dir_exists = workflows_state_dir.exists();
-        let artifacts_dir_exists = artifacts_dir.exists();
-        let workflows_dir_exists = workflows_dir.exists();
 
         Self {
             workspace_root,
@@ -70,15 +53,32 @@ impl WorkspacePaths {
             workflows_state_dir,
             artifacts_dir,
             workflows_dir,
-            dot_newton_exists,
-            backend_sqlite_exists,
-            configs_dir_exists,
-            monitor_conf_exists,
-            plan_dir_exists,
-            workflows_state_dir_exists,
-            artifacts_dir_exists,
-            workflows_dir_exists,
         }
+    }
+
+    pub fn dot_newton_exists(&self) -> bool {
+        self.dot_newton.exists()
+    }
+    pub fn backend_sqlite_exists(&self) -> bool {
+        self.backend_sqlite.exists()
+    }
+    pub fn configs_dir_exists(&self) -> bool {
+        self.configs_dir.exists()
+    }
+    pub fn monitor_conf_exists(&self) -> bool {
+        self.monitor_conf.exists()
+    }
+    pub fn plan_dir_exists(&self) -> bool {
+        self.plan_dir.exists()
+    }
+    pub fn workflows_state_dir_exists(&self) -> bool {
+        self.workflows_state_dir.exists()
+    }
+    pub fn artifacts_dir_exists(&self) -> bool {
+        self.artifacts_dir.exists()
+    }
+    pub fn workflows_dir_exists(&self) -> bool {
+        self.workflows_dir.exists()
     }
 
     /// Build paths from the process current working directory.
@@ -96,61 +96,19 @@ impl WorkspacePaths {
             "workspace_root".into(),
             json!(self.workspace_root.display().to_string()),
         );
-        map.insert(
-            "dot_newton".into(),
-            json!(self.dot_newton.display().to_string()),
-        );
-        map.insert("dot_newton_exists".into(), json!(self.dot_newton_exists));
-        map.insert(
-            "backend_sqlite".into(),
-            json!(self.backend_sqlite.display().to_string()),
-        );
-        map.insert(
-            "backend_sqlite_exists".into(),
-            json!(self.backend_sqlite_exists),
-        );
-        map.insert(
-            "configs_dir".into(),
-            json!(self.configs_dir.display().to_string()),
-        );
-        map.insert("configs_dir_exists".into(), json!(self.configs_dir_exists));
-        map.insert(
-            "monitor_conf".into(),
-            json!(self.monitor_conf.display().to_string()),
-        );
-        map.insert(
-            "monitor_conf_exists".into(),
-            json!(self.monitor_conf_exists),
-        );
-        map.insert(
-            "plan_dir".into(),
-            json!(self.plan_dir.display().to_string()),
-        );
-        map.insert("plan_dir_exists".into(), json!(self.plan_dir_exists));
-        map.insert(
-            "workflows_state_dir".into(),
-            json!(self.workflows_state_dir.display().to_string()),
-        );
-        map.insert(
-            "workflows_state_dir_exists".into(),
-            json!(self.workflows_state_dir_exists),
-        );
-        map.insert(
-            "artifacts_dir".into(),
-            json!(self.artifacts_dir.display().to_string()),
-        );
-        map.insert(
-            "artifacts_dir_exists".into(),
-            json!(self.artifacts_dir_exists),
-        );
-        map.insert(
-            "workflows_dir".into(),
-            json!(self.workflows_dir.display().to_string()),
-        );
-        map.insert(
-            "workflows_dir_exists".into(),
-            json!(self.workflows_dir_exists),
-        );
+        for (name, path) in [
+            ("dot_newton", &self.dot_newton),
+            ("backend_sqlite", &self.backend_sqlite),
+            ("configs_dir", &self.configs_dir),
+            ("monitor_conf", &self.monitor_conf),
+            ("plan_dir", &self.plan_dir),
+            ("workflows_state_dir", &self.workflows_state_dir),
+            ("artifacts_dir", &self.artifacts_dir),
+            ("workflows_dir", &self.workflows_dir),
+        ] {
+            map.insert(name.into(), json!(path.display().to_string()));
+            map.insert(format!("{name}_exists"), json!(path.exists()));
+        }
         map
     }
 
@@ -169,30 +127,13 @@ pub fn resolve_state_dir(
 ) -> PathBuf {
     // Level 1: explicit --state-dir flag
     if let Some(p) = explicit {
-        let abs = std::fs::canonicalize(p).unwrap_or_else(|_| {
-            if p.is_absolute() {
-                p.to_path_buf()
-            } else {
-                std::env::current_dir()
-                    .map(|cwd| cwd.join(p))
-                    .unwrap_or_else(|_| p.to_path_buf())
-            }
-        });
-        return abs;
+        return make_absolute(p.to_path_buf());
     }
 
     // Level 2: NEWTON_STATE_DIR env var
     if let Ok(env_val) = std::env::var("NEWTON_STATE_DIR") {
         if !env_val.is_empty() {
-            let p = PathBuf::from(&env_val);
-            let abs = std::fs::canonicalize(&p).unwrap_or_else(|_| {
-                if p.is_absolute() {
-                    p.clone()
-                } else {
-                    std::env::current_dir().map(|cwd| cwd.join(&p)).unwrap_or(p)
-                }
-            });
-            return abs;
+            return make_absolute(PathBuf::from(&env_val));
         }
     }
 
@@ -426,13 +367,13 @@ mod tests {
     fn test_exists_flags_false_for_nonexistent_root() {
         let root = PathBuf::from("/tmp/this-path-should-not-exist-338-abc");
         let paths = WorkspacePaths::new(root);
-        assert!(!paths.dot_newton_exists);
-        assert!(!paths.backend_sqlite_exists);
-        assert!(!paths.configs_dir_exists);
-        assert!(!paths.monitor_conf_exists);
-        assert!(!paths.plan_dir_exists);
-        assert!(!paths.workflows_state_dir_exists);
-        assert!(!paths.artifacts_dir_exists);
-        assert!(!paths.workflows_dir_exists);
+        assert!(!paths.dot_newton_exists());
+        assert!(!paths.backend_sqlite_exists());
+        assert!(!paths.configs_dir_exists());
+        assert!(!paths.monitor_conf_exists());
+        assert!(!paths.plan_dir_exists());
+        assert!(!paths.workflows_state_dir_exists());
+        assert!(!paths.artifacts_dir_exists());
+        assert!(!paths.workflows_dir_exists());
     }
 }

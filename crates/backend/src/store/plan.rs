@@ -1,3 +1,11 @@
+use super::helpers::{query_err, tx_err};
+
+pub(super) const PLAN_SELECT: &str =
+    "SELECT p.id, p.title, p.componentId as component_id, c.name as component_name, \
+     p.repoId as repo_id, r.name as repo_name, p.status, p.linkedRequestId as linked_request_id, \
+     p.confidence, p.risk, p.expectedValue as expected_value, p.agentGenerated as agent_generated, \
+     p.waitingSince as waiting_since, p.createdAt as created_at \
+     FROM Plan p LEFT JOIN Component c ON p.componentId = c.id LEFT JOIN Repo r ON p.repoId = r.id";
 use super::rows::*;
 use crate::err_conflict;
 use crate::err_internal;
@@ -8,7 +16,7 @@ use newton_types::ApiError;
 use uuid::Uuid;
 
 impl super::SqliteBackendStore {
-    pub(super) async fn list_pending_approvals(
+    pub(super) async fn list_pending_approvals_db(
         &self,
     ) -> Result<Vec<PendingApprovalItem>, ApiError> {
         let rows = sqlx::query_as::<_, PendingApprovalRow>(
@@ -16,7 +24,7 @@ impl super::SqliteBackendStore {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         Ok(rows
             .into_iter()
@@ -32,18 +40,18 @@ impl super::SqliteBackendStore {
                 reviewer: row.reviewer,
                 status: row.status,
                 confidence: row.confidence,
-                agent_generated: row.agent_generated != 0,
+                agent_generated: row.agent_generated,
             })
             .collect())
     }
 
-    pub(super) async fn list_regressions(&self) -> Result<Vec<RegressionItem>, ApiError> {
+    pub(super) async fn list_regressions_db(&self) -> Result<Vec<RegressionItem>, ApiError> {
         let rows = sqlx::query_as::<_, RegressionRow>(
             "SELECT repoName as repo, kpiId as kpi_id, delta, severity, since, trend FROM Regression ORDER BY id ASC"
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         Ok(rows
             .into_iter()
@@ -58,7 +66,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn list_recent_actions(
+    pub(super) async fn list_recent_actions_db(
         &self,
         limit: u32,
     ) -> Result<Vec<RecentActionItem>, ApiError> {
@@ -68,7 +76,7 @@ impl super::SqliteBackendStore {
         .bind(limit as i64)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         Ok(rows
             .into_iter()
@@ -81,7 +89,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn list_saved_views(
+    pub(super) async fn list_saved_views_db(
         &self,
         kind: Option<String>,
     ) -> Result<serde_json::Value, ApiError> {
@@ -92,7 +100,7 @@ impl super::SqliteBackendStore {
             .bind(k)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| err_internal(&format!("query error: {e}")))?;
+            .map_err(query_err)?;
 
             let items: Vec<SavedViewItem> = rows
                 .into_iter()
@@ -111,7 +119,7 @@ impl super::SqliteBackendStore {
             )
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| err_internal(&format!("query error: {e}")))?;
+            .map_err(query_err)?;
 
             let mut grouped: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
             for row in rows {
@@ -134,7 +142,7 @@ impl super::SqliteBackendStore {
         }
     }
 
-    pub(super) async fn list_opportunities(
+    pub(super) async fn list_opportunities_db(
         &self,
         status: Option<String>,
     ) -> Result<Vec<OpportunityItem>, ApiError> {
@@ -147,12 +155,12 @@ impl super::SqliteBackendStore {
             .bind(s)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| err_internal(&format!("query error: {e}")))?
+            .map_err(query_err)?
         } else {
             sqlx::query_as::<_, OpportunityRow>(&format!("{base_sql} ORDER BY o.id ASC"))
                 .fetch_all(&self.pool)
                 .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?
+                .map_err(query_err)?
         };
 
         Ok(rows
@@ -189,7 +197,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn patch_opportunity(
+    pub(super) async fn patch_opportunity_db(
         &self,
         id: &str,
         body: PatchOpportunityBody,
@@ -206,13 +214,7 @@ impl super::SqliteBackendStore {
             return Err(err_validation("Invalid opportunity status"));
         }
 
-        let count: Option<CountRow> =
-            sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Opportunity WHERE id = ?")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
-        if count.map(|c| c.count).unwrap_or(0) == 0 {
+        if !self.row_exists("Opportunity", id).await? {
             return Err(err_not_found("Opportunity not found"));
         }
 
@@ -225,14 +227,14 @@ impl super::SqliteBackendStore {
             .await
             .map_err(|e| err_internal(&format!("update error: {e}")))?;
 
-        self.list_opportunities(None)
+        self.list_opportunities_db(None)
             .await?
             .into_iter()
             .find(|o| o.id == id)
             .ok_or_else(|| err_internal("Failed to read back updated opportunity"))
     }
 
-    pub(super) async fn create_opportunity(
+    pub(super) async fn create_opportunity_db(
         &self,
         body: CreateOpportunityBody,
     ) -> Result<OpportunityItem, ApiError> {
@@ -266,14 +268,7 @@ impl super::SqliteBackendStore {
         }
 
         let component_id = if let Some(ref cid) = body.component {
-            let count: Option<CountRow> = sqlx::query_as::<_, CountRow>(
-                "SELECT COUNT(*) as count FROM Component WHERE id = ?",
-            )
-            .bind(cid)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| err_internal(&format!("query error: {e}")))?;
-            if count.map(|c| c.count).unwrap_or(0) == 0 {
+            if !self.row_exists("Component", cid).await? {
                 tracing::warn!("component '{}' not found, proceeding", cid);
                 None
             } else {
@@ -283,13 +278,7 @@ impl super::SqliteBackendStore {
             None
         };
         let repo_id = if let Some(ref rid) = body.repo {
-            let count: Option<CountRow> =
-                sqlx::query_as::<_, CountRow>("SELECT COUNT(*) as count FROM Repo WHERE id = ?")
-                    .bind(rid)
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(|e| err_internal(&format!("query error: {e}")))?;
-            if count.map(|c| c.count).unwrap_or(0) == 0 {
+            if !self.row_exists("Repo", rid).await? {
                 tracing::warn!("repo '{}' not found, proceeding", rid);
                 None
             } else {
@@ -348,20 +337,20 @@ impl super::SqliteBackendStore {
         .await
         .map_err(|e| err_internal(&format!("upsert error: {e}")))?;
 
-        self.list_opportunities(None)
+        self.list_opportunities_db(None)
             .await?
             .into_iter()
             .find(|o| o.id == body.id)
             .ok_or_else(|| err_internal("Failed to read back created opportunity"))
     }
 
-    pub(super) async fn list_requests(&self) -> Result<Vec<RequestItem>, ApiError> {
+    pub(super) async fn list_requests_db(&self) -> Result<Vec<RequestItem>, ApiError> {
         let rows = sqlx::query_as::<_, RequestRow>(
             "SELECT req.id, req.title, req.description, req.componentId as component_id, c.name as component_name, req.repoId as repo_id, r.name as repo_name, req.requestedBy as requested_by, req.status, req.linkedOpportunityId as linked_opportunity_id, req.createdAt as created_at FROM Request req LEFT JOIN Component c ON req.componentId = c.id LEFT JOIN Repo r ON req.repoId = r.id ORDER BY req.id ASC"
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         Ok(rows
             .into_iter()
@@ -379,7 +368,7 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn create_request(
+    pub(super) async fn create_request_db(
         &self,
         body: CreateRequestBody,
     ) -> Result<RequestItem, ApiError> {
@@ -392,7 +381,7 @@ impl super::SqliteBackendStore {
                     .bind(name)
                     .fetch_optional(&self.pool)
                     .await
-                    .map_err(|e| err_internal(&format!("query error: {e}")))?;
+                    .map_err(query_err)?;
             r.map(|r| r.id)
         } else {
             None
@@ -402,7 +391,7 @@ impl super::SqliteBackendStore {
                 .bind(name)
                 .fetch_optional(&self.pool)
                 .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+                .map_err(query_err)?;
             r.map(|r| r.id)
         } else {
             None
@@ -416,20 +405,18 @@ impl super::SqliteBackendStore {
         .await
         .map_err(|e| err_internal(&format!("insert error: {e}")))?;
 
-        self.list_requests()
+        self.list_requests_db()
             .await?
             .into_iter()
             .find(|r| r.id == id)
             .ok_or_else(|| err_internal("Failed to read back created request"))
     }
 
-    pub(super) async fn list_plans(&self) -> Result<Vec<PlanItem>, ApiError> {
-        let rows = sqlx::query_as::<_, PlanRow>(
-            "SELECT p.id, p.title, p.componentId as component_id, c.name as component_name, p.repoId as repo_id, r.name as repo_name, p.status, p.linkedRequestId as linked_request_id, p.confidence, p.risk, p.expectedValue as expected_value, p.agentGenerated as agent_generated, p.waitingSince as waiting_since, p.createdAt as created_at FROM Plan p LEFT JOIN Component c ON p.componentId = c.id LEFT JOIN Repo r ON p.repoId = r.id ORDER BY p.id ASC"
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+    pub(super) async fn list_plans_db(&self) -> Result<Vec<PlanItem>, ApiError> {
+        let rows = sqlx::query_as::<_, PlanRow>(&format!("{PLAN_SELECT} ORDER BY p.id ASC"))
+            .fetch_all(&self.pool)
+            .await
+            .map_err(query_err)?;
 
         let mut result = Vec::new();
         for row in rows {
@@ -439,7 +426,7 @@ impl super::SqliteBackendStore {
             .bind(&row.id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| err_internal(&format!("query error: {e}")))?;
+            .map_err(query_err)?;
 
             result.push(PlanItem {
                 id: row.id,
@@ -452,7 +439,7 @@ impl super::SqliteBackendStore {
                 confidence: row.confidence,
                 risk: row.risk,
                 expected_value: row.expected_value,
-                agent_generated: row.agent_generated != 0,
+                agent_generated: row.agent_generated,
                 waiting_since: row.waiting_since,
                 created_at: row.created_at,
             });
@@ -460,9 +447,9 @@ impl super::SqliteBackendStore {
         Ok(result)
     }
 
-    pub(super) async fn get_plan(&self, id: &str) -> Result<PlanDetail, ApiError> {
+    pub(super) async fn get_plan_db(&self, id: &str) -> Result<PlanDetail, ApiError> {
         let plan = self
-            .list_plans()
+            .list_plans_db()
             .await?
             .into_iter()
             .find(|p| p.id == id)
@@ -474,7 +461,7 @@ impl super::SqliteBackendStore {
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         let sections = sqlx::query_as::<_, PlanSectionRow>(
             "SELECT id, label, content FROM PlanSection WHERE planId = ? ORDER BY sortOrder ASC",
@@ -482,7 +469,7 @@ impl super::SqliteBackendStore {
         .bind(id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         let policy_checks = sqlx::query_as::<_, PlanPolicyCheckRow>(
             "SELECT rule, status, met FROM PlanPolicyCheck WHERE planId = ?",
@@ -490,7 +477,7 @@ impl super::SqliteBackendStore {
         .bind(id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         let approvers = sqlx::query_as::<_, PlanApproverRow>(
             "SELECT role, name, approverStatus as status FROM PlanApprover WHERE planId = ?",
@@ -498,7 +485,7 @@ impl super::SqliteBackendStore {
         .bind(id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         Ok(PlanDetail {
             plan,
@@ -530,20 +517,15 @@ impl super::SqliteBackendStore {
         })
     }
 
-    pub(super) async fn approve_plan(&self, id: &str) -> Result<ApprovedPlan, ApiError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+    pub(super) async fn approve_plan_db(&self, id: &str) -> Result<ApprovedPlan, ApiError> {
+        let mut tx = self.pool.begin().await.map_err(tx_err)?;
 
-        let plan: Option<PlanRow> = sqlx::query_as::<_, PlanRow>(
-            "SELECT p.id, p.title, p.componentId as component_id, c.name as component_name, p.repoId as repo_id, r.name as repo_name, p.status, p.linkedRequestId as linked_request_id, p.confidence, p.risk, p.expectedValue as expected_value, p.agentGenerated as agent_generated, p.waitingSince as waiting_since, p.createdAt as created_at FROM Plan p LEFT JOIN Component c ON p.componentId = c.id LEFT JOIN Repo r ON p.repoId = r.id WHERE p.id = ?"
-        )
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        let plan: Option<PlanRow> =
+            sqlx::query_as::<_, PlanRow>(&format!("{PLAN_SELECT} WHERE p.id = ?"))
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(query_err)?;
 
         let plan = plan.ok_or_else(|| err_not_found("Plan not found"))?;
 
@@ -568,9 +550,7 @@ impl super::SqliteBackendStore {
         .await
         .map_err(|e| err_internal(&format!("insert error: {e}")))?;
 
-        tx.commit()
-            .await
-            .map_err(|e| err_internal(&format!("commit error: {e}")))?;
+        tx.commit().await.map_err(tx_err)?;
 
         let plan_item = self.fetch_plan_item(id).await?;
         Ok(ApprovedPlan {
@@ -580,20 +560,15 @@ impl super::SqliteBackendStore {
         })
     }
 
-    pub(super) async fn reject_plan(&self, id: &str) -> Result<PlanItem, ApiError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+    pub(super) async fn reject_plan_db(&self, id: &str) -> Result<PlanItem, ApiError> {
+        let mut tx = self.pool.begin().await.map_err(tx_err)?;
 
-        let plan: Option<PlanRow> = sqlx::query_as::<_, PlanRow>(
-            "SELECT p.id, p.title, p.componentId as component_id, c.name as component_name, p.repoId as repo_id, r.name as repo_name, p.status, p.linkedRequestId as linked_request_id, p.confidence, p.risk, p.expectedValue as expected_value, p.agentGenerated as agent_generated, p.waitingSince as waiting_since, p.createdAt as created_at FROM Plan p LEFT JOIN Component c ON p.componentId = c.id LEFT JOIN Repo r ON p.repoId = r.id WHERE p.id = ?"
-        )
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        let plan: Option<PlanRow> =
+            sqlx::query_as::<_, PlanRow>(&format!("{PLAN_SELECT} WHERE p.id = ?"))
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(query_err)?;
 
         let plan = plan.ok_or_else(|| err_not_found("Plan not found"))?;
 
@@ -609,14 +584,12 @@ impl super::SqliteBackendStore {
             .await
             .map_err(|e| err_internal(&format!("update error: {e}")))?;
 
-        tx.commit()
-            .await
-            .map_err(|e| err_internal(&format!("commit error: {e}")))?;
+        tx.commit().await.map_err(tx_err)?;
 
         self.fetch_plan_item(id).await
     }
 
-    pub(super) async fn list_executions(
+    pub(super) async fn list_executions_db(
         &self,
         plan_id: Option<String>,
     ) -> Result<Vec<ExecutionItem>, ApiError> {
@@ -629,12 +602,12 @@ impl super::SqliteBackendStore {
             .bind(pid)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| err_internal(&format!("query error: {e}")))?
+            .map_err(query_err)?
         } else {
             sqlx::query_as::<_, ExecutionRow>(&format!("{base_sql} ORDER BY e.id ASC"))
                 .fetch_all(&self.pool)
                 .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?
+                .map_err(query_err)?
         };
 
         Ok(rows
@@ -662,13 +635,13 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn list_operators(&self) -> Result<Vec<OperatorItem>, ApiError> {
+    pub(super) async fn list_operators_db(&self) -> Result<Vec<OperatorItem>, ApiError> {
         let rows = sqlx::query_as::<_, OperatorRow>(
             "SELECT operatorType as operator_type, description, paramsSchema as params_schema, paletteLabel as palette_label, paletteIcon as palette_icon FROM Operator ORDER BY id ASC"
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         Ok(rows
             .into_iter()
@@ -685,13 +658,16 @@ impl super::SqliteBackendStore {
             .collect())
     }
 
-    pub(super) async fn get_persistence(&self, key: &str) -> Result<serde_json::Value, ApiError> {
+    pub(super) async fn get_persistence_db(
+        &self,
+        key: &str,
+    ) -> Result<serde_json::Value, ApiError> {
         let row: Option<StringValueRow> =
             sqlx::query_as::<_, StringValueRow>("SELECT value FROM Persistence WHERE key = ?")
                 .bind(key)
                 .fetch_optional(&self.pool)
                 .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?;
+                .map_err(query_err)?;
 
         match row.and_then(|r| r.value) {
             Some(v) => serde_json::from_str(&v)
@@ -700,7 +676,7 @@ impl super::SqliteBackendStore {
         }
     }
 
-    pub(super) async fn put_persistence(
+    pub(super) async fn put_persistence_db(
         &self,
         key: &str,
         value: serde_json::Value,
@@ -720,7 +696,7 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn delete_persistence(&self, key: &str) -> Result<(), ApiError> {
+    pub(super) async fn delete_persistence_db(&self, key: &str) -> Result<(), ApiError> {
         sqlx::query("DELETE FROM Persistence WHERE key = ?")
             .bind(key)
             .execute(&self.pool)
@@ -729,7 +705,7 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn reset(&self) -> Result<(), ApiError> {
+    pub(super) async fn reset_db(&self) -> Result<(), ApiError> {
         use sqlx::Executor;
         let tables = [
             "ExecutionRecord",
@@ -755,11 +731,7 @@ impl super::SqliteBackendStore {
             "Persistence",
         ];
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+        let mut tx = self.pool.begin().await.map_err(tx_err)?;
 
         for table in &tables {
             tx.execute(sqlx::query(&format!("DELETE FROM {table}")))
@@ -769,9 +741,7 @@ impl super::SqliteBackendStore {
 
         crate::fixtures::load_fixtures(&mut tx).await?;
 
-        tx.commit()
-            .await
-            .map_err(|e| err_internal(&format!("commit error: {e}")))?;
+        tx.commit().await.map_err(tx_err)?;
 
         Ok(())
     }

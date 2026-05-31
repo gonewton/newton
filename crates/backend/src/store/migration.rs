@@ -1,3 +1,4 @@
+use super::helpers::tx_err;
 use crate::err_internal;
 use newton_types::ApiError;
 use sqlx::FromRow;
@@ -24,10 +25,7 @@ pub(super) async fn upgrade_legacy_grade_schema(pool: &SqlitePool) -> Result<(),
         return Ok(());
     }
 
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+    let mut tx = pool.begin().await.map_err(tx_err)?;
 
     sqlx::query("PRAGMA foreign_keys = OFF;")
         .execute(&mut *tx)
@@ -72,9 +70,7 @@ pub(super) async fn upgrade_legacy_grade_schema(pool: &SqlitePool) -> Result<(),
         .await
         .map_err(|e| err_internal(&format!("pragma error: {e}")))?;
 
-    tx.commit()
-        .await
-        .map_err(|e| err_internal(&format!("commit tx error: {e}")))?;
+    tx.commit().await.map_err(tx_err)?;
 
     Ok(())
 }
@@ -106,10 +102,7 @@ pub(super) async fn upgrade_legacy_indicator_schema(pool: &SqlitePool) -> Result
         .map(|r| r.notnull != 0)
         .unwrap_or(false);
 
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+    let mut tx = pool.begin().await.map_err(tx_err)?;
 
     sqlx::query("PRAGMA foreign_keys = OFF;")
         .execute(&mut *tx)

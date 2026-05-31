@@ -6,7 +6,7 @@ use newton_types::ApiError;
 use uuid::Uuid;
 
 impl super::SqliteBackendStore {
-    pub(super) async fn get_workflow_instance(
+    pub(super) async fn get_workflow_instance_db(
         &self,
         instance_id: &str,
     ) -> Result<newton_types::WorkflowInstance, ApiError> {
@@ -16,14 +16,14 @@ impl super::SqliteBackendStore {
         .bind(instance_id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         let row = row.ok_or_else(|| err_not_found("Workflow instance not found"))?;
-        let nodes = self.list_node_states_for_instance(instance_id).await?;
+        let nodes = self.list_node_states_for_instance_db(instance_id).await?;
         wi_row_to_instance(row, nodes)
     }
 
-    pub(super) async fn list_workflow_instances(
+    pub(super) async fn list_workflow_instances_db(
         &self,
         status: Option<newton_types::WorkflowStatus>,
         limit: Option<usize>,
@@ -39,7 +39,7 @@ impl super::SqliteBackendStore {
                 .bind(offset.unwrap_or(0) as i64)
                 .fetch_all(&self.pool)
                 .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?
+                .map_err(query_err)?
             }
             None => {
                 sqlx::query_as::<_, WorkflowInstanceRow>(
@@ -49,20 +49,20 @@ impl super::SqliteBackendStore {
                 .bind(offset.unwrap_or(0) as i64)
                 .fetch_all(&self.pool)
                 .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?
+                .map_err(query_err)?
             }
         };
 
         let mut instances = Vec::with_capacity(rows.len());
         for row in rows {
             let id = row.instance_id.clone();
-            let nodes = self.list_node_states_for_instance(&id).await?;
+            let nodes = self.list_node_states_for_instance_db(&id).await?;
             instances.push(wi_row_to_instance(row, nodes)?);
         }
         Ok(instances)
     }
 
-    pub(super) async fn upsert_workflow_instance(
+    pub(super) async fn upsert_workflow_instance_db(
         &self,
         instance: &newton_types::WorkflowInstance,
     ) -> Result<(), ApiError> {
@@ -102,7 +102,10 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn delete_workflow_instance(&self, instance_id: &str) -> Result<(), ApiError> {
+    pub(super) async fn delete_workflow_instance_db(
+        &self,
+        instance_id: &str,
+    ) -> Result<(), ApiError> {
         let affected = sqlx::query("DELETE FROM WorkflowInstance WHERE instanceId = ?")
             .bind(instance_id)
             .execute(&self.pool)
@@ -114,7 +117,7 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn get_node_state(
+    pub(super) async fn get_node_state_db(
         &self,
         instance_id: &str,
         node_id: &str,
@@ -126,13 +129,13 @@ impl super::SqliteBackendStore {
         .bind(node_id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         let row = row.ok_or_else(|| err_not_found("Node state not found"))?;
         row_to_node_state(row)
     }
 
-    pub(super) async fn list_node_states_for_instance(
+    pub(super) async fn list_node_states_for_instance_db(
         &self,
         instance_id: &str,
     ) -> Result<Vec<newton_types::NodeState>, ApiError> {
@@ -142,18 +145,17 @@ impl super::SqliteBackendStore {
         .bind(instance_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         rows.into_iter().map(row_to_node_state).collect()
     }
 
-    pub(super) async fn upsert_node_state(
+    pub(super) async fn upsert_node_state_db(
         &self,
         instance_id: &str,
         node: &newton_types::NodeState,
     ) -> Result<(), ApiError> {
         let id = format!("{}-{}", instance_id, node.node_id);
-        let now = chrono::Utc::now().to_rfc3339();
         sqlx::query(
             "INSERT INTO NodeState (id, instanceId, nodeId, status, startedAt, endedAt, operatorType)
              VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -174,11 +176,10 @@ impl super::SqliteBackendStore {
         .await
         .map_err(|e| err_internal(&format!("upsert node state error: {e}")))?;
 
-        let _ = now;
         Ok(())
     }
 
-    pub(super) async fn update_workflow_status(
+    pub(super) async fn update_workflow_status_db(
         &self,
         instance_id: &str,
         status: newton_types::WorkflowStatus,
@@ -202,7 +203,7 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn get_hil_event(
+    pub(super) async fn get_hil_event_db(
         &self,
         event_id: &str,
     ) -> Result<newton_types::HilEvent, ApiError> {
@@ -212,13 +213,13 @@ impl super::SqliteBackendStore {
         .bind(event_id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         let row = row.ok_or_else(|| err_not_found("HIL event not found"))?;
         row_to_hil_event(row)
     }
 
-    pub(super) async fn list_hil_events_for_instance(
+    pub(super) async fn list_hil_events_for_instance_db(
         &self,
         instance_id: &str,
     ) -> Result<Vec<newton_types::HilEvent>, ApiError> {
@@ -228,23 +229,23 @@ impl super::SqliteBackendStore {
         .bind(instance_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         rows.into_iter().map(row_to_hil_event).collect()
     }
 
-    pub(super) async fn list_hil_instances(&self) -> Result<Vec<String>, ApiError> {
+    pub(super) async fn list_hil_instances_db(&self) -> Result<Vec<String>, ApiError> {
         let rows: Vec<InstanceIdRow> = sqlx::query_as::<_, InstanceIdRow>(
             "SELECT DISTINCT instanceId FROM HilEvent ORDER BY instanceId ASC",
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         Ok(rows.into_iter().map(|r| r.instance_id).collect())
     }
 
-    pub(super) async fn insert_hil_event(
+    pub(super) async fn insert_hil_event_db(
         &self,
         event: &newton_types::HilEvent,
     ) -> Result<(), ApiError> {
@@ -278,7 +279,7 @@ impl super::SqliteBackendStore {
         Ok(())
     }
 
-    pub(super) async fn update_hil_event_status(
+    pub(super) async fn update_hil_event_status_db(
         &self,
         event_id: &str,
         status: newton_types::HilStatus,
@@ -296,20 +297,16 @@ impl super::SqliteBackendStore {
         if affected.rows_affected() == 0 {
             return Err(err_not_found("HIL event not found"));
         }
-        self.get_hil_event(event_id).await
+        self.get_hil_event_db(event_id).await
     }
 
-    pub(super) async fn append_log_line(
+    pub(super) async fn append_log_line_db(
         &self,
         instance_id: &str,
         node_id: &str,
         line: &newton_types::LogLine,
     ) -> Result<(), ApiError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+        let mut tx = self.pool.begin().await.map_err(tx_err)?;
 
         sqlx::query(
             "INSERT INTO WorkflowLog (instanceId, nodeId, seq, ts, level, message)
@@ -326,14 +323,12 @@ impl super::SqliteBackendStore {
         .await
         .map_err(|e| err_internal(&format!("append log line error: {e}")))?;
 
-        tx.commit()
-            .await
-            .map_err(|e| err_internal(&format!("commit tx error: {e}")))?;
+        tx.commit().await.map_err(tx_err)?;
 
         Ok(())
     }
 
-    pub(super) async fn list_log_lines(
+    pub(super) async fn list_log_lines_db(
         &self,
         instance_id: &str,
         node_id: &str,
@@ -347,7 +342,7 @@ impl super::SqliteBackendStore {
         .bind(since_seq)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         rows.into_iter()
             .map(|r| {

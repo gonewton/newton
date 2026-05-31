@@ -1,40 +1,51 @@
+use super::helpers::{query_err, tx_err, unique_err};
 use super::rows::*;
 use crate::err_conflict;
-use crate::err_internal;
 use crate::err_not_found;
 use crate::err_validation;
 use crate::models::*;
 use newton_types::ApiError;
 use uuid::Uuid;
 
+const ALLOWED_AGG_FNS: &[&str] = &["latest", "avg", "p50", "p90"];
+const ALLOWED_SCOPE_LEVELS: &[&str] = &["product", "component", "repo", "module"];
+
+fn scope_table(scope: &str) -> Option<&'static str> {
+    match scope {
+        "product" => Some("Product"),
+        "component" => Some("Component"),
+        "repo" => Some("Repo"),
+        "module" => Some("Module"),
+        _ => None,
+    }
+}
+
 impl super::SqliteBackendStore {
-    pub(super) async fn list_kpis(&self) -> Result<Vec<KpiItem>, ApiError> {
+    pub(super) async fn list_kpis_db(&self) -> Result<Vec<KpiItem>, ApiError> {
         let rows = sqlx::query_as::<_, KpiRow>(
             "SELECT id, name, description, scopeLevel AS scope_level, threshold, weight, aggFn AS agg_fn, createdAt AS created_at, updatedAt AS updated_at \
              FROM KPI ORDER BY id ASC",
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
 
         Ok(rows.into_iter().map(|r| r.into_item()).collect())
     }
 
-    pub(super) async fn create_kpi(&self, body: CreateKpiBody) -> Result<KpiItem, ApiError> {
+    pub(super) async fn create_kpi_db(&self, body: CreateKpiBody) -> Result<KpiItem, ApiError> {
         if body.id.trim().is_empty() {
             return Err(err_validation("id is required"));
         }
         if body.name.trim().is_empty() {
             return Err(err_validation("name is required"));
         }
-        let allowed_agg_fns = ["latest", "avg", "p50", "p90"];
-        if !allowed_agg_fns.contains(&body.agg_fn.as_str()) {
+        if !ALLOWED_AGG_FNS.contains(&body.agg_fn.as_str()) {
             return Err(err_validation(
                 "aggFn must be one of: latest, avg, p50, p90",
             ));
         }
-        let allowed_scope_levels = ["product", "component", "repo", "module"];
-        if !allowed_scope_levels.contains(&body.scope_level.as_str()) {
+        if !ALLOWED_SCOPE_LEVELS.contains(&body.scope_level.as_str()) {
             return Err(err_validation(
                 "scopeLevel must be one of: product, component, repo, module",
             ));
@@ -70,18 +81,12 @@ impl super::SqliteBackendStore {
         .bind(&now)
         .execute(&self.pool)
         .await
-        .map_err(|e| {
-            if e.to_string().contains("UNIQUE constraint failed") {
-                err_conflict("KPI name already exists")
-            } else {
-                err_internal(&format!("insert error: {e}"))
-            }
-        })?;
+        .map_err(|e| unique_err(e, "KPI name already exists", "insert error"))?;
 
-        self.get_kpi(&body.id).await
+        self.get_kpi_db(&body.id).await
     }
 
-    pub(super) async fn get_kpi(&self, id: &str) -> Result<KpiItem, ApiError> {
+    pub(super) async fn get_kpi_db(&self, id: &str) -> Result<KpiItem, ApiError> {
         let row: Option<KpiRow> = sqlx::query_as::<_, KpiRow>(
             "SELECT id, name, description, scopeLevel AS scope_level, threshold, weight, aggFn AS agg_fn, createdAt AS created_at, updatedAt AS updated_at \
              FROM KPI WHERE id = ?",
@@ -89,12 +94,12 @@ impl super::SqliteBackendStore {
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
         row.map(|r| r.into_item())
             .ok_or_else(|| err_not_found("KPI not found"))
     }
 
-    pub(super) async fn create_eval_run(
+    pub(super) async fn create_eval_run_db(
         &self,
         body: CreateEvalRunBody,
     ) -> Result<EvalRunItem, ApiError> {
@@ -107,8 +112,7 @@ impl super::SqliteBackendStore {
         if body.scope_id.trim().is_empty() {
             return Err(err_validation("scopeId is required"));
         }
-        let allowed_scopes = ["product", "component", "repo", "module"];
-        if !allowed_scopes.contains(&body.scope.as_str()) {
+        if !ALLOWED_SCOPE_LEVELS.contains(&body.scope.as_str()) {
             return Err(err_validation(
                 "scope must be one of: product, component, repo, module",
             ));
@@ -122,47 +126,18 @@ impl super::SqliteBackendStore {
         let now = Self::now_iso();
         let evaluated_at = body.evaluated_at.clone().unwrap_or_else(|| now.clone());
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+        let mut tx = self.pool.begin().await.map_err(tx_err)?;
 
-        let scope_id_exists: bool = match body.scope.as_str() {
-            "product" => {
-                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Product WHERE id = ?")
-                    .bind(&body.scope_id)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(|e| err_internal(&format!("query error: {e}")))?
-                    > 0
-            }
-            "component" => {
-                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Component WHERE id = ?")
-                    .bind(&body.scope_id)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(|e| err_internal(&format!("query error: {e}")))?
-                    > 0
-            }
-            "repo" => {
-                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Repo WHERE id = ?")
-                    .bind(&body.scope_id)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(|e| err_internal(&format!("query error: {e}")))?
-                    > 0
-            }
-            "module" => {
-                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM Module WHERE id = ?")
-                    .bind(&body.scope_id)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(|e| err_internal(&format!("query error: {e}")))?
-                    > 0
-            }
-            _ => false,
-        };
+        let table = scope_table(&body.scope).ok_or_else(|| {
+            err_validation("scope must be one of: product, component, repo, module")
+        })?;
+        let scope_id_exists: bool =
+            sqlx::query_scalar::<_, i64>(&format!("SELECT COUNT(*) FROM {table} WHERE id = ?"))
+                .bind(&body.scope_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(query_err)?
+                > 0;
         if !scope_id_exists {
             return Err(err_not_found(&format!(
                 "{} '{}' not found",
@@ -205,13 +180,7 @@ impl super::SqliteBackendStore {
         .bind(&now)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            if e.to_string().contains("UNIQUE constraint failed") {
-                err_conflict("EvalRun id already exists")
-            } else {
-                err_internal(&format!("insert error: {e}"))
-            }
-        })?;
+        .map_err(|e| unique_err(e, "EvalRun id already exists", "insert error"))?;
 
         if let Some(grades) = body.grades {
             for g in grades {
@@ -221,7 +190,7 @@ impl super::SqliteBackendStore {
                             .bind(kpi_id)
                             .fetch_one(&mut *tx)
                             .await
-                            .map_err(|e| err_internal(&format!("query error: {e}")))?
+                            .map_err(query_err)?
                             > 0;
                     if !kpi_exists {
                         return Err(err_not_found(&format!("KPI '{}' not found", kpi_id)));
@@ -253,27 +222,16 @@ impl super::SqliteBackendStore {
                 .bind(&now)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| {
-                    if e.to_string().contains("UNIQUE constraint failed") {
-                        err_conflict(&format!(
-                            "Grade already exists for (runId, dimension={})",
-                            g.dimension
-                        ))
-                    } else {
-                        err_internal(&format!("insert grade error: {e}"))
-                    }
-                })?;
+                .map_err(|e| unique_err(e, &format!("Grade already exists for (runId, dimension={})", g.dimension), "insert grade error"))?;
             }
         }
 
-        tx.commit()
-            .await
-            .map_err(|e| err_internal(&format!("commit tx error: {e}")))?;
+        tx.commit().await.map_err(tx_err)?;
 
-        self.get_eval_run(&body.id).await
+        self.get_eval_run_db(&body.id).await
     }
 
-    pub(super) async fn list_eval_runs(
+    pub(super) async fn list_eval_runs_db(
         &self,
         scope: Option<String>,
         scope_id: Option<String>,
@@ -316,14 +274,11 @@ impl super::SqliteBackendStore {
             q = q.bind(limit as i64);
         }
 
-        let rows = q
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        let rows = q.fetch_all(&self.pool).await.map_err(query_err)?;
         Ok(rows.into_iter().map(|r| r.into_item()).collect())
     }
 
-    pub(super) async fn get_eval_run(&self, id: &str) -> Result<EvalRunItem, ApiError> {
+    pub(super) async fn get_eval_run_db(&self, id: &str) -> Result<EvalRunItem, ApiError> {
         let row: Option<EvalRunRow> = sqlx::query_as::<_, EvalRunRow>(
             "SELECT id, source, scope, scopeId AS scope_id, score, verdict, summary, evaluatedAt AS evaluated_at, ingestedAt AS ingested_at \
              FROM EvalRun WHERE id = ?",
@@ -331,12 +286,15 @@ impl super::SqliteBackendStore {
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
         row.map(|r| r.into_item())
             .ok_or_else(|| err_not_found("EvalRun not found"))
     }
 
-    pub(super) async fn create_grade(&self, body: CreateGradeBody) -> Result<GradeItem, ApiError> {
+    pub(super) async fn create_grade_db(
+        &self,
+        body: CreateGradeBody,
+    ) -> Result<GradeItem, ApiError> {
         if body.id.trim().is_empty() {
             return Err(err_validation("id is required"));
         }
@@ -362,18 +320,14 @@ impl super::SqliteBackendStore {
             .as_ref()
             .map(|m| serde_json::to_string(m).unwrap_or_default());
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| err_internal(&format!("begin tx error: {e}")))?;
+        let mut tx = self.pool.begin().await.map_err(tx_err)?;
 
         let run_exists: bool =
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM EvalRun WHERE id = ?")
                 .bind(&body.run_id)
                 .fetch_one(&mut *tx)
                 .await
-                .map_err(|e| err_internal(&format!("query error: {e}")))?
+                .map_err(query_err)?
                 > 0;
         if !run_exists {
             return Err(err_not_found(&format!(
@@ -388,7 +342,7 @@ impl super::SqliteBackendStore {
                     .bind(kpi_id)
                     .fetch_one(&mut *tx)
                     .await
-                    .map_err(|e| err_internal(&format!("query error: {e}")))?
+                    .map_err(query_err)?
                     > 0;
             if !kpi_exists {
                 return Err(err_not_found(&format!("KPI '{}' not found", kpi_id)));
@@ -402,7 +356,7 @@ impl super::SqliteBackendStore {
         .bind(&body.dimension)
         .fetch_one(&mut *tx)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?
+        .map_err(query_err)?
             > 0;
         if exists_for_dimension {
             return Err(err_conflict("Grade already exists for (runId, dimension)"));
@@ -422,22 +376,14 @@ impl super::SqliteBackendStore {
         .bind(&now)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            if e.to_string().contains("UNIQUE constraint failed") {
-                err_conflict("Grade already exists for (runId, dimension) or id")
-            } else {
-                err_internal(&format!("insert error: {e}"))
-            }
-        })?;
+        .map_err(|e| unique_err(e, "Grade already exists for (runId, dimension) or id", "insert error"))?;
 
-        tx.commit()
-            .await
-            .map_err(|e| err_internal(&format!("commit tx error: {e}")))?;
+        tx.commit().await.map_err(tx_err)?;
 
-        self.get_grade(&body.id).await
+        self.get_grade_db(&body.id).await
     }
 
-    pub(super) async fn list_grades(
+    pub(super) async fn list_grades_db(
         &self,
         run_id: Option<String>,
         kpi_id: Option<String>,
@@ -466,14 +412,11 @@ impl super::SqliteBackendStore {
             q = q.bind(kpi_id);
         }
 
-        let rows = q
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        let rows = q.fetch_all(&self.pool).await.map_err(query_err)?;
         Ok(rows.into_iter().map(|r| r.into_item()).collect())
     }
 
-    pub(super) async fn get_grade(&self, id: &str) -> Result<GradeItem, ApiError> {
+    pub(super) async fn get_grade_db(&self, id: &str) -> Result<GradeItem, ApiError> {
         let row: Option<GradeRow> = sqlx::query_as::<_, GradeRow>(
             "SELECT id, runId AS run_id, kpiId AS kpi_id, dimension, score, evidence, evaluatedAt AS evaluated_at, ingestedAt AS ingested_at \
              FROM Grade WHERE id = ?",
@@ -481,7 +424,7 @@ impl super::SqliteBackendStore {
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| err_internal(&format!("query error: {e}")))?;
+        .map_err(query_err)?;
         row.map(|r| r.into_item())
             .ok_or_else(|| err_not_found("Grade not found"))
     }
