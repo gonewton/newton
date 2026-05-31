@@ -2423,7 +2423,7 @@ dependencies = [
 
 [[package]]
 name = "newton-cli"
-version = "0.5.109"
+version = "0.5.110"
 dependencies = [
  "aikit-sdk",
  "ailoop-server",
@@ -2475,7 +2475,7 @@ dependencies = [
 
 [[package]]
 name = "newton-core"
-version = "0.5.109"
+version = "0.5.110"
 dependencies = [
  "aikit-magictool",
  "aikit-sdk",
@@ -5951,11 +5951,13 @@ name = "ws001-test-utils"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
