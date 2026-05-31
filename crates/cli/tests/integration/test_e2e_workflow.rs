@@ -57,6 +57,36 @@ fn integ_workflow_preview_text() {
 }
 
 #[test]
+fn integ_workflow_preview_multi_trigger_json() {
+    let wf = fixture_path("workflows/minimal_smoke.yaml");
+    let out = newton()
+        .args([
+            "workflow",
+            "preview",
+            &wf.to_string_lossy(),
+            "--trigger",
+            "board_item_id=PVTI_test",
+            "--trigger",
+            "skip_idea_to_draft=true",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("board_item_id"),
+        "expected board_item_id in triggers JSON: {stdout}"
+    );
+    assert!(
+        stdout.contains("skip_idea_to_draft"),
+        "expected skip_idea_to_draft in triggers JSON: {stdout}"
+    );
+}
+
+#[test]
 fn integ_workflow_graph_dot() {
     let wf = fixture_path("workflows/minimal_smoke.yaml");
     let out = newton()

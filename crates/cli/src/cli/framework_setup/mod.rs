@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use cli_framework::app::{App, AppBuilder};
 use cli_framework::command::{Command, CommandArgs};
 use cli_framework::spec::command_tree::{CommandPath, GroupMetadata};
+use cli_framework::spec::value::ArgValue;
 use uuid::Uuid;
 
 use crate::cli::args::{
@@ -38,6 +39,35 @@ pub(crate) fn parse_kvp_list(s: &str) -> anyhow::Result<Vec<crate::cli::args::Ke
                 .map_err(|e| anyhow!("{}: {}", error_codes::CLI_MIG_002, e))
         })
         .collect()
+}
+
+/// Extract a Repeated KVP option from `CommandArgs`.
+///
+/// Prefers `named_typed` List (populated by cli-framework spec-based parsing)
+/// over the legacy comma-joined `named` string, so that multiple `--trigger`
+/// flags each arrive as their own `KeyValuePair` rather than being silently
+/// dropped.
+pub(crate) fn parse_kvp_from_command_args(
+    args: &CommandArgs,
+    key: &str,
+) -> anyhow::Result<Vec<crate::cli::args::KeyValuePair>> {
+    use std::str::FromStr;
+    let list = args.get_list(key);
+    if !list.is_empty() {
+        return list
+            .into_iter()
+            .map(|v| match v {
+                ArgValue::Str(s) => crate::cli::args::KeyValuePair::from_str(&s)
+                    .map_err(|e| anyhow!("{}: {}", error_codes::CLI_MIG_002, e)),
+                _other => Err(anyhow!(
+                    "{}: expected string value for --{}, got unexpected type",
+                    error_codes::CLI_MIG_002,
+                    key,
+                )),
+            })
+            .collect();
+    }
+    parse_kvp_list(args.named.get(key).map(String::as_str).unwrap_or(""))
 }
 
 pub(crate) fn get_bool(args: &CommandArgs, key: &str) -> bool {
@@ -196,8 +226,8 @@ impl TryFrom<CommandArgs> for RunArgs {
         let workflow = require_workflow_path(&args, "run")?;
         let input_file = get_opt_path(&args, "input-file");
         let workspace = get_opt_path(&args, "workspace");
-        let trigger = parse_kvp_list(args.named.get("trigger").map(String::as_str).unwrap_or(""))?;
-        let context = parse_kvp_list(args.named.get("context").map(String::as_str).unwrap_or(""))?;
+        let trigger = parse_kvp_from_command_args(&args, "trigger")?;
+        let context = parse_kvp_from_command_args(&args, "context")?;
         let parameters_json = get_opt_path(&args, "parameters-json");
         let emit_completion_json = get_bool(&args, "emit-completion-json");
         let parallel_limit = args
@@ -412,5 +442,106 @@ impl DataArgs {
             source,
             limit,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cli_framework::command::CommandArgs;
+    use cli_framework::spec::value::ArgValue;
+    use std::collections::HashMap;
+
+    fn args_with_list(key: &str, values: Vec<&str>) -> CommandArgs {
+        let mut named_typed = HashMap::new();
+        named_typed.insert(
+            key.to_string(),
+            ArgValue::List(
+                values
+                    .iter()
+                    .map(|s| ArgValue::Str(s.to_string()))
+                    .collect(),
+            ),
+        );
+        CommandArgs {
+            positional: vec![],
+            named: HashMap::new(),
+            named_typed,
+        }
+    }
+
+    fn args_with_named(key: &str, value: &str) -> CommandArgs {
+        let mut named = HashMap::new();
+        named.insert(key.to_string(), value.to_string());
+        CommandArgs {
+            positional: vec![],
+            named,
+            named_typed: HashMap::new(),
+        }
+    }
+
+    fn empty_args() -> CommandArgs {
+        CommandArgs::default()
+    }
+
+    #[test]
+    fn repeated_typed_list_returns_multiple_kvps_in_order() {
+        let args = args_with_list("trigger", vec!["board_item_id=PVTI_abc", "skip_draft=true"]);
+        let result = parse_kvp_from_command_args(&args, "trigger").unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].key, "board_item_id");
+        assert_eq!(result[0].value, "PVTI_abc");
+        assert_eq!(result[1].key, "skip_draft");
+        assert_eq!(result[1].value, "true");
+    }
+
+    #[test]
+    fn legacy_comma_joined_named_string_still_works() {
+        let args = args_with_named("trigger", "env=prod,version=1.2.3");
+        let result = parse_kvp_from_command_args(&args, "trigger").unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].key, "env");
+        assert_eq!(result[0].value, "prod");
+        assert_eq!(result[1].key, "version");
+        assert_eq!(result[1].value, "1.2.3");
+    }
+
+    #[test]
+    fn absent_key_returns_empty_vec() {
+        let result = parse_kvp_from_command_args(&empty_args(), "trigger").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn invalid_kvp_in_list_returns_error() {
+        let args = args_with_list("trigger", vec!["no-equals-sign"]);
+        let result = parse_kvp_from_command_args(&args, "trigger");
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains(error_codes::CLI_MIG_002),
+            "expected CLI_MIG_002 in: {msg}"
+        );
+    }
+
+    #[test]
+    fn non_string_list_element_returns_error() {
+        let mut named_typed = HashMap::new();
+        named_typed.insert(
+            "trigger".to_string(),
+            ArgValue::List(vec![ArgValue::Int(42)]),
+        );
+        let args = CommandArgs {
+            positional: vec![],
+            named: HashMap::new(),
+            named_typed,
+        };
+        let result = parse_kvp_from_command_args(&args, "trigger");
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains(error_codes::CLI_MIG_002),
+            "expected CLI_MIG_002 in: {msg}"
+        );
     }
 }
