@@ -1,82 +1,172 @@
 # Contributing to Newton
 
-## Crate Layout
+Thank you for contributing to Newton. This document covers development setup, standards, and the pull request process. End-user documentation lives in [README.md](README.md); system design is in [architecture.md](architecture.md).
 
-The repository is a Cargo workspace with four member crates:
+## Crate layout
 
-| Crate | Package | Role |
-|---|---|---|
-| `crates/core` | `newton-core` | Library: workflow engine, batch runner, HTTP API, integrations, logging, utils. No CLI/TUI deps. |
-| `crates/cli` | `newton-cli` | Binary `newton`: argument parsing, logging bootstrap. Depends on `newton-core`. |
-| `crates/types` | `newton-types` | Shared types (leaf crate). |
-| `crates/backend` | `newton-backend` | Persistence/store models. Depends on `newton-types`. |
+The repository is a Cargo workspace:
 
-Dependency direction: `newton-cli` → `newton-core` → `{ newton-types, newton-backend }`. `newton-core` MUST NOT depend on `clap`; this invariant is verified in CI via `cargo tree -p newton-core`.
+| Directory | Package | Role |
+| --- | --- | --- |
+| `crates/core` | `newton-core` | Workflow engine, batch logic, HTTP API, integrations, logging. No CLI/TUI deps. |
+| `crates/cli` | `newton-cli` | Binary `newton`: clap/cli-framework wiring. Depends on `newton-core`. |
+| `crates/types` | `newton-types` | Shared API and domain types (leaf crate). |
+| `crates/backend` | `newton-backend` | SQLite persistence store. Depends on `newton-types`. |
+| `crates/test-utils` | `ws001-test-utils` | Shared test helpers (HTTP fixtures, temp workspaces). |
 
-To build the binary: `cargo build -p newton-cli`. To embed the engine as a library: add `newton-core = { path = "crates/core" }` to your `Cargo.toml`.
+Dependency direction:
 
-## Development Rules
+```
+newton-cli → newton-core → { newton-types, newton-backend }
+```
 
-See [AGENTS.md](AGENTS.md) for the full rule set. Key requirements:
+**Invariant**: `newton-core` MUST NOT depend on `clap`, `ratatui`, or `crossterm`. CI verifies this with `cargo tree -p newton-core`.
 
-- NEWTON-0001: Use conventional commit messages (`type(scope): description`, imperative mood, first line ≤ 72 chars).
-- NEWTON-0002: Never use `--no-verify` when committing.
-- NEWTON-0003/0004: Run `cargo test --workspace` and `cargo fmt --all` before pushing.
-- NEWTON-0005: Run `cargo clippy --all-targets` and fix warnings.
-- NEWTON-0007/0015/0016: Write unit tests for all public functions and integration tests for complex workflows.
-- NEWTON-0019/0020: All CI and security-audit checks must pass before merging.
+- Build the binary: `cargo build -p newton-cli`
+- Embed the engine: add `newton-core = { path = "crates/core" }` to your `Cargo.toml`
 
-## Ailoop Integration Architecture
+## Development environment
 
-Newton optionally integrates with an ailoop server for real-time notifications and human-in-the-loop (HITL) prompts. The integration is in `crates/core/src/integrations/ailoop/`.
+### Rust toolchain
 
-### Transport
+Pin is in [rust-toolchain.toml](rust-toolchain.toml) (currently **1.93.1** with `rustfmt` and `clippy`). CI uses Rust **1.94**; keep local toolchains reasonably current.
 
-All ailoop communication uses **WebSocket only** via the `ailoop-core` git dependency. Newton does not use ailoop's HTTP API for the integration transport. The `NEWTON_AILOOP_HTTP_URL` environment variable is accepted but silently ignored (kept for backwards compatibility with old config files).
+Install components:
 
-Configuration is resolved from (highest priority first):
+```bash
+rustup toolchain install 1.93.1 --component rustfmt clippy
+```
 
-1. `NEWTON_AILOOP_WS_URL` + `NEWTON_AILOOP_CHANNEL` environment variables
-2. `ailoop_server_ws_url` / `ailoop_channel` keys in `.newton/configs/*.conf` files in the workspace configs directory
-
-Integration is disabled unless explicitly enabled via `NEWTON_AILOOP_INTEGRATION=1` or via env vars that provide a complete config.
-
-### Components
-
-| Module | Struct | Direction | Content type |
-|---|---|---|---|
-| `integrations/ailoop/output_forwarder.rs` | `OutputForwarder` | Newton → ailoop | `MessageContent::Stdout` / `Stderr` |
-| `integrations/ailoop/orchestrator_notifier.rs` | `OrchestratorNotifier` | Newton → ailoop | `MessageContent::Notification` |
-| `integrations/ailoop/workflow_emitter.rs` | `WorkflowEmitter` | Newton → ailoop | `MessageContent::WorkflowProgress` |
-| `workflow/human/ailoop.rs` | `AiloopInterviewer` | bidirectional | `MessageContent::Authorization` / `Question` → `Response` |
-
-`OutputForwarder` and `WorkflowEmitter` are fire-and-forget (no response expected). `OrchestratorNotifier` uses retry with exponential backoff. `AiloopInterviewer` blocks until the human responds or a timeout fires.
-
-### HITL Interviewer Selection
-
-`workflow::human::resolve_interviewer()` returns `Result<Arc<dyn Interviewer>, AppError>`:
-
-1. Enabled `AiloopContext` provided → `AiloopInterviewer`
-2. Otherwise → `Err(HIL-AILOOP-001)`
-
-There is no console fallback. CLI subcommands wrap this in a lazy `InterviewerProvider` (`workflow::human::lazy_interviewer_provider`) so workflows without human tasks never require an ailoop context.
-
-`AiloopInterviewer` calls `ailoop_core::client::authorize()` (for `HumanApprovalOperator`) and `ailoop_core::client::ask()` (for `HumanDecisionOperator`). Error codes `WFG-HUMAN-101…105` are mapped from transport and response outcomes.
-
-## Build Commands
+### Build and test
 
 ```bash
 cargo build --workspace          # build all crates
 cargo build -p newton-cli        # build the newton binary
 cargo test --workspace           # run all tests
 cargo fmt --all -- --check       # check formatting
-cargo clippy --all-targets       # lint
+cargo clippy --all-targets --all-features -- -D warnings
 cargo tree -p newton-core        # verify no clap/ratatui/crossterm in core
 ```
 
-To execute a workflow:
+Run a workflow locally:
 
 ```bash
-newton workflow run examples/hello.yaml
-newton workflow run examples/hello.yaml --workspace ./ws --verbose
+cargo run -p newton-cli -- workflow run examples/hello.yaml
+cargo run -p newton-cli -- workflow run examples/hello.yaml --workspace ./ws --verbose
 ```
+
+### OpenAPI parity
+
+When adding or modifying backend CRUD endpoints (NEWTON-0028):
+
+```bash
+./scripts/generate-openapi.sh
+git diff openapi/newton-backend-parity.yaml   # commit updated contract in the same PR
+```
+
+CI runs the generator and fails if `openapi/newton-backend-parity.yaml` is out of date.
+
+## Development rules
+
+See [AGENTS.md](AGENTS.md) for the full rule set. Key requirements:
+
+| Rule | Requirement |
+| --- | --- |
+| NEWTON-0001/0008–0010 | Conventional commits: `type(scope): description`, imperative mood, first line ≤ 72 chars |
+| NEWTON-0002 | Never use `--no-verify` when committing |
+| NEWTON-0003/0004 | Run `cargo test --workspace` and `cargo fmt --all` before pushing |
+| NEWTON-0005 | Run `cargo clippy --all-targets` and fix warnings |
+| NEWTON-0007/0015/0016 | Unit tests for public functions; integration tests for complex workflows |
+| NEWTON-0011 | Public APIs must have documentation |
+| NEWTON-0019/0020 | All CI and security-audit checks must pass before merging |
+| NEWTON-0026/0027 | README is end-user only; contributor material belongs here or in architecture.md |
+
+Git hooks in `.githooks/` enforce commit message format and pre-push checks. Enable with:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+## CLI framework wiring
+
+Newton's CLI is built on [cli-framework](https://github.com/aroff/cli-framework). Commands are declared in `crates/cli/src/cli/framework_setup/` and registered by `build_app()`.
+
+Each command carries `CommandSpec` metadata (`summary`, `syntax`, `category`, `args`). When adding or renaming a command:
+
+1. Add the command module under `framework_setup/commands/`
+2. Update `REGISTERED_COMMAND_IDS` in `framework_setup/mod.rs`
+3. Update integration tests in `crates/cli/tests/integration/test_command_metadata.rs`
+
+See [crates/cli/README.md](crates/cli/README.md) for the metadata contract and operational commands (`health`, `doctor`, `config show`, `completion`).
+
+## Pull request process
+
+1. **Branch** from `main` with a descriptive name (`feat/…`, `fix/…`, `refactor/…`).
+2. **Implement** with focused commits following conventional commit format.
+3. **Test** locally: `cargo test --workspace --all-features`, `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features -- -D warnings`.
+4. **Open a PR** against `main` with a clear summary and test plan.
+5. **CI must pass** before merge (see below).
+6. **Review** feedback: address comments or explain deferrals.
+
+Do not force-push to `main`. Avoid amending published commits unless you own the branch and no one else has pulled it.
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on push and pull requests to `main`:
+
+| Step | What it checks |
+| --- | --- |
+| `cargo fmt --all -- --check` | Formatting |
+| `./scripts/generate-openapi.sh` + git diff | OpenAPI contract parity |
+| AsyncAPI validation | `openapi/newton-realtime.asyncapi.yaml` |
+| `cargo clippy --all-targets --all-features` | Lint (warnings denied via `RUSTFLAGS=-D warnings`) |
+| `cargo build --workspace --release` | Release build |
+| `cargo test --workspace --all-features` | Tests |
+| `cargo tree -p newton-core` | No CLI/TUI deps in core |
+| Security audit job | `cargo audit` with documented ignores |
+| Coverage job | `cargo llvm-cov` with 50% line threshold |
+
+Nightly and release workflows live under `.github/workflows/`.
+
+## Exploring the codebase
+
+[repomix-output.xml](repomix-output.xml) is a packed snapshot of the repository for AI-assisted exploration and code review. Regenerate when making large structural changes (if your workflow uses repomix).
+
+Useful entry points:
+
+| Path | Contents |
+| --- | --- |
+| `crates/core/src/workflow/` | Engine, operators, executor, checkpoints |
+| `crates/core/src/api/` | HTTP handlers and OpenAPI generation |
+| `crates/core/src/integrations/` | ailoop, external service wiring |
+| `crates/backend/src/store/` | SQLite store modules |
+| `crates/cli/src/cli/framework_setup/` | Command registration |
+| `openapi/` | HTTP and realtime API contracts |
+
+Domain terminology: [docs/context.md](docs/context.md).
+
+## Project skills
+
+Agent-oriented command and workflow documentation:
+
+| Location | Purpose |
+| --- | --- |
+| [skill/newton/](skill/newton/) | Primary Newton skill (commands, batch, operators, configuration) |
+| [.agents/skills/newton/](.agents/skills/newton/) | Workspace copy of the Newton skill bundle |
+| [.agents/skills/tools-cli-framework/](.agents/skills/tools-cli-framework/) | cli-framework reference for CLI changes |
+
+When changing CLI behavior, update the skill references and `skill/newton/SKILL.md` if user-facing flows change.
+
+## Ailoop integration (developer notes)
+
+Newton integrates with ailoop for HITL and orchestration notifications. Implementation lives in `crates/core/src/integrations/ailoop/` and `crates/core/src/workflow/human/`.
+
+- **Transport**: WebSocket only via `ailoop-core` (not HTTP).
+- **Configuration** (highest priority first): `NEWTON_AILOOP_WS_URL` + `NEWTON_AILOOP_CHANNEL` env vars, then `.newton/configs/*.conf` keys. Integration requires explicit enablement (`NEWTON_AILOOP_INTEGRATION=1` or a complete config).
+- **Interviewer selection**: `resolve_interviewer()` returns `AiloopInterviewer` when enabled, otherwise `HIL-AILOOP-001`. No console fallback.
+
+Full component breakdown and data flow: [architecture.md](architecture.md#ailoop-human-in-the-loop).
+
+## Questions
+
+Open a GitHub issue or discussion on [github.com/gonewton/newton](https://github.com/gonewton/newton) for bugs, features, or design questions.
