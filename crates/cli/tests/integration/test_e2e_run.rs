@@ -67,6 +67,33 @@ fn integ_run_trigger_payload() {
 }
 
 #[test]
+fn integ_run_multi_trigger_payload() {
+    let ws = TempWorkspace::new();
+    let wf = fixture_path("workflows/minimal_smoke.yaml");
+
+    let out = newton()
+        .args([
+            "workflow",
+            "run",
+            &wf.to_string_lossy(),
+            "--workspace",
+            &ws.path().to_string_lossy(),
+            "--trigger",
+            "board_item_id=PVTI_test",
+            "--trigger",
+            "skip_idea_to_draft=true",
+        ])
+        .output()
+        .expect("newton workflow run --trigger (multiple) should execute");
+
+    assert!(
+        out.status.success(),
+        "newton workflow run with multiple --trigger flags should succeed; stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn integ_run_deprecated_notice() {
     let wf = fixture_path("workflows/minimal_smoke.yaml");
 

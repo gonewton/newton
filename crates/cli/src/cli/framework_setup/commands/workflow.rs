@@ -17,7 +17,7 @@ use crate::cli::commands;
 use crate::cli::framework_setup::error_codes;
 use crate::cli::framework_setup::help_text::{WEBHOOK_LONG_ABOUT, WORKFLOW_LONG_ABOUT};
 use crate::cli::framework_setup::{
-    get_bool, get_opt_path, get_opt_str, parse_kvp_list, parse_output_format,
+    get_bool, get_opt_path, get_opt_str, parse_kvp_from_command_args, parse_output_format,
 };
 
 pub(crate) fn workflow_command() -> Command {
@@ -353,12 +353,8 @@ pub(crate) fn workflow_command() -> Command {
                                 error_codes::CLI_MIG_002
                             )
                         })?;
-                        let context = parse_kvp_list(
-                            args.named.get("context").map(String::as_str).unwrap_or(""),
-                        )?;
-                        let trigger = parse_kvp_list(
-                            args.named.get("trigger").map(String::as_str).unwrap_or(""),
-                        )?;
+                        let context = parse_kvp_from_command_args(&args, "context")?;
+                        let trigger = parse_kvp_from_command_args(&args, "trigger")?;
                         commands::explain(ExplainArgs {
                             workflow,
                             workspace: get_opt_path(&args, "workspace"),
