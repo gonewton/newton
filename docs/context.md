@@ -212,6 +212,19 @@ real-time monitoring, human-in-the-loop gating, opportunity triage, and plan app
 
 ---
 
+## Dependency mapping
+
+> Status: draft — terms being resolved in spec `056-dependencies-crate`.
+
+| Term | Definition | Aliases to avoid |
+| --- | --- | --- |
+| **Dependency** | A directed link meaning "this artifact relies on that one": `from → to`. The unit of reasoning is the **Module**, though links may also be recorded at **Repo** level. Carries a **Discovery** and (where the version scheme allows) a version constraint. | Edge, link, reference |
+| **Discovery** | How a **Dependency** became known: `Detected` (a machine read it from a real manifest/lockfile), `Declared` (a person stated it), or `Suggested` (analysis or AI proposed it — must be reviewed before it is trusted). One stored value per dependency. | Provenance, source, origin |
+| **Confirmed** | A *derived* yes/no flag on a **Dependency**: true when **Discovery** is `Detected` or `Declared`, false when `Suggested`. Only **Confirmed** dependencies drive release sequencing automatically; `Suggested` ones are surfaced for human promotion first. | Trusted, verified |
+| **Impact Sequence** | The computed, ordered list of **Modules** that must be updated when a change ripples through the dependency graph. An output of impact analysis, not a stored entity. Consumed by an agent to author **Plans**. See "Release is not a first-class entity" under Flagged ambiguities. | Release plan, release order |
+
+---
+
 ## Relationships
 
 - A **Product** contains one or more **Components**; a **Component** contains one or more **Repos**; a **Repo** contains zero or more **Modules**.
@@ -262,3 +275,4 @@ real-time monitoring, human-in-the-loop gating, opportunity triage, and plan app
 - **"Autonomy" vs. "Policy Level"** — The portfolio model names this field `autonomy`; the Execution Center table names it `policyLevel`. Same enum values (`manual`, `supervised`, `assisted`, `autonomous`), same concept. Prefer **Autonomy** in portfolio contexts, **Policy Level** in execution/governance contexts.
 - **"Operator" (person) vs. "Operator" (plugin)** — Human-in-the-loop docs sometimes use "operator" for the human approving a task. Prefer **human operator** for the person, **Operator** (capitalized) for the plugin abstraction.
 - **"NodeState" (UI) vs. "TaskStatus" (backend)** — Both describe the completion state of a task within a run. **TaskStatus** is the backend enum (`Success`, `Failed`, `Skipped`); **NodeState** is the UI/API representation (`pending`, `running`, `succeeded`, `failed`, `timeout`, `cancelled`) with a finer-grained set of values. Use the appropriate term for the layer you are working in.
+- **"Release" is not a first-class entity** — Newton plans a ripple of changes but does not track "releases" as stored objects with their own lifecycle. The dependency model emits an **Impact Sequence** (a computed ordering of Modules to update), which the agent turns into existing **Plans** and **Executions**. Avoid using "Release" as a noun in the data model; say **Impact Sequence** for the ordering, **Plan**/**Execution** for the tracked work.
