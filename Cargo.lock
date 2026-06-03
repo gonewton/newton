@@ -59,7 +59,7 @@ dependencies = [
 [[package]]
 name = "aikit-agent"
 version = "0.1.0"
-source = "git+https://github.com/goaikit/aikit.git?rev=a22a619fa61d2fce7f7364c18199b75b72d74e4b#a22a619fa61d2fce7f7364c18199b75b72d74e4b"
+source = "git+https://github.com/goaikit/aikit.git?rev=435a1132859bbfaf2977c0fb0ce070c795525132#435a1132859bbfaf2977c0fb0ce070c795525132"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -661,9 +661,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 [[package]]
 name = "cli-framework"
 version = "0.4.2"
-source = "git+https://github.com/aroff/cli-framework?rev=d876344#d8763444ef50187b10455fca25c0453fd26b0ffb"
+source = "git+https://github.com/aroff/cli-framework?rev=76a83e0d57e88b55e5f8c44fd3dffe1444443924#76a83e0d57e88b55e5f8c44fd3dffe1444443924"
 dependencies = [
- "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?rev=a22a619fa61d2fce7f7364c18199b75b72d74e4b)",
+ "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?rev=435a1132859bbfaf2977c0fb0ce070c795525132)",
  "ailoop-core 1.0.5",
  "anyhow",
  "async-trait",

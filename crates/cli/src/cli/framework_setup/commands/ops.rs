@@ -8,16 +8,16 @@ use cli_framework::spec::command_tree::CommandSpec;
 use crate::cli::categories;
 use crate::cli::framework_setup::error_codes;
 use crate::cli::framework_setup::get_opt_path;
+use crate::cli::framework_setup::get_opt_str;
 use crate::cli::ops;
 
 pub(crate) fn health_command() -> Command {
     Command {
-        id: "health",
-        summary: "Print a one-line liveness status",
-        syntax: Some("[OPTIONS]"),
-        category: Some(categories::OPERATIONAL),
-        spec: Some(Arc::new(CommandSpec {
+        id: "health".into(),
+        spec: Arc::new(CommandSpec {
             summary: "Print a one-line liveness status",
+            syntax: Some("[OPTIONS]"),
+            category: Some(categories::OPERATIONAL),
             long_about: Some(
                 "Health prints `newton OK <version>` and exits 0 if the binary can run.\n\
                  No workspace, network, or config access — suitable for container probes.",
@@ -25,7 +25,7 @@ pub(crate) fn health_command() -> Command {
             examples: vec!["newton health"],
             args: vec![],
             ..Default::default()
-        })),
+        }),
         validator: None,
         execute: Arc::new(|_ctx, _args| Box::pin(async move { ops::health::run() })),
         expose_mcp: true,
@@ -34,12 +34,11 @@ pub(crate) fn health_command() -> Command {
 
 pub(crate) fn doctor_command() -> Command {
     Command {
-        id: "doctor",
-        summary: "Run local environment diagnostic probes",
-        syntax: Some("[OPTIONS]"),
-        category: Some(categories::OPERATIONAL),
-        spec: Some(Arc::new(CommandSpec {
+        id: "doctor".into(),
+        spec: Arc::new(CommandSpec {
             summary: "Run local environment diagnostic probes",
+            syntax: Some("[OPTIONS]"),
+            category: Some(categories::OPERATIONAL),
             long_about: Some(
                 "Doctor runs a small set of probes (workspace, config, ailoop reachability, gh,\n\
                  logging) and prints one `OK|FAIL|SKIP <name>: <detail>` line per probe.\n\
@@ -49,17 +48,14 @@ pub(crate) fn doctor_command() -> Command {
             args: vec![ArgSpec {
                 name: "workspace",
                 kind: ArgKind::Option,
-                short: None,
                 long: Some("workspace"),
                 value_type: ArgValueType::String,
                 cardinality: Cardinality::Optional,
-                default: None,
-                conflicts_with: vec![],
-                requires: vec![],
                 help: "Workspace root to probe (defaults to CWD with .newton/)",
+                ..Default::default()
             }],
             ..Default::default()
-        })),
+        }),
         validator: None,
         execute: Arc::new(|_ctx, args| {
             Box::pin(async move {
@@ -78,12 +74,11 @@ pub(crate) fn doctor_command() -> Command {
 
 pub(crate) fn config_command() -> Command {
     Command {
-        id: "config",
-        summary: "Inspect resolved Newton configuration",
-        syntax: Some("show [OPTIONS]"),
-        category: Some(categories::OPERATIONAL),
-        spec: Some(Arc::new(CommandSpec {
+        id: "config".into(),
+        spec: Arc::new(CommandSpec {
             summary: "Inspect resolved Newton configuration",
+            syntax: Some("show [OPTIONS]"),
+            category: Some(categories::OPERATIONAL),
             long_about: Some(
                 "Config currently exposes one subcommand: `show`.\n\
                  `newton config show` prints the resolved configuration as JSON, with values\n\
@@ -98,39 +93,27 @@ pub(crate) fn config_command() -> Command {
                 ArgSpec {
                     name: "subcommand",
                     kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Subcommand: show (only supported value)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "workspace",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("workspace"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Workspace root (optional)",
+                    ..Default::default()
                 },
             ],
             ..Default::default()
-        })),
+        }),
         validator: None,
         execute: Arc::new(|_ctx, args| {
             Box::pin(async move {
-                let sub = args
-                    .named
-                    .get("subcommand")
-                    .cloned()
-                    .or_else(|| args.positional.first().cloned())
-                    .unwrap_or_else(|| "show".to_string());
+                let sub = get_opt_str(&args, "subcommand").unwrap_or_else(|| "show".to_string());
                 if sub != "show" {
                     return Err(anyhow!(
                         "{}: only `config show` is supported (got `config {}`)",

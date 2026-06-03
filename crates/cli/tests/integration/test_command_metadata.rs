@@ -54,10 +54,10 @@ fn category_bindings_match_spec_4_1() {
             .map(|(_, c)| c)
             .unwrap_or_else(|| panic!("expected `{name}` in tree registry"));
         assert_eq!(
-            cmd.category,
+            cmd.category(),
             Some(*want),
             "command `{name}` should have category `{want}`, got {:?}",
-            cmd.category
+            cmd.category()
         );
     }
 }
@@ -79,10 +79,10 @@ fn effective_app_registry_includes_framework_builtins() {
 #[test]
 fn metadata_is_populated_for_every_command() {
     for (path, cmd) in enumerate_tree_commands() {
-        assert!(!cmd.summary.is_empty(), "{} summary empty", path);
-        assert!(cmd.syntax.is_some(), "{} syntax missing", path);
+        assert!(!cmd.summary().is_empty(), "{} summary empty", path);
+        assert!(cmd.syntax().is_some(), "{} syntax missing", path);
         let cat = cmd
-            .category
+            .category()
             .unwrap_or_else(|| panic!("{} category missing", path));
         assert!(
             categories::is_allowed(cat),

@@ -63,28 +63,20 @@ pub(crate) fn data_verb_command(verb: DataVerb) -> Command {
         ArgSpec {
             name: "resource",
             kind: ArgKind::Positional,
-            short: None,
-            long: None,
             value_type: ArgValueType::String,
             cardinality: Cardinality::Required,
-            default: None,
-            conflicts_with: vec![],
-            requires: vec![],
             help: "Resource token (product, products, component, components, \
                    repo, repos, module, modules, module-dependency, module-dependencies, \
                    kpi, kpis, eval-run, eval-runs, grade, grades)",
+            ..Default::default()
         },
         ArgSpec {
             name: "id",
             kind: ArgKind::Positional,
-            short: None,
-            long: None,
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            default: None,
-            conflicts_with: vec![],
-            requires: vec![],
             help: "Entity ID (required for single-item GET and all mutating verbs except POST)",
+            ..Default::default()
         },
         ArgSpec {
             name: "json",
@@ -93,34 +85,26 @@ pub(crate) fn data_verb_command(verb: DataVerb) -> Command {
             long: Some("json"),
             value_type: ArgValueType::Bool,
             cardinality: Cardinality::Optional,
-            default: None,
-            conflicts_with: vec![],
-            requires: vec![],
             help: "Emit machine-readable JSON to stdout",
+            ..Default::default()
         },
         ArgSpec {
             name: "output-format",
             kind: ArgKind::Option,
-            short: None,
             long: Some("output-format"),
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            default: None,
-            conflicts_with: vec![],
-            requires: vec![],
             help: "Output format: text (default) or json (alias for --json)",
+            ..Default::default()
         },
         ArgSpec {
             name: "workspace",
             kind: ArgKind::Option,
-            short: None,
             long: Some("workspace"),
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            default: None,
-            conflicts_with: vec![],
-            requires: vec![],
             help: "Workspace root containing .newton/state/backend.sqlite",
+            ..Default::default()
         },
     ];
 
@@ -128,74 +112,56 @@ pub(crate) fn data_verb_command(verb: DataVerb) -> Command {
         args.push(ArgSpec {
             name: "run-id",
             kind: ArgKind::Option,
-            short: None,
             long: Some("run-id"),
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            default: None,
-            conflicts_with: vec![],
-            requires: vec![],
             help: "Filter grade listings by EvalRun id (only used with: resource=grades)",
+            ..Default::default()
         });
         args.push(ArgSpec {
             name: "kpi-id",
             kind: ArgKind::Option,
-            short: None,
             long: Some("kpi-id"),
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            default: None,
-            conflicts_with: vec![],
-            requires: vec![],
             help: "Filter grade listings by KPI id (only used with: resource=grades)",
+            ..Default::default()
         });
         args.push(ArgSpec {
             name: "scope",
             kind: ArgKind::Option,
-            short: None,
             long: Some("scope"),
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            default: None,
-            conflicts_with: vec![],
-            requires: vec![],
             help: "Filter EvalRun listings by scope (only used with: resource=eval-runs)",
+            ..Default::default()
         });
         args.push(ArgSpec {
             name: "scope-id",
             kind: ArgKind::Option,
-            short: None,
             long: Some("scope-id"),
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            default: None,
-            conflicts_with: vec![],
-            requires: vec![],
             help: "Filter EvalRun listings by scope id (only used with: resource=eval-runs)",
+            ..Default::default()
         });
         args.push(ArgSpec {
             name: "source",
             kind: ArgKind::Option,
-            short: None,
             long: Some("source"),
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            default: None,
-            conflicts_with: vec![],
-            requires: vec![],
             help: "Filter EvalRun listings by source (only used with: resource=eval-runs)",
+            ..Default::default()
         });
         args.push(ArgSpec {
             name: "limit",
             kind: ArgKind::Option,
-            short: None,
             long: Some("limit"),
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            default: None,
-            conflicts_with: vec![],
-            requires: vec![],
             help: "Limit EvalRun listings (only used with: resource=eval-runs)",
+            ..Default::default()
         });
     }
 
@@ -207,53 +173,46 @@ pub(crate) fn data_verb_command(verb: DataVerb) -> Command {
             long: Some("file"),
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            default: None,
             conflicts_with: vec!["body"],
-            requires: vec![],
             help: "Path to JSON body file; use - for stdin",
+            ..Default::default()
         });
         args.push(ArgSpec {
             name: "body",
             kind: ArgKind::Option,
-            short: None,
             long: Some("body"),
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            default: None,
             conflicts_with: vec!["file"],
-            requires: vec![],
             help: "Inline JSON body string (mutually exclusive with --file)",
+            ..Default::default()
         });
         args.push(ArgSpec {
             name: "dry-run",
             kind: ArgKind::Flag,
-            short: None,
             long: Some("dry-run"),
             value_type: ArgValueType::Bool,
             cardinality: Cardinality::Optional,
-            default: None,
-            conflicts_with: vec![],
-            requires: vec![],
             help: "Parse and validate body without writing to DB",
+            ..Default::default()
         });
     }
 
     Command {
-        id,
-        summary,
-        syntax: Some(syntax),
-        category: Some(categories::WORKFLOW),
-        spec: Some(Arc::new(CommandSpec {
+        id: id.into(),
+        spec: Arc::new(CommandSpec {
             summary,
+            syntax: Some(syntax),
+            category: Some(categories::WORKFLOW),
             long_about: Some(long_about),
             examples,
             args,
             ..Default::default()
-        })),
+        }),
         validator: None,
         execute: Arc::new(move |_ctx, args| {
             Box::pin(async move {
-                let dto = DataArgs::from_verb_and_args(verb, args)?;
+                let dto = DataArgs::from_verb_and_map(verb, &args)?;
                 commands::data(dto).await
             })
         }),

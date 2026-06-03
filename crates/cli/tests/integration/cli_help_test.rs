@@ -137,88 +137,108 @@ fn run_help_does_not_reference_nonexistent_flags() {
 
 /// Parity check (spec §10 Stage E / §15 D8): asserts that the post-migration
 /// `newton --help` output stays in lock-step with the `help_parity.snap`
-/// artifact that the CHANGELOG references.  cli-framework prints commands
-/// in HashMap order, so we sort both sides before comparing — what we care
-/// about is the *set* and rendering shape, not framework iteration order.
+/// artifact that the CHANGELOG references.
+///
+/// The new cli-framework (v0.4.2+) renders grouped-by-category help instead of
+/// a flat "Commands:" list. We normalize by:
+/// 1. Keeping the "Usage:" header line.
+/// 2. Collecting all category-section command lines (first indented token = command name),
+///    stripping the Usage: sub-lines (double-indented) and the deprecated `run` alias.
+/// 3. Sorting the collected command summary lines within each category section.
+/// 4. Keeping "Options:" lines sorted.
+///
+/// This keeps the snapshot stable across cli-framework iteration-order changes.
 #[test]
 fn newton_help_matches_parity_snapshot() {
     fn normalize(text: &str) -> String {
-        // Bucket lines into "header lines" (Usage / Commands: / Options: /
-        // blank) and "indented body lines"; sort the body bucket.
-        let mut header_pre: Vec<&str> = Vec::new();
-        let mut commands_body: Vec<&str> = Vec::new();
-        let mut options_body: Vec<&str> = Vec::new();
-        let mut section: &str = "pre";
-        for line in text.lines() {
-            let trimmed = line.trim_end();
-            if trimmed == "Commands:" {
-                section = "commands";
-                header_pre.push(trimmed);
+        // New grouped format: category headers are "Word:" at column 0 (not
+        // "Commands:" or "Options:"). Command lines are single-indented. Usage
+        // hint sub-lines are double-indented — we strip those for the snapshot.
+        let mut out_lines: Vec<String> = Vec::new();
+        let mut current_category: Option<String> = None;
+        // category → sorted command lines (first summary line only)
+        let mut category_commands: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+        let mut options_lines: Vec<String> = Vec::new();
+        let mut in_options = false;
+        let mut usage_line: Option<String> = None;
+
+        for raw_line in text.lines() {
+            let trimmed = raw_line.trim_end();
+
+            // Usage line (first non-empty)
+            if usage_line.is_none() && trimmed.starts_with("Usage:") {
+                // Normalise binary path: replace everything up to and including the binary name
+                let normalised = if let Some(pos) = trimmed.rfind('/') {
+                    format!(
+                        "Usage: newton{}",
+                        &trimmed[pos + trimmed[pos..].find(' ').unwrap_or(trimmed.len() - pos)..]
+                    )
+                } else {
+                    trimmed.to_string()
+                };
+                usage_line = Some(normalised);
                 continue;
             }
+
+            // Options section
             if trimmed == "Options:" {
-                section = "options";
-                header_pre.push(trimmed);
+                in_options = true;
+                current_category = None;
                 continue;
             }
-            match section {
-                "pre" => header_pre.push(trimmed),
-                "commands" => {
-                    if trimmed.is_empty() {
-                        section = "between";
-                        header_pre.push(trimmed);
-                    } else if trimmed.trim_start().starts_with("run ") {
-                        // `run` is a deprecated hidden alias (spec 051); excluded from
-                        // the public command surface snapshot even though the framework
-                        // renders it because CommandSpec::hidden does not suppress clap output.
+            if in_options {
+                if !trimmed.is_empty() {
+                    options_lines.push(trimmed.to_string());
+                }
+                continue;
+            }
+
+            // Category header: "Word:" at column 0 (no leading whitespace)
+            if !raw_line.starts_with(' ') && trimmed.ends_with(':') && !trimmed.is_empty() {
+                current_category = Some(trimmed.trim_end_matches(':').to_string());
+                continue;
+            }
+
+            // Inside a category: single-indented lines are command summaries;
+            // double-indented lines are Usage hints — skip them.
+            if let Some(ref cat) = current_category {
+                if raw_line.starts_with("  ") && !raw_line.starts_with("   ") {
+                    // Single indent (exactly 2 spaces) = command summary line.
+                    let cmd_name = trimmed.split_whitespace().next().unwrap_or("");
+                    // Skip deprecated `run` (hidden alias, spec 051).
+                    if cmd_name == "run" {
                         continue;
-                    } else {
-                        commands_body.push(trimmed);
                     }
+                    category_commands
+                        .entry(cat.clone())
+                        .or_default()
+                        .push(trimmed.to_string());
                 }
-                "between" => header_pre.push(trimmed),
-                "options" => options_body.push(trimmed),
-                _ => {}
+                // Double-indent (Usage: hints) → skip silently.
             }
         }
-        commands_body.sort();
-        options_body.sort();
-        let mut out = String::new();
-        let mut emit_commands = false;
-        let mut emit_options = false;
-        for line in header_pre {
-            out.push_str(line);
-            out.push('\n');
-            if line == "Commands:" {
-                for c in &commands_body {
-                    out.push_str(c);
-                    out.push('\n');
-                }
-                emit_commands = true;
-            }
-            if line == "Options:" {
-                for c in &options_body {
-                    out.push_str(c);
-                    out.push('\n');
-                }
-                emit_options = true;
+
+        // Reconstruct: Usage + blank + sorted category sections + Options
+        if let Some(u) = usage_line {
+            out_lines.push(u);
+        }
+        out_lines.push(String::new());
+        for (cat, mut cmds) in category_commands {
+            cmds.sort();
+            out_lines.push(format!("{}:", cat));
+            for cmd in cmds {
+                out_lines.push(format!("  {}", cmd));
             }
         }
-        // Defensive: if Options: never appeared in pre buffer (shouldn't
-        // happen with current renderer), append the bucket at the end.
-        if !emit_commands {
-            for c in &commands_body {
-                out.push_str(c);
-                out.push('\n');
+        options_lines.sort();
+        if !options_lines.is_empty() {
+            out_lines.push("Options:".to_string());
+            for opt in options_lines {
+                out_lines.push(format!("  {}", opt));
             }
         }
-        if !emit_options {
-            for c in &options_body {
-                out.push_str(c);
-                out.push('\n');
-            }
-        }
-        out
+        out_lines.join("\n")
     }
 
     let actual = help_output(&[]);
@@ -235,7 +255,8 @@ fn newton_help_matches_parity_snapshot() {
         actual_norm.trim(),
         expected_norm.trim(),
         "newton --help drifted from snapshots/help_parity.snap; \
-         regenerate the snapshot if the change is intentional"
+         regenerate the snapshot if the change is intentional.\n\
+         Actual normalized:\n{actual_norm}\n\nExpected normalized:\n{expected_norm}"
     );
 }
 

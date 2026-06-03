@@ -25,12 +25,12 @@ fn enumerate_commands_includes_health_with_spec() {
     let cmds = enumerate_commands();
     let health = cmds
         .iter()
-        .find(|c| c.id == "health")
+        .find(|c| c.id.as_ref() == "health")
         .expect("health command registered");
     // CommandSpec is what cli-framework's MCP layer translates into a JSON
-    // Schema; missing it would mean MCP falls back to a permissive schema.
+    // Schema; all commands now carry a mandatory spec.
     assert!(
-        health.spec.is_some(),
+        !health.spec.summary.is_empty(),
         "health command should expose a CommandSpec for MCP tool derivation"
     );
 }

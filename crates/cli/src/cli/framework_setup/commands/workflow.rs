@@ -5,6 +5,7 @@ use anyhow::anyhow;
 use cli_framework::command::Command;
 use cli_framework::spec::arg_spec::{ArgKind, ArgSpec, ArgValueType, Cardinality};
 use cli_framework::spec::command_tree::CommandSpec;
+use cli_framework::spec::value::ArgValue;
 use uuid::Uuid;
 
 use crate::cli::args::{
@@ -17,17 +18,16 @@ use crate::cli::commands;
 use crate::cli::framework_setup::error_codes;
 use crate::cli::framework_setup::help_text::{WEBHOOK_LONG_ABOUT, WORKFLOW_LONG_ABOUT};
 use crate::cli::framework_setup::{
-    get_bool, get_opt_path, get_opt_str, parse_kvp_from_command_args, parse_output_format,
+    get_bool, get_opt_path, get_opt_str, parse_kvp_from_map, parse_output_format, FromArgValueMap,
 };
 
 pub(crate) fn workflow_command() -> Command {
     Command {
-        id: "workflow",
-        summary: "Operate on workflow YAML files or manage execution lifecycle (validate/lint/preview/graph/run/resume/runs/checkpoint/artifact)",
-        syntax: Some("<validate|lint|preview|graph|run|resume|runs|checkpoint|artifact> [SUBCOMMAND] [FILE] [OPTIONS]"),
-        category: Some(categories::WORKFLOW),
-        spec: Some(Arc::new(CommandSpec {
+        id: "workflow".into(),
+        spec: Arc::new(CommandSpec {
             summary: "Operate on workflow YAML files or manage execution lifecycle (validate/lint/preview/graph/run/resume/runs/checkpoint/artifact)",
+            syntax: Some("<validate|lint|preview|graph|run|resume|runs|checkpoint|artifact> [SUBCOMMAND] [FILE] [OPTIONS]"),
+            category: Some(categories::WORKFLOW),
             long_about: Some(WORKFLOW_LONG_ABOUT),
             examples: vec![
                 "newton workflow run workflow.yaml",
@@ -47,101 +47,74 @@ pub(crate) fn workflow_command() -> Command {
                 ArgSpec {
                     name: "subcommand",
                     kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
                     value_type: ArgValueType::Enum(vec![
                         "validate", "lint", "preview", "graph", "run",
                         "resume", "runs", "checkpoint", "artifact", "import",
                     ]),
                     cardinality: Cardinality::Required,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Subcommand: validate | lint | preview | graph | run | resume | runs | checkpoint | artifact",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "subcommand2",
                     kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Second-level subcommand (runs: list|show; checkpoint: list|clean; artifact: clean) or workflow file path (validate/lint/preview/graph)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "input-file",
                     kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Optional input file path (workflow run only)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "format",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("format"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Output format (lint: text|json; preview: text|json|prose; graph: dot)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "workspace",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("workspace"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Workspace root directory",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "context",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("context"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Repeated,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Merge KEY=VALUE into workflow.context at runtime (preview)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "trigger",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("trigger"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Repeated,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Trigger payload override KEY=VALUE (preview)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "parameters-json",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("parameters-json"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "JSON file with base trigger payload (preview/workflow run). Accepts a bare path or @path syntax.",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "output",
@@ -150,82 +123,62 @@ pub(crate) fn workflow_command() -> Command {
                     long: Some("output"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Output destination file (graph)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "run-id",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("run-id"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "UUID of the workflow run to resume (resume) or inspect (runs show)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "allow-workflow-change",
                     kind: ArgKind::Flag,
-                    short: None,
                     long: Some("allow-workflow-change"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Allow resuming even if the workflow definition changed since checkpoint",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "json",
                     kind: ArgKind::Flag,
-                    short: None,
                     long: Some("json"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Emit machine-readable JSON (checkpoint list, runs list)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "older-than",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("older-than"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Duration threshold for clean (e.g. 7d, 1w, 24h)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "last",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("last"),
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Limit list to N most recent executions (runs list)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "task",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("task"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Filter output to a single task ID (runs show)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "verbose",
@@ -234,95 +187,71 @@ pub(crate) fn workflow_command() -> Command {
                     long: Some("verbose"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Expand single-task output for debugging (runs show) or workflow run",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "emit-completion-json",
                     kind: ArgKind::Flag,
-                    short: None,
                     long: Some("emit-completion-json"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Write structured completion envelope to stdout as JSON (workflow run)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "parallel-limit",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("parallel-limit"),
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Runtime override for bounded task concurrency (workflow run)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "timeout",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("timeout"),
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Runtime wall-clock limit override in seconds (workflow run)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "server",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("server"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Newton server URL to register this run (workflow run)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "state-dir",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("state-dir"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Override the state root directory where checkpoints, artifacts, and backend.sqlite are stored. Defaults to auto-resolved from workspace root.",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "recursive",
                     kind: ArgKind::Flag,
-                    short: None,
                     long: Some("recursive"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Recursively walk workspace for all .newton/state/workflows directories (import)",
+                    ..Default::default()
                 },
             ],
             ..Default::default()
-        })),
+        }),
         validator: None,
         execute: Arc::new(|_ctx, args| {
             Box::pin(async move {
-                let subcmd = args
-                    .named
-                    .get("subcommand")
-                    .map(String::as_str)
-                    .unwrap_or("")
-                    .to_string();
+                let subcmd = get_opt_str(&args, "subcommand")
+                    .unwrap_or_default();
                 match subcmd.as_str() {
                     "validate" => {
                         let workflow = get_opt_path(&args, "subcommand2").ok_or_else(|| {
@@ -353,8 +282,8 @@ pub(crate) fn workflow_command() -> Command {
                                 error_codes::CLI_MIG_002
                             )
                         })?;
-                        let context = parse_kvp_from_command_args(&args, "context")?;
-                        let trigger = parse_kvp_from_command_args(&args, "trigger")?;
+                        let context = parse_kvp_from_map(&args, "context")?;
+                        let trigger = parse_kvp_from_map(&args, "trigger")?;
                         commands::explain(ExplainArgs {
                             workflow,
                             workspace: get_opt_path(&args, "workspace"),
@@ -372,7 +301,7 @@ pub(crate) fn workflow_command() -> Command {
                                 error_codes::CLI_MIG_002
                             )
                         })?;
-                        let format = match args.named.get("format").map(String::as_str) {
+                        let format = match get_opt_str(&args, "format").as_deref() {
                             Some("dot") | None => GraphFormat::Dot,
                             Some(other) => {
                                 return Err(anyhow!(
@@ -390,16 +319,13 @@ pub(crate) fn workflow_command() -> Command {
                         .map_err(anyhow::Error::from)
                     }
                     "resume" => {
-                        let dto = ResumeArgs::try_from(args)?;
+                        let dto = ResumeArgs::from_arg_value_map(&args);
                         commands::resume(dto).await.map_err(anyhow::Error::from)
                     }
                     "checkpoint" => {
-                        let subcmd2 = args
-                            .named
-                            .get("subcommand2")
-                            .map(String::as_str)
-                            .unwrap_or("");
-                        match subcmd2 {
+                        let subcmd2 = get_opt_str(&args, "subcommand2")
+                            .unwrap_or_default();
+                        match subcmd2.as_str() {
                             "list" => {
                                 let dto = CheckpointArgs {
                                     command: CheckpointCommand::List {
@@ -412,7 +338,7 @@ pub(crate) fn workflow_command() -> Command {
                             }
                             "clean" => {
                                 let older_than =
-                                    args.named.get("older-than").cloned().ok_or_else(|| {
+                                    get_opt_str(&args, "older-than").ok_or_else(|| {
                                         anyhow!(
                                             "{}: --older-than is required for checkpoint clean",
                                             error_codes::CLI_MIG_002
@@ -435,15 +361,12 @@ pub(crate) fn workflow_command() -> Command {
                         }
                     }
                     "artifact" => {
-                        let subcmd2 = args
-                            .named
-                            .get("subcommand2")
-                            .map(String::as_str)
-                            .unwrap_or("");
-                        match subcmd2 {
+                        let subcmd2 = get_opt_str(&args, "subcommand2")
+                            .unwrap_or_default();
+                        match subcmd2.as_str() {
                             "clean" => {
                                 let older_than =
-                                    args.named.get("older-than").cloned().ok_or_else(|| {
+                                    get_opt_str(&args, "older-than").ok_or_else(|| {
                                         anyhow!(
                                             "{}: --older-than is required for artifact clean",
                                             error_codes::CLI_MIG_002
@@ -466,31 +389,21 @@ pub(crate) fn workflow_command() -> Command {
                         }
                     }
                     "runs" => {
-                        let subcmd2 = args
-                            .named
-                            .get("subcommand2")
-                            .map(String::as_str)
-                            .unwrap_or("")
-                            .to_string();
+                        let subcmd2 = get_opt_str(&args, "subcommand2")
+                            .unwrap_or_default();
                         match subcmd2.as_str() {
                             "list" => {
-                                let last = args
-                                    .named
-                                    .get("last")
-                                    .map(|s| {
-                                        let n: usize = s.parse().map_err(|_| {
-                                            anyhow!(
-                                                "LOG-003: runs list --last must be a positive integer"
-                                            )
-                                        })?;
-                                        if n == 0 {
-                                            return Err(anyhow!(
-                                                "LOG-003: runs list --last must be a positive integer"
-                                            ));
-                                        }
-                                        Ok(n)
-                                    })
-                                    .transpose()?;
+                                let last = if let Some(ArgValue::Int(n)) = args.get("last") {
+                                    let n = *n as usize;
+                                    if n == 0 {
+                                        return Err(anyhow!(
+                                            "LOG-003: runs list --last must be a positive integer"
+                                        ));
+                                    }
+                                    Some(n)
+                                } else {
+                                    None
+                                };
                                 let dto = RunsArgs {
                                     command: RunsCommand::List {
                                         workspace: get_opt_path(&args, "workspace"),
@@ -502,7 +415,7 @@ pub(crate) fn workflow_command() -> Command {
                             }
                             "show" => {
                                 let run_id_str =
-                                    args.named.get("run-id").cloned().ok_or_else(|| {
+                                    get_opt_str(&args, "run-id").ok_or_else(|| {
                                         anyhow!(
                                             "{}: <RUN_ID> is required for `runs show`",
                                             error_codes::CLI_MIG_002
@@ -534,13 +447,14 @@ pub(crate) fn workflow_command() -> Command {
                         }
                     }
                     "run" => {
-                        let mut a = args;
-                        if !a.named.contains_key("workflow") {
-                            if let Some(p) = a.named.get("subcommand2").cloned() {
-                                a.named.insert("workflow".to_string(), p);
+                        // If workflow key isn't set, promote subcommand2 to workflow
+                        let mut map = args;
+                        if !map.contains_key("workflow") {
+                            if let Some(p) = map.get("subcommand2").cloned() {
+                                map.insert("workflow".to_string(), p);
                             }
                         }
-                        let run_args = RunArgs::try_from(a)?;
+                        let run_args = RunArgs::from_arg_value_map(&map);
                         commands::workflow_run(run_args).await.map_err(anyhow::Error::from)
                     }
                     "import" => {
@@ -565,12 +479,11 @@ pub(crate) fn workflow_command() -> Command {
 
 pub(crate) fn webhook_command() -> Command {
     Command {
-        id: "webhook",
-        summary: "Run webhooks to trigger workflows from external events",
-        syntax: Some("<serve|status> --workflow <PATH> --workspace <PATH>"),
-        category: Some(categories::OPS),
-        spec: Some(Arc::new(CommandSpec {
+        id: "webhook".into(),
+        spec: Arc::new(CommandSpec {
             summary: "Run webhooks to trigger workflows from external events",
+            syntax: Some("<serve|status> --workflow <PATH> --workspace <PATH>"),
+            category: Some(categories::OPS),
             long_about: Some(WEBHOOK_LONG_ABOUT),
             examples: vec![
                 "newton webhook serve --workflow workflow.yaml --workspace ./workspace",
@@ -580,52 +493,37 @@ pub(crate) fn webhook_command() -> Command {
                 ArgSpec {
                     name: "subcommand",
                     kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
                     value_type: ArgValueType::Enum(vec!["serve", "status"]),
                     cardinality: Cardinality::Required,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Subcommand: serve or status",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "workflow",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("workflow"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Path to the workflow YAML file (required for serve)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "workspace",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("workspace"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Required,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Workspace root directory (required)",
+                    ..Default::default()
                 },
             ],
             ..Default::default()
-        })),
+        }),
         validator: None,
         execute: Arc::new(|_ctx, args| {
             Box::pin(async move {
-                let subcmd = args
-                    .named
-                    .get("subcommand")
-                    .map(String::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                let workspace_str = args.named.get("workspace").cloned().ok_or_else(|| {
+                let subcmd = get_opt_str(&args, "subcommand").unwrap_or_default();
+                let workspace_str = get_opt_str(&args, "workspace").ok_or_else(|| {
                     anyhow!(
                         "{}: --workspace is required for webhook {}",
                         error_codes::CLI_MIG_002,

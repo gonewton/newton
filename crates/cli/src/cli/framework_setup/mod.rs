@@ -1,6 +1,6 @@
 //! cli-framework registration for Newton CLI.
 //! Decomposed into submodules by concern; this file provides shared helpers,
-//! public entry points, and TryFrom adapters.
+//! public entry points, and FromArgValueMap adapters.
 
 pub(crate) mod commands;
 pub mod error_codes;
@@ -12,11 +12,13 @@ pub(crate) mod help_text;
 pub use help_text::WORKFLOW_RUN_LONG_ABOUT;
 pub use mcp::{build_mcp_command_registry, build_mcp_router_for_serve};
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::anyhow;
 use cli_framework::app::{App, AppBuilder};
-use cli_framework::command::{Command, CommandArgs};
+use cli_framework::command::Command;
+use cli_framework::command::{FromArgValueMap, IntoCommandSpec};
 use cli_framework::spec::command_tree::{CommandPath, GroupMetadata};
 use cli_framework::spec::value::ArgValue;
 use uuid::Uuid;
@@ -41,57 +43,73 @@ pub(crate) fn parse_kvp_list(s: &str) -> anyhow::Result<Vec<crate::cli::args::Ke
         .collect()
 }
 
-/// Extract a Repeated KVP option from `CommandArgs`.
+/// Extract a Repeated KVP option from an ArgValue map.
 ///
-/// Prefers `named_typed` List (populated by cli-framework spec-based parsing)
-/// over the legacy comma-joined `named` string, so that multiple `--trigger`
+/// Prefers `List` (populated by cli-framework spec-based parsing)
+/// over the legacy comma-joined string, so that multiple `--trigger`
 /// flags each arrive as their own `KeyValuePair` rather than being silently
 /// dropped.
-pub(crate) fn parse_kvp_from_command_args(
-    args: &CommandArgs,
+pub(crate) fn parse_kvp_from_map(
+    map: &HashMap<String, ArgValue>,
     key: &str,
 ) -> anyhow::Result<Vec<crate::cli::args::KeyValuePair>> {
     use std::str::FromStr;
-    let list = args.get_list(key);
-    if !list.is_empty() {
-        return list
-            .into_iter()
-            .map(|v| match v {
-                ArgValue::Str(s) => crate::cli::args::KeyValuePair::from_str(&s)
-                    .map_err(|e| anyhow!("{}: {}", error_codes::CLI_MIG_002, e)),
-                _other => Err(anyhow!(
-                    "{}: expected string value for --{}, got unexpected type",
-                    error_codes::CLI_MIG_002,
-                    key,
-                )),
-            })
-            .collect();
+    match map.get(key) {
+        Some(ArgValue::List(items)) => {
+            return items
+                .iter()
+                .map(|v| match v {
+                    ArgValue::Str(s) => crate::cli::args::KeyValuePair::from_str(s)
+                        .map_err(|e| anyhow!("{}: {}", error_codes::CLI_MIG_002, e)),
+                    _other => Err(anyhow!(
+                        "{}: expected string value for --{}, got unexpected type",
+                        error_codes::CLI_MIG_002,
+                        key,
+                    )),
+                })
+                .collect();
+        }
+        Some(ArgValue::Str(s)) => {
+            return parse_kvp_list(s);
+        }
+        _ => {}
     }
-    parse_kvp_list(args.named.get(key).map(String::as_str).unwrap_or(""))
+    Ok(vec![])
 }
 
-pub(crate) fn get_bool(args: &CommandArgs, key: &str) -> bool {
-    args.named.get(key).map(|s| s == "true").unwrap_or(false)
+pub(crate) fn get_bool(map: &HashMap<String, ArgValue>, key: &str) -> bool {
+    matches!(map.get(key), Some(ArgValue::Bool(true)))
 }
 
-pub(crate) fn get_opt_path(args: &CommandArgs, key: &str) -> Option<PathBuf> {
-    args.named.get(key).map(PathBuf::from)
+pub(crate) fn get_opt_path(map: &HashMap<String, ArgValue>, key: &str) -> Option<PathBuf> {
+    if let Some(ArgValue::Str(s)) = map.get(key) {
+        Some(PathBuf::from(s))
+    } else {
+        None
+    }
 }
 
-pub(crate) fn get_opt_str(args: &CommandArgs, key: &str) -> Option<String> {
-    args.named.get(key).cloned()
+pub(crate) fn get_opt_str(map: &HashMap<String, ArgValue>, key: &str) -> Option<String> {
+    match map.get(key) {
+        Some(ArgValue::Str(s)) => Some(s.clone()),
+        Some(ArgValue::Enum(s)) => Some(s.clone()),
+        _ => None,
+    }
 }
 
-pub(crate) fn parse_output_format(args: &CommandArgs) -> OutputFormat {
-    match args.named.get("format").map(String::as_str) {
+pub(crate) fn parse_output_format(map: &HashMap<String, ArgValue>) -> OutputFormat {
+    match get_opt_str(map, "format").as_deref() {
         Some("json") => OutputFormat::Json,
         Some("prose") => OutputFormat::Prose,
         _ => OutputFormat::Text,
     }
 }
 
-pub(crate) fn require_workflow_path(args: &CommandArgs, label: &str) -> anyhow::Result<PathBuf> {
-    get_opt_path(args, "workflow").ok_or_else(|| {
+pub(crate) fn require_workflow_path(
+    map: &HashMap<String, ArgValue>,
+    label: &str,
+) -> anyhow::Result<PathBuf> {
+    get_opt_path(map, "workflow").ok_or_else(|| {
         anyhow!(
             "{}: workflow file is required for {}",
             error_codes::CLI_MIG_002,
@@ -217,47 +235,41 @@ pub fn enumerate_effective_app_tree_commands() -> Vec<(String, Command)> {
     items
 }
 
-// ── TryFrom<CommandArgs> adapters ────────────────────────────────────────────
+// ── FromArgValueMap adapters ─────────────────────────────────────────────────
 
-impl TryFrom<CommandArgs> for RunArgs {
-    type Error = anyhow::Error;
+impl IntoCommandSpec for RunArgs {
+    fn command_spec() -> cli_framework::spec::command_tree::CommandSpec {
+        // RunArgs spec is defined in run_command(); this impl satisfies the trait
+        // but the spec is constructed directly in the Command builder.
+        panic!("RunArgs::command_spec() should not be called directly; spec lives in run_command()")
+    }
+}
 
-    fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
-        let workflow = require_workflow_path(&args, "run")?;
-        let input_file = get_opt_path(&args, "input-file");
-        let workspace = get_opt_path(&args, "workspace");
-        let trigger = parse_kvp_from_command_args(&args, "trigger")?;
-        let context = parse_kvp_from_command_args(&args, "context")?;
-        let parameters_json = get_opt_path(&args, "parameters-json");
-        let emit_completion_json = get_bool(&args, "emit-completion-json");
-        let parallel_limit = args
-            .named
-            .get("parallel-limit")
-            .map(|s| {
-                s.parse::<usize>().map_err(|_| {
-                    anyhow!(
-                        "{}: --parallel-limit must be a positive integer",
-                        error_codes::CLI_MIG_002
-                    )
-                })
-            })
-            .transpose()?;
-        let timeout_seconds = args
-            .named
-            .get("timeout")
-            .map(|s| {
-                s.parse::<u64>().map_err(|_| {
-                    anyhow!(
-                        "{}: --timeout must be a non-negative integer",
-                        error_codes::CLI_MIG_002
-                    )
-                })
-            })
-            .transpose()?;
-        let verbose = get_bool(&args, "verbose");
-        let server = get_opt_str(&args, "server");
-        let state_dir = get_opt_path(&args, "state-dir");
-        Ok(RunArgs {
+impl FromArgValueMap for RunArgs {
+    fn from_arg_value_map(map: &HashMap<String, ArgValue>) -> Self {
+        let workflow = require_workflow_path(map, "run").unwrap_or_else(|e| panic!("fw bug: {e}"));
+        let input_file = get_opt_path(map, "input-file");
+        let workspace = get_opt_path(map, "workspace");
+        let trigger = parse_kvp_from_map(map, "trigger")
+            .unwrap_or_else(|e| panic!("fw bug: invalid trigger: {e}"));
+        let context = parse_kvp_from_map(map, "context")
+            .unwrap_or_else(|e| panic!("fw bug: invalid context: {e}"));
+        let parameters_json = get_opt_path(map, "parameters-json");
+        let emit_completion_json = get_bool(map, "emit-completion-json");
+        let parallel_limit = if let Some(ArgValue::Int(n)) = map.get("parallel-limit") {
+            Some(*n as usize)
+        } else {
+            None
+        };
+        let timeout_seconds = if let Some(ArgValue::Int(n)) = map.get("timeout") {
+            Some(*n as u64)
+        } else {
+            None
+        };
+        let verbose = get_bool(map, "verbose");
+        let server = get_opt_str(map, "server");
+        let state_dir = get_opt_path(map, "state-dir");
+        RunArgs {
             workflow,
             input_file,
             workspace,
@@ -270,151 +282,101 @@ impl TryFrom<CommandArgs> for RunArgs {
             verbose,
             server,
             state_dir,
-        })
+        }
     }
 }
 
-impl TryFrom<CommandArgs> for InitArgs {
-    type Error = anyhow::Error;
-
-    fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
-        Ok(InitArgs {
-            path: get_opt_path(&args, "path"),
-            template: get_opt_str(&args, "template"),
-        })
+impl FromArgValueMap for InitArgs {
+    fn from_arg_value_map(map: &HashMap<String, ArgValue>) -> Self {
+        InitArgs {
+            path: get_opt_path(map, "path"),
+            template: get_opt_str(map, "template"),
+        }
     }
 }
 
-impl TryFrom<CommandArgs> for BatchArgs {
-    type Error = anyhow::Error;
-
-    fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
-        let project_id = args
-            .named
-            .get("project-id")
-            .cloned()
-            .ok_or_else(|| anyhow!("{}: project-id is required", error_codes::CLI_MIG_002))?;
-        let poll_interval_seconds = args
-            .named
-            .get("poll-interval")
-            .map(|s| {
-                s.parse::<u64>().map_err(|_| {
-                    anyhow!(
-                        "{}: --poll-interval must be a non-negative integer",
-                        error_codes::CLI_MIG_002
-                    )
-                })
-            })
-            .transpose()?
-            .unwrap_or(60);
-        Ok(BatchArgs {
+impl FromArgValueMap for BatchArgs {
+    fn from_arg_value_map(map: &HashMap<String, ArgValue>) -> Self {
+        let project_id = get_opt_str(map, "project-id")
+            .unwrap_or_else(|| panic!("fw bug: project-id is required"));
+        let poll_interval_seconds = if let Some(ArgValue::Int(n)) = map.get("poll-interval") {
+            *n as u64
+        } else {
+            60
+        };
+        BatchArgs {
             project_id,
-            workspace: get_opt_path(&args, "workspace"),
-            once: get_bool(&args, "once"),
+            workspace: get_opt_path(map, "workspace"),
+            once: get_bool(map, "once"),
             poll_interval_seconds,
-        })
+        }
     }
 }
 
-impl TryFrom<CommandArgs> for ServeArgs {
-    type Error = anyhow::Error;
-
-    fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
-        let host = args
-            .named
-            .get("host")
-            .cloned()
-            .unwrap_or_else(|| "127.0.0.1".to_string());
-        let port = args
-            .named
-            .get("port")
-            .map(|s| {
-                s.parse::<i64>()
-                    .map_err(|_| anyhow!("{}: --port must be an integer", error_codes::CLI_MIG_002))
-                    .and_then(|n| {
-                        u16::try_from(n).map_err(|_| {
-                            anyhow!(
-                                "{}: --port must be in range 0-65535",
-                                error_codes::CLI_MIG_002
-                            )
-                        })
-                    })
-            })
-            .transpose()?
-            .unwrap_or(8080);
-        let with_mcp = get_bool(&args, "with-mcp");
-        let with_embedded_ailoop = get_bool(&args, "with-embedded-ailoop");
-        let ailoop_base_path = args
-            .named
-            .get("ailoop-base-path")
-            .cloned()
-            .unwrap_or_else(|| "/ailoop".to_string());
-        Ok(ServeArgs {
+impl FromArgValueMap for ServeArgs {
+    fn from_arg_value_map(map: &HashMap<String, ArgValue>) -> Self {
+        let host = get_opt_str(map, "host").unwrap_or_else(|| "127.0.0.1".to_string());
+        let port = if let Some(ArgValue::Int(n)) = map.get("port") {
+            u16::try_from(*n).unwrap_or(8080)
+        } else {
+            8080
+        };
+        let with_mcp = get_bool(map, "with-mcp");
+        let with_embedded_ailoop = get_bool(map, "with-embedded-ailoop");
+        let ailoop_base_path =
+            get_opt_str(map, "ailoop-base-path").unwrap_or_else(|| "/ailoop".to_string());
+        ServeArgs {
             host,
             port,
-            static_ui: get_opt_path(&args, "static-ui"),
+            static_ui: get_opt_path(map, "static-ui"),
             with_mcp,
             with_embedded_ailoop,
             ailoop_base_path,
-            state_dir: get_opt_path(&args, "state-dir"),
-            import_existing: get_bool(&args, "import-existing"),
-        })
+            state_dir: get_opt_path(map, "state-dir"),
+            import_existing: get_bool(map, "import-existing"),
+        }
     }
 }
 
-impl TryFrom<CommandArgs> for ResumeArgs {
-    type Error = anyhow::Error;
-
-    fn try_from(args: CommandArgs) -> Result<Self, Self::Error> {
-        let run_id = args
-            .named
-            .get("run-id")
-            .ok_or_else(|| anyhow!("{}: --run-id is required", error_codes::CLI_MIG_002))
-            .and_then(|s| {
-                Uuid::parse_str(s).map_err(|e| {
-                    anyhow!(
-                        "{}: --run-id must be a valid UUID: {}",
-                        error_codes::CLI_MIG_002,
-                        e
-                    )
-                })
-            })?;
-        Ok(ResumeArgs {
+impl FromArgValueMap for ResumeArgs {
+    fn from_arg_value_map(map: &HashMap<String, ArgValue>) -> Self {
+        let run_id_str =
+            get_opt_str(map, "run-id").unwrap_or_else(|| panic!("fw bug: --run-id is required"));
+        let run_id = Uuid::parse_str(&run_id_str)
+            .unwrap_or_else(|e| panic!("fw bug: invalid run-id UUID: {e}"));
+        ResumeArgs {
             run_id,
-            workspace: get_opt_path(&args, "workspace"),
-            allow_workflow_change: get_bool(&args, "allow-workflow-change"),
-            state_dir: get_opt_path(&args, "state-dir"),
-        })
+            workspace: get_opt_path(map, "workspace"),
+            allow_workflow_change: get_bool(map, "allow-workflow-change"),
+            state_dir: get_opt_path(map, "state-dir"),
+        }
     }
 }
 
 impl DataArgs {
-    pub fn from_verb_and_args(verb: DataVerb, args: CommandArgs) -> Result<Self, anyhow::Error> {
-        let resource = args
-            .named
-            .get("resource")
-            .cloned()
+    pub fn from_verb_and_map(
+        verb: DataVerb,
+        map: &HashMap<String, ArgValue>,
+    ) -> Result<Self, anyhow::Error> {
+        let resource = get_opt_str(map, "resource")
             .ok_or_else(|| anyhow!("DATA-003: resource token is required"))?;
-        let id = args.named.get("id").cloned();
-        let file = args.named.get("file").map(PathBuf::from);
-        let body = args.named.get("body").cloned();
-        let json = get_bool(&args, "json")
-            || args
-                .named
-                .get("output-format")
+        let id = get_opt_str(map, "id");
+        let file = get_opt_path(map, "file");
+        let body = get_opt_str(map, "body");
+        let json = get_bool(map, "json")
+            || get_opt_str(map, "output-format")
+                .as_deref()
                 .map(|s| s == "json")
                 .unwrap_or(false);
-        let dry_run = get_bool(&args, "dry-run");
-        let workspace = get_opt_path(&args, "workspace");
-        let run_id = args.named.get("run-id").cloned();
-        let kpi_id = args.named.get("kpi-id").cloned();
-        let scope = args.named.get("scope").cloned();
-        let scope_id = args.named.get("scope-id").cloned();
-        let source = args.named.get("source").cloned();
-        let limit = args
-            .named
-            .get("limit")
-            .map(|s| {
+        let dry_run = get_bool(map, "dry-run");
+        let workspace = get_opt_path(map, "workspace");
+        let run_id = get_opt_str(map, "run-id");
+        let kpi_id = get_opt_str(map, "kpi-id");
+        let scope = get_opt_str(map, "scope");
+        let scope_id = get_opt_str(map, "scope-id");
+        let source = get_opt_str(map, "source");
+        let limit = if let Some(ArgValue::Str(s)) = map.get("limit") {
+            Some(
                 s.parse::<u32>()
                     .map_err(|_| anyhow!("DATA-007: --limit must be a positive integer"))
                     .and_then(|n| {
@@ -423,9 +385,11 @@ impl DataArgs {
                         } else {
                             Ok(n)
                         }
-                    })
-            })
-            .transpose()?;
+                    })?,
+            )
+        } else {
+            None
+        };
         Ok(DataArgs {
             verb,
             resource,
@@ -448,13 +412,12 @@ impl DataArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cli_framework::command::CommandArgs;
     use cli_framework::spec::value::ArgValue;
     use std::collections::HashMap;
 
-    fn args_with_list(key: &str, values: Vec<&str>) -> CommandArgs {
-        let mut named_typed = HashMap::new();
-        named_typed.insert(
+    fn map_with_list(key: &str, values: Vec<&str>) -> HashMap<String, ArgValue> {
+        let mut map = HashMap::new();
+        map.insert(
             key.to_string(),
             ArgValue::List(
                 values
@@ -463,31 +426,23 @@ mod tests {
                     .collect(),
             ),
         );
-        CommandArgs {
-            positional: vec![],
-            named: HashMap::new(),
-            named_typed,
-        }
+        map
     }
 
-    fn args_with_named(key: &str, value: &str) -> CommandArgs {
-        let mut named = HashMap::new();
-        named.insert(key.to_string(), value.to_string());
-        CommandArgs {
-            positional: vec![],
-            named,
-            named_typed: HashMap::new(),
-        }
+    fn map_with_str(key: &str, value: &str) -> HashMap<String, ArgValue> {
+        let mut map = HashMap::new();
+        map.insert(key.to_string(), ArgValue::Str(value.to_string()));
+        map
     }
 
-    fn empty_args() -> CommandArgs {
-        CommandArgs::default()
+    fn empty_map() -> HashMap<String, ArgValue> {
+        HashMap::new()
     }
 
     #[test]
     fn repeated_typed_list_returns_multiple_kvps_in_order() {
-        let args = args_with_list("trigger", vec!["board_item_id=PVTI_abc", "skip_draft=true"]);
-        let result = parse_kvp_from_command_args(&args, "trigger").unwrap();
+        let map = map_with_list("trigger", vec!["board_item_id=PVTI_abc", "skip_draft=true"]);
+        let result = parse_kvp_from_map(&map, "trigger").unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].key, "board_item_id");
         assert_eq!(result[0].value, "PVTI_abc");
@@ -496,9 +451,9 @@ mod tests {
     }
 
     #[test]
-    fn legacy_comma_joined_named_string_still_works() {
-        let args = args_with_named("trigger", "env=prod,version=1.2.3");
-        let result = parse_kvp_from_command_args(&args, "trigger").unwrap();
+    fn legacy_comma_joined_str_still_works() {
+        let map = map_with_str("trigger", "env=prod,version=1.2.3");
+        let result = parse_kvp_from_map(&map, "trigger").unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].key, "env");
         assert_eq!(result[0].value, "prod");
@@ -508,14 +463,14 @@ mod tests {
 
     #[test]
     fn absent_key_returns_empty_vec() {
-        let result = parse_kvp_from_command_args(&empty_args(), "trigger").unwrap();
+        let result = parse_kvp_from_map(&empty_map(), "trigger").unwrap();
         assert!(result.is_empty());
     }
 
     #[test]
     fn invalid_kvp_in_list_returns_error() {
-        let args = args_with_list("trigger", vec!["no-equals-sign"]);
-        let result = parse_kvp_from_command_args(&args, "trigger");
+        let map = map_with_list("trigger", vec!["no-equals-sign"]);
+        let result = parse_kvp_from_map(&map, "trigger");
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(
@@ -526,17 +481,12 @@ mod tests {
 
     #[test]
     fn non_string_list_element_returns_error() {
-        let mut named_typed = HashMap::new();
-        named_typed.insert(
+        let mut map = HashMap::new();
+        map.insert(
             "trigger".to_string(),
             ArgValue::List(vec![ArgValue::Int(42)]),
         );
-        let args = CommandArgs {
-            positional: vec![],
-            named: HashMap::new(),
-            named_typed,
-        };
-        let result = parse_kvp_from_command_args(&args, "trigger");
+        let result = parse_kvp_from_map(&map, "trigger");
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(

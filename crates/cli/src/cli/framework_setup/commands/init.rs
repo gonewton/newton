@@ -7,16 +7,16 @@ use cli_framework::spec::command_tree::CommandSpec;
 use crate::cli::args::InitArgs;
 use crate::cli::categories;
 use crate::cli::framework_setup::help_text::INIT_LONG_ABOUT;
+use crate::cli::framework_setup::FromArgValueMap;
 use crate::cli::init;
 
 pub(crate) fn init_command() -> Command {
     Command {
-        id: "init",
-        summary: "Initialize a Newton workspace with the default template",
-        syntax: Some("[PATH] [OPTIONS]"),
-        category: Some(categories::WORKSPACE),
-        spec: Some(Arc::new(CommandSpec {
+        id: "init".into(),
+        spec: Arc::new(CommandSpec {
             summary: "Initialize a Newton workspace with the default template",
+            syntax: Some("[PATH] [OPTIONS]"),
+            category: Some(categories::WORKSPACE),
             long_about: Some(INIT_LONG_ABOUT),
             examples: vec![
                 "newton init .",
@@ -27,35 +27,28 @@ pub(crate) fn init_command() -> Command {
                 ArgSpec {
                     name: "path",
                     kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help:
                         "Directory where .newton/ will be created (defaults to current directory)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "template",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("template"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Template source (GitHub repo, URL, or local path)",
+                    ..Default::default()
                 },
             ],
             ..Default::default()
-        })),
+        }),
         validator: None,
         execute: Arc::new(|_ctx, args| {
             Box::pin(async move {
-                let dto = InitArgs::try_from(args)?;
+                let dto = InitArgs::from_arg_value_map(&args);
                 init::run(dto)
             })
         }),

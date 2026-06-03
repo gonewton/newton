@@ -8,15 +8,15 @@ use crate::cli::args::RunArgs;
 use crate::cli::categories;
 use crate::cli::commands;
 use crate::cli::framework_setup::help_text::WORKFLOW_RUN_LONG_ABOUT;
+use crate::cli::framework_setup::FromArgValueMap;
 
 pub(crate) fn run_command() -> Command {
     Command {
-        id: "run",
-        summary: "Execute a workflow graph (deprecated — use `newton workflow run`)",
-        syntax: Some("<WORKFLOW> [INPUT_FILE] [OPTIONS]"),
-        category: Some(categories::WORKFLOW),
-        spec: Some(Arc::new(CommandSpec {
+        id: "run".into(),
+        spec: Arc::new(CommandSpec {
             summary: "Execute a workflow graph (deprecated — use `newton workflow run`)",
+            syntax: Some("<WORKFLOW> [INPUT_FILE] [OPTIONS]"),
+            category: Some(categories::WORKFLOW),
             long_about: Some(WORKFLOW_RUN_LONG_ABOUT),
             hidden: true,
             examples: vec![
@@ -29,110 +29,81 @@ pub(crate) fn run_command() -> Command {
                 ArgSpec {
                     name: "workflow",
                     kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Required,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Path to the workflow YAML file (required)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "input-file",
                     kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Optional path written into triggers.payload.input_file",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "workspace",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("workspace"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Workspace root directory",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "trigger",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("trigger"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Repeated,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Merge KEY=VALUE into trigger payload (repeatable; VALUE may be @path)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "context",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("context"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Repeated,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Merge KEY=VALUE into workflow.context at runtime (repeatable)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "parameters-json",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("parameters-json"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Load JSON object as base parameters before --trigger overrides. Accepts a bare path or @path syntax.",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "emit-completion-json",
                     kind: ArgKind::Flag,
-                    short: None,
                     long: Some("emit-completion-json"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Write structured completion envelope to stdout as JSON",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "parallel-limit",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("parallel-limit"),
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Runtime override for bounded task concurrency",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "timeout",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("timeout"),
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Runtime wall-clock limit override (seconds)",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "verbose",
@@ -141,26 +112,21 @@ pub(crate) fn run_command() -> Command {
                     long: Some("verbose"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Print task stdout/stderr to terminal after each task completes",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "server",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("server"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Newton server URL to register this run (optional)",
+                    ..Default::default()
                 },
             ],
             ..Default::default()
-        })),
+        }),
         validator: None,
         execute: Arc::new(|_ctx, args| {
             Box::pin(async move {
@@ -168,7 +134,7 @@ pub(crate) fn run_command() -> Command {
                     "[newton] DEPRECATED: `newton run` is deprecated; \
                      use `newton workflow run` instead"
                 );
-                let run_args = RunArgs::try_from(args)?;
+                let run_args = RunArgs::from_arg_value_map(&args);
                 commands::workflow_run(run_args).await.map_err(anyhow::Error::from)
             })
         }),

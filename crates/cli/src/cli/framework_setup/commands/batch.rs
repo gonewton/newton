@@ -8,15 +8,15 @@ use crate::cli::args::BatchArgs;
 use crate::cli::categories;
 use crate::cli::commands;
 use crate::cli::framework_setup::help_text::BATCH_LONG_ABOUT;
+use crate::cli::framework_setup::FromArgValueMap;
 
 pub(crate) fn batch_command() -> Command {
     Command {
-        id: "batch",
-        summary: "Process queued work items for a project",
-        syntax: Some("<PROJECT_ID> [OPTIONS]"),
-        category: Some(categories::OPS),
-        spec: Some(Arc::new(CommandSpec {
+        id: "batch".into(),
+        spec: Arc::new(CommandSpec {
             summary: "Process queued work items for a project",
+            syntax: Some("<PROJECT_ID> [OPTIONS]"),
+            category: Some(categories::OPS),
             long_about: Some(BATCH_LONG_ABOUT),
             examples: vec![
                 "newton batch project-alpha",
@@ -28,58 +28,45 @@ pub(crate) fn batch_command() -> Command {
                 ArgSpec {
                     name: "project-id",
                     kind: ArgKind::Positional,
-                    short: None,
-                    long: None,
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Required,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Project identifier that maps to .newton/configs/<project_id>.conf",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "workspace",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("workspace"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Workspace root containing the .newton directory",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "once",
                     kind: ArgKind::Flag,
-                    short: None,
                     long: Some("once"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Process a single plan and exit instead of running as a daemon",
+                    ..Default::default()
                 },
                 ArgSpec {
                     name: "poll-interval",
                     kind: ArgKind::Option,
-                    short: None,
                     long: Some("poll-interval"),
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
-                    default: None,
-                    conflicts_with: vec![],
-                    requires: vec![],
                     help: "Seconds to wait when the queue is empty (default: 60)",
+                    ..Default::default()
                 },
             ],
             ..Default::default()
-        })),
+        }),
         validator: None,
         execute: Arc::new(|_ctx, args| {
             Box::pin(async move {
-                let dto = BatchArgs::try_from(args)?;
+                let dto = BatchArgs::from_arg_value_map(&args);
                 commands::batch(dto).await
             })
         }),
