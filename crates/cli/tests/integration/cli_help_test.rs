@@ -150,6 +150,27 @@ fn run_help_does_not_reference_nonexistent_flags() {
 /// This keeps the snapshot stable across cli-framework iteration-order changes.
 #[test]
 fn newton_help_matches_parity_snapshot() {
+    fn regex_replace_version(s: &str) -> String {
+        // Replace "newton X.Y.Z" with "newton VERSION" so option lines are
+        // stable across version bumps and the snapshot never needs updating for
+        // a release.
+        let mut out = String::new();
+        let marker = "newton ";
+        if let Some(pos) = s.find(marker) {
+            let after = &s[pos + marker.len()..];
+            let end = after
+                .find(|c: char| !c.is_ascii_digit() && c != '.')
+                .unwrap_or(after.len());
+            if end > 0 && after[..end].contains('.') {
+                out.push_str(&s[..pos]);
+                out.push_str("newton VERSION");
+                out.push_str(&after[end..]);
+                return out;
+            }
+        }
+        s.to_string()
+    }
+
     fn normalize(text: &str) -> String {
         // New grouped format: category headers are "Word:" at column 0 (not
         // "Commands:" or "Options:"). Command lines are single-indented. Usage
@@ -189,7 +210,10 @@ fn newton_help_matches_parity_snapshot() {
             }
             if in_options {
                 if !trimmed.is_empty() {
-                    options_lines.push(trimmed.to_string());
+                    // Strip the semver token so the snapshot never needs
+                    // updating for a version bump: "newton 0.5.111" → "newton VERSION".
+                    let normalised_opt = regex_replace_version(trimmed);
+                    options_lines.push(normalised_opt);
                 }
                 continue;
             }
@@ -201,10 +225,12 @@ fn newton_help_matches_parity_snapshot() {
             }
 
             // Inside a category: single-indented lines are command summaries;
-            // double-indented lines are Usage hints — skip them.
+            // deeper-indented lines are Usage hints — skip them.
+            // Accept 1–5 leading spaces so the snapshot is stable across
+            // cli-framework help-indent changes (was 2 spaces, now 4 spaces).
             if let Some(ref cat) = current_category {
-                if raw_line.starts_with("  ") && !raw_line.starts_with("   ") {
-                    // Single indent (exactly 2 spaces) = command summary line.
+                let indent = raw_line.len() - raw_line.trim_start().len();
+                if (1..=5).contains(&indent) {
                     let cmd_name = trimmed.split_whitespace().next().unwrap_or("");
                     // Skip deprecated `run` (hidden alias, spec 051).
                     if cmd_name == "run" {
@@ -215,7 +241,7 @@ fn newton_help_matches_parity_snapshot() {
                         .or_default()
                         .push(trimmed.to_string());
                 }
-                // Double-indent (Usage: hints) → skip silently.
+                // Deeper indent (Usage: hints) → skip silently.
             }
         }
 
