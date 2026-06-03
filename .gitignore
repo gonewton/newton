@@ -36,3 +36,4 @@ auto_release_trigger.txt
 dk.toml
 
 .newton
+docs/adr
