@@ -159,10 +159,6 @@ name = "test_e2e_coverage_matrix"
 path = "tests/test_e2e_coverage_matrix.rs"
 
 [[test]]
-name = "test_e2e_run"
-path = "tests/integration/test_e2e_run.rs"
-
-[[test]]
 name = "test_e2e_workflow"
 path = "tests/integration/test_e2e_workflow.rs"
 
@@ -193,10 +189,6 @@ path = "tests/integration/test_e2e_batch.rs"
 [[test]]
 name = "test_e2e_ops"
 path = "tests/integration/test_e2e_ops.rs"
-
-[[test]]
-name = "test_e2e_webhook"
-path = "tests/integration/test_e2e_webhook.rs"
 
 [[test]]
 name = "test_e2e_negative"

@@ -1,11 +1,7 @@
-//! Issue #337: `newton mcp serve` subcommand entry path applies Newton's
-//! customizations (probe-bind, structured startup event, error codes) just like
-//! the legacy `--mcp-serve` flag.
-//!
-//! Stage 3 integration tests covering:
-//! - `mcp serve` emits `mcp_serve_started` JSON on stderr
-//! - `mcp serve` on an occupied port emits `NEWTON-MCP-001`
-//! - `mcp serve` `tool_count` matches `MCP_EXPOSED_COMMAND_IDS.len()`
+//! Integration tests for `newton mcp serve` subcommand:
+//! - emits `mcp_serve_started` JSON on stderr
+//! - on an occupied port emits `NEWTON-MCP-001`
+//! - `tool_count` matches `MCP_EXPOSED_COMMAND_IDS.len()`
 use newton_cli::cli::framework_setup::MCP_EXPOSED_COMMAND_IDS;
 use newton_cli::cli::mcp;
 use std::io::{BufRead, BufReader};
@@ -37,9 +33,6 @@ fn is_mcp_subcommand_detects_subcommand_form() {
 
     let no_serve_with_mcp: Vec<String> = vec!["newton".into(), "serve".into(), "--with-mcp".into()];
     assert!(!mcp::is_mcp_subcommand(&no_serve_with_mcp));
-
-    let no_flag_form: Vec<String> = vec!["newton".into(), "--mcp-serve".into()];
-    assert!(!mcp::is_mcp_subcommand(&no_flag_form));
 }
 
 #[test]
@@ -139,49 +132,4 @@ fn mcp_serve_subcommand_port_conflict_emits_newton_mcp_001() {
         port,
         stderr
     );
-}
-
-#[test]
-fn mcp_serve_subcommand_does_not_emit_deprecation_notice() {
-    let port = pick_free_port();
-    let bin = assert_cmd::cargo::cargo_bin("newton");
-    let mut child = Command::new(bin)
-        .arg("mcp")
-        .arg("serve")
-        .arg("--port")
-        .arg(port.to_string())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn newton mcp serve");
-
-    let stderr = child.stderr.take().expect("stderr pipe");
-    let mut reader = BufReader::new(stderr);
-
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let mut lines_before_json: Vec<String> = Vec::new();
-    while Instant::now() < deadline {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) => break,
-            Ok(_) => {
-                if line.contains("\"event\":\"mcp_serve_started\"") {
-                    break;
-                }
-                lines_before_json.push(line);
-            }
-            Err(_) => break,
-        }
-    }
-
-    let _ = child.kill();
-    let _ = child.wait();
-
-    for line in &lines_before_json {
-        assert!(
-            !line.contains("[newton] DEPRECATED:"),
-            "unexpected deprecation notice in mcp serve output: {}",
-            line
-        );
-    }
 }

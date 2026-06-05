@@ -608,7 +608,8 @@ workflow:
     std::fs::write(&workflow_path, workflow_yaml).unwrap();
 
     let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
-    cmd.arg("run")
+    cmd.arg("workflow")
+        .arg("run")
         .arg(&workflow_path)
         .arg("--workspace")
         .arg(&workspace);
@@ -665,7 +666,8 @@ workflow:
     fs::write(&workflow_path, workflow_yaml).unwrap();
 
     let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
-    cmd.arg("run")
+    cmd.arg("workflow")
+        .arg("run")
         .arg(&workflow_path)
         .arg("--workspace")
         .arg(&workspace);
@@ -740,7 +742,8 @@ workflow:
     fs::write(&workflow_path, workflow_yaml).unwrap();
 
     let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
-    cmd.arg("run")
+    cmd.arg("workflow")
+        .arg("run")
         .arg(&workflow_path)
         .arg("--workspace")
         .arg(&workspace);
@@ -791,7 +794,8 @@ workflow:
     fs::write(&workflow_path, workflow_yaml).unwrap();
 
     let mut cmd = ProcessCommand::cargo_bin("newton").expect("newton binary");
-    cmd.arg("run")
+    cmd.arg("workflow")
+        .arg("run")
         .arg(&workflow_path)
         .arg("--workspace")
         .arg(&workspace)

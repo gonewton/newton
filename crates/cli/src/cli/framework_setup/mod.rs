@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use anyhow::anyhow;
 use cli_framework::app::{App, AppBuilder};
 use cli_framework::command::Command;
-use cli_framework::command::{FromArgValueMap, IntoCommandSpec};
+use cli_framework::command::FromArgValueMap;
 use cli_framework::spec::command_tree::{CommandPath, GroupMetadata};
 use cli_framework::spec::value::ArgValue;
 use uuid::Uuid;
@@ -122,7 +122,6 @@ pub(crate) fn require_workflow_path(
 
 fn all_root_commands() -> Vec<Command> {
     vec![
-        commands::run::run_command(),
         commands::init::init_command(),
         commands::batch::batch_command(),
         commands::serve::serve_command(),
@@ -180,7 +179,6 @@ pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
 
 /// Stable list of tree-path strings registered by [`build_app`].
 pub const REGISTERED_COMMAND_IDS: &[&str] = &[
-    "run",
     "init",
     "batch",
     "serve",
@@ -238,14 +236,6 @@ pub fn enumerate_effective_app_tree_commands() -> Vec<(String, Command)> {
 }
 
 // ── FromArgValueMap adapters ─────────────────────────────────────────────────
-
-impl IntoCommandSpec for RunArgs {
-    fn command_spec() -> cli_framework::spec::command_tree::CommandSpec {
-        // RunArgs spec is defined in run_command(); this impl satisfies the trait
-        // but the spec is constructed directly in the Command builder.
-        panic!("RunArgs::command_spec() should not be called directly; spec lives in run_command()")
-    }
-}
 
 impl FromArgValueMap for RunArgs {
     fn from_arg_value_map(map: &HashMap<String, ArgValue>) -> Self {

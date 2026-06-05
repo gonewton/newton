@@ -6,28 +6,7 @@
 mod support;
 
 use predicates::prelude::*;
-use support::{fixture_path, newton};
-
-#[test]
-fn smoke_run_help() {
-    // Repurposed (spec 051 Decision #4): exercises the hidden deprecated `newton run` alias.
-    // Kept in REQUIRED_SMOKE_IDS until the hidden shim is removed.
-    let wf = fixture_path("workflows/minimal_smoke.yaml");
-    let out = newton()
-        .args(["run", &wf.to_string_lossy()])
-        .output()
-        .expect("newton run (deprecated) should execute");
-    assert!(
-        out.status.success(),
-        "deprecated newton run should succeed; stderr={}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("[newton] DEPRECATED"),
-        "deprecated newton run should emit deprecation notice; stderr={stderr}"
-    );
-}
+use support::newton;
 
 #[test]
 fn smoke_workflow_run_help() {

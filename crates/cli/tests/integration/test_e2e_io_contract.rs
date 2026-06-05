@@ -11,6 +11,7 @@ fn emit_completion_json_success_exit_0() {
 
     let out = newton()
         .args([
+            "workflow",
             "run",
             &wf.to_string_lossy(),
             "--workspace",
@@ -45,6 +46,7 @@ fn no_emit_completion_json_human_readable() {
 
     let out = newton()
         .args([
+            "workflow",
             "run",
             &wf.to_string_lossy(),
             "--workspace",
@@ -79,6 +81,7 @@ fn emit_completion_json_workflow_failure_exit_2() {
 
     let out = newton()
         .args([
+            "workflow",
             "run",
             &wf.to_string_lossy(),
             "--workspace",
@@ -117,6 +120,7 @@ fn emit_completion_json_internal_error_exit_1() {
     // Run WITHOUT providing the required `repo` parameter — triggers WFG-IO-002.
     let out = newton()
         .args([
+            "workflow",
             "run",
             &wf.to_string_lossy(),
             "--workspace",
@@ -161,6 +165,7 @@ fn parameters_json_loads_trigger_payload() {
 
     let out = newton()
         .args([
+            "workflow",
             "run",
             &wf.to_string_lossy(),
             "--workspace",
@@ -186,6 +191,7 @@ fn trigger_file_flag_rejected() {
 
     let out = newton()
         .args([
+            "workflow",
             "run",
             &wf.to_string_lossy(),
             "--workspace",
@@ -228,6 +234,7 @@ fn parameters_json_at_prefix_resolves_file() {
 
     let out = newton()
         .args([
+            "workflow",
             "run",
             &wf.to_string_lossy(),
             "--workspace",
@@ -258,6 +265,7 @@ fn wfg_io_001_emitted_when_payload_exceeds_max_input_bytes() {
 
     let out = newton()
         .args([
+            "workflow",
             "run",
             &wf.to_string_lossy(),
             "--workspace",
@@ -297,6 +305,7 @@ fn wfg_io_003_emitted_when_result_exceeds_max_output_bytes() {
 
     let out = newton()
         .args([
+            "workflow",
             "run",
             &wf.to_string_lossy(),
             "--workspace",

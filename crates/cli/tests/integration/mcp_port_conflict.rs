@@ -1,4 +1,4 @@
-//! Issue #237: bind failure on `--mcp-host:--mcp-port` MUST exit non-zero with
+//! Issue #237: bind failure on `mcp serve --host:--port` MUST exit non-zero with
 //! a single error line referencing `NEWTON-MCP-001` and the failed `host:port`
 //! (spec §4.3).
 use std::process::{Command, Stdio};
@@ -11,15 +11,16 @@ fn port_conflict_emits_newton_mcp_001_and_exits_nonzero() {
 
     let bin = assert_cmd::cargo::cargo_bin("newton");
     let output = Command::new(bin)
-        .arg("--mcp-serve")
-        .arg("--mcp-host")
+        .arg("mcp")
+        .arg("serve")
+        .arg("--host")
         .arg("127.0.0.1")
-        .arg("--mcp-port")
+        .arg("--port")
         .arg(port.to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .expect("spawn newton");
+        .expect("spawn newton mcp serve");
 
     drop(listener);
 

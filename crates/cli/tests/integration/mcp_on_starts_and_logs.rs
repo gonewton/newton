@@ -27,35 +27,31 @@ fn mcp_serve_emits_structured_startup_log() {
     let port = pick_free_port();
     let bin = assert_cmd::cargo::cargo_bin("newton");
     let mut child = Command::new(bin)
-        .arg("--mcp-serve")
-        .arg("--mcp-host")
+        .arg("mcp")
+        .arg("serve")
+        .arg("--host")
         .arg("127.0.0.1")
-        .arg("--mcp-port")
+        .arg("--port")
         .arg(port.to_string())
-        .arg("--mcp-path")
+        .arg("--path")
         .arg("/mcp")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("spawn newton --mcp-serve");
+        .expect("spawn newton mcp serve");
 
     let stderr = child.stderr.take().expect("stderr pipe");
     let mut reader = BufReader::new(stderr);
 
     // Poll for the structured log line; cli-framework starts an Axum runtime
     // so we cannot wait_for_exit. Cap at 10s.
-    // Also verify the deprecation notice appears before the JSON startup event.
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut found: Option<String> = None;
-    let mut found_deprecation_before_json = false;
     while Instant::now() < deadline {
         let mut line = String::new();
         match reader.read_line(&mut line) {
             Ok(0) => break,
             Ok(_) => {
-                if line.contains("[newton] DEPRECATED:") && found.is_none() {
-                    found_deprecation_before_json = true;
-                }
                 if line.contains("\"event\":\"mcp_serve_started\"") {
                     found = Some(line);
                     break;
@@ -80,9 +76,5 @@ fn mcp_serve_emits_structured_startup_log() {
         line.contains(&format!("\"tool_count\":{}", MCP_EXPOSED_COMMAND_IDS.len())),
         "line={}",
         line
-    );
-    assert!(
-        found_deprecation_before_json,
-        "--mcp-serve must emit deprecation notice before mcp_serve_started JSON"
     );
 }

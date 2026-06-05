@@ -72,7 +72,6 @@ mod integration_tests {
         let test_cases = vec![
             vec!["newton", "--help"],
             vec!["newton", "--version"],
-            vec!["newton", "run", "--help"],
             vec!["newton", "step", "--help"],
             vec!["newton", "status", "--help"],
             vec!["newton", "report", "--help"],

@@ -520,10 +520,7 @@ impl Operator for HumanDecisionOperator {
                     execution_id: ctx.execution_id.clone(),
                     task_id: ctx.task_id.clone(),
                     interviewer_type: interviewer.interviewer_type().to_string(),
-                    prompt: format!(
-                        "{} [DEPRECATED: migrate to structured options by next release]",
-                        prompt
-                    ),
+                    prompt: prompt.clone(),
                     choices: Some(choices.clone()),
                     approved: None,
                     choice: Some(result.choice.clone()),

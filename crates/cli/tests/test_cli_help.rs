@@ -6,7 +6,6 @@
 use std::process::Command;
 
 static ALL_MAIN_COMMANDS: &[&[&str]] = &[
-    &["run"],
     &["init"],
     &["batch"],
     &["workflow"],
@@ -49,38 +48,6 @@ fn test_all_main_commands_have_examples_section() {
             stdout.contains("EXAMPLES") || stdout.contains("Example"),
             "Help text for {:?} should contain examples section",
             command
-        );
-    }
-}
-
-#[test]
-fn run_help_documents_target_flags_only() {
-    let stdout = get_help_output(&["run"]);
-    for required in [
-        "--trigger",
-        "--context",
-        "--parameters-json",
-        "--timeout",
-        "--workspace",
-    ] {
-        assert!(
-            stdout.contains(required),
-            "run --help should document {}, got:\n{}",
-            required,
-            stdout
-        );
-    }
-    for forbidden in [
-        "--arg ",
-        "--set ",
-        "--trigger-json",
-        "--max-time-seconds",
-        "--file ",
-    ] {
-        assert!(
-            !stdout.contains(forbidden),
-            "run --help must not reference legacy flag {}",
-            forbidden
         );
     }
 }

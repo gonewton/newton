@@ -37,12 +37,12 @@ fn enumerate_commands_includes_health_with_spec() {
 
 #[test]
 fn argv_with_newton_defaults_inserts_missing_flags() {
-    let argv: Vec<String> = vec!["newton".into(), "--mcp-serve".into()];
+    let argv: Vec<String> = vec!["newton".into(), "mcp".into(), "serve".into()];
     let flags = mcp::parse_mcp_flags(&argv);
     let out = mcp::argv_with_newton_defaults(&argv, &flags);
-    assert!(out.iter().any(|a| a == "--mcp-host"));
-    assert!(out.iter().any(|a| a == "--mcp-port"));
-    assert!(out.iter().any(|a| a == "--mcp-path"));
+    assert!(out.iter().any(|a| a == "--host"));
+    assert!(out.iter().any(|a| a == "--port"));
+    assert!(out.iter().any(|a| a == "--path"));
     // Newton default port is 8730 (spec §4.2), distinct from cli-framework's
     // upstream default of 8080.
     assert!(
@@ -56,17 +56,18 @@ fn argv_with_newton_defaults_inserts_missing_flags() {
 fn argv_with_newton_defaults_preserves_user_overrides() {
     let argv: Vec<String> = vec![
         "newton".into(),
-        "--mcp-serve".into(),
-        "--mcp-port".into(),
+        "mcp".into(),
+        "serve".into(),
+        "--port".into(),
         "9100".into(),
-        "--mcp-host".into(),
+        "--host".into(),
         "0.0.0.0".into(),
     ];
     let flags = mcp::parse_mcp_flags(&argv);
     assert_eq!(flags.port, 9100);
     assert_eq!(flags.host, "0.0.0.0");
     let out = mcp::argv_with_newton_defaults(&argv, &flags);
-    // User-supplied `--mcp-port 9100` MUST not be duplicated.
-    let port_count = out.iter().filter(|a| *a == "--mcp-port").count();
+    // User-supplied `--port 9100` MUST not be duplicated.
+    let port_count = out.iter().filter(|a| *a == "--port").count();
     assert_eq!(port_count, 1);
 }

@@ -14,44 +14,6 @@ fn help_output(args: &[&str]) -> String {
 }
 
 #[test]
-fn run_help_has_examples_section() {
-    let stdout = help_output(&["run"]);
-    assert!(
-        stdout.contains("EXAMPLES:"),
-        "run --help should contain EXAMPLES: section, got:\n{}",
-        stdout
-    );
-}
-
-#[test]
-fn run_help_shows_basic_workflow_example() {
-    // `newton run --help` is intercepted to `newton workflow run --help`
-    let stdout = help_output(&["run"]);
-    assert!(
-        stdout.contains("newton workflow run workflow.yaml"),
-        "run --help (intercepted to workflow run --help) should show basic usage example"
-    );
-}
-
-#[test]
-fn run_help_shows_workspace_flag_example() {
-    let stdout = help_output(&["run"]);
-    assert!(
-        stdout.contains("--workspace"),
-        "run --help should demonstrate --workspace flag"
-    );
-}
-
-#[test]
-fn run_help_shows_trigger_flag_example() {
-    let stdout = help_output(&["run"]);
-    assert!(
-        stdout.contains("--trigger"),
-        "run --help should demonstrate --trigger flag"
-    );
-}
-
-#[test]
 fn init_help_has_examples_section() {
     let stdout = help_output(&["init"]);
     assert!(
@@ -101,7 +63,6 @@ fn batch_help_shows_workspace_flag_example() {
 #[test]
 fn all_main_commands_have_examples() {
     let commands: &[&[&str]] = &[
-        &["run"],
         &["init"],
         &["batch"],
         &["serve"],
@@ -118,23 +79,6 @@ fn all_main_commands_have_examples() {
     }
 }
 
-#[test]
-fn run_help_does_not_reference_nonexistent_flags() {
-    let stdout = help_output(&["run"]);
-    assert!(
-        !stdout.contains("--max-iterations"),
-        "run --help should not reference removed --max-iterations flag"
-    );
-    assert!(
-        !stdout.contains("--tool-timeout"),
-        "run --help should not reference removed --tool-timeout flag"
-    );
-    assert!(
-        !stdout.contains("--strict-mode"),
-        "run --help should not reference removed --strict-mode flag"
-    );
-}
-
 /// Parity check (spec §10 Stage E / §15 D8): asserts that the post-migration
 /// `newton --help` output stays in lock-step with the `help_parity.snap`
 /// artifact that the CHANGELOG references.
@@ -143,7 +87,7 @@ fn run_help_does_not_reference_nonexistent_flags() {
 /// a flat "Commands:" list. We normalize by:
 /// 1. Keeping the "Usage:" header line.
 /// 2. Collecting all category-section command lines (first indented token = command name),
-///    stripping the Usage: sub-lines (double-indented) and the deprecated `run` alias.
+///    stripping the Usage: sub-lines (double-indented).
 /// 3. Sorting the collected command summary lines within each category section.
 /// 4. Keeping "Options:" lines sorted.
 ///
@@ -231,11 +175,6 @@ fn newton_help_matches_parity_snapshot() {
             if let Some(ref cat) = current_category {
                 let indent = raw_line.len() - raw_line.trim_start().len();
                 if (1..=5).contains(&indent) {
-                    let cmd_name = trimmed.split_whitespace().next().unwrap_or("");
-                    // Skip deprecated `run` (hidden alias, spec 051).
-                    if cmd_name == "run" {
-                        continue;
-                    }
                     category_commands
                         .entry(cat.clone())
                         .or_default()

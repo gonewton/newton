@@ -9,7 +9,6 @@ use newton_core::logging::LogInvocationKind;
 pub fn kind_for_command(name: &str) -> LogInvocationKind {
     use LogInvocationKind::*;
     match name {
-        "run" => Run,
         "resume" => Resume,
         "init" => Init,
         "batch" => Batch,
