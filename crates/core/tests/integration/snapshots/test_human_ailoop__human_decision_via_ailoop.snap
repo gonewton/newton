@@ -12,7 +12,7 @@ decision_id: ~
 default_used: false
 execution_id: "[execution_id]"
 interviewer_type: ailoop
-prompt: "Which path forward? [DEPRECATED: migrate to structured options by next release]"
+prompt: Which path forward?
 responder: ~
 response_text: fix
 task_id: decision
