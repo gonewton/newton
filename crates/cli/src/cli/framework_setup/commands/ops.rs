@@ -29,6 +29,7 @@ pub(crate) fn health_command() -> Command {
         validator: None,
         execute: Arc::new(|_ctx, _args| Box::pin(async move { ops::health::run() })),
         expose_mcp: true,
+        expose_chat: true,
     }
 }
 
@@ -69,6 +70,7 @@ pub(crate) fn doctor_command() -> Command {
             })
         }),
         expose_mcp: false,
+        expose_chat: true,
     }
 }
 
@@ -126,5 +128,6 @@ pub(crate) fn config_command() -> Command {
             })
         }),
         expose_mcp: true,
+        expose_chat: true,
     }
 }

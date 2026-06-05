@@ -53,5 +53,6 @@ pub(crate) fn init_command() -> Command {
             })
         }),
         expose_mcp: false,
+        expose_chat: false,
     }
 }

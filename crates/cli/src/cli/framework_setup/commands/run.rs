@@ -139,5 +139,6 @@ pub(crate) fn run_command() -> Command {
             })
         }),
         expose_mcp: false,
+        expose_chat: false,
     }
 }

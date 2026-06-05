@@ -71,5 +71,6 @@ pub(crate) fn batch_command() -> Command {
             })
         }),
         expose_mcp: false,
+        expose_chat: false,
     }
 }

@@ -217,5 +217,6 @@ pub(crate) fn data_verb_command(verb: DataVerb) -> Command {
             })
         }),
         expose_mcp: true,
+        expose_chat: true,
     }
 }

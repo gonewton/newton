@@ -167,11 +167,13 @@ fn populate_command_registry(builder: AppBuilder) -> anyhow::Result<AppBuilder> 
 
 /// Build the Newton CLI application backed by `cli-framework`.
 pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
+    use cli_framework::command::chat::ChatToolPolicy;
     use cli_framework::mcp::McpToolExportPolicy;
     let builder = AppBuilder::new().with_version("newton", env!("CARGO_PKG_VERSION"));
     let builder = populate_command_registry(builder)?;
     builder
         .with_mcp_export_policy(McpToolExportPolicy::ExposeMcpOnly)
+        .with_chat_tool_policy(ChatToolPolicy::UseCommandFlag)
         .build(ctx)
         .map_err(|e| anyhow!("{}: {}", error_codes::CLI_MIG_001, e))
 }
