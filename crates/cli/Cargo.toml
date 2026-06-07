@@ -18,7 +18,7 @@ name = "logging_integration_helper"
 path = "tests/bin/logging_integration_helper.rs"
 
 [dependencies]
-cli-framework = { git = "https://github.com/aroff/cli-framework", rev = "268de6e7b2a490c7345941b961487165a8e840bb", default-features = false, features = ["mcp-server", "api-server", "api-swagger"] }
+cli-framework = { git = "https://github.com/aroff/cli-framework", rev = "268de6e7b2a490c7345941b961487165a8e840bb", default-features = false, features = ["mcp-server", "mcp-install", "api-server", "api-swagger"] }
 rmcp = { version = "1.6", features = ["server", "transport-streamable-http-server"] }
 utoipa-swagger-ui = { version = "9.0.2", default-features = false, features = ["vendored", "url"] }
 newton-core = { path = "../core" }
@@ -149,6 +149,10 @@ path = "tests/integration/mcp_expose_mcp_only.rs"
 [[test]]
 name = "mcp_serve_subcommand"
 path = "tests/integration/mcp_serve_subcommand.rs"
+
+[[test]]
+name = "mcp_install_dry_run"
+path = "tests/integration/mcp_install_dry_run.rs"
 
 [[test]]
 name = "test_e2e_smoke"

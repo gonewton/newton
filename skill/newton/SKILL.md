@@ -30,6 +30,8 @@ scoop install newton
 
 Verify: `newton --help` and `newton --version`.
 
+> **Deprecated:** Manually editing agent config files (`.cursor/mcp.json`, `~/.claude.json`, etc.) to register Newton as an MCP server is deprecated. Use `newton mcp install` instead (see [MCP agent registration](#mcp-agent-registration) below).
+
 ## Quick start
 
 1. `newton --help` and `newton <command> --help` for flags.
@@ -85,6 +87,56 @@ newton workflow lint workflow.yaml
 newton workflow preview workflow.yaml
 newton workflow resume --run-id <uuid> --workspace .
 ```
+
+## MCP agent registration
+
+Newton can register itself as an MCP server in any supported agent with a single command. This replaces manual config-file editing, which is deprecated.
+
+**Discover supported agents and their config file paths:**
+
+```bash
+newton mcp list
+```
+
+**Register for Cursor (project scope — writes `.cursor/mcp.json` in CWD):**
+
+```bash
+newton mcp install --agent cursor --stdio --scope project --overwrite
+```
+
+**Register for Claude Code (project scope — writes `.mcp.json` in CWD):**
+
+```bash
+newton mcp install --agent claude --stdio --scope project --overwrite
+```
+
+**Preview the config entry without writing any file:**
+
+```bash
+newton mcp install --agent cursor --stdio --dry-run
+```
+
+**Register for other agents (global scope):**
+
+```bash
+newton mcp install --agent gemini --stdio --scope global --overwrite
+newton mcp install --agent copilot --stdio --scope global --overwrite
+newton mcp install --agent opencode --stdio --scope global --overwrite
+newton mcp install --agent codex --stdio --scope global --overwrite
+```
+
+`newton mcp register` is an alias for `newton mcp install`.
+
+After running `mcp install`, reload the agent (restart or re-open the workspace). Newton's exposed MCP tools (`config`, `health`, `run`, `workflow`) will be callable over the registered stdio transport.
+
+| Agent flag | Project-scope config file | Global-scope config file |
+| --- | --- | --- |
+| `claude` | `.mcp.json` in CWD | `~/.claude.json` |
+| `cursor` | `.cursor/mcp.json` in CWD | `~/.cursor/mcp.json` |
+| `gemini` | `.gemini/settings.json` in CWD | `~/.gemini/settings.json` |
+| `copilot` / `vscode` | `.vscode/mcp.json` in CWD | `~/.config/Code/User/mcp.json` |
+| `opencode` | `opencode.json` in CWD | `~/.config/opencode/opencode.json` |
+| `codex` | `.codex/config.toml` in CWD | `~/.codex/config.toml` |
 
 ## MCP Server Mode
 
