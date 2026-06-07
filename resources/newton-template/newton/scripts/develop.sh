@@ -26,7 +26,7 @@ if [[ "${2:-}" == "resume" ]]; then
   export GH_PROJECT_OWNER="$gh_project_owner"
   export GH_PROJECT_NUMBER="$gh_project_number"
   export RUST_LOG=debug
-  exec newton resume --execution-id "$execution_id" \
+  exec newton workflow resume --run-id "$execution_id" \
     --workspace "$project_root" \
     --allow-workflow-change
 fi
@@ -59,7 +59,7 @@ echo "Raw spec: $raw_spec_path"
 export GH_PROJECT_OWNER="$gh_project_owner"
 export GH_PROJECT_NUMBER="$gh_project_number"
 export RUST_LOG=debug
-exec newton run "$workflow_path" \
+exec newton workflow run "$workflow_path" \
   --workspace "$project_root" \
   --arg "raw_spec_path=$raw_spec_path" \
   --arg "board_issue_number=${item_issue_number}" \

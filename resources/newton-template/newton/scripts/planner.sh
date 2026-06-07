@@ -37,7 +37,7 @@ echo "Spec:   $spec_path"
 export GH_PROJECT_OWNER="$gh_project_owner"
 export GH_PROJECT_NUMBER="$gh_project_number"
 # --server must match newton serve bind (default 127.0.0.1:8080).
-exec newton run "$WORKFLOW" \
+exec newton workflow run "$WORKFLOW" \
   --workspace "$project_root" \
   --arg "prompt=$spec_path" \
   --arg "output_path=$spec_path" \

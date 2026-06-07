@@ -25,7 +25,7 @@ if [[ -z "$trigger_json" ]]; then
   fi
 fi
 
-args=(newton run "$WORKFLOW" --workspace "$project_root" --verbose --server http://127.0.0.1:8080)
+args=(newton workflow run "$WORKFLOW" --workspace "$project_root" --verbose --server http://127.0.0.1:8080)
 if [[ -n "$trigger_json" ]]; then
   args+=(--trigger-json "$trigger_json")
 fi
