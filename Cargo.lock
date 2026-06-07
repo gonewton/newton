@@ -2444,7 +2444,7 @@ dependencies = [
 
 [[package]]
 name = "newton-cli"
-version = "0.5.113"
+version = "0.5.114"
 dependencies = [
  "aikit-sdk 0.3.0 (git+https://github.com/goaikit/aikit.git?branch=main)",
  "ailoop-server",
@@ -2496,7 +2496,7 @@ dependencies = [
 
 [[package]]
 name = "newton-core"
-version = "0.5.113"
+version = "0.5.114"
 dependencies = [
  "aikit-magictool",
  "aikit-sdk 0.3.0 (git+https://github.com/goaikit/aikit.git?branch=main)",
