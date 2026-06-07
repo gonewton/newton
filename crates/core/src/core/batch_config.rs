@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 /// Batch configuration derived from `.newton/configs/<project>.conf`.
 #[derive(Debug, Clone)]
-pub struct BatchProjectConfig {
+pub struct PlanQueueConfig {
     /// Absolute path to the project root that contains `.newton`.
     pub project_root: PathBuf,
 
@@ -13,7 +13,7 @@ pub struct BatchProjectConfig {
     pub workflow_file: PathBuf,
 }
 
-impl BatchProjectConfig {
+impl PlanQueueConfig {
     /// Load and validate batch config for the provided project ID from the workspace root.
     pub fn load(workspace_root: &Path, project_id: &str) -> Result<Self> {
         let conf_path = workspace_root
@@ -44,7 +44,7 @@ impl BatchProjectConfig {
             }
         };
 
-        Ok(BatchProjectConfig {
+        Ok(PlanQueueConfig {
             project_root,
             workflow_file,
         })

@@ -4,22 +4,6 @@ mod support;
 use support::newton;
 
 #[test]
-fn integ_health_command() {
-    let out = newton()
-        .args(["health"])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
-
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("OK") || stdout.contains("ok"),
-        "health should report OK; got: {stdout}"
-    );
-}
-
-#[test]
 fn integ_doctor_command() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".newton")).unwrap();

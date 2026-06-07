@@ -187,8 +187,8 @@ name = "test_e2e_init"
 path = "tests/integration/test_e2e_init.rs"
 
 [[test]]
-name = "test_e2e_batch"
-path = "tests/integration/test_e2e_batch.rs"
+name = "test_e2e_optimize"
+path = "tests/integration/test_e2e_optimize.rs"
 
 [[test]]
 name = "test_e2e_ops"

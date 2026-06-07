@@ -18,8 +18,8 @@ smoke row below. The required set is the sixteen Newton ids registered in
 `crates/cli/src/cli/framework_setup.rs`, plus the framework-provided `spec`
 command.
 
-Required smoke rows: `init`, `batch`, `serve`, `workflow`,
-`resume`, `checkpoint`, `artifact`, `webhook`, `runs`, `health`, `doctor`,
+Required smoke rows: `init`, `optimize`, `serve`, `workflow`,
+`resume`, `checkpoint`, `artifact`, `runs`, `doctor`,
 `config`, `completion`, `chat`, `spec`.
 
 ## Coverage matrix
@@ -28,15 +28,13 @@ Required smoke rows: `init`, `batch`, `serve`, `workflow`,
 |---|---|---|---|
 | workflow run | --help | smoke_workflow_run_help | smoke |
 | init | --help | smoke_init_help | smoke |
-| batch | --help | smoke_batch_help | smoke |
+| optimize | --help | smoke_optimize_help | smoke |
 | serve | --help | smoke_serve_help | smoke |
 | workflow | --help | smoke_workflow_help | smoke |
 | resume | --help | smoke_resume_help | smoke |
 | checkpoint | --help | smoke_checkpoint_help | smoke |
 | artifact | --help | smoke_artifact_help | smoke |
-| webhook | --help | smoke_webhook_help | smoke |
 | runs | --help | smoke_runs_help | smoke |
-| health |  | smoke_health | smoke |
 | doctor | --help | smoke_doctor_help | smoke |
 | config | --help | smoke_config_help | smoke |
 | completion | --help | smoke_completion_help | smoke |
@@ -54,8 +52,7 @@ Required smoke rows: `init`, `batch`, `serve`, `workflow`,
 | checkpoint clean | --older-than | integ_checkpoint_clean_older_than | integration |
 | artifact clean | --older-than | integ_artifact_clean_removes_old | integration |
 | init |  | integ_init_creates_workspace | integration |
-| batch | --once | integ_batch_once_no_plans | integration |
-| health |  | integ_health_command | integration |
+| optimize | --once | integ_optimize_once_no_plans | integration |
 | doctor |  | integ_doctor_command | integration |
 | config show |  | integ_config_show | integration |
 | completion | bash | integ_completion_bash | integration |

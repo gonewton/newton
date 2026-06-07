@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -11,12 +10,11 @@ use uuid::Uuid;
 use crate::cli::args::{
     ArtifactArgs, ArtifactCommand, CheckpointArgs, CheckpointCommand, DotArgs, ExplainArgs,
     GraphFormat, ImportArgs, LintArgs, ResumeArgs, RunArgs, RunsArgs, RunsCommand, ValidateArgs,
-    WebhookArgs, WebhookCommand, WebhookServeArgs, WebhookStatusArgs,
 };
 use crate::cli::categories;
 use crate::cli::commands;
 use crate::cli::framework_setup::error_codes;
-use crate::cli::framework_setup::help_text::{WEBHOOK_LONG_ABOUT, WORKFLOW_LONG_ABOUT};
+use crate::cli::framework_setup::help_text::WORKFLOW_LONG_ABOUT;
 use crate::cli::framework_setup::{
     get_bool, get_opt_path, get_opt_str, parse_kvp_from_map, parse_output_format, FromArgValueMap,
 };
@@ -475,98 +473,5 @@ pub(crate) fn workflow_command() -> Command {
         }),
         expose_mcp: true,
         expose_chat: true,
-    }
-}
-
-pub(crate) fn webhook_command() -> Command {
-    Command {
-        id: "webhook".into(),
-        spec: Arc::new(CommandSpec {
-            summary: "Run webhooks to trigger workflows from external events",
-            syntax: Some("<serve|status> --workflow <PATH> --workspace <PATH>"),
-            category: Some(categories::OPS),
-            long_about: Some(WEBHOOK_LONG_ABOUT),
-            examples: vec![
-                "newton webhook serve --workflow workflow.yaml --workspace ./workspace",
-                "newton webhook status --workflow workflow.yaml --workspace ./workspace",
-            ],
-            args: vec![
-                ArgSpec {
-                    name: "subcommand",
-                    kind: ArgKind::Positional,
-                    value_type: ArgValueType::Enum(vec!["serve", "status"]),
-                    cardinality: Cardinality::Required,
-                    help: "Subcommand: serve or status",
-                    ..Default::default()
-                },
-                ArgSpec {
-                    name: "workflow",
-                    kind: ArgKind::Option,
-                    long: Some("workflow"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Optional,
-                    help: "Path to the workflow YAML file (required for serve)",
-                    ..Default::default()
-                },
-                ArgSpec {
-                    name: "workspace",
-                    kind: ArgKind::Option,
-                    long: Some("workspace"),
-                    value_type: ArgValueType::String,
-                    cardinality: Cardinality::Required,
-                    help: "Workspace root directory (required)",
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        }),
-        validator: None,
-        execute: Arc::new(|_ctx, args| {
-            Box::pin(async move {
-                let subcmd = get_opt_str(&args, "subcommand").unwrap_or_default();
-                let workspace_str = get_opt_str(&args, "workspace").ok_or_else(|| {
-                    anyhow!(
-                        "{}: --workspace is required for webhook {}",
-                        error_codes::CLI_MIG_002,
-                        subcmd
-                    )
-                })?;
-                let workspace = PathBuf::from(workspace_str);
-                let workflow = get_opt_path(&args, "workflow");
-                match subcmd.as_str() {
-                    "serve" => {
-                        let workflow = workflow.ok_or_else(|| {
-                            anyhow!(
-                                "{}: --workflow is required for webhook serve",
-                                error_codes::CLI_MIG_002
-                            )
-                        })?;
-                        let dto = WebhookArgs {
-                            command: WebhookCommand::Serve(WebhookServeArgs {
-                                workflow,
-                                workspace,
-                            }),
-                        };
-                        commands::webhook(dto).await.map_err(anyhow::Error::from)
-                    }
-                    "status" => {
-                        let dto = WebhookArgs {
-                            command: WebhookCommand::Status(WebhookStatusArgs {
-                                workflow,
-                                workspace,
-                            }),
-                        };
-                        commands::webhook(dto).await.map_err(anyhow::Error::from)
-                    }
-                    _ => Err(anyhow!(
-                        "{}: unknown webhook subcommand '{}'",
-                        error_codes::CLI_MIG_005,
-                        subcmd
-                    )),
-                }
-            })
-        }),
-        expose_mcp: false,
-        expose_chat: false,
     }
 }

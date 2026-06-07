@@ -15,15 +15,13 @@ use std::path::{Path, PathBuf};
 
 const REQUIRED_SMOKE_IDS: &[&str] = &[
     "init",
-    "batch",
+    "optimize",
     "serve",
     "workflow",
     "resume",
     "checkpoint",
     "artifact",
-    "webhook",
     "runs",
-    "health",
     "doctor",
     "config",
     "completion",

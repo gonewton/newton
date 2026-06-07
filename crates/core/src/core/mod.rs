@@ -7,7 +7,7 @@ pub mod template;
 pub mod types;
 pub mod workspace;
 
-pub use batch_config::{find_workspace_root, parse_conf, BatchProjectConfig};
+pub use batch_config::{find_workspace_root, parse_conf, PlanQueueConfig};
 pub use config::{validate_config, ConfigLoader, NewtonConfig};
 pub use context_file::ContextManager;
 pub use error::{AppError, DefaultErrorReporter, ErrorReporter};

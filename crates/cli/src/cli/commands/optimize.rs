@@ -1,7 +1,7 @@
-use crate::cli::args::BatchArgs;
+use crate::cli::args::OptimizeArgs;
 use crate::Result;
 use anyhow::anyhow;
-use newton_core::core::batch_config::BatchProjectConfig;
+use newton_core::core::batch_config::PlanQueueConfig;
 use newton_core::workflow::{
     executor::ExecutionOverrides, schema as workflow_schema, transform as workflow_transform,
 };
@@ -11,13 +11,13 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-struct BatchDirs {
+struct OptimizeDirs {
     todo_dir: PathBuf,
     completed_dir: PathBuf,
     failed_dir: PathBuf,
 }
 
-fn ensure_batch_dirs(workspace_root: &Path, project_id: &str) -> Result<BatchDirs> {
+fn ensure_optimize_dirs(workspace_root: &Path, project_id: &str) -> Result<OptimizeDirs> {
     let plan_root = workspace_root.join(".newton").join("plan");
     if !plan_root.is_dir() {
         return Err(anyhow!(
@@ -35,33 +35,31 @@ fn ensure_batch_dirs(workspace_root: &Path, project_id: &str) -> Result<BatchDir
     fs::create_dir_all(&completed_dir)?;
     fs::create_dir_all(plan_project_dir.join("draft"))?;
     fs::create_dir_all(&failed_dir)?;
+    fs::create_dir_all(plan_project_dir.join("abandoned"))?;
 
-    Ok(BatchDirs {
+    Ok(OptimizeDirs {
         todo_dir,
         completed_dir,
         failed_dir,
     })
 }
 
-pub async fn batch(args: BatchArgs) -> Result<()> {
-    tracing::info!(
-        "Starting workflow batch runner for project {}",
-        args.project_id
-    );
+pub async fn optimize(args: OptimizeArgs) -> Result<()> {
+    tracing::info!("Starting optimization loop for project {}", args.project_id);
 
-    let workspace_root = validate_batch_workspace(args.workspace.clone())?;
-    let batch_config = BatchProjectConfig::load(&workspace_root, &args.project_id)?;
-    let dirs = ensure_batch_dirs(&workspace_root, &args.project_id)?;
+    let workspace_root = validate_optimize_workspace(args.workspace.clone())?;
+    let plan_config = PlanQueueConfig::load(&workspace_root, &args.project_id)?;
+    let dirs = ensure_optimize_dirs(&workspace_root, &args.project_id)?;
 
     loop {
         let Some(plan_file) =
-            fetch_next_task(&dirs.todo_dir, args.once, args.poll_interval_seconds).await?
+            fetch_next_plan(&dirs.todo_dir, args.once, args.poll_interval_seconds).await?
         else {
             return Ok(());
         };
 
-        let task_layout = prepare_task_layout(&batch_config, &plan_file)?;
-        let run_result = execute_workflow_for_plan(&batch_config, &task_layout).await;
+        let task_layout = prepare_task_layout(&plan_config, &plan_file)?;
+        let run_result = execute_workflow_for_plan(&plan_config, &task_layout).await;
 
         let destination_dir = if run_result.is_ok() {
             &dirs.completed_dir
@@ -102,19 +100,19 @@ pub async fn batch(args: BatchArgs) -> Result<()> {
 }
 
 async fn execute_workflow_for_plan(
-    batch_config: &BatchProjectConfig,
+    plan_config: &PlanQueueConfig,
     task_layout: &TaskLayout,
 ) -> Result<()> {
     fs::create_dir_all(task_layout.state_dir.join("workflows"))?;
     fs::create_dir_all(task_layout.state_dir.join("artifacts").join("workflows"))?;
 
-    let workspace = batch_config.project_root.clone();
-    let workflow_path = batch_config.workflow_file.clone();
+    let workspace = plan_config.project_root.clone();
+    let workflow_path = plan_config.workflow_file.clone();
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
     document.triggers = Some(workflow_schema::WorkflowTrigger::manual(json!({
         "input_file": task_layout.input_file.display().to_string(),
-        "workspace": batch_config.project_root.display().to_string(),
+        "workspace": plan_config.project_root.display().to_string(),
     })));
 
     let overrides = ExecutionOverrides {
@@ -126,7 +124,7 @@ async fn execute_workflow_for_plan(
 
     let settings = document.workflow.settings.clone();
     let ailoop_ctx =
-        newton_core::integrations::ailoop::init_context_for_command_name(&workspace, "batch")
+        newton_core::integrations::ailoop::init_context_for_command_name(&workspace, "optimize")
             .ok()
             .flatten();
     let registry = super::build_operator_registry(workspace.clone(), &settings, ailoop_ctx);
@@ -160,13 +158,13 @@ struct TaskLayout {
     input_file: PathBuf,
 }
 
-fn prepare_task_layout(batch_config: &BatchProjectConfig, plan_file: &Path) -> Result<TaskLayout> {
+fn prepare_task_layout(plan_config: &PlanQueueConfig, plan_file: &Path) -> Result<TaskLayout> {
     let task_id = plan_file
         .file_stem()
         .and_then(|s| s.to_str())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("Plan file missing stem: {}", plan_file.display()))?;
-    let task_root = batch_config
+    let task_root = plan_config
         .project_root
         .join(".newton")
         .join("tasks")
@@ -183,7 +181,7 @@ fn prepare_task_layout(batch_config: &BatchProjectConfig, plan_file: &Path) -> R
     })
 }
 
-fn validate_batch_workspace(workspace: Option<PathBuf>) -> Result<PathBuf> {
+fn validate_optimize_workspace(workspace: Option<PathBuf>) -> Result<PathBuf> {
     let workspace_root = match workspace {
         Some(p) => p,
         None => std::env::current_dir()
@@ -199,7 +197,7 @@ fn validate_batch_workspace(workspace: Option<PathBuf>) -> Result<PathBuf> {
     Ok(workspace_root)
 }
 
-async fn fetch_next_task(
+async fn fetch_next_plan(
     todo_dir: &Path,
     once: bool,
     sleep_duration: u64,
@@ -214,7 +212,7 @@ async fn fetch_next_task(
         }
 
         if once {
-            tracing::info!("Queue empty; exiting after --once");
+            tracing::info!("Plan queue empty; exiting after --once");
             return Ok(None);
         }
         tokio::time::sleep(Duration::from_secs(sleep_duration)).await;

@@ -31,22 +31,22 @@ EXAMPLES:
   Initialize with custom template source:
     newton init . --template gonewton/newton-templates";
 
-pub(super) const BATCH_LONG_ABOUT: &str = "\
-Batch reads plan files from .newton/plan/<project_id> and drives headless \
-workflow orchestration.
+pub(super) const OPTIMIZE_LONG_ABOUT: &str = "\
+Optimize reads Plans from .newton/plan/<project_id>/todo and drives the \
+autonomous optimization loop until the Plan queue is drained.
 
 EXAMPLES:
-  Process queued plans for a project:
-    newton batch project-alpha
+  Drive the optimization loop for a project:
+    newton optimize project-alpha
 
   With workspace override:
-    newton batch project-alpha --workspace ./workspace
+    newton optimize project-alpha --workspace ./workspace
 
-  Process one plan and exit:
-    newton batch project-alpha --once
+  Process one Plan and exit:
+    newton optimize project-alpha --once
 
   Custom poll interval (seconds):
-    newton batch project-alpha --poll-interval 30";
+    newton optimize project-alpha --poll-interval 30";
 
 pub(super) const SERVE_LONG_ABOUT: &str = "\
 Serve runs the Newton HTTP/WebSocket API for UIs, agents, and integrations.
@@ -97,18 +97,6 @@ EXAMPLES:
   newton workflow checkpoint list --workspace ./workspace --json
   newton workflow checkpoint clean --workspace ./workspace --older-than 7d
   newton workflow artifact clean --workspace ./workspace --older-than 30d";
-
-pub(super) const WEBHOOK_LONG_ABOUT: &str = "\
-Webhook provides HTTP endpoints that can trigger workflow executions in \
-response to external events.
-
-Subcommands:
-  serve   Start an HTTP server to receive webhook events
-  status  Display webhook endpoint configuration and status
-
-EXAMPLES:
-  newton webhook serve --workflow workflow.yaml --workspace ./workspace
-  newton webhook status --workflow workflow.yaml --workspace ./workspace";
 
 pub(super) const DATA_GET_LONG_ABOUT: &str =
     "Retrieve catalog entities — either a full collection or a single item by id.\n\n\

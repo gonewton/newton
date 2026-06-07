@@ -1083,24 +1083,6 @@ async fn test_scenario_23_redaction() {
 }
 
 // -----------------------------------------------------------------------------
-// Scenario 24: Webhook Trigger
-// -----------------------------------------------------------------------------
-#[tokio::test]
-async fn test_scenario_24_webhook() {
-    let trigger_payload = json!({
-        "event": "push"
-    });
-
-    let harness = WorkflowTestHarness::new(HashMap::new(), FakeInterviewer::new());
-    let summary = harness
-        .run_fixture("24_webhook.yaml", Some(trigger_payload))
-        .await
-        .expect("workflow must succeed");
-
-    assert!(summary.completed_tasks.contains_key("handle_webhook"));
-}
-
-// -----------------------------------------------------------------------------
 // Scenario 25: Human Approval Operator
 // -----------------------------------------------------------------------------
 #[tokio::test]

@@ -16,8 +16,7 @@ pub use log_invocation::kind_for_command;
 pub use workspace_paths::WorkspacePaths;
 
 pub use args::{
-    ArtifactArgs, ArtifactCommand, BatchArgs, CheckpointArgs, CheckpointCommand, DotArgs,
-    ExplainArgs, GraphFormat, ImportArgs, InitArgs, LintArgs, ResumeArgs, RunArgs, RunsArgs,
-    RunsCommand, ServeArgs, ValidateArgs, WebhookArgs, WebhookCommand, WebhookServeArgs,
-    WebhookStatusArgs, WorkflowArgs, WorkflowCommand,
+    ArtifactArgs, ArtifactCommand, CheckpointArgs, CheckpointCommand, DotArgs, ExplainArgs,
+    GraphFormat, ImportArgs, InitArgs, LintArgs, OptimizeArgs, ResumeArgs, RunArgs, RunsArgs,
+    RunsCommand, ServeArgs, ValidateArgs, WorkflowArgs, WorkflowCommand,
 };

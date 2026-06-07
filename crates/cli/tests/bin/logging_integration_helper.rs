@@ -26,7 +26,7 @@ fn main() -> Result<()> {
 enum Mode {
     Monitor,
     LocalDev,
-    Batch,
+    Optimize,
 }
 
 impl Mode {
@@ -34,7 +34,7 @@ impl Mode {
         match value {
             "monitor" => Some(Mode::Monitor),
             "localdev" => Some(Mode::LocalDev),
-            "batch" => Some(Mode::Batch),
+            "optimize" => Some(Mode::Optimize),
             _ => None,
         }
     }
@@ -43,7 +43,7 @@ impl Mode {
         match self {
             Mode::Monitor => "monitor",
             Mode::LocalDev => "localdev",
-            Mode::Batch => "batch",
+            Mode::Optimize => "optimize",
         }
     }
 }
@@ -66,7 +66,7 @@ impl Config {
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
-                "monitor" | "localdev" | "batch" => {
+                "monitor" | "localdev" | "optimize" => {
                     if mode.is_some() {
                         bail!("mode already specified");
                     }
@@ -105,12 +105,12 @@ impl Config {
                     .ok_or_else(|| anyhow!("workspace is required for localdev"))?;
                 Ok(LogInvocation::new(LogInvocationKind::Run, Some(workspace)))
             }
-            Mode::Batch => {
+            Mode::Optimize => {
                 let workspace = self
                     .workspace
-                    .ok_or_else(|| anyhow!("workspace is required for batch"))?;
+                    .ok_or_else(|| anyhow!("workspace is required for optimize"))?;
                 Ok(LogInvocation::new(
-                    LogInvocationKind::Batch,
+                    LogInvocationKind::Optimize,
                     Some(workspace),
                 ))
             }

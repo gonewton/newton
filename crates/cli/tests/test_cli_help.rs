@@ -5,13 +5,7 @@
 
 use std::process::Command;
 
-static ALL_MAIN_COMMANDS: &[&[&str]] = &[
-    &["init"],
-    &["batch"],
-    &["workflow"],
-    &["webhook"],
-    &["serve"],
-];
+static ALL_MAIN_COMMANDS: &[&[&str]] = &[&["init"], &["optimize"], &["workflow"], &["serve"]];
 
 fn get_help_output(args: &[&str]) -> String {
     let output = Command::new(assert_cmd::cargo::cargo_bin!("newton"))
@@ -72,8 +66,8 @@ fn resume_help_documents_run_id_flag() {
 }
 
 #[test]
-fn batch_help_documents_poll_interval_not_sleep() {
-    let stdout = get_help_output(&["batch"]);
+fn optimize_help_documents_poll_interval_not_sleep() {
+    let stdout = get_help_output(&["optimize"]);
     assert!(stdout.contains("--poll-interval"));
     assert!(!stdout.contains("--sleep "));
 }

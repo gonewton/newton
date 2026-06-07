@@ -191,7 +191,7 @@ fn workspace_root_for_command(command: &LogInvocation) -> Result<Option<PathBuf>
                 Some(find_workspace_root(&cwd)?)
             }
         },
-        LogInvocationKind::Batch => command.workspace_candidate.clone().or_else(|| {
+        LogInvocationKind::Optimize => command.workspace_candidate.clone().or_else(|| {
             env::current_dir()
                 .ok()
                 .and_then(|cwd| find_workspace_root(&cwd).ok())
@@ -400,7 +400,7 @@ mod tests {
     }
 
     fn make_batch_command() -> LogInvocation {
-        LogInvocation::new(LogInvocationKind::Batch, Some(PathBuf::from(".")))
+        LogInvocation::new(LogInvocationKind::Optimize, Some(PathBuf::from(".")))
     }
 
     fn make_init_command() -> LogInvocation {

@@ -22,8 +22,8 @@ fn smoke_init_help() {
 }
 
 #[test]
-fn smoke_batch_help() {
-    newton().args(["batch", "--help"]).assert().success();
+fn smoke_optimize_help() {
+    newton().args(["optimize", "--help"]).assert().success();
 }
 
 #[test]
@@ -61,21 +61,11 @@ fn smoke_artifact_help() {
 }
 
 #[test]
-fn smoke_webhook_help() {
-    newton().args(["webhook", "--help"]).assert().success();
-}
-
-#[test]
 fn smoke_runs_help() {
     newton()
         .args(["workflow", "runs", "--help"])
         .assert()
         .success();
-}
-
-#[test]
-fn smoke_health() {
-    newton().args(["health"]).assert().success();
 }
 
 #[test]

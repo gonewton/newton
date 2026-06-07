@@ -109,7 +109,7 @@ fn g5_workflow_batch_paths_are_under_task_state_dir() {
     let workspace = setup_workspace();
     let root = workspace.path();
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("newton");
-    cmd.arg("batch")
+    cmd.arg("optimize")
         .arg("proj")
         .arg("--workspace")
         .arg(root)
