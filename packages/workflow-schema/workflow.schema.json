@@ -1,0 +1,1729 @@
+{
+  "$defs": {
+    "ArtifactCleanupPolicy": {
+      "description": "Artifact cleanup policy.",
+      "enum": [
+        "lru"
+      ],
+      "type": "string"
+    },
+    "ArtifactStorageSettings": {
+      "description": "Artifact storage configuration embedded in workflow settings.",
+      "properties": {
+        "base_path": {
+          "type": "string"
+        },
+        "cleanup_policy": {
+          "$ref": "#/$defs/ArtifactCleanupPolicy"
+        },
+        "max_artifact_bytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_inline_bytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_total_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retention_hours": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "base_path",
+        "max_inline_bytes",
+        "max_artifact_bytes",
+        "max_total_bytes",
+        "retention_hours",
+        "cleanup_policy"
+      ],
+      "type": "object"
+    },
+    "CheckpointSettings": {
+      "description": "Checkpointing configuration embedded in workflow settings.",
+      "properties": {
+        "checkpoint_enabled": {
+          "type": "boolean"
+        },
+        "checkpoint_interval_seconds": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "checkpoint_keep_history": {
+          "type": "boolean"
+        },
+        "checkpoint_on_task_complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "checkpoint_enabled",
+        "checkpoint_interval_seconds",
+        "checkpoint_on_task_complete",
+        "checkpoint_keep_history"
+      ],
+      "type": "object"
+    },
+    "CommandOperatorSettings": {
+      "description": "Command operator specific settings embedded in workflow settings.",
+      "properties": {
+        "allow_shell": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "allow_shell"
+      ],
+      "type": "object"
+    },
+    "CompletionSettings": {
+      "description": "Completion policy configuration for workflow graphs.",
+      "properties": {
+        "goal_gate_failure_behavior": {
+          "$ref": "#/$defs/GoalGateFailureBehavior",
+          "default": "fail"
+        },
+        "require_goal_gates": {
+          "default": true,
+          "type": "boolean"
+        },
+        "stop_on_terminal": {
+          "default": true,
+          "type": "boolean"
+        },
+        "success_requires_no_task_failures": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "Condition": {
+      "anyOf": [
+        {
+          "properties": {
+            "$expr": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "$expr"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "boolean"
+        }
+      ],
+      "description": "Condition used to guard transitions between tasks."
+    },
+    "ContextFidelity": {
+      "description": "Context fidelity policy for agent operators (schema-only; not yet implemented).",
+      "enum": [
+        "full",
+        "summary",
+        "truncate"
+      ],
+      "type": "string"
+    },
+    "GoalGateFailureBehavior": {
+      "description": "Controls whether a reached-but-failed goal gate causes the workflow to fail.",
+      "enum": [
+        "fail",
+        "allow"
+      ],
+      "type": "string"
+    },
+    "HumanSettings": {
+      "description": "Human interaction configuration for workflows.",
+      "properties": {
+        "audit_path": {
+          "type": "string"
+        },
+        "default_timeout_seconds": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "default_timeout_seconds",
+        "audit_path"
+      ],
+      "type": "object"
+    },
+    "IoBlock": {
+      "description": "Workflow-level I/O contract block (optional).",
+      "properties": {
+        "error_schema": true,
+        "input_schema": true,
+        "output_schema": true,
+        "result_map": {
+          "additionalProperties": true,
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "IoSettings": {
+      "description": "Sub-settings for workflow I/O contract.",
+      "properties": {
+        "max_input_bytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_output_bytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "MacroDefinition": {
+      "description": "Reusable macro definition containing one or more task templates.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/WorkflowTask"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "tasks"
+      ],
+      "type": "object"
+    },
+    "MacroInvocation": {
+      "description": "Invocation of a named macro from the workflow task list.",
+      "properties": {
+        "macro": {
+          "type": "string"
+        },
+        "with": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "macro"
+      ],
+      "type": "object"
+    },
+    "ModelStylesheet": {
+      "description": "Workflow-level model configuration for agent operators.",
+      "properties": {
+        "context_fidelity": {
+          "$ref": "#/$defs/ContextFidelity",
+          "default": "summary",
+          "description": "Conversation history retention policy.\nSchema-only in 017-h — does not affect prompt construction or operator behavior."
+        },
+        "model": {
+          "description": "Model identifier (e.g. \"gpt-4o\", \"claude-sonnet-4-6\").",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "type": "object"
+    },
+    "RedactionSettings": {
+      "description": "Redaction configuration embedded in workflow settings.",
+      "properties": {
+        "redact_keys": {
+          "default": [
+            "token",
+            "password",
+            "secret"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RetryPolicy": {
+      "description": "Retry configuration for a task.",
+      "properties": {
+        "backoff_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "backoff_multiplier": {
+          "default": null,
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "jitter_ms": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_attempts": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_attempts",
+        "backoff_ms"
+      ],
+      "type": "object"
+    },
+    "TaskOrMacro": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkflowTask"
+        },
+        {
+          "$ref": "#/$defs/MacroInvocation"
+        }
+      ],
+      "description": "Workflow task entries can be concrete tasks or macro invocations pre-transform."
+    },
+    "TerminalKind": {
+      "description": "Terminal task kind — determines how the workflow outcome is affected by a terminal task.",
+      "enum": [
+        "success",
+        "failure"
+      ],
+      "type": "string"
+    },
+    "Transition": {
+      "description": "Transition between tasks.",
+      "properties": {
+        "include_if": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Condition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "priority": {
+          "default": 100,
+          "format": "int32",
+          "type": "integer"
+        },
+        "to": {
+          "type": "string"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Condition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "to"
+      ],
+      "type": "object"
+    },
+    "TriggerType": {
+      "description": "Allowed trigger types for workflow graphs.",
+      "enum": [
+        "manual",
+        "webhook"
+      ],
+      "type": "string"
+    },
+    "WebhookSettings": {
+      "description": "Webhook server configuration embedded in workflow settings.",
+      "properties": {
+        "auth_token_env": {
+          "type": "string"
+        },
+        "bind": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_body_bytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "enabled",
+        "bind",
+        "auth_token_env",
+        "max_body_bytes"
+      ],
+      "type": "object"
+    },
+    "WorkflowDefinition": {
+      "description": "Workflow-level configuration.",
+      "properties": {
+        "context": {
+          "default": {}
+        },
+        "settings": {
+          "$ref": "#/$defs/WorkflowSettings"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/TaskOrMacro"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "settings",
+        "tasks"
+      ],
+      "type": "object"
+    },
+    "WorkflowMetadata": {
+      "description": "Metadata embedded with a workflow document.",
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "WorkflowSettings": {
+      "description": "Execution settings for a workflow graph.",
+      "properties": {
+        "artifact_storage": {
+          "$ref": "#/$defs/ArtifactStorageSettings",
+          "default": {
+            "base_path": ".newton/artifacts",
+            "cleanup_policy": "lru",
+            "max_artifact_bytes": 104857600,
+            "max_inline_bytes": 65536,
+            "max_total_bytes": 1073741824,
+            "retention_hours": 168
+          }
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/CheckpointSettings",
+          "default": {
+            "checkpoint_enabled": true,
+            "checkpoint_interval_seconds": 30,
+            "checkpoint_keep_history": false,
+            "checkpoint_on_task_complete": true
+          }
+        },
+        "command_operator": {
+          "$ref": "#/$defs/CommandOperatorSettings",
+          "default": {
+            "allow_shell": false
+          }
+        },
+        "completion": {
+          "$ref": "#/$defs/CompletionSettings",
+          "default": {
+            "goal_gate_failure_behavior": "fail",
+            "require_goal_gates": true,
+            "stop_on_terminal": true,
+            "success_requires_no_task_failures": true
+          }
+        },
+        "continue_on_error": {
+          "default": false,
+          "type": "boolean"
+        },
+        "default_engine": {
+          "description": "Default coding engine for all agent operators in this workflow.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "entry_task": {
+          "default": "start",
+          "type": "string"
+        },
+        "human": {
+          "$ref": "#/$defs/HumanSettings",
+          "default": {
+            "audit_path": ".newton/state/workflows",
+            "default_timeout_seconds": 86400
+          }
+        },
+        "io": {
+          "$ref": "#/$defs/IoBlock",
+          "description": "Workflow I/O contract: input/output schemas and result mapping."
+        },
+        "io_settings": {
+          "$ref": "#/$defs/IoSettings",
+          "description": "Workflow I/O size limits."
+        },
+        "max_task_iterations": {
+          "default": 100,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_time_seconds": {
+          "default": 3600,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_workflow_iterations": {
+          "default": 1000,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "model_stylesheet": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelStylesheet"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Default model configuration for agent operators.\nAllowed and silently ignored when the workflow has no AgentOperator tasks."
+        },
+        "parallel_limit": {
+          "default": 1,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "redaction": {
+          "$ref": "#/$defs/RedactionSettings",
+          "default": {
+            "redact_keys": [
+              "token",
+              "password",
+              "secret"
+            ]
+          }
+        },
+        "required_triggers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stream_agent_stdout": {
+          "default": false,
+          "description": "Whether to stream agent engine stdout to the terminal by default.\nIndividual agent tasks can override this setting.",
+          "type": "boolean"
+        },
+        "webhook": {
+          "$ref": "#/$defs/WebhookSettings",
+          "default": {
+            "auth_token_env": "NEWTON_WEBHOOK_TOKEN",
+            "bind": "127.0.0.1:8787",
+            "enabled": false,
+            "max_body_bytes": 1048576
+          }
+        }
+      },
+      "type": "object"
+    },
+    "WorkflowTask": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "GhOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "properties": {
+                  "operation": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "operation"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "HumanApprovalOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "default_on_timeout": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "prompt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "timeout_seconds": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "prompt"
+                ],
+                "title": "HumanApprovalParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "HumanDecisionOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "barrier"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "description": "Parameters for the barrier operator that waits for multiple tasks to complete.",
+                "properties": {
+                  "expected": {
+                    "anyOf": [
+                      {
+                        "default": [],
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "title": "BarrierParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "NoOpOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "NoOpParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "ReadControlFileOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "path": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "title": "ReadControlFileParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "CommandOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "additionalProperties": false,
+                "properties": {
+                  "capture_stderr": {
+                    "anyOf": [
+                      {
+                        "default": true,
+                        "type": "boolean"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "capture_stdout": {
+                    "anyOf": [
+                      {
+                        "default": true,
+                        "type": "boolean"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "cmd": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "cwd": {
+                    "anyOf": [
+                      {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "env": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "$expr": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "$expr"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "shell": {
+                    "anyOf": [
+                      {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "write_stderr": {
+                    "anyOf": [
+                      {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "write_stdout": {
+                    "anyOf": [
+                      {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "cmd"
+                ],
+                "title": "CommandParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "SetContextOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "patch": {
+                    "anyOf": [
+                      true,
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "patch"
+                ],
+                "title": "SetContextParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "AssertCompletedOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "require": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "require"
+                ],
+                "title": "AssertCompletedParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "AgentOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "engine": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "engine_command": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": [
+                          "array",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "env": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "$expr": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "$expr"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "default": null,
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "loop": {
+                    "anyOf": [
+                      {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "max_iterations": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "format": "uint32",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "model": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "prompt": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "prompt_file": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "require_signal": {
+                    "anyOf": [
+                      {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "signals": {
+                    "anyOf": [
+                      {
+                        "default": null
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "stream_stdout": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "timeout_seconds": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "working_dir": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "title": "AgentParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "WorkflowOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "context": {
+                    "anyOf": [
+                      {
+                        "default": null
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "triggers": {
+                    "anyOf": [
+                      {
+                        "default": null
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "workflow_path": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "workflow_path"
+                ],
+                "title": "WorkflowOperatorParams",
+                "type": "object"
+              }
+            }
+          }
+        }
+      ],
+      "description": "Task definition consumed by the workflow executor.",
+      "properties": {
+        "classes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "goal_gate": {
+          "default": false,
+          "type": "boolean"
+        },
+        "goal_gate_group": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "include_if": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Condition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_iterations": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operator": {
+          "type": "string"
+        },
+        "parallel_group": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "params": {
+          "default": {}
+        },
+        "retry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetryPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminalKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timeout_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "transitions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Transition"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "operator"
+      ],
+      "type": "object"
+    },
+    "WorkflowTrigger": {
+      "description": "Workflow trigger definition supporting manual and webhook workflows.",
+      "properties": {
+        "payload": {
+          "default": {}
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/TriggerType"
+        }
+      },
+      "required": [
+        "type",
+        "schema_version"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Root document for a workflow graph definition.",
+  "properties": {
+    "macros": {
+      "default": null,
+      "items": {
+        "$ref": "#/$defs/MacroDefinition"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "metadata": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkflowMetadata"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "mode": {
+      "type": "string"
+    },
+    "triggers": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkflowTrigger"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "version": {
+      "type": "string"
+    },
+    "workflow": {
+      "$ref": "#/$defs/WorkflowDefinition"
+    }
+  },
+  "required": [
+    "version",
+    "mode",
+    "workflow"
+  ],
+  "title": "WorkflowDocument",
+  "type": "object"
+}
