@@ -113,6 +113,22 @@ fn relax_schema_for_exprs(schema: &mut serde_json::Value) {
     }
 }
 
+/// Return a JSON object mapping each registered operator name to its output schema.
+/// This is the artifact 058/060 need to generate typed `.out.field` references —
+/// it is separate from the composed workflow document schema so consumers can
+/// use one or both as required.
+///
+/// Output schemas describe the **runtime output** shape (post-execution), so they
+/// are NOT subject to the `$expr` relaxation applied to params schemas.
+pub fn operator_output_schemas(registry: &OperatorRegistry) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for op in registry.list_operators() {
+        let schema_value = serde_json::to_value(op.output_schema()).unwrap_or_default();
+        map.insert(op.name().to_owned(), schema_value);
+    }
+    serde_json::Value::Object(map)
+}
+
 fn patch_task_schema_with_operator_branches(
     schema: &mut serde_json::Value,
     branches: &[serde_json::Value],

@@ -58,6 +58,35 @@ fn command_output_has_success_field() {
     assert!(output.success);
 }
 
+/// Finding #1 fix: operator_output_schemas() must return a non-empty object keyed
+/// by operator name, each entry a non-empty schema object.  058/060 need this to
+/// generate typed .out.field references.
+#[test]
+fn operator_output_schemas_covers_all_registered_operators() {
+    let registry = build_test_registry();
+    let ops: Vec<_> = registry.list_operators();
+    let map = schema_export::operator_output_schemas(&registry);
+
+    assert!(
+        map.is_object(),
+        "operator_output_schemas must return a JSON object"
+    );
+    let obj = map.as_object().unwrap();
+
+    for op in &ops {
+        let name = op.name();
+        assert!(
+            obj.contains_key(name),
+            "output schemas map is missing operator '{name}'"
+        );
+        let schema = &obj[name];
+        assert!(
+            schema.is_object(),
+            "output schema for '{name}' must be a JSON object, got: {schema}"
+        );
+    }
+}
+
 /// DoD #2: every real workflow in .newton/workflows/ must validate against the
 /// composed schema with zero errors.  This is the acceptance gate — if it fails,
 /// the schema does not accurately describe the authored-document shape and cannot

@@ -11,6 +11,10 @@ pub struct SchemaExportArgs {
     pub out: Option<PathBuf>,
     pub pretty: bool,
     pub workspace: Option<PathBuf>,
+    /// When true, emit the operator output-schema map instead of the workflow
+    /// document schema.  058/060 need this to generate typed `.out.field`
+    /// references.
+    pub outputs: bool,
 }
 
 pub fn schema_export_cmd(args: SchemaExportArgs) -> StdResult<(), AppError> {
@@ -24,17 +28,27 @@ pub fn schema_export_cmd(args: SchemaExportArgs) -> StdResult<(), AppError> {
     operators::register_builtins(&mut builder, workspace, settings);
     let registry = builder.build();
 
-    let schema = schema_export::composed_workflow_schema(&registry);
+    let value: serde_json::Value = if args.outputs {
+        schema_export::operator_output_schemas(&registry)
+    } else {
+        let schema = schema_export::composed_workflow_schema(&registry);
+        serde_json::to_value(&schema).map_err(|e| {
+            AppError::new(
+                ErrorCategory::SerializationError,
+                format!("serialize schema: {e}"),
+            )
+        })?
+    };
 
     let output = if args.pretty {
-        serde_json::to_string_pretty(&schema).map_err(|e| {
+        serde_json::to_string_pretty(&value).map_err(|e| {
             AppError::new(
                 ErrorCategory::SerializationError,
                 format!("serialize schema: {e}"),
             )
         })?
     } else {
-        serde_json::to_string(&schema).map_err(|e| {
+        serde_json::to_string(&value).map_err(|e| {
             AppError::new(
                 ErrorCategory::SerializationError,
                 format!("serialize schema: {e}"),

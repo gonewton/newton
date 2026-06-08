@@ -57,6 +57,15 @@ pub(crate) fn schema_command() -> Command {
                     help: "Workspace path (defaults to current directory)",
                     ..Default::default()
                 },
+                ArgSpec {
+                    name: "outputs",
+                    kind: ArgKind::Flag,
+                    long: Some("outputs"),
+                    value_type: ArgValueType::Bool,
+                    cardinality: Cardinality::Optional,
+                    help: "Emit the operator output-schema map ({name→schema}) instead of the workflow document schema",
+                    ..Default::default()
+                },
             ],
             ..Default::default()
         }),
@@ -70,6 +79,7 @@ pub(crate) fn schema_command() -> Command {
                             out: get_opt_path(&args, "out"),
                             pretty: get_bool(&args, "pretty"),
                             workspace: get_opt_path(&args, "workspace"),
+                            outputs: get_bool(&args, "outputs"),
                         };
                         schema_export_cmd(dto).map_err(|e| anyhow::anyhow!("{e}"))
                     }
