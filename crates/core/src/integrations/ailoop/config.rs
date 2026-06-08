@@ -1,4 +1,4 @@
-use crate::core::batch_config::parse_conf;
+use crate::core::plan_queue_config::parse_conf;
 use crate::logging::invocation::{LogInvocation, LogInvocationKind};
 use crate::Result;
 use anyhow::anyhow;
@@ -76,10 +76,10 @@ pub fn init_context(
         }
     }
 
-    // Only enable for run and batch commands by default
+    // Only enable for run and optimize commands by default
     let command_name = match command.kind {
         LogInvocationKind::Run => "run",
-        LogInvocationKind::Batch => "batch",
+        LogInvocationKind::Optimize => "optimize",
         _ => {
             tracing::debug!("Ailoop integration not applicable for this command");
             return Ok(None);

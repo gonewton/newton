@@ -13,11 +13,9 @@ Ai:
 Operational:
   config  Inspect resolved Newton configuration
   doctor  Run local environment diagnostic probes
-  health  Print a one-line liveness status
 Ops:
-  batch    Process queued work items for a project
-  serve    Start the Newton HTTP API server
-  webhook  Run webhooks to trigger workflows from external events
+  optimize  Drive a project's optimization loop
+  serve     Start the Newton HTTP API server
 Workflow:
   workflow  Operate on workflow YAML files or manage execution lifecycle (validate/lint/preview/graph/run/resume/runs/checkpoint/artifact)
 Workspace:

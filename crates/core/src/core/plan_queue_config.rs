@@ -3,18 +3,18 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Batch configuration derived from `.newton/configs/<project>.conf`.
+/// Plan queue configuration derived from `.newton/configs/<project>.conf`.
 #[derive(Debug, Clone)]
-pub struct BatchProjectConfig {
+pub struct PlanQueueConfig {
     /// Absolute path to the project root that contains `.newton`.
     pub project_root: PathBuf,
 
-    /// Required workflow file path for batch execution.
+    /// Required workflow file path for optimize execution.
     pub workflow_file: PathBuf,
 }
 
-impl BatchProjectConfig {
-    /// Load and validate batch config for the provided project ID from the workspace root.
+impl PlanQueueConfig {
+    /// Load and validate plan queue config for the provided project ID from the workspace root.
     pub fn load(workspace_root: &Path, project_id: &str) -> Result<Self> {
         let conf_path = workspace_root
             .join(".newton")
@@ -44,7 +44,7 @@ impl BatchProjectConfig {
             }
         };
 
-        Ok(BatchProjectConfig {
+        Ok(PlanQueueConfig {
             project_root,
             workflow_file,
         })
@@ -80,12 +80,12 @@ fn load_and_validate_project_root(
     Ok(project_root)
 }
 
-// Old config loading functions removed - batch now workflow-only
+// Old config loading functions removed - optimize now workflow-only
 
 /// Parse .conf file as key=value pairs.
 pub fn parse_conf(path: &Path) -> Result<HashMap<String, String>> {
     let content = fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("failed to read batch config {}: {}", path.display(), e))?;
+        .map_err(|e| anyhow::anyhow!("failed to read config {}: {}", path.display(), e))?;
 
     let mut map = HashMap::new();
     for line in content.lines() {

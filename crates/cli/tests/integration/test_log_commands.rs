@@ -892,7 +892,7 @@ fn kind_for_command_maps_every_top_level_command() {
     assert_eq!(kind_for_command("run"), LogInvocationKind::Run);
     assert_eq!(kind_for_command("resume"), LogInvocationKind::Resume);
     assert_eq!(kind_for_command("init"), LogInvocationKind::Init);
-    assert_eq!(kind_for_command("batch"), LogInvocationKind::Batch);
+    assert_eq!(kind_for_command("optimize"), LogInvocationKind::Optimize);
     assert_eq!(kind_for_command("serve"), LogInvocationKind::Serve);
     assert_eq!(kind_for_command("workflow"), LogInvocationKind::Workflow);
     assert_eq!(kind_for_command("runs"), LogInvocationKind::Runs);
@@ -901,8 +901,7 @@ fn kind_for_command_maps_every_top_level_command() {
         LogInvocationKind::Checkpoint
     );
     assert_eq!(kind_for_command("artifact"), LogInvocationKind::Artifact);
-    assert_eq!(kind_for_command("webhook"), LogInvocationKind::Webhook);
-    for diag in ["health", "doctor", "config", "completion", "chat"] {
+    for diag in ["doctor", "config", "completion", "chat"] {
         assert_eq!(kind_for_command(diag), LogInvocationKind::Diagnostic);
     }
 }

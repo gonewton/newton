@@ -353,6 +353,8 @@ fn default_trigger_payload() -> Value {
 #[serde(rename_all = "lowercase")]
 pub enum TriggerType {
     Manual,
+    // dormant: no active producer; reserved for future serve-route ingress
+    #[allow(dead_code)]
     Webhook,
 }
 

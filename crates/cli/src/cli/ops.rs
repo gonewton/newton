@@ -1,5 +1,5 @@
 //! Operational/diagnostic commands required by the org-baseline CLI checklist:
-//! `health`, `doctor`, `config show`, `completion`.
+//! `doctor`, `config show`, `completion`.
 //!
 //! These commands MUST be runnable without a configured workspace.
 
@@ -12,30 +12,10 @@ use serde_json::{json, Map, Value};
 use crate::cli::WorkspacePaths;
 
 pub mod error_codes {
-    pub const CLI_OPS_001: &str = "CLI-OPS-001";
     pub const CLI_OPS_002: &str = "CLI-OPS-002";
     pub const CLI_OPS_003: &str = "CLI-OPS-003";
     pub const CLI_OPS_004: &str = "CLI-OPS-004";
     pub const CLI_OPS_006: &str = "CLI-OPS-006";
-}
-
-// ── health ───────────────────────────────────────────────────────────────────
-
-pub mod health {
-    use super::*;
-
-    /// Print a single liveness line and exit 0.
-    pub fn run() -> Result<()> {
-        run_with_version(crate::VERSION)
-    }
-
-    pub fn run_with_version(version: &str) -> Result<()> {
-        if version.is_empty() {
-            return Err(anyhow!("{}: VERSION is empty", error_codes::CLI_OPS_001));
-        }
-        println!("newton OK {version}");
-        Ok(())
-    }
 }
 
 // ── doctor ───────────────────────────────────────────────────────────────────

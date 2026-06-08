@@ -68,7 +68,7 @@ fn legacy_resume_execution_id_rejected() {
 #[test]
 fn legacy_misc_flags_rejected() {
     assert_unrecognized(&["serve", "--ui-dir", "./ui"]);
-    assert_unrecognized(&["batch", "p", "--sleep", "30"]);
+    assert_unrecognized(&["optimize", "p", "--sleep", "30"]);
     assert_unrecognized(&["init", "--template-source", "x/y"]);
     assert_unrecognized(&["checkpoint", "list", "--workspace", ".", "--format-json"]);
     assert_unrecognized(&["workflow", "graph", "wf.yaml", "--out", "g.dot"]);
@@ -110,7 +110,7 @@ fn trigger_payload_merge_precedence() {
     assert_eq!(payload, json!({"a": "1", "b": "hello"}));
 }
 
-// --- §7 criterion 4: additional legacy spellings on workflow.* and webhook ---
+// --- §7 criterion 4: additional legacy spellings on workflow.* ---
 
 #[test]
 fn legacy_workflow_subcommand_flags_rejected() {
@@ -119,13 +119,4 @@ fn legacy_workflow_subcommand_flags_rejected() {
     assert_unrecognized(&["workflow", "preview", "wf.yaml", "--arg", "x=y"]);
     assert_unrecognized(&["workflow", "preview", "wf.yaml", "--set", "x=y"]);
     assert_unrecognized(&["workflow", "preview", "wf.yaml", "--trigger-json", "x.json"]);
-}
-
-#[test]
-fn webhook_legacy_file_flag_and_positional_rejected() {
-    // `--file` was renamed to `--workflow`.
-    assert_unrecognized(&["webhook", "serve", "--file", "wf.yaml", "--workspace", "."]);
-    assert_unrecognized(&["webhook", "status", "--file", "wf.yaml", "--workspace", "."]);
-    // The positional WORKFLOW slot was removed.
-    assert_unrecognized(&["webhook", "serve", "wf.yaml", "--workspace", "."]);
 }

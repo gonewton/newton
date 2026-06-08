@@ -11,28 +11,6 @@ use crate::cli::framework_setup::get_opt_path;
 use crate::cli::framework_setup::get_opt_str;
 use crate::cli::ops;
 
-pub(crate) fn health_command() -> Command {
-    Command {
-        id: "health".into(),
-        spec: Arc::new(CommandSpec {
-            summary: "Print a one-line liveness status",
-            syntax: Some("[OPTIONS]"),
-            category: Some(categories::OPERATIONAL),
-            long_about: Some(
-                "Health prints `newton OK <version>` and exits 0 if the binary can run.\n\
-                 No workspace, network, or config access — suitable for container probes.",
-            ),
-            examples: vec!["newton health"],
-            args: vec![],
-            ..Default::default()
-        }),
-        validator: None,
-        execute: Arc::new(|_ctx, _args| Box::pin(async move { ops::health::run() })),
-        expose_mcp: true,
-        expose_chat: true,
-    }
-}
-
 pub(crate) fn doctor_command() -> Command {
     Command {
         id: "doctor".into(),

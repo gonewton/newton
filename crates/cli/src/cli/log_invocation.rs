@@ -11,14 +11,13 @@ pub fn kind_for_command(name: &str) -> LogInvocationKind {
     match name {
         "resume" => Resume,
         "init" => Init,
-        "batch" => Batch,
+        "optimize" => Optimize,
         "serve" => Serve,
         "workflow" => Workflow,
         "runs" => Runs,
         "checkpoint" => Checkpoint,
         "artifact" => Artifact,
-        "webhook" => Webhook,
-        "health" | "doctor" | "config" | "completion" | "chat" => Diagnostic,
+        "doctor" | "config" | "completion" | "chat" => Diagnostic,
         _ => Run,
     }
 }

@@ -3,26 +3,20 @@
 use crate::cli::args::{
     DotArgs, ExplainArgs, LintArgs, OutputFormat, ResumeArgs, RunArgs, ValidateArgs,
 };
-use crate::cli::workspace_paths::{
-    resolve_state_dir, state_artifacts_dir, state_backend_sqlite_url, state_checkpoints_dir,
-};
-use newton_backend::SqliteBackendStore;
+use crate::cli::workspace_paths::{resolve_state_dir, state_checkpoints_dir};
 use newton_core::core::error::AppError;
 use newton_core::core::types::ErrorCategory;
 use newton_core::workflow::io::{CompletionEnvelope, CompletionError};
 use newton_core::workflow::{
     checkpoint, dot as workflow_dot,
-    executor::{self as workflow_executor, ExecutionOverrides},
+    executor::{self as workflow_executor},
     explain,
     expression::ExpressionEngine,
     lint::{LintRegistry, LintSeverity},
-    schema as workflow_schema,
-    server_notifier::ServerNotifier,
-    transform as workflow_transform,
-    workflow_sink::{DbSink, FanoutSink, WorkflowSink},
+    schema as workflow_schema, transform as workflow_transform,
 };
 use serde_json::Value;
-use std::{fs, result::Result as StdResult, sync::Arc};
+use std::{fs, result::Result as StdResult};
 
 fn emit_or_return(
     emit_json: bool,
@@ -94,60 +88,13 @@ async fn execute_run_command(args: &RunArgs) -> StdResult<(), AppError> {
     let io_settings = document.workflow.settings.io_settings.clone();
     let io_block = document.workflow.settings.io.clone();
 
-    if state_dir.exists() && !state_dir.is_dir() {
-        return Err(AppError::new(
-            ErrorCategory::ValidationError,
-            format!(
-                "STATE-DIR-001: --state-dir path exists but is not a directory: {}",
-                state_dir.display()
-            ),
-        )
-        .with_code("STATE-DIR-001"));
-    }
-    fs::create_dir_all(state_checkpoints_dir(&state_dir)).map_err(|e| {
-        AppError::new(
-            ErrorCategory::IoError,
-            format!("STATE-DIR-002: failed to create state directory: {}", e),
-        )
-        .with_code("STATE-DIR-002")
-    })?;
-    fs::create_dir_all(state_artifacts_dir(&state_dir)).map_err(|e| {
-        AppError::new(
-            ErrorCategory::IoError,
-            format!("STATE-DIR-002: failed to create artifacts directory: {}", e),
-        )
-        .with_code("STATE-DIR-002")
-    })?;
-
-    let backend = SqliteBackendStore::new(&state_backend_sqlite_url(&state_dir))
-        .await
-        .map_err(|e| {
-            AppError::new(
-                ErrorCategory::IoError,
-                format!("STATE-DIR-003: backend store init failed: {}", e.message),
-            )
-            .with_code("STATE-DIR-003")
-        })?;
-    let backend_arc: Arc<dyn newton_backend::BackendStore> = Arc::new(backend);
-    let db_sink = Arc::new(DbSink::new(backend_arc));
-    let sink: Option<Arc<dyn WorkflowSink>> = if let Some(url) = &args.server {
-        Some(Arc::new(FanoutSink(vec![
-            db_sink as Arc<dyn WorkflowSink>,
-            Arc::new(ServerNotifier::new(url.clone())),
-        ])))
-    } else {
-        Some(db_sink as Arc<dyn WorkflowSink>)
-    };
-
-    let overrides = ExecutionOverrides {
-        parallel_limit: args.parallel_limit,
-        max_time_seconds: args.timeout_seconds,
-        checkpoint_base_path: Some(state_checkpoints_dir(&state_dir)),
-        artifact_base_path: Some(state_artifacts_dir(&state_dir)),
-        sink,
-        pre_seed_nodes: true,
-        ..Default::default()
-    };
+    let exec_setup = super::shared_execution::build_execution_setup(
+        state_dir,
+        args.parallel_limit,
+        args.timeout_seconds,
+        args.server.as_deref(),
+    )
+    .await?;
 
     let settings = document.workflow.settings.clone();
     let ailoop_ctx =
@@ -161,7 +108,7 @@ async fn execute_run_command(args: &RunArgs) -> StdResult<(), AppError> {
         workflow_path,
         registry,
         workspace.clone(),
-        overrides,
+        exec_setup.overrides,
     )
     .await;
 

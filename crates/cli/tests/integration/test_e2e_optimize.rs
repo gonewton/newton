@@ -4,7 +4,7 @@ mod support;
 use std::fs;
 use support::newton;
 
-fn setup_minimal_batch_workspace(root: &std::path::Path, project_id: &str) {
+fn setup_minimal_optimize_workspace(root: &std::path::Path, project_id: &str) {
     let configs_dir = root.join(".newton/configs");
     fs::create_dir_all(&configs_dir).unwrap();
 
@@ -25,13 +25,13 @@ fn setup_minimal_batch_workspace(root: &std::path::Path, project_id: &str) {
 }
 
 #[test]
-fn integ_batch_once_no_plans() {
+fn integ_optimize_once_no_plans() {
     let dir = tempfile::tempdir().unwrap();
-    setup_minimal_batch_workspace(dir.path(), "testproj");
+    setup_minimal_optimize_workspace(dir.path(), "testproj");
 
     newton()
         .args([
-            "batch",
+            "optimize",
             "testproj",
             "--workspace",
             &dir.path().to_string_lossy(),

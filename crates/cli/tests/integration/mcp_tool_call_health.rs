@@ -1,37 +1,23 @@
 //! Issue #237: MCP `tools/list` exposes the same set of commands Newton
-//! registers via `build_app`, and `tools/call` for `health` reaches the same
-//! handler as `newton health`. The framework owns the JSON-RPC transport;
-//! Newton's responsibility is to make sure (a) the registry is the single
-//! source of truth and (b) `health` is in it.
-//!
-//! A full HTTP round-trip against the streamable HTTP transport requires
-//! session negotiation (init → tools/list → tools/call) that mirrors
-//! `cli-framework/tests/integration/mcp_http.rs`. We exercise the contract
-//! at the registry level here to keep the test deterministic and avoid
-//! flakiness from the long-running HTTP server.
+//! registers via `build_app`. The `health` command has been removed; this
+//! test verifies it is NOT present in the MCP registry.
 use newton_cli::cli::framework_setup::{enumerate_commands, REGISTERED_COMMAND_IDS};
 use newton_cli::cli::mcp;
 
 #[test]
-fn health_is_in_registered_commands() {
+fn health_is_not_in_registered_commands() {
     assert!(
-        REGISTERED_COMMAND_IDS.contains(&"health"),
-        "health must be in REGISTERED_COMMAND_IDS so MCP exports it as a tool"
+        !REGISTERED_COMMAND_IDS.contains(&"health"),
+        "health must NOT be in REGISTERED_COMMAND_IDS — it has been removed"
     );
 }
 
 #[test]
-fn enumerate_commands_includes_health_with_spec() {
+fn enumerate_commands_does_not_include_health() {
     let cmds = enumerate_commands();
-    let health = cmds
-        .iter()
-        .find(|c| c.id.as_ref() == "health")
-        .expect("health command registered");
-    // CommandSpec is what cli-framework's MCP layer translates into a JSON
-    // Schema; all commands now carry a mandatory spec.
     assert!(
-        !health.spec.summary.is_empty(),
-        "health command should expose a CommandSpec for MCP tool derivation"
+        cmds.iter().all(|c| c.id.as_ref() != "health"),
+        "health command must not be registered after removal"
     );
 }
 

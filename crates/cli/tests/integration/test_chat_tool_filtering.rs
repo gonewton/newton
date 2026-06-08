@@ -14,10 +14,9 @@ fn chat_tool_list_excludes_filtered_commands() {
 
     for tool in &[
         "newton_serve",
-        "newton_batch",
+        "newton_optimize",
         "newton_init",
         "newton_run",
-        "newton_webhook",
     ] {
         assert!(
             !chat_tool_names.contains(&tool.to_string()),
@@ -27,7 +26,6 @@ fn chat_tool_list_excludes_filtered_commands() {
 
     for tool in &[
         "newton_workflow",
-        "newton_health",
         "newton_config",
         "newton_doctor",
         "newton_data_get",

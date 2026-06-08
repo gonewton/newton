@@ -40,13 +40,12 @@ pub fn detect_context(command: &LogInvocation) -> ExecutionContext {
     }
 
     match command.kind {
-        LogInvocationKind::Batch => ExecutionContext::Batch,
+        LogInvocationKind::Optimize => ExecutionContext::Batch,
         LogInvocationKind::Run
         | LogInvocationKind::Workflow
         | LogInvocationKind::Resume
         | LogInvocationKind::Checkpoint
         | LogInvocationKind::Artifact
-        | LogInvocationKind::Webhook
         | LogInvocationKind::Runs
         | LogInvocationKind::Init
         | LogInvocationKind::Diagnostic => ExecutionContext::LocalDev,

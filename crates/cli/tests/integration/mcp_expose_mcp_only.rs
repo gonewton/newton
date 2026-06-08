@@ -52,11 +52,11 @@ fn expose_mcp_only_excludes_non_allowed_tools() {
     let registry = build_exposed_registry();
     for id in &[
         "init",
-        "batch",
+        "optimize",
         "serve",
         "checkpoint",
         "artifact",
-        "webhook",
+        "health",
         "doctor",
         // "completion" — now framework-provided, not in newton's CommandRegistry
         // "data" removed — it is now a group node, not a tool

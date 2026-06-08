@@ -5,17 +5,6 @@ use assert_cmd::Command;
 const BIN: &str = "newton";
 
 #[test]
-fn health_prints_ok_line() {
-    let expected_prefix = format!("newton OK {}", newton_cli::VERSION);
-    Command::cargo_bin(BIN)
-        .expect("binary should build")
-        .arg("health")
-        .assert()
-        .success()
-        .stdout(predicates::str::starts_with(expected_prefix));
-}
-
-#[test]
 fn doctor_succeeds_in_empty_tempdir_with_skips() {
     let dir = tempfile::tempdir().expect("tempdir");
     let output = Command::cargo_bin(BIN)
@@ -228,16 +217,6 @@ fn completion_bash_first_line_matches_pattern() {
             "completion {shell}: first line `{first}` did not match expected stubs"
         );
     }
-}
-
-#[test]
-fn health_with_empty_version_returns_cli_ops_001() {
-    let err = newton_cli::ops::health::run_with_version("")
-        .expect_err("empty version must surface CLI-OPS-001");
-    assert!(
-        format!("{err}").contains("CLI-OPS-001"),
-        "expected CLI-OPS-001 in: {err}"
-    );
 }
 
 #[test]

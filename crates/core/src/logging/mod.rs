@@ -191,7 +191,7 @@ fn workspace_root_for_command(command: &LogInvocation) -> Result<Option<PathBuf>
                 Some(find_workspace_root(&cwd)?)
             }
         },
-        LogInvocationKind::Batch => command.workspace_candidate.clone().or_else(|| {
+        LogInvocationKind::Optimize => command.workspace_candidate.clone().or_else(|| {
             env::current_dir()
                 .ok()
                 .and_then(|cwd| find_workspace_root(&cwd).ok())
@@ -399,8 +399,8 @@ mod tests {
         LogInvocation::new(LogInvocationKind::Run, Some(PathBuf::from(".")))
     }
 
-    fn make_batch_command() -> LogInvocation {
-        LogInvocation::new(LogInvocationKind::Batch, Some(PathBuf::from(".")))
+    fn make_optimize_command() -> LogInvocation {
+        LogInvocation::new(LogInvocationKind::Optimize, Some(PathBuf::from(".")))
     }
 
     fn make_init_command() -> LogInvocation {
@@ -418,7 +418,7 @@ mod tests {
         let mapping = vec![
             (make_run_command(), ExecutionContext::LocalDev),
             (make_init_command(), ExecutionContext::LocalDev),
-            (make_batch_command(), ExecutionContext::Batch),
+            (make_optimize_command(), ExecutionContext::Batch),
             (make_monitor_command(), ExecutionContext::Tui),
         ];
 
@@ -436,7 +436,7 @@ mod tests {
             ExecutionContext::RemoteAgent
         );
         assert_eq!(
-            detect_context(&make_batch_command()),
+            detect_context(&make_optimize_command()),
             ExecutionContext::RemoteAgent
         );
         assert_eq!(

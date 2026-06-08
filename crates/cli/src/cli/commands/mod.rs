@@ -1,13 +1,13 @@
 #![allow(clippy::result_large_err)]
 
 pub mod artifact;
-pub mod batch;
 pub mod checkpoint;
 pub mod data;
 pub mod import;
 pub mod log;
+pub mod optimize;
 pub mod serve;
-pub mod webhook;
+pub mod shared_execution;
 pub mod workflow;
 
 use crate::cli::args::KeyValuePair;
@@ -28,13 +28,12 @@ use std::{
 };
 
 pub use artifact::artifacts;
-pub use batch::batch;
 pub use checkpoint::checkpoints;
 pub use data::data;
 pub use import::workflow_import;
 pub use log::log;
+pub use optimize::optimize;
 pub use serve::serve;
-pub use webhook::webhook;
 pub use workflow::{dot, explain, lint, resume, validate, workflow_run};
 
 fn resolve_workflow_workspace(path: Option<PathBuf>) -> StdResult<PathBuf, AppError> {
@@ -47,28 +46,6 @@ fn resolve_workflow_workspace(path: Option<PathBuf>) -> StdResult<PathBuf, AppEr
             )
         })?),
     }
-}
-
-fn resolve_workspace_workflow_path(
-    workspace: &Path,
-    override_path: Option<PathBuf>,
-) -> StdResult<PathBuf, AppError> {
-    if let Some(path) = override_path {
-        return Ok(path);
-    }
-    for candidate in &["workflow.yaml", "workflow.yml"] {
-        let candidate_path = workspace.join(candidate);
-        if candidate_path.exists() {
-            return Ok(candidate_path);
-        }
-    }
-    Err(AppError::new(
-        ErrorCategory::ValidationError,
-        format!(
-            "workflow file not found under {}; pass WORKFLOW or --file PATH to specify",
-            workspace.display()
-        ),
-    ))
 }
 
 fn build_operator_registry(

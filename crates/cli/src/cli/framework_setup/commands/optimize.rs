@@ -4,25 +4,25 @@ use cli_framework::command::Command;
 use cli_framework::spec::arg_spec::{ArgKind, ArgSpec, ArgValueType, Cardinality};
 use cli_framework::spec::command_tree::CommandSpec;
 
-use crate::cli::args::BatchArgs;
+use crate::cli::args::OptimizeArgs;
 use crate::cli::categories;
 use crate::cli::commands;
-use crate::cli::framework_setup::help_text::BATCH_LONG_ABOUT;
+use crate::cli::framework_setup::help_text::OPTIMIZE_LONG_ABOUT;
 use crate::cli::framework_setup::FromArgValueMap;
 
-pub(crate) fn batch_command() -> Command {
+pub(crate) fn optimize_command() -> Command {
     Command {
-        id: "batch".into(),
+        id: "optimize".into(),
         spec: Arc::new(CommandSpec {
-            summary: "Process queued work items for a project",
+            summary: "Drive a project's optimization loop",
             syntax: Some("<PROJECT_ID> [OPTIONS]"),
             category: Some(categories::OPS),
-            long_about: Some(BATCH_LONG_ABOUT),
+            long_about: Some(OPTIMIZE_LONG_ABOUT),
             examples: vec![
-                "newton batch project-alpha",
-                "newton batch project-alpha --workspace ./workspace",
-                "newton batch project-alpha --once",
-                "newton batch project-alpha --poll-interval 30",
+                "newton optimize project-alpha",
+                "newton optimize project-alpha --workspace ./workspace",
+                "newton optimize project-alpha --once",
+                "newton optimize project-alpha --poll-interval 30",
             ],
             args: vec![
                 ArgSpec {
@@ -48,7 +48,7 @@ pub(crate) fn batch_command() -> Command {
                     long: Some("once"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
-                    help: "Process a single plan and exit instead of running as a daemon",
+                    help: "Process a single Plan and exit instead of running as a daemon",
                     ..Default::default()
                 },
                 ArgSpec {
@@ -57,7 +57,7 @@ pub(crate) fn batch_command() -> Command {
                     long: Some("poll-interval"),
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
-                    help: "Seconds to wait when the queue is empty (default: 60)",
+                    help: "Seconds to wait when the Plan queue is empty (default: 60)",
                     ..Default::default()
                 },
             ],
@@ -66,8 +66,8 @@ pub(crate) fn batch_command() -> Command {
         validator: None,
         execute: Arc::new(|_ctx, args| {
             Box::pin(async move {
-                let dto = BatchArgs::from_arg_value_map(&args);
-                commands::batch(dto).await
+                let dto = OptimizeArgs::from_arg_value_map(&args);
+                commands::optimize(dto).await
             })
         }),
         expose_mcp: false,

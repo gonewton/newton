@@ -33,42 +33,36 @@ fn init_help_shows_current_dir_example() {
 }
 
 #[test]
-fn batch_help_has_examples_section() {
-    let stdout = help_output(&["batch"]);
+fn optimize_help_has_examples_section() {
+    let stdout = help_output(&["optimize"]);
     assert!(
         stdout.contains("EXAMPLES:"),
-        "batch --help should contain EXAMPLES: section, got:\n{}",
+        "optimize --help should contain EXAMPLES: section, got:\n{}",
         stdout
     );
 }
 
 #[test]
-fn batch_help_shows_project_id_example() {
-    let stdout = help_output(&["batch"]);
+fn optimize_help_shows_project_id_example() {
+    let stdout = help_output(&["optimize"]);
     assert!(
-        stdout.contains("newton batch project-alpha"),
-        "batch --help should show project-id usage example"
+        stdout.contains("newton optimize project-alpha"),
+        "optimize --help should show project-id usage example"
     );
 }
 
 #[test]
-fn batch_help_shows_workspace_flag_example() {
-    let stdout = help_output(&["batch"]);
+fn optimize_help_shows_workspace_flag_example() {
+    let stdout = help_output(&["optimize"]);
     assert!(
         stdout.contains("--workspace"),
-        "batch --help should demonstrate --workspace flag"
+        "optimize --help should demonstrate --workspace flag"
     );
 }
 
 #[test]
 fn all_main_commands_have_examples() {
-    let commands: &[&[&str]] = &[
-        &["init"],
-        &["batch"],
-        &["serve"],
-        &["workflow"],
-        &["webhook"],
-    ];
+    let commands: &[&[&str]] = &[&["init"], &["optimize"], &["serve"], &["workflow"]];
     for command in commands {
         let stdout = help_output(command);
         assert!(

@@ -24,7 +24,7 @@ use cli_framework::spec::value::ArgValue;
 use uuid::Uuid;
 
 use crate::cli::args::{
-    BatchArgs, DataArgs, DataVerb, InitArgs, OutputFormat, ResumeArgs, RunArgs, ServeArgs,
+    DataArgs, DataVerb, InitArgs, OptimizeArgs, OutputFormat, ResumeArgs, RunArgs, ServeArgs,
 };
 use crate::cli::context::NewtonContext;
 
@@ -123,12 +123,10 @@ pub(crate) fn require_workflow_path(
 fn all_root_commands() -> Vec<Command> {
     vec![
         commands::init::init_command(),
-        commands::batch::batch_command(),
+        commands::optimize::optimize_command(),
         commands::serve::serve_command(),
-        commands::ops::health_command(),
         commands::ops::doctor_command(),
         commands::ops::config_command(),
-        commands::workflow::webhook_command(),
         commands::workflow::workflow_command(),
     ]
 }
@@ -180,11 +178,9 @@ pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
 /// Stable list of tree-path strings registered by [`build_app`].
 pub const REGISTERED_COMMAND_IDS: &[&str] = &[
     "init",
-    "batch",
+    "optimize",
     "serve",
     "workflow",
-    "webhook",
-    "health",
     "doctor",
     "config",
     "data/get",
@@ -202,7 +198,6 @@ pub const MCP_EXPOSED_COMMAND_IDS: &[&str] = &[
     "data.put",
     "data.patch",
     "data.delete",
-    "health",
     "workflow",
 ];
 
@@ -287,7 +282,7 @@ impl FromArgValueMap for InitArgs {
     }
 }
 
-impl FromArgValueMap for BatchArgs {
+impl FromArgValueMap for OptimizeArgs {
     fn from_arg_value_map(map: &HashMap<String, ArgValue>) -> Self {
         let project_id = get_opt_str(map, "project-id")
             .unwrap_or_else(|| panic!("fw bug: project-id is required"));
@@ -296,7 +291,7 @@ impl FromArgValueMap for BatchArgs {
         } else {
             60
         };
-        BatchArgs {
+        OptimizeArgs {
             project_id,
             workspace: get_opt_path(map, "workspace"),
             once: get_bool(map, "once"),

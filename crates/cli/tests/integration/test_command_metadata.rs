@@ -38,10 +38,8 @@ fn category_bindings_match_spec_4_1() {
         ("data/patch", categories::WORKFLOW),
         ("data/delete", categories::WORKFLOW),
         ("serve", categories::OPS),
-        ("batch", categories::OPS),
-        ("webhook", categories::OPS),
+        ("optimize", categories::OPS),
         ("init", categories::WORKSPACE),
-        ("health", categories::OPERATIONAL),
         ("doctor", categories::OPERATIONAL),
         ("config", categories::OPERATIONAL),
         // "completion" removed — now provided by cli-framework built-in, not in newton's registry

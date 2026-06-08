@@ -114,48 +114,6 @@ pub struct RunArgs {
     pub state_dir: Option<PathBuf>,
 }
 
-// ── Webhook ───────────────────────────────────────────────────────────────────
-
-#[derive(Args, Clone)]
-pub struct WebhookArgs {
-    #[command(subcommand)]
-    pub command: WebhookCommand,
-}
-
-#[derive(Subcommand, Clone)]
-pub enum WebhookCommand {
-    #[command(
-        about = "Start an HTTP server to receive webhook events and trigger workflows",
-        after_help = "EXAMPLES:\n  newton webhook serve --workflow ./workflows/deploy.yaml --workspace ./project"
-    )]
-    Serve(WebhookServeArgs),
-    #[command(
-        about = "Display webhook endpoint configuration and server status",
-        after_help = "EXAMPLES:\n  newton webhook status --workflow workflow.yaml --workspace ./workspace"
-    )]
-    Status(WebhookStatusArgs),
-}
-
-#[derive(Args, Clone)]
-pub struct WebhookServeArgs {
-    /// Path to the workflow YAML file
-    #[arg(long = "workflow", value_name = "PATH")]
-    pub workflow: PathBuf,
-
-    #[arg(long, value_name = "PATH")]
-    pub workspace: PathBuf,
-}
-
-#[derive(Args, Clone)]
-pub struct WebhookStatusArgs {
-    /// Path to the workflow YAML file (optional)
-    #[arg(long = "workflow", value_name = "PATH")]
-    pub workflow: Option<PathBuf>,
-
-    #[arg(long, value_name = "PATH")]
-    pub workspace: PathBuf,
-}
-
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lowercase")]
 pub enum OutputFormat {
@@ -380,7 +338,7 @@ impl FromStr for KeyValuePair {
 }
 
 #[derive(Args, Clone)]
-pub struct BatchArgs {
+pub struct OptimizeArgs {
     /// Project identifier that maps to .newton/configs/<project_id>.conf
     #[arg(value_name = "PROJECT_ID")]
     pub project_id: String,
@@ -389,11 +347,11 @@ pub struct BatchArgs {
     #[arg(long, value_name = "PATH")]
     pub workspace: Option<PathBuf>,
 
-    /// Process a single plan and exit instead of running as a daemon
+    /// Process a single Plan and exit instead of running as a daemon
     #[arg(long)]
     pub once: bool,
 
-    /// Seconds to wait when the queue is empty (default: 60)
+    /// Seconds to wait when the Plan queue is empty (default: 60)
     #[arg(long = "poll-interval", default_value = "60", value_name = "SECONDS")]
     pub poll_interval_seconds: u64,
 }
