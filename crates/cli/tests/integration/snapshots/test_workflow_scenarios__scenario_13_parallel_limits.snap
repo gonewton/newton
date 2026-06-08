@@ -12,6 +12,7 @@ completed_tasks:
       exit_code: 0
       stderr: ""
       stdout: ""
+      success: true
     error_code: ~
     duration_ms: "[duration]"
     run_seq: 1
@@ -22,6 +23,7 @@ completed_tasks:
       exit_code: 0
       stderr: ""
       stdout: ""
+      success: true
     error_code: ~
     duration_ms: "[duration]"
     run_seq: 1
@@ -32,6 +34,7 @@ completed_tasks:
       exit_code: 0
       stderr: ""
       stdout: ""
+      success: true
     error_code: ~
     duration_ms: "[duration]"
     run_seq: 1
