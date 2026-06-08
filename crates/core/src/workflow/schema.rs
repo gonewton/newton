@@ -5,6 +5,7 @@ use crate::core::types::ErrorCategory;
 use crate::workflow::expression::ExpressionEngine;
 use crate::workflow::transform;
 use indexmap::IndexMap;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -36,7 +37,7 @@ fn default_transitions() -> Vec<Transition> {
 }
 
 /// Root document for a workflow graph definition.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct WorkflowDocument {
     pub version: String,
     pub mode: String,
@@ -50,7 +51,7 @@ pub struct WorkflowDocument {
 }
 
 /// Metadata embedded with a workflow document.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct WorkflowMetadata {
     pub name: Option<String>,
     pub description: Option<String>,
@@ -58,7 +59,7 @@ pub struct WorkflowMetadata {
 }
 
 /// Workflow-level configuration.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct WorkflowDefinition {
     #[serde(default = "default_context_value")]
     pub context: Value,
@@ -67,7 +68,7 @@ pub struct WorkflowDefinition {
 }
 
 /// Sub-settings for workflow I/O contract.
-#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, JsonSchema)]
 pub struct IoSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_input_bytes: Option<usize>,
@@ -82,7 +83,7 @@ impl IoSettings {
 }
 
 /// Workflow-level I/O contract block (optional).
-#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, JsonSchema)]
 pub struct IoBlock {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_schema: Option<Value>,
@@ -104,7 +105,7 @@ impl IoBlock {
 }
 
 /// Execution settings for a workflow graph.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(default)]
 pub struct WorkflowSettings {
     pub entry_task: String,
@@ -175,7 +176,7 @@ impl Default for WorkflowSettings {
 }
 
 /// Workflow-level model configuration for agent operators.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ModelStylesheet {
     /// Model identifier (e.g. "gpt-4o", "claude-sonnet-4-6").
     pub model: String,
@@ -186,7 +187,7 @@ pub struct ModelStylesheet {
 }
 
 /// Context fidelity policy for agent operators (schema-only; not yet implemented).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextFidelity {
     Full,
@@ -196,7 +197,7 @@ pub enum ContextFidelity {
 }
 
 /// Terminal task kind — determines how the workflow outcome is affected by a terminal task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TerminalKind {
     Success,
@@ -204,7 +205,7 @@ pub enum TerminalKind {
 }
 
 /// Controls whether a reached-but-failed goal gate causes the workflow to fail.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum GoalGateFailureBehavior {
     #[default]
@@ -225,7 +226,7 @@ fn default_success_requires_no_task_failures() -> bool {
 }
 
 /// Completion policy configuration for workflow graphs.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct CompletionSettings {
     #[serde(default = "default_stop_on_terminal")]
     pub stop_on_terminal: bool,
@@ -249,7 +250,7 @@ impl Default for CompletionSettings {
 }
 
 /// Artifact storage configuration embedded in workflow settings.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct ArtifactStorageSettings {
     pub base_path: PathBuf,
     pub max_inline_bytes: usize,
@@ -260,7 +261,7 @@ pub struct ArtifactStorageSettings {
 }
 
 /// Command operator specific settings embedded in workflow settings.
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 pub struct CommandOperatorSettings {
     pub allow_shell: bool,
 }
@@ -270,7 +271,7 @@ fn default_command_operator_settings() -> CommandOperatorSettings {
 }
 
 /// Human interaction configuration for workflows.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct HumanSettings {
     pub default_timeout_seconds: u64,
     pub audit_path: PathBuf,
@@ -286,7 +287,7 @@ impl Default for HumanSettings {
 }
 
 /// Webhook server configuration embedded in workflow settings.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookSettings {
     pub enabled: bool,
     pub bind: String,
@@ -306,7 +307,7 @@ impl Default for WebhookSettings {
 }
 
 /// Workflow trigger definition supporting manual and webhook workflows.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct WorkflowTrigger {
     #[serde(rename = "type")]
     pub trigger_type: TriggerType,
@@ -349,7 +350,7 @@ fn default_trigger_payload() -> Value {
 }
 
 /// Allowed trigger types for workflow graphs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TriggerType {
     Manual,
@@ -381,7 +382,7 @@ impl Default for ArtifactStorageSettings {
 }
 
 /// Checkpointing configuration embedded in workflow settings.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct CheckpointSettings {
     pub checkpoint_enabled: bool,
     pub checkpoint_interval_seconds: u64,
@@ -401,7 +402,7 @@ impl Default for CheckpointSettings {
 }
 
 /// Redaction configuration embedded in workflow settings.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct RedactionSettings {
     #[serde(default = "default_redact_keys")]
     pub redact_keys: Vec<String>,
@@ -420,7 +421,7 @@ fn default_redact_keys() -> Vec<String> {
 }
 
 /// Artifact cleanup policy.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ArtifactCleanupPolicy {
     #[default]
@@ -428,7 +429,7 @@ pub enum ArtifactCleanupPolicy {
 }
 
 /// Task definition consumed by the workflow executor.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct WorkflowTask {
     pub id: String,
     pub operator: String,
@@ -461,14 +462,14 @@ impl WorkflowTask {
 }
 
 /// Reusable macro definition containing one or more task templates.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct MacroDefinition {
     pub name: String,
     pub tasks: Vec<WorkflowTask>,
 }
 
 /// Invocation of a named macro from the workflow task list.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct MacroInvocation {
     #[serde(rename = "macro")]
     pub macro_name: String,
@@ -477,7 +478,7 @@ pub struct MacroInvocation {
 }
 
 /// Workflow task entries can be concrete tasks or macro invocations pre-transform.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[allow(clippy::large_enum_variant)] // Task variant intentionally carries full task payload pre-transform.
 #[serde(untagged)]
 pub enum TaskOrMacro {
@@ -533,7 +534,7 @@ impl WorkflowDefinition {
 }
 
 /// Retry configuration for a task.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct RetryPolicy {
     pub max_attempts: usize,
     pub backoff_ms: u64,
@@ -557,7 +558,7 @@ impl RetryPolicy {
 }
 
 /// Transition between tasks.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct Transition {
     pub to: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -570,7 +571,7 @@ pub struct Transition {
 }
 
 /// Condition used to guard transitions between tasks.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Condition {
     Expr {
@@ -590,7 +591,7 @@ impl Condition {
 }
 
 /// Parameters for the barrier operator that waits for multiple tasks to complete.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BarrierParams {
     #[serde(default)]
     pub expected: Vec<String>,

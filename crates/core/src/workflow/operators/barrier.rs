@@ -5,7 +5,15 @@ use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
 use crate::workflow::schema::BarrierParams;
 use async_trait::async_trait;
+use serde::Serialize;
 use serde_json::Value;
+
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct BarrierOutput {
+    pub expected_tasks: Vec<String>,
+    pub barrier_passed: bool,
+    pub message: String,
+}
 
 /// Barrier operator that waits for multiple tasks to complete before proceeding.
 /// This operator becomes ready when all task IDs in its `expected` list have completed.
@@ -32,6 +40,14 @@ impl Operator for BarrierOperator {
             .with_code("WFG-BARRIER-001"));
         }
         Ok(())
+    }
+
+    fn params_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(BarrierParams)
+    }
+
+    fn output_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(BarrierOutput)
     }
 
     async fn execute(&self, params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {

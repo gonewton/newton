@@ -64,6 +64,7 @@ dashmap = { workspace = true }
 async-stream = { workspace = true }
 tokio-stream = { workspace = true }
 jsonschema = { workspace = true }
+schemars = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
@@ -192,3 +193,11 @@ path = "tests/integration/test_magic_tools.rs"
 [[test]]
 name = "test_kpi_evalrun_grade_api"
 path = "tests/integration/test_kpi_evalrun_grade_api.rs"
+
+[[test]]
+name = "test_schema_export"
+path = "tests/workflow_graph/test_schema_export.rs"
+
+[[test]]
+name = "test_git_operator"
+path = "tests/workflow_graph/test_git_operator.rs"

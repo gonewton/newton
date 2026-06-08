@@ -6,6 +6,7 @@ pub mod data;
 pub mod import;
 pub mod log;
 pub mod optimize;
+pub mod schema;
 pub mod serve;
 pub mod shared_execution;
 pub mod workflow;
@@ -33,6 +34,7 @@ pub use data::data;
 pub use import::workflow_import;
 pub use log::log;
 pub use optimize::optimize;
+pub use schema::schema_export_cmd;
 pub use serve::serve;
 pub use workflow::{dot, explain, lint, resume, validate, workflow_run};
 

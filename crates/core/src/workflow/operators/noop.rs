@@ -2,7 +2,16 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema, Default)]
+pub struct NoOpParams {}
+
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct NoOpOutput {
+    pub status: String,
+}
 
 pub struct NoOpOperator;
 
@@ -32,6 +41,14 @@ impl Operator for NoOpOperator {
             ));
         }
         Ok(())
+    }
+
+    fn params_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(NoOpParams)
+    }
+
+    fn output_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(NoOpOutput)
     }
 
     async fn execute(&self, _params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {

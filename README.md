@@ -55,7 +55,7 @@ Newton runs YAML workflow graphs with:
 - **Durability**: checkpoint persistence, resume, artifact routing, and execution history under `.newton/`.
 - **Authoring**: macros, `include_if` filtering, `{{ ... }}` interpolation, and `$expr` evaluation.
 
-Built-in operators include `CommandOperator`, `WorkflowOperator` (nested workflows), `HumanApprovalOperator`, `HumanDecisionOperator`, and `GhOperator`. Agent operators integrate with **aikit-sdk**; quota exhaustion surfaces as error code `WFG-AGENT-008` (provider-agnostic detection via aikit-sdk, not by parsing agent output).
+Built-in operators include `CommandOperator`, `WorkflowOperator` (nested workflows), `HumanApprovalOperator`, `HumanDecisionOperator`, `GhOperator` (GitHub CLI), and `GitOperator` (typed git operations: `clean_check`, `sync_main`, `create_branch`, `commit`, `push` with retry, `diff`, `cleanup_merge`). Recurring shell patterns are promoted to typed operators with `success`/`exit_code` outputs; `CommandOperator` remains the escape hatch for bespoke glue. Agent operators integrate with **aikit-sdk**; quota exhaustion surfaces as error code `WFG-AGENT-008` (provider-agnostic detection via aikit-sdk, not by parsing agent output).
 
 For operator reference, see [docs/operators/](docs/operators/) and the [Newton skill](skill/newton/SKILL.md) (`skill/newton/references/`).
 
@@ -72,6 +72,7 @@ For operator reference, see [docs/operators/](docs/operators/) and the [Newton s
 | `newton batch <project_id>` | Process queued plan files |
 | `newton serve` | HTTP/WebSocket API for workflow state and integrations |
 | `newton webhook serve\|status` | Trigger workflows from external HTTP events |
+| `newton schema export` | Emit the workflow IR JSON Schema (operator-discriminated) |
 
 Run `newton <command> --help` for flags and examples. The top-level `newton run` command is deprecated; use `newton workflow run`.
 
@@ -134,6 +135,41 @@ See `newton mcp serve --help` for client configuration examples.
 
 `HumanApprovalOperator` and `HumanDecisionOperator` pause workflows for human input via [ailoop](https://github.com/goailoop/ailoop). Configure ailoop in `.newton/configs/*.conf` or via `NEWTON_AILOOP_*` environment variables. See [docs/operators/human_approval.md](docs/operators/human_approval.md) and [docs/operators/human_decision.md](docs/operators/human_decision.md).
 
+## Authoring workflows in code
+
+Workflow YAML is the IR the engine runs, but you can author it in a typed
+language and compile down to that same YAML. The engine never learns where the
+YAML came from — handwritten and generated definitions are
+indistinguishable. These authoring surfaces live in `packages/`:
+
+| Package | Language | Authoring entry point |
+| --- | --- | --- |
+| [`packages/newton-dsl-py`](packages/newton-dsl-py/) | Python (`uv` / pydantic) | `from newton import Workflow` |
+| [`packages/newton-dsl-ts`](packages/newton-dsl-ts/) | TypeScript (`pnpm`) | `import { Workflow } from "@newton/dsl"` |
+
+Both surfaces use `.then()` / `.when()` / `.otherwise()` for transitions,
+`repeat_at_most()` for bounded loops, typed `.out` references between tasks, and
+`wf.expects()` for inputs — then emit validated YAML for `newton workflow run`.
+See each package's README for the full API.
+
+The shared, committed JSON Schema and a conformance corpus both surfaces test
+against live in [`packages/workflow-schema`](packages/workflow-schema/).
+
+## Schema export
+
+`newton schema export` emits the workflow IR as a single composed,
+operator-discriminated JSON Schema — the contract the authoring surfaces and
+external tooling validate against:
+
+```bash
+newton schema export --pretty                       # composed IR schema to stdout
+newton schema export --out workflow.schema.json     # write to a file
+newton schema export --outputs                      # per-operator output schemas
+```
+
+Each operator owns its own `params_schema()` and `output_schema()`
+([ADR 0006](docs/adr/0006-operators-own-param-and-output-schemas.md)).
+
 ## Workspace layout
 
 After `newton init`, Newton expects:
@@ -170,7 +206,7 @@ newton workflow runs show --run-id <UUID> --task <TASK_ID>
 | Resource | Contents |
 | --- | --- |
 | [skill/newton/SKILL.md](skill/newton/SKILL.md) | Command reference and typical flows |
-| [docs/context.md](docs/context.md) | Domain terminology (portfolio, plans, opportunities) |
+| [CONTEXT.md](CONTEXT.md) | Domain glossary (loop, grading, portfolio, planning) |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Deployment notes |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [architecture.md](architecture.md) | System design (contributors) |

@@ -9,10 +9,16 @@ use crate::workflow::human::{
 use crate::workflow::operator::{ExecutionContext, Operator};
 use crate::workflow::schema::HumanSettings;
 use async_trait::async_trait;
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct HumanDecisionOutput {
+    pub choice: String,
+}
 
 struct ParsedOption {
     id: String,
@@ -376,6 +382,16 @@ impl Operator for HumanDecisionOperator {
             }
         }
         Ok(())
+    }
+
+    fn params_schema(&self) -> schemars::Schema {
+        // permissive — structured vs legacy discriminated by presence of `options` or `prompt`
+        serde_json::from_value::<schemars::Schema>(serde_json::json!({"type": "object"}))
+            .unwrap_or_default()
+    }
+
+    fn output_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(HumanDecisionOutput)
     }
 
     async fn execute(&self, params: Value, ctx: ExecutionContext) -> Result<Value, AppError> {

@@ -38,6 +38,14 @@ impl Operator for FailOperator {
         Ok(())
     }
 
+    fn params_schema(&self) -> schemars::Schema {
+        schemars::Schema::default()
+    }
+
+    fn output_schema(&self) -> schemars::Schema {
+        schemars::Schema::default()
+    }
+
     async fn execute(&self, _params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {
         Err(AppError::new(
             ErrorCategory::ValidationError,

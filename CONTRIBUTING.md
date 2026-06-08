@@ -25,6 +25,27 @@ newton-cli → newton-core → { newton-types, newton-backend }
 - Build the binary: `cargo build -p newton-cli`
 - Embed the engine: add `newton-core = { path = "crates/core" }` to your `Cargo.toml`
 
+### Non-Rust packages
+
+Code-based authoring surfaces and the shared schema live under `packages/` (outside the Cargo workspace):
+
+| Directory | Stack | Role |
+| --- | --- | --- |
+| `packages/workflow-schema` | committed JSON | Canonical workflow IR `workflow.schema.json` + per-operator `output_schemas.json`, plus a `conformance/` corpus both surfaces test against. |
+| `packages/newton-dsl-py` | Python (`uv` / pydantic) | Python authoring surface; compiles to the YAML IR. |
+| `packages/newton-dsl-ts` | TypeScript (`pnpm`) | TypeScript authoring surface; compiles to the YAML IR. |
+
+The committed schemas are the source of truth for both surfaces. Each surface generates typed models from them (`packages/*/codegen/generate.sh`) and verifies they are current (`packages/*/codegen/check_drift.sh`). Regenerate after changing any operator's `params_schema()` / `output_schema()`:
+
+```bash
+newton schema export --out packages/workflow-schema/workflow.schema.json --pretty
+newton schema export --outputs --out packages/workflow-schema/output_schemas.json --pretty
+bash packages/newton-dsl-py/codegen/generate.sh
+bash packages/newton-dsl-ts/codegen/generate.sh
+```
+
+Generated files (`src/newton/_generated/`, `src/generated/`) are committed; `generate.sh` runs with `--disable-timestamp` so output is deterministic and `check_drift.sh` does not trip on clock differences.
+
 ## Development environment
 
 ### Rust toolchain
@@ -65,6 +86,16 @@ git diff openapi/newton-backend-parity.yaml   # commit updated contract in the s
 ```
 
 CI runs the generator and fails if `openapi/newton-backend-parity.yaml` is out of date.
+
+### Operators and the IR schema
+
+Every `Operator` implements `params_schema()` and `output_schema()` ([ADR 0006](docs/adr/0006-operators-own-param-and-output-schemas.md)). When adding or changing an operator:
+
+1. Register it in `crates/core/src/workflow/operators/mod.rs`.
+2. Keep the schema methods accurate — `newton schema export` composes them into the published IR schema.
+3. Regenerate the committed schema and the authoring-surface models (see [Non-Rust packages](#non-rust-packages)).
+
+Recurring, failure-prone shell embedded in workflows should be promoted to a typed operator (e.g. `GitOperator`) rather than left in `CommandOperator`, which is the escape hatch for bespoke glue ([ADR 0008](docs/adr/0008-shell-patterns-promoted-to-typed-operators.md)).
 
 ## Development rules
 
@@ -137,13 +168,16 @@ Useful entry points:
 | Path | Contents |
 | --- | --- |
 | `crates/core/src/workflow/` | Engine, operators, executor, checkpoints |
+| `crates/core/src/workflow/operators/` | Built-in operators (`git/`, `gh.rs`, `command.rs`, `agent/`, …) |
+| `crates/core/src/workflow/schema_export.rs` | Composed IR + per-operator output schema generation |
+| `packages/` | Code-based authoring surfaces and the shared workflow schema |
 | `crates/core/src/api/` | HTTP handlers and OpenAPI generation |
 | `crates/core/src/integrations/` | ailoop, external service wiring |
 | `crates/backend/src/store/` | SQLite store modules |
 | `crates/cli/src/cli/framework_setup/` | Command registration |
 | `openapi/` | HTTP and realtime API contracts |
 
-Domain terminology: [docs/context.md](docs/context.md).
+Domain terminology: [CONTEXT.md](CONTEXT.md) (and implementation/internal terms in [architecture.md](architecture.md)).
 
 ## Project skills
 

@@ -32,3 +32,4 @@ NEWTON-0029 - Whenever a backend CRUD endpoint is added or modified, you MUST up
 - check Cargo.toml for dependencies and versions
 - Files (artifact management, workspace state)
 
+NEWTON-0030 - Always assume greenfield where we should keep no backward compatibilities. When choosing between breaking things and improving design, prefer to breakthings.

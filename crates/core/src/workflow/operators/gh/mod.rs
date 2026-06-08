@@ -134,6 +134,21 @@ impl Operator for GhOperator {
         Ok(())
     }
 
+    fn params_schema(&self) -> schemars::Schema {
+        serde_json::from_value::<schemars::Schema>(serde_json::json!({
+            "type": "object",
+            "properties": { "operation": { "type": "string" } },
+            "required": ["operation"]
+        }))
+        .unwrap_or_default()
+    }
+
+    fn output_schema(&self) -> schemars::Schema {
+        // Output is operation-discriminated — permissive schema
+        serde_json::from_value::<schemars::Schema>(serde_json::json!({"type": "object"}))
+            .unwrap_or_default()
+    }
+
     async fn execute(&self, params: Value, ctx: ExecutionContext) -> Result<Value, AppError> {
         let map = params.as_object().ok_or_else(|| {
             AppError::new(ErrorCategory::ValidationError, "params must be an object")

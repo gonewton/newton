@@ -5,6 +5,7 @@ use crate::workflow::executor::ExecutionOverrides;
 use crate::workflow::executor::GraphHandle;
 use crate::workflow::expression::EvaluationContext;
 use async_trait::async_trait;
+use schemars::Schema;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -66,6 +67,12 @@ pub trait Operator: Send + Sync + 'static {
 
     /// Execute the operator with resolved params.
     async fn execute(&self, params: Value, ctx: ExecutionContext) -> Result<Value, AppError>;
+
+    /// JSON Schema for the operator's params object.
+    fn params_schema(&self) -> Schema;
+
+    /// JSON Schema for the operator's output object.
+    fn output_schema(&self) -> Schema;
 }
 
 /// Builder used to register operators before execution.

@@ -6,10 +6,20 @@ use crate::workflow::child_run::{ChildRunInput, ChildWorkflowRunner};
 use crate::workflow::operator::{ExecutionContext, Operator};
 use crate::workflow::state::canonicalize_workflow_path;
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct WorkflowOperatorParams {
+    pub workflow_path: String,
+    #[serde(default)]
+    pub context: Option<serde_json::Value>,
+    #[serde(default)]
+    pub triggers: Option<serde_json::Value>,
+}
 
 pub struct WorkflowOperator {
     runner: Arc<dyn ChildWorkflowRunner>,
@@ -51,6 +61,15 @@ impl Operator for WorkflowOperator {
         validate_optional_object(obj, "context")?;
         validate_optional_object(obj, "triggers")?;
         Ok(())
+    }
+
+    fn params_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(WorkflowOperatorParams)
+    }
+
+    fn output_schema(&self) -> schemars::Schema {
+        // Output is dynamic
+        schemars::Schema::default()
     }
 
     async fn execute(&self, params: Value, ctx: ExecutionContext) -> Result<Value, AppError> {

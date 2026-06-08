@@ -8,11 +8,27 @@ use crate::workflow::human::{
 use crate::workflow::operator::{ExecutionContext, Operator};
 use crate::workflow::schema::HumanSettings;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct HumanApprovalParams {
+    pub prompt: String,
+    #[serde(default)]
+    pub timeout_seconds: Option<u64>,
+    #[serde(default)]
+    pub default_on_timeout: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct HumanApprovalOutput {
+    pub approved: bool,
+    pub outcome: String,
+}
 
 struct ApprovalParams {
     prompt: String,
@@ -108,6 +124,14 @@ impl Operator for HumanApprovalOperator {
             .with_code("WFG-HUMAN-001"));
         }
         Ok(())
+    }
+
+    fn params_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(HumanApprovalParams)
+    }
+
+    fn output_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(HumanApprovalOutput)
     }
 
     async fn execute(&self, params: Value, ctx: ExecutionContext) -> Result<Value, AppError> {

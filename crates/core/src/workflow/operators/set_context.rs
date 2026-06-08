@@ -2,7 +2,19 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct SetContextParams {
+    pub patch: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct SetContextOutput {
+    pub applied: bool,
+    pub patch: serde_json::Value,
+}
 
 pub struct SetContextOperator;
 
@@ -39,6 +51,14 @@ impl Operator for SetContextOperator {
             ));
         }
         Ok(())
+    }
+
+    fn params_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(SetContextParams)
+    }
+
+    fn output_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(SetContextOutput)
     }
 
     async fn execute(&self, params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {
