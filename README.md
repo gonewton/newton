@@ -170,7 +170,7 @@ newton workflow runs show --run-id <UUID> --task <TASK_ID>
 | Resource | Contents |
 | --- | --- |
 | [skill/newton/SKILL.md](skill/newton/SKILL.md) | Command reference and typical flows |
-| [docs/context.md](docs/context.md) | Domain terminology (portfolio, plans, opportunities) |
+| [CONTEXT.md](CONTEXT.md) | Domain glossary (loop, grading, portfolio, planning) |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Deployment notes |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [architecture.md](architecture.md) | System design (contributors) |

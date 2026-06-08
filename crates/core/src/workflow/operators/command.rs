@@ -4,6 +4,7 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Number, Value};
 use std::collections::HashMap;
 use std::fs;
@@ -45,29 +46,62 @@ impl Operator for CommandOperator {
     }
 
     fn validate_params(&self, params: &Value) -> Result<(), AppError> {
-        if !params.is_object() {
-            return Err(AppError::new(
+        let parsed: CommandParams = serde_json::from_value(params.clone()).map_err(|e| {
+            AppError::new(
                 ErrorCategory::ValidationError,
-                "CommandOperator params must be an object",
-            ));
-        }
-        let map = params.as_object().unwrap();
-        if map
-            .get("cmd")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .is_empty()
-        {
+                format!("CommandOperator params invalid: {e}"),
+            )
+        })?;
+        if parsed.cmd.trim().is_empty() {
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
                 "CommandOperator requires a non-empty cmd",
             ));
         }
+        if let Some(cwd_str) = &parsed.cwd {
+            if Path::new(cwd_str).is_absolute() {
+                return Err(
+                    AppError::new(ErrorCategory::ValidationError, "cwd must be relative")
+                        .with_code("WFG-CMD-001"),
+                );
+            }
+        }
+        if let Some(ref p) = parsed.write_stdout {
+            if Path::new(p).is_absolute() {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    "write_stdout must be relative",
+                )
+                .with_code("WFG-CMD-003"));
+            }
+        }
+        if let Some(ref p) = parsed.write_stderr {
+            if Path::new(p).is_absolute() {
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    "write_stderr must be relative",
+                )
+                .with_code("WFG-CMD-003"));
+            }
+        }
         Ok(())
     }
 
+    fn params_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(CommandParams)
+    }
+
+    fn output_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(CommandOutput)
+    }
+
     async fn execute(&self, params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {
-        let parsed = CommandParams::from_value(&params)?;
+        let parsed: CommandParams = serde_json::from_value(params.clone()).map_err(|e| {
+            AppError::new(
+                ErrorCategory::ValidationError,
+                format!("CommandOperator params invalid: {e}"),
+            )
+        })?;
         let resolved_cwd = parsed.cwd.as_deref().map_or_else(
             || self.workspace_root.clone(),
             |cwd| self.workspace_root.join(cwd),
@@ -150,6 +184,7 @@ impl Operator for CommandOperator {
                 "duration_ms".to_string(),
                 Value::Number(Number::from(duration_ms)),
             ),
+            ("success".to_string(), Value::Bool(output.exit_code == 0)),
         ]));
 
         if output.exit_code != 0 {
@@ -249,107 +284,37 @@ impl CommandRunner for TokioCommandRunner {
     }
 }
 
-struct CommandParams {
-    cmd: String,
-    cwd: Option<String>,
-    env: Option<HashMap<String, String>>,
-    capture_stdout: bool,
-    capture_stderr: bool,
-    shell: bool,
-    write_stdout: Option<String>,
-    write_stderr: Option<String>,
+fn default_capture_true() -> bool {
+    true
 }
 
-impl CommandParams {
-    fn from_value(value: &Value) -> Result<Self, AppError> {
-        let map = value.as_object().ok_or_else(|| {
-            AppError::new(
-                ErrorCategory::ValidationError,
-                "CommandOperator params must be an object",
-            )
-        })?;
-        let cmd = map
-            .get("cmd")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| AppError::new(ErrorCategory::ValidationError, "cmd is required"))?
-            .to_string();
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommandParams {
+    pub cmd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<HashMap<String, String>>,
+    #[serde(default = "default_capture_true")]
+    pub capture_stdout: bool,
+    #[serde(default = "default_capture_true")]
+    pub capture_stderr: bool,
+    #[serde(default)]
+    pub shell: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write_stdout: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write_stderr: Option<String>,
+}
 
-        let cwd = map
-            .get("cwd")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .map(std::string::ToString::to_string);
-        if let Some(cwd_str) = &cwd {
-            if Path::new(cwd_str).is_absolute() {
-                return Err(
-                    AppError::new(ErrorCategory::ValidationError, "cwd must be relative")
-                        .with_code("WFG-CMD-001"),
-                );
-            }
-        }
-
-        let env = map.get("env").and_then(Value::as_object).map(|env_map| {
-            env_map
-                .iter()
-                .filter_map(|(key, value)| value.as_str().map(|v| (key.clone(), v.to_string())))
-                .collect::<HashMap<_, _>>()
-        });
-
-        let capture_stdout = map
-            .get("capture_stdout")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-        let capture_stderr = map
-            .get("capture_stderr")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-        let shell = map.get("shell").and_then(Value::as_bool).unwrap_or(false);
-
-        let write_stdout = map
-            .get("write_stdout")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string);
-        if let Some(ref p) = write_stdout {
-            if Path::new(p).is_absolute() {
-                return Err(AppError::new(
-                    ErrorCategory::ValidationError,
-                    "write_stdout must be relative",
-                )
-                .with_code("WFG-CMD-003"));
-            }
-        }
-
-        let write_stderr = map
-            .get("write_stderr")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string);
-        if let Some(ref p) = write_stderr {
-            if Path::new(p).is_absolute() {
-                return Err(AppError::new(
-                    ErrorCategory::ValidationError,
-                    "write_stderr must be relative",
-                )
-                .with_code("WFG-CMD-003"));
-            }
-        }
-
-        Ok(Self {
-            cmd,
-            cwd,
-            env,
-            capture_stdout,
-            capture_stderr,
-            shell,
-            write_stdout,
-            write_stderr,
-        })
-    }
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct CommandOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+    pub success: bool,
+    pub duration_ms: u64,
 }
 
 fn limit_bytes(bytes: &[u8]) -> String {

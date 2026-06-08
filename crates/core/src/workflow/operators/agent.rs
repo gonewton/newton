@@ -16,9 +16,48 @@ use crate::workflow::operators::engine::passthrough::PassthroughDriver;
 use crate::workflow::operators::engine::{AikitEngineManager, DriverConfig, EngineDriver};
 use crate::workflow::state::GraphSettings;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct AgentParams {
+    #[serde(default)]
+    pub engine: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub prompt: Option<String>,
+    #[serde(default)]
+    pub prompt_file: Option<String>,
+    #[serde(default)]
+    pub working_dir: Option<String>,
+    #[serde(default)]
+    pub env: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub timeout_seconds: Option<u64>,
+    #[serde(default)]
+    pub signals: Option<serde_json::Value>,
+    #[serde(rename = "loop", default)]
+    pub loop_mode: bool,
+    #[serde(default)]
+    pub max_iterations: Option<u32>,
+    #[serde(default)]
+    pub engine_command: Option<Vec<String>>,
+    #[serde(default)]
+    pub stream_stdout: Option<bool>,
+    #[serde(default)]
+    pub require_signal: bool,
+}
+
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct AgentSchemaOutput {
+    pub signal: Option<String>,
+    pub stdout_artifact: Option<String>,
+    pub exit_code: Option<i32>,
+}
 
 use self::command::{ExecParams, ExecPaths};
 use self::config::AgentOperatorConfig;
@@ -70,6 +109,14 @@ impl Operator for AgentOperator {
         signals::validate_and_compile_signals(&config.signals)?;
         config.validate_engine_command()?;
         Ok(())
+    }
+
+    fn params_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(AgentParams)
+    }
+
+    fn output_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(AgentSchemaOutput)
     }
 
     async fn execute(&self, params: Value, ctx: ExecutionContext) -> Result<Value, AppError> {

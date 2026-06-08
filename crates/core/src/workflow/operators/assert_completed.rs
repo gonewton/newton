@@ -2,7 +2,18 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct AssertCompletedParams {
+    pub require: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct AssertCompletedOutput {
+    pub all_succeeded: bool,
+}
 
 pub struct AssertCompletedOperator;
 
@@ -40,6 +51,14 @@ impl Operator for AssertCompletedOperator {
             ));
         }
         Ok(())
+    }
+
+    fn params_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(AssertCompletedParams)
+    }
+
+    fn output_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(AssertCompletedOutput)
     }
 
     async fn execute(&self, params: Value, ctx: ExecutionContext) -> Result<Value, AppError> {

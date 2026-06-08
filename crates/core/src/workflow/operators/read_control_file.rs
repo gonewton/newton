@@ -4,8 +4,15 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema, Default)]
+pub struct ReadControlFileParams {
+    #[serde(default)]
+    pub path: Option<String>,
+}
 
 pub struct ReadControlFileOperator;
 
@@ -46,6 +53,15 @@ impl Operator for ReadControlFileOperator {
             }
         }
         Ok(())
+    }
+
+    fn params_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(ReadControlFileParams)
+    }
+
+    fn output_schema(&self) -> schemars::Schema {
+        // Output is dynamic — permissive schema
+        schemars::Schema::default()
     }
 
     async fn execute(&self, params: Value, ctx: ExecutionContext) -> Result<Value, AppError> {

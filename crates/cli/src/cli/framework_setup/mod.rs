@@ -128,6 +128,7 @@ fn all_root_commands() -> Vec<Command> {
         commands::ops::doctor_command(),
         commands::ops::config_command(),
         commands::workflow::workflow_command(),
+        commands::schema::schema_command(),
     ]
 }
 
@@ -183,6 +184,8 @@ pub const REGISTERED_COMMAND_IDS: &[&str] = &[
     "workflow",
     "doctor",
     "config",
+    "schema",
+    "schema/export",
     "data/get",
     "data/post",
     "data/put",

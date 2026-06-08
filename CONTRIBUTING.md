@@ -143,7 +143,7 @@ Useful entry points:
 | `crates/cli/src/cli/framework_setup/` | Command registration |
 | `openapi/` | HTTP and realtime API contracts |
 
-Domain terminology: [docs/context.md](docs/context.md).
+Domain terminology: [CONTEXT.md](CONTEXT.md) (and implementation/internal terms in [architecture.md](architecture.md)).
 
 ## Project skills
 

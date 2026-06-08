@@ -42,6 +42,7 @@ async-stream = { workspace = true }
 async-trait = { workspace = true }
 tempfile = { workspace = true }
 indexmap = { workspace = true }
+schemars = { workspace = true }
 dirs-next = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }

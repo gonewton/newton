@@ -15,6 +15,7 @@ pub mod loader;
 pub mod operator;
 pub mod operators;
 pub mod schema;
+pub mod schema_export;
 pub mod server_notifier;
 pub mod state;
 pub mod task_execution;

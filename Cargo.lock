@@ -2470,6 +2470,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "rmcp",
+ "schemars",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2527,6 +2528,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "rhai",
+ "schemars",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -3859,10 +3861,12 @@ checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
  "chrono",
  "dyn-clone",
+ "indexmap",
  "ref-cast",
  "schemars_derive",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
