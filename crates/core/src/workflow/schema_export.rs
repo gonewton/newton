@@ -15,7 +15,11 @@ pub fn composed_workflow_schema(registry: &OperatorRegistry) -> Schema {
     for op in &operators {
         let name = op.name();
         let params_schema = op.params_schema();
-        let params_value = serde_json::to_value(&params_schema).unwrap_or_default();
+        let mut params_value = serde_json::to_value(&params_schema).unwrap_or_default();
+        // Allow {$expr: "..."} wrappers anywhere a param field value is expected,
+        // since authored YAML carries pre-resolution expressions that the engine
+        // evaluates before deserializing into the typed param struct.
+        relax_schema_for_exprs(&mut params_value);
 
         if_then_branches.push(serde_json::json!({
             "if": {
@@ -38,6 +42,75 @@ pub fn composed_workflow_schema(registry: &OperatorRegistry) -> Schema {
     patch_task_schema_with_operator_branches(&mut root_value, &if_then_branches);
 
     serde_json::from_value(root_value).unwrap_or(root)
+}
+
+/// Recursively rewrite every property schema (and every HashMap value schema via
+/// `additionalProperties`) to accept either its resolved type OR an `{$expr: "…"}`
+/// wrapper.  Newton evaluates `$expr` nodes before deserializing into typed param
+/// structs, so the authored YAML shape differs from the post-resolution shape that
+/// the Rust types describe.  Applying this transform at composition time keeps the
+/// param structs clean while making the authored-document schema accurate.
+fn relax_schema_for_exprs(schema: &mut serde_json::Value) {
+    if !schema.is_object() {
+        return;
+    }
+
+    let expr_schema = serde_json::json!({
+        "type": "object",
+        "required": ["$expr"],
+        "properties": {"$expr": {"type": "string"}},
+        "additionalProperties": false
+    });
+
+    // Recurse into anyOf/oneOf/allOf sub-schemas
+    for kw in ["anyOf", "oneOf", "allOf"] {
+        if let Some(arr) = schema.get_mut(kw).and_then(|v| v.as_array_mut()) {
+            for item in arr {
+                relax_schema_for_exprs(item);
+            }
+        }
+    }
+
+    // Recurse into $defs and definitions
+    for kw in ["$defs", "definitions"] {
+        if let Some(obj) = schema.get_mut(kw).and_then(|v| v.as_object_mut()) {
+            for (_, def) in obj {
+                relax_schema_for_exprs(def);
+            }
+        }
+    }
+
+    // Relax additionalProperties when it is a schema object (i.e. HashMap value
+    // schemas like `additionalProperties: {type: "string"}`).  Leave boolean
+    // additionalProperties (true/false) unchanged.
+    let add_props = schema.get("additionalProperties").cloned();
+    if let Some(ap) = add_props {
+        if ap.is_object() {
+            let mut relaxed = ap;
+            relax_schema_for_exprs(&mut relaxed);
+            schema["additionalProperties"] =
+                serde_json::json!({"anyOf": [relaxed, expr_schema.clone()]});
+        }
+    }
+
+    // Relax each property schema: clone the map first to avoid simultaneous
+    // immutable + mutable borrows on `schema`.
+    let props = schema
+        .get("properties")
+        .and_then(|p| p.as_object())
+        .cloned();
+    if let Some(props_map) = props {
+        for (key, prop_val) in props_map {
+            let mut relaxed = prop_val;
+            relax_schema_for_exprs(&mut relaxed);
+            if let Some(props_obj) = schema.get_mut("properties").and_then(|p| p.as_object_mut()) {
+                props_obj.insert(
+                    key,
+                    serde_json::json!({"anyOf": [relaxed, expr_schema.clone()]}),
+                );
+            }
+        }
+    }
 }
 
 fn patch_task_schema_with_operator_branches(

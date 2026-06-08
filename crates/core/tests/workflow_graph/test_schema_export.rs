@@ -1,6 +1,7 @@
 // Tests for composed schema export and per-operator params validation
 use newton_core::workflow::state::GraphSettings;
 use newton_core::workflow::{operator::OperatorRegistry, operators, schema, schema_export};
+use std::path::PathBuf;
 
 fn build_test_registry() -> OperatorRegistry {
     let workspace = std::path::PathBuf::from(".");
@@ -55,4 +56,48 @@ fn command_output_has_success_field() {
         duration_ms: 0,
     };
     assert!(output.success);
+}
+
+/// DoD #2: every real workflow in .newton/workflows/ must validate against the
+/// composed schema with zero errors.  This is the acceptance gate — if it fails,
+/// the schema does not accurately describe the authored-document shape and cannot
+/// drive 058/060 codegen or the editor.
+#[test]
+fn real_workflows_validate_against_composed_schema() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // CARGO_MANIFEST_DIR = crates/core; workspace root is two levels up
+    let workflows_dir = manifest_dir.join("../../.newton/workflows");
+
+    let registry = build_test_registry();
+    let composed = schema_export::composed_workflow_schema(&registry);
+    let schema_value = serde_json::to_value(&composed).expect("schema serializable");
+    let validator = jsonschema::JSONSchema::compile(&schema_value).expect("schema compiles");
+
+    let yaml_files = ["planning_enriching.yaml", "planner.yaml", "develop.yaml"];
+    let mut all_errors: Vec<String> = Vec::new();
+
+    for filename in &yaml_files {
+        let path = workflows_dir.join(filename);
+        let yaml_str = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        let instance: serde_json::Value = serde_yaml::from_str(&yaml_str)
+            .unwrap_or_else(|e| panic!("cannot parse {}: {e}", path.display()));
+
+        let errors: Vec<String> = validator
+            .validate(&instance)
+            .err()
+            .into_iter()
+            .flatten()
+            .map(|e| format!("{filename}: {e}"))
+            .collect();
+
+        all_errors.extend(errors);
+    }
+
+    assert!(
+        all_errors.is_empty(),
+        "composed schema rejected real workflow(s) — {} error(s):\n{}",
+        all_errors.len(),
+        all_errors.join("\n")
+    );
 }
