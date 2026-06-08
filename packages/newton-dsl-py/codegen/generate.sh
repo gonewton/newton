@@ -11,7 +11,8 @@ uv run --with datamodel-code-generator \
   --output-model-type pydantic_v2.BaseModel \
   --target-python-version 3.11 \
   --use-schema-description \
-  --reuse-model
+  --reuse-model \
+  --disable-timestamp
 echo "Regenerated src/newton/_generated/ir.py"
 
 python3 - << 'PYEOF'

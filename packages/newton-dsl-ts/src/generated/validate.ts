@@ -13,11 +13,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function findSchemaPath(): string {
   const candidates = [
-    // From src/generated/, walk up to newton root then to packages/workflow-schema/
+    // From src/generated/, walk up to repo root then to packages/workflow-schema/
     join(__dirname, "..", "..", "..", "..", "packages", "workflow-schema", "workflow.schema.json"),
     join(__dirname, "..", "..", "..", "..", "..", "packages", "workflow-schema", "workflow.schema.json"),
-    // Absolute fallback for this workspace
-    "/home/sysuser/ws001/gonewton/newton/packages/workflow-schema/workflow.schema.json",
   ];
   for (const p of candidates) {
     if (existsSync(p)) return p;
