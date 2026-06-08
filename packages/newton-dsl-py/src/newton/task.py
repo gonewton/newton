@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .edges import EdgeSpec, PRIORITY_STEP
+from .edges import EdgeSpec, PRIORITY_STEP, PRIORITY_OTHERWISE
 from .refs import Guard, Ref, _OutAccessor, TaskOutputRef
 from .operators import OperatorCall
 
@@ -79,18 +79,17 @@ class Task:
 
     def otherwise(self, target: "Task", *, label: str | None = None) -> "Task":
         """
-        Append an unconditional fallback transition (lowest priority).
+        Append an unconditional fallback transition. Always gets the lowest
+        possible priority (PRIORITY_OTHERWISE sentinel), regardless of call order.
         Returns `self` for fluent chaining.
         """
-        # otherwise uses highest declared priority so far + PRIORITY_STEP, no guard
         edge = EdgeSpec(
             target.task_id,
-            priority=self._next_priority,
+            priority=PRIORITY_OTHERWISE,
             guard=None,
             label=label,
         )
         self._edges.append(edge)
-        self._next_priority += PRIORITY_STEP
         return self
 
     # ------------------------------------------------------------------
@@ -139,7 +138,11 @@ class Task:
         t.out itself renders as TaskOutputRef("tasks.<id>.output") (the whole output)
         """
         known = self.operator_call.output_fields()
-        return _OutAccessor(self.task_id, known_fields=known)
+        return _OutAccessor(
+            self.task_id,
+            known_fields=known,
+            operator_type=self.operator_call.operator_type,
+        )
 
     @property
     def output(self) -> TaskOutputRef:

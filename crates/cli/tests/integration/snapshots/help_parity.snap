@@ -17,6 +17,7 @@ Ops:
   optimize  Drive a project's optimization loop
   serve     Start the Newton HTTP API server
 Workflow:
+  schema    Export the composed workflow JSON Schema
   workflow  Operate on workflow YAML files or manage execution lifecycle (validate/lint/preview/graph/run/resume/runs/checkpoint/artifact)
 Workspace:
   init  Initialize a Newton workspace with the default template

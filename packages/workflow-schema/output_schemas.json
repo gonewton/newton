@@ -1,0 +1,163 @@
+{
+  "AgentOperator": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "exit_code": {
+        "format": "int32",
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "signal": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "stdout_artifact": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "title": "AgentSchemaOutput",
+    "type": "object"
+  },
+  "AssertCompletedOperator": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "all_succeeded": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "all_succeeded"
+    ],
+    "title": "AssertCompletedOutput",
+    "type": "object"
+  },
+  "CommandOperator": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "duration_ms": {
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "exit_code": {
+        "format": "int32",
+        "type": "integer"
+      },
+      "stderr": {
+        "type": "string"
+      },
+      "stdout": {
+        "type": "string"
+      },
+      "success": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "stdout",
+      "stderr",
+      "exit_code",
+      "success",
+      "duration_ms"
+    ],
+    "title": "CommandOutput",
+    "type": "object"
+  },
+  "GhOperator": {
+    "type": "object"
+  },
+  "GitOperator": {
+    "type": "object"
+  },
+  "HumanApprovalOperator": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "approved": {
+        "type": "boolean"
+      },
+      "outcome": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "approved",
+      "outcome"
+    ],
+    "title": "HumanApprovalOutput",
+    "type": "object"
+  },
+  "HumanDecisionOperator": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "choice": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "choice"
+    ],
+    "title": "HumanDecisionOutput",
+    "type": "object"
+  },
+  "NoOpOperator": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "status": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "status"
+    ],
+    "title": "NoOpOutput",
+    "type": "object"
+  },
+  "ReadControlFileOperator": {},
+  "SetContextOperator": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "applied": {
+        "type": "boolean"
+      },
+      "patch": true
+    },
+    "required": [
+      "applied",
+      "patch"
+    ],
+    "title": "SetContextOutput",
+    "type": "object"
+  },
+  "WorkflowOperator": {},
+  "barrier": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "barrier_passed": {
+        "type": "boolean"
+      },
+      "expected_tasks": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "message": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_tasks",
+      "barrier_passed",
+      "message"
+    ],
+    "title": "BarrierOutput",
+    "type": "object"
+  }
+}

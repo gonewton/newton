@@ -4,7 +4,7 @@
  * Supports chaining: task.then(...).then(...).retry(...)
  */
 
-import { EdgeSpec, PRIORITY_STEP } from "./edges.js";
+import { EdgeSpec, PRIORITY_STEP, PRIORITY_OTHERWISE } from "./edges.js";
 import { Guard, Ref, makeOutProxy, TaskOutputRef } from "./refs.js";
 import type { OutProxy } from "./refs.js";
 import type { OperatorCall } from "./operators.js";
@@ -68,14 +68,14 @@ export class Task {
   }
 
   otherwise(target: Task, opts?: { label?: string }): this {
+    // Always uses the sentinel so it sorts last regardless of call order.
     const edge = new EdgeSpec(
       target.taskId,
-      this._nextPriority,
+      PRIORITY_OTHERWISE,
       null,
       opts?.label ?? null
     );
     this._edges.push(edge);
-    this._nextPriority += PRIORITY_STEP;
     return this;
   }
 
@@ -109,7 +109,7 @@ export class Task {
   // -------------------------------------------------------------------------
 
   get out(): OutProxy {
-    return makeOutProxy(this.taskId);
+    return makeOutProxy(this.taskId, this.operatorCall.outputFields());
   }
 
   get output(): TaskOutputRef {

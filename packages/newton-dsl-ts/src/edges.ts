@@ -5,12 +5,15 @@
  * Priority is determined by declaration order:
  *   - First .then() call gets priority 0
  *   - Next gets priority 5, 10, 15, ...
- *   - .otherwise() always uses current priority (no guard), then advances
+ *   - .otherwise() always gets PRIORITY_OTHERWISE (a large sentinel), so it
+ *     sorts last regardless of call order.
  */
 
 import type { Guard } from "./refs.js";
 
 export const PRIORITY_STEP = 5;
+/** Sentinel used by Task.otherwise() — guaranteed to sort after any .then() edge. */
+export const PRIORITY_OTHERWISE = 2_147_483_647; // i32::MAX
 
 export interface EdgeDict {
   to: string;
@@ -31,10 +34,7 @@ export class EdgeSpec {
   ) {}
 
   toDict(): EdgeDict {
-    const d: EdgeDict = { to: this.targetId };
-    if (this.priority !== 100) {
-      d.priority = this.priority;
-    }
+    const d: EdgeDict = { to: this.targetId, priority: this.priority };
     if (this.guard !== null) {
       d.when = this.guard.toCondition();
     }

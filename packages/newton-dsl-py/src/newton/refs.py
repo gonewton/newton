@@ -105,9 +105,15 @@ class _OutAccessor:
     t.out.field gives OutRef for a specific field.
     """
 
-    def __init__(self, task_id: str, known_fields: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        task_id: str,
+        known_fields: list[str] | None = None,
+        operator_type: str | None = None,
+    ) -> None:
         self._task_id = task_id
         self._known_fields = known_fields  # None means unknown schema
+        self._operator_type = operator_type
 
     def __call__(self) -> TaskOutputRef:
         """t.out() -> TaskOutputRef for the whole output object."""
@@ -116,6 +122,14 @@ class _OutAccessor:
     def __getattr__(self, name: str) -> OutRef:
         if name.startswith("_"):
             raise AttributeError(name)
+        if self._known_fields is not None and name not in self._known_fields:
+            from .checks import check_out_field
+            check_out_field(
+                self._task_id,
+                self._operator_type or "unknown",
+                name,
+                self._known_fields,
+            )
         return OutRef(self._task_id, name)
 
     def to_condition(self) -> dict:

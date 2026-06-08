@@ -5,7 +5,8 @@ Transitions are added via Task.then() and Task.otherwise().
 Priority is determined by declaration order:
   - First .then() call gets priority 0
   - Next gets priority 5, 10, 15, ...
-  - .otherwise() always gets lowest priority (no `when` condition)
+  - .otherwise() always gets PRIORITY_OTHERWISE (a large sentinel), so it
+    sorts last regardless of call order.
 """
 from __future__ import annotations
 
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
 
 
 PRIORITY_STEP = 5
+# Sentinel used by Task.otherwise() — guaranteed to sort after any .then() edge.
+PRIORITY_OTHERWISE = 2_147_483_647  # i32::MAX
 
 
 class EdgeSpec:
@@ -40,8 +43,7 @@ class EdgeSpec:
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"to": self.target_id}
-        if self.priority != 100:
-            d["priority"] = self.priority
+        d["priority"] = self.priority
         if self.guard is not None:
             d["when"] = self.guard.to_condition()
         if self.label is not None:

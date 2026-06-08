@@ -6,6 +6,7 @@
  */
 
 import type { Ref, Guard } from "./refs.js";
+import { OUTPUT_SCHEMAS as _OUTPUT_SCHEMAS } from "./generated/output_schemas.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyValue = unknown;
@@ -24,14 +25,8 @@ function renderValue(v: AnyValue): AnyValue {
 }
 
 export class OperatorCall {
-  // Known output schemas per operator type — used by checks.ts for .out.field validation
-  static readonly OUTPUT_SCHEMAS: Record<string, string[]> = {
-    CommandOperator: ["stdout", "stderr", "exit_code", "stdout_artifact", "stderr_artifact"],
-    AgentOperator: ["stdout", "stderr", "signal", "exit_code", "stdout_artifact", "stderr_artifact"],
-    GhOperator: ["pr_number", "pr_url", "state", "merged", "number", "title"],
-    HumanOperator: ["response", "choice", "timed_out"],
-    WorkflowOperator: ["output", "status"],
-  };
+  // Generated from `newton schema export --outputs` — do not edit by hand.
+  static readonly OUTPUT_SCHEMAS: Record<string, string[]> = _OUTPUT_SCHEMAS;
 
   constructor(
     public readonly operatorType: string,
@@ -103,22 +98,50 @@ export function agent(opts: AgentOpts = {}): OperatorCall {
 }
 
 // --------------------------------------------------------------------------
-// HumanOperator
+// HumanApprovalOperator
 // --------------------------------------------------------------------------
 
 export interface HumanApprovalOpts {
-  ask: string;
+  prompt: string;
   timeoutSeconds?: number;
   defaultOnTimeout?: string;
 }
 
 export function humanApproval(opts: HumanApprovalOpts): OperatorCall {
-  const params: Record<string, AnyValue> = {
-    ask: opts.ask,
-    timeout_seconds: opts.timeoutSeconds ?? 300,
-    default_on_timeout: opts.defaultOnTimeout ?? "timeout",
-  };
-  return new OperatorCall("HumanOperator", params);
+  const params: Record<string, AnyValue> = { prompt: opts.prompt };
+  if (opts.timeoutSeconds != null) params.timeout_seconds = opts.timeoutSeconds;
+  if (opts.defaultOnTimeout != null) params.default_on_timeout = opts.defaultOnTimeout;
+  return new OperatorCall("HumanApprovalOperator", params);
+}
+
+// --------------------------------------------------------------------------
+// HumanDecisionOperator
+// --------------------------------------------------------------------------
+
+export interface HumanDecisionOption {
+  label: string;
+  description?: string;
+  recommendation?: boolean;
+}
+
+export interface HumanDecisionOpts {
+  /** Structured form: list of options with labels. */
+  options?: HumanDecisionOption[];
+  /** Legacy form: freeform prompt with explicit choices. */
+  prompt?: string;
+  choices?: string[];
+  timeoutSeconds?: number;
+  defaultChoice?: string;
+}
+
+export function humanDecision(opts: HumanDecisionOpts): OperatorCall {
+  const params: Record<string, AnyValue> = {};
+  if (opts.options != null) params.options = opts.options;
+  if (opts.prompt != null) params.prompt = opts.prompt;
+  if (opts.choices != null) params.choices = opts.choices;
+  if (opts.timeoutSeconds != null) params.timeout_seconds = opts.timeoutSeconds;
+  if (opts.defaultChoice != null) params.default_choice = opts.defaultChoice;
+  return new OperatorCall("HumanDecisionOperator", params);
 }
 
 // --------------------------------------------------------------------------
@@ -199,5 +222,65 @@ export const gh = {
     };
     if (opts.onError != null) params.on_error = opts.onError;
     return new OperatorCall("GhOperator", params);
+  },
+};
+
+// --------------------------------------------------------------------------
+// GitOperator sub-constructors
+// --------------------------------------------------------------------------
+
+export const git = {
+  cleanCheck(): OperatorCall {
+    return new OperatorCall("GitOperator", { operation: "clean_check" });
+  },
+
+  syncMain(): OperatorCall {
+    return new OperatorCall("GitOperator", { operation: "sync_main" });
+  },
+
+  createBranch(opts: { name: AnyValue }): OperatorCall {
+    return new OperatorCall("GitOperator", { operation: "create_branch", name: opts.name });
+  },
+
+  stage(opts: { exclude?: string[] } = {}): OperatorCall {
+    const params: Record<string, AnyValue> = { operation: "stage" };
+    if (opts.exclude?.length) params.exclude = opts.exclude;
+    return new OperatorCall("GitOperator", params);
+  },
+
+  commit(opts: { message: AnyValue; allowEmpty?: boolean }): OperatorCall {
+    const params: Record<string, AnyValue> = {
+      operation: "commit",
+      message: opts.message,
+    };
+    if (opts.allowEmpty) params.allow_empty = true;
+    return new OperatorCall("GitOperator", params);
+  },
+
+  push(opts: {
+    remote?: string;
+    force?: boolean;
+    retryCount?: number;
+    retryDelayMs?: number;
+  } = {}): OperatorCall {
+    return new OperatorCall("GitOperator", {
+      operation: "push",
+      remote: opts.remote ?? "origin",
+      force: opts.force ?? false,
+      retry_count: opts.retryCount ?? 3,
+      retry_delay_ms: opts.retryDelayMs ?? 5000,
+    });
+  },
+
+  diff(opts: { base?: string; maxBytes?: number } = {}): OperatorCall {
+    return new OperatorCall("GitOperator", {
+      operation: "diff",
+      base: opts.base ?? "main",
+      max_bytes: opts.maxBytes ?? 65536,
+    });
+  },
+
+  cleanupMerge(): OperatorCall {
+    return new OperatorCall("GitOperator", { operation: "cleanup_merge" });
   },
 };

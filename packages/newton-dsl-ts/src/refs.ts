@@ -9,6 +9,8 @@
  * - ref.eq(value)     -> Guard (Rhai comparison expression)
  */
 
+import { CompilerError } from "./errors.js";
+
 function rhaiLiteral(value: unknown): string {
   if (typeof value === "string") return `"${value}"`;
   if (typeof value === "boolean") return value ? "true" : "false";
@@ -113,15 +115,20 @@ export type OutProxy = TaskOutputRef & {
   [field: string]: OutRef;
 };
 
-export function makeOutProxy(taskId: string): OutProxy {
+export function makeOutProxy(taskId: string, knownFields: string[] | null = null): OutProxy {
   const base = new TaskOutputRef(taskId);
   return new Proxy(base as unknown as OutProxy, {
     get(target, prop: string | symbol) {
       if (typeof prop === "symbol") return Reflect.get(target, prop);
       // Pass through built-in methods/properties on TaskOutputRef
       if (prop in target) return Reflect.get(target, prop);
-      // Any other property access is treated as an output field
-      return new OutRef(taskId, prop);
+      // Validate field name against known output schema
+      if (knownFields !== null && !knownFields.includes(prop as string)) {
+        throw new CompilerError(
+          `task '${taskId}' has no output field '${prop as string}'; known fields: ${knownFields.join(", ")}`
+        );
+      }
+      return new OutRef(taskId, prop as string);
     },
   });
 }

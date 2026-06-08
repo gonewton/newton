@@ -319,7 +319,8 @@ async fn execute_diff(base: &str, max_bytes: u64, cwd: &Path) -> Result<Value, A
 
     let patch_bytes = patch_out.stdout.len() as u64;
     let patch = if patch_bytes > max_bytes {
-        patch_out.stdout[..max_bytes as usize].to_string()
+        let end = patch_out.stdout.floor_char_boundary(max_bytes as usize);
+        patch_out.stdout[..end].to_string()
     } else {
         patch_out.stdout.clone()
     };

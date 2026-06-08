@@ -8,13 +8,8 @@
  */
 
 import type { Task } from "./task.js";
-
-export class CompilerError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "CompilerError";
-  }
-}
+import { CompilerError } from "./errors.js";
+export { CompilerError } from "./errors.js";
 
 export interface CompilerWarning {
   message: string;

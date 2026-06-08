@@ -24,7 +24,9 @@ export {
   command,
   agent,
   humanApproval,
+  humanDecision,
   subWorkflow,
+  git,
   gh,
   OperatorCall,
 } from "./operators.js";

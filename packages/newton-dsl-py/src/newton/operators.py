@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from .refs import Ref, Guard
+from ._generated.output_schemas import OUTPUT_SCHEMAS as _OUTPUT_SCHEMAS
 
 
 def _render_value(v: Any) -> Any:
@@ -35,14 +36,8 @@ class OperatorCall:
     def rendered_params(self) -> dict[str, Any]:
         return _render_value(self.params)
 
-    # Known output schemas per operator type — used by checks.py for t.out.field validation
-    OUTPUT_SCHEMAS: dict[str, list[str]] = {
-        "CommandOperator": ["stdout", "stderr", "exit_code", "stdout_artifact", "stderr_artifact"],
-        "AgentOperator": ["stdout", "stderr", "signal", "exit_code", "stdout_artifact", "stderr_artifact"],
-        "GhOperator": ["pr_number", "pr_url", "state", "merged", "number", "title"],
-        "HumanOperator": ["response", "choice", "timed_out"],
-        "WorkflowOperator": ["output", "status"],
-    }
+    # Generated from `newton schema export --outputs` — do not edit by hand.
+    OUTPUT_SCHEMAS: dict[str, list[str]] = _OUTPUT_SCHEMAS
 
     def output_fields(self) -> list[str] | None:
         """Return known output field names or None if unknown."""
@@ -115,18 +110,45 @@ def agent(
 
 
 def human_approval(
-    ask: str,
+    prompt: str,
     *,
-    timeout_seconds: int = 300,
-    default_on_timeout: str = "timeout",
+    timeout_seconds: int | None = None,
+    default_on_timeout: str | None = None,
 ) -> OperatorCall:
-    """HumanOperator constructor for approval gates."""
-    params: dict[str, Any] = {
-        "ask": ask,
-        "timeout_seconds": timeout_seconds,
-        "default_on_timeout": default_on_timeout,
-    }
-    return OperatorCall("HumanOperator", params)
+    """HumanApprovalOperator — blocks until a human approves or rejects."""
+    params: dict[str, Any] = {"prompt": prompt}
+    if timeout_seconds is not None:
+        params["timeout_seconds"] = timeout_seconds
+    if default_on_timeout is not None:
+        params["default_on_timeout"] = default_on_timeout
+    return OperatorCall("HumanApprovalOperator", params)
+
+
+def human_decision(
+    *,
+    options: list[dict[str, Any]] | None = None,
+    prompt: str | None = None,
+    choices: list[str] | None = None,
+    timeout_seconds: int | None = None,
+    default_choice: str | None = None,
+) -> OperatorCall:
+    """HumanDecisionOperator — prompts a human for a multi-option decision.
+
+    Structured form: pass `options` (list of dicts with "label"/"description").
+    Legacy form: pass `prompt` + `choices`.
+    """
+    params: dict[str, Any] = {}
+    if options is not None:
+        params["options"] = options
+    if prompt is not None:
+        params["prompt"] = prompt
+    if choices is not None:
+        params["choices"] = choices
+    if timeout_seconds is not None:
+        params["timeout_seconds"] = timeout_seconds
+    if default_choice is not None:
+        params["default_choice"] = default_choice
+    return OperatorCall("HumanDecisionOperator", params)
 
 
 def sub_workflow(
@@ -212,3 +234,69 @@ class gh:
         if on_error is not None:
             params["on_error"] = on_error
         return OperatorCall("GhOperator", params)
+
+
+class git:
+    """Git operator sub-constructors — one per operation."""
+
+    @staticmethod
+    def clean_check() -> OperatorCall:
+        """Assert the working tree is clean (no untracked/modified files)."""
+        return OperatorCall("GitOperator", {"operation": "clean_check"})
+
+    @staticmethod
+    def sync_main() -> OperatorCall:
+        """Fetch and fast-forward the current branch from origin/main."""
+        return OperatorCall("GitOperator", {"operation": "sync_main"})
+
+    @staticmethod
+    def create_branch(name: Any) -> OperatorCall:
+        """Create and switch to a new branch."""
+        return OperatorCall("GitOperator", {"operation": "create_branch", "name": name})
+
+    @staticmethod
+    def stage(*, exclude: list[str] | None = None) -> OperatorCall:
+        """Stage all changes (git add -A), optionally excluding paths."""
+        params: dict[str, Any] = {"operation": "stage"}
+        if exclude:
+            params["exclude"] = exclude
+        return OperatorCall("GitOperator", params)
+
+    @staticmethod
+    def commit(message: Any, *, allow_empty: bool = False) -> OperatorCall:
+        """Commit staged changes."""
+        params: dict[str, Any] = {"operation": "commit", "message": message}
+        if allow_empty:
+            params["allow_empty"] = True
+        return OperatorCall("GitOperator", params)
+
+    @staticmethod
+    def push(
+        *,
+        remote: str = "origin",
+        force: bool = False,
+        retry_count: int = 3,
+        retry_delay_ms: int = 5000,
+    ) -> OperatorCall:
+        """Push the current branch to a remote."""
+        return OperatorCall("GitOperator", {
+            "operation": "push",
+            "remote": remote,
+            "force": force,
+            "retry_count": retry_count,
+            "retry_delay_ms": retry_delay_ms,
+        })
+
+    @staticmethod
+    def diff(*, base: str = "main", max_bytes: int = 65536) -> OperatorCall:
+        """Produce a unified diff between base and HEAD."""
+        return OperatorCall("GitOperator", {
+            "operation": "diff",
+            "base": base,
+            "max_bytes": max_bytes,
+        })
+
+    @staticmethod
+    def cleanup_merge() -> OperatorCall:
+        """Abort any in-progress merge/rebase/cherry-pick."""
+        return OperatorCall("GitOperator", {"operation": "cleanup_merge"})

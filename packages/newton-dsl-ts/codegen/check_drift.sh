@@ -17,7 +17,8 @@ if [ ! -f "$SCHEMA" ]; then
 fi
 
 TMPFILE=$(mktemp /tmp/ir_check_XXXXXX.ts)
-trap "rm -f $TMPFILE" EXIT
+TMPFILE2=$(mktemp /tmp/output_schemas_check_XXXXXX.ts)
+trap "rm -f $TMPFILE $TMPFILE2" EXIT
 
 pnpm dlx json-schema-to-typescript \
   "$SCHEMA" \
@@ -25,11 +26,36 @@ pnpm dlx json-schema-to-typescript \
   --unreachableDefinitions \
   > "$TMPFILE" 2>/dev/null
 
-if diff -u src/generated/ir.ts "$TMPFILE"; then
-  echo "OK: src/generated/ir.ts is up to date with the schema."
-else
+OUTPUT_SCHEMAS_JSON="$(dirname "$SCHEMA")/output_schemas.json"
+python3 - "$OUTPUT_SCHEMAS_JSON" > "$TMPFILE2" << 'PYEOF'
+import json, pathlib, sys
+schema = json.loads(pathlib.Path(sys.argv[1]).read_text())
+entries = []
+for op in sorted(schema):
+    props = schema[op].get("properties", {})
+    if props:
+        fields = "[" + ", ".join(f'"{f}"' for f in sorted(props)) + "]"
+        entries.append(f'  {op}: {fields},')
+lines = [
+    "// AUTO-GENERATED — do not edit by hand.",
+    "// Regenerate with: bash codegen/generate.sh",
+    "export const OUTPUT_SCHEMAS: Record<string, string[]> = {",
+] + entries + ["};", ""]
+print("\n".join(lines), end="")
+PYEOF
+
+DRIFT=0
+if ! diff -u src/generated/ir.ts "$TMPFILE"; then
   echo ""
   echo "DRIFT DETECTED: src/generated/ir.ts is out of date." >&2
   echo "Run: bash codegen/generate.sh" >&2
-  exit 1
+  DRIFT=1
 fi
+if ! diff -u src/generated/output_schemas.ts "$TMPFILE2"; then
+  echo ""
+  echo "DRIFT DETECTED: src/generated/output_schemas.ts is out of date." >&2
+  echo "Run: bash codegen/generate.sh" >&2
+  DRIFT=1
+fi
+[ $DRIFT -eq 0 ] && echo "OK: src/generated/ is up to date with the schema."
+exit $DRIFT
