@@ -1,0 +1,218 @@
+version: "2.0"
+mode: workflow_graph
+
+metadata:
+  name: "planner-workflow"
+  description: "Orchestrator: resolve board, slug paths; copy planning_enriching into workspace .newton/workflows; WorkflowOperator loads it via triggers.workspace (nested sandbox); inject frontmatter; publish issue body; move item to Backlog."
+
+triggers:
+  type: manual
+  schema_version: "1.0"
+  payload:
+    raw_spec_path: ""
+    board_item_id: ""
+    board_content_id: ""
+    board_issue_number: ""
+    board_item_title: ""
+
+workflow:
+  settings:
+    entry_task: resolve_board_ids
+    max_time_seconds: 999999999
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 15
+
+    default_engine: codex
+
+    command_operator:
+      allow_shell: true
+
+  context:
+    preamble: |-
+      You are enriching a product/spec document so that requirements are clearly and explicitly defined and implementation-ready. The user provided a spec (path or content below).
+
+      CODEBASE GROUNDING (do this first):
+      Before writing the enriched document, you MUST explore the target codebase (read key files, list directories) to ground every section in the actual project structure. File paths in the "Modified files" table MUST correspond to real files. If the spec references entities (commands, endpoints, modules), enumerate them from the source, not from the user's prose.
+
+      You MUST produce an enriched markdown document that MANDATORILY covers these aspects in this order (use the exact section headers):
+
+      TECHNICAL CONTEXT (sections 1-7):
+      1. **Problem statement** - What is broken or missing today. One paragraph grounded in actual codebase state. MUST include an explicit "out of scope" sentence for related work not in this spec.
+      2. **Goals** - Numbered list of concrete outcomes. Each goal MUST be verifiable.
+      3. **Current behavior** - Table: Component | Role | Mutable at runtime? Plus 1-2 sentences on current build and resume flow. Grounded in code inspection.
+      4. **Design** - The core "how". Subsections for each major mechanism (data structures, concurrency model, API surface, integration points). MUST include: storage types and data structure choices with concrete types, concurrency/locking strategy, invariants, identity/naming conventions, collision and error conditions, tick/lifecycle visibility rules. Include YAML or config examples where applicable.
+      5. **Schema and API** - Exact struct/type definitions and method signatures that implementers will create or modify. Use the project's language (Rust, Python, etc.) for code blocks.
+      6. **Error codes** - Table: Code | Category | Trigger. One row per error the implementation introduces.
+      7. **Acceptance criteria** - Numbered, testable conditions. Each criterion MUST be a single verifiable statement (not a vague goal). Produce at least one criterion per goal, one per error code, and one for backward-compatibility regression.
+
+      PLANNING (sections 8-14):
+      8. **Functionality comparison (before vs after)** - What exists today vs what will exist after implementation.
+      9. **Benefit of implementing this functionality** - Why implement this; value and impact.
+      10. **Stages** - Break the work into ordered stages. Each stage MUST define: (a) a concrete deliverable or output, (b) the explicit scope (enumerate items, NEVER use "etc." or ellipsis), and (c) any blocking dependency on a prior stage. If a stage produces a document or artifact that later stages consume, describe its expected content or structure.
+      11. **Breaking changes** - API, config, or behavioral changes that affect existing users or callers.
+      12. **Modified files and summary** - A table: | File/path | Summary of modifications |. Every path MUST be verified against the actual codebase. If existing tests or configs already cover the area, reference them.
+      13. **Dependencies** - External or internal dependencies (libraries, services, teams). For each dependency on a person or team, state whether it is blocking or non-blocking and which stage it gates. If a dependency is marked "recommended" or "optional", state what happens if it is skipped.
+      14. **Proposed folder structure** - If this is a new project, write complete folder structure; otherwise only modified files and paths.
+
+      VERIFICATION AND REFERENCE (sections 15-17):
+      15. **Design decisions** - Table: # | Question | Decision | Rationale. Captures key trade-offs so implementers do not re-debate them.
+      16. **Out of scope (explicit)** - Bulleted list of things explicitly excluded. Prevents scope creep.
+      17. **References** - Pointers to real files, functions, and structs in the codebase that the implementer should start from.
+
+      Requirements quality (apply throughout the spec):
+      - State requirements in normative language where applicable: MUST (mandatory), SHOULD (recommended), MAY (optional). Avoid vague wording; make obligations and options explicit.
+      - For each major capability or command, make applicability explicit (e.g. which commands get which options, or "all read-only commands" with a defined list).
+      - NEVER use "etc.", "and so on", or ellipsis to scope work items. If a stage or requirement applies to a subset of entities, enumerate them explicitly. If the full list is unknown, flag it with [NEED_USER_INPUT].
+      - Include test expectations where relevant (e.g. "Format selection MUST be covered by tests for each updated command").
+      - Ensure success criteria are measurable or verifiable. When a criterion uses a comparative metric (e.g. "2x longer", "50% faster"), it MUST include or reference a concrete baseline value so the criterion can be checked.
+      - If the spec defines options or formats (e.g. output formats, flags), specify per-entity applicability or a clear rule so implementers know exactly where each option applies.
+
+      For each of the 17 aspects: if you can fill it from the spec, codebase inspection, or well-grounded inference, write the section. If you are inventing names, paths, or details that cannot be verified from the spec or codebase, write exactly "[NEED_USER_INPUT: <aspect_name>]" in that section and add the aspect_name to the gaps list. Valid aspect_name values: problem_statement, goals, current_behavior, design, schema_api, error_codes, acceptance_criteria, functionality_comparison, benefit, stages, breaking_changes, modified_files_table, dependencies, folder_structure, design_decisions, out_of_scope, references.
+
+      When presenting multiple options to the user, present a recommended one and the rationale.
+
+  tasks:
+    - id: resolve_board_ids
+      operator: GhOperator
+      params:
+        operation: project_resolve_board
+        owner:
+          $expr: 'env("GH_PROJECT_OWNER")'
+        project_number:
+          $expr: 'env("GH_PROJECT_NUMBER")'
+        required_option_names:
+          - Backlog
+      transitions:
+        - to: compute_paths
+
+    - id: compute_paths
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: true
+        env:
+          ISSUE:
+            $expr: 'triggers.board_issue_number'
+          TITLE:
+            $expr: 'triggers.board_item_title'
+        cmd: |
+          set -eo pipefail
+          slug=$(printf '%s' "${TITLE:-}" | iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null || printf '%s' "${TITLE:-}")
+          slug=$(printf '%s' "$slug" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')
+          if [ -z "$slug" ]; then slug="spec"; fi
+          slug=$(printf '%s' "$slug" | cut -c1-60 | sed -E 's/-+$//')
+          mkdir -p .newton/plan tmp
+          OUT="tmp/${ISSUE}-${slug}.md"
+          BRANCH="feature/${ISSUE}-${slug}"
+          printf '%s\n' "$OUT" > .newton/plan/.planner-output-path
+          printf '%s\n' "$BRANCH" > .newton/plan/.planner-branch
+          echo "output_path=$OUT branch=$BRANCH"
+      transitions:
+        - to: read_output_path
+
+    - id: read_output_path
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: true
+        cmd: |
+          set -eo pipefail
+          printf '%s' "$(cat .newton/plan/.planner-output-path)"
+      transitions:
+        - to: invoke_enricher
+
+    - id: invoke_enricher
+      operator: WorkflowOperator
+      params:
+        workflow_path:
+          $expr: 'triggers.workspace + "/.newton/workflows/planning_enriching.yaml"'
+        triggers:
+          prompt:
+            $expr: 'triggers.raw_spec_path'
+          output_path:
+            $expr: 'tasks.read_output_path.output.stdout'
+        context:
+          preamble:
+            $expr: 'context.preamble'
+          develop_primary_engine:
+            $expr: 'develop_primary_engine'
+          develop_primary_model:
+            $expr: 'develop_primary_model'
+      transitions:
+        - to: inject_frontmatter
+
+    - id: inject_frontmatter
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: false
+        env:
+          ISSUE:
+            $expr: 'triggers.board_issue_number'
+          BOARD_ITEM_ID:
+            $expr: 'triggers.board_item_id'
+        cmd: |
+          set -eo pipefail
+          OUT=$(cat .newton/plan/.planner-output-path)
+          BRANCH=$(cat .newton/plan/.planner-branch)
+          tmp=$(mktemp)
+          {
+            echo "---"
+            echo "issue: ${ISSUE}"
+            echo "branch: ${BRANCH}"
+            echo "board_item_id: ${BOARD_ITEM_ID}"
+            echo "source: github-project"
+            echo "---"
+            echo ""
+            cat "$OUT"
+          } > "$tmp"
+          mv -f "$tmp" "$OUT"
+      transitions:
+        - to: update_board_body
+
+    - id: update_board_body
+      operator: CommandOperator
+      params:
+        shell: true
+        env:
+          ITEM_ID:
+            $expr: 'triggers.board_content_id'
+          ITEM_TITLE:
+            $expr: 'triggers.board_item_title'
+          ISSUE_NUMBER:
+            $expr: 'triggers.board_issue_number'
+          OUT:
+            $expr: 'tasks.read_output_path.output.stdout'
+        cmd: |
+          set -e
+          if [[ "$ITEM_ID" == DI_* ]]; then
+            gh project item-edit --id "$ITEM_ID" --title "$ITEM_TITLE" --body "$(cat "$OUT")"
+          else
+            gh issue edit "$ISSUE_NUMBER" --body "$(cat "$OUT")"
+          fi
+        capture_stdout: false
+      transitions:
+        - to: move_to_backlog
+
+    - id: move_to_backlog
+      operator: GhOperator
+      params:
+        operation: project_item_set_status
+        item_id:
+          $expr: 'triggers.board_item_id'
+        board:
+          $expr: 'tasks.resolve_board_ids.output'
+        status: "Backlog"
+        on_error: fail
+      transitions:
+        - to: success
+
+    - id: success
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: 'echo "Planner completed; item moved to Backlog"'
+        capture_stdout: false
+      terminal: success

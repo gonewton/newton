@@ -36,8 +36,12 @@ change-request`. It is a **Driver** that sequences **Steps**; it is not itself a
 Step. Distinct from a batch: a batch drains a finite set once and stops; the
 optimization loop is closed — grading feeds the next round of change requests.
 The CLI command is **`optimize`** (renamed from `batch`; see ADR 0003).
-(As of this writing the loop is open: the grade→change-request edge is not yet
-wired. The vocabulary describes the target.)
+The `change-request` phase is the loop's *optimizer step*: it reads the standing
+**Findings** and synthesizes a **Change Request**. Full closing chain:
+`grade (→ Assessment) → reconcile (→ Findings) → change-request (→ Change Request)
+→ plan → implement → grade`.
+(As of this writing the edge is **designed but not yet wired** in code; the
+vocabulary and ADR 0005 describe the target.)
 
 ### Objective
 The project-defined goal the optimization loop drives toward — *what progress
@@ -80,6 +84,20 @@ grade is a success, not a task failure; only operational failures (grader crash,
 invalid output) fail the task. **Grade quality lives only in the Assessment**,
 never in an exit code, and the **gate is workflow policy** (transition `when`
 conditions over `tasks.<id>.output` + goal-gate placement), not an operator flag.
+
+### Rubric
+The explicit criteria a **Grader** evaluates against: the **Dimensions** to
+score, what each means, and how to score them. A Rubric *operationalizes* an
+abstract **Objective** ("be secure") into checkable measures — one Objective may
+be served by different Rubrics. Applying a Rubric is what yields the Assessment:
+one **Score** per Rubric Dimension, plus **Observations** where criteria are
+violated. The Rubric is **explicit, authored data** for a *rubric Grader* (the
+built-in agent form — it is the operator's `rubric` input) and **embedded and
+opaque** inside the program for a *command Grader* (e.g. dk's methodology pack;
+the osv grader's implicit "no vulnerabilities"). Either way Newton sees only the
+resulting Assessment.
+_Avoid_: conflating with **Objective** (the goal) — a Rubric is *how* progress
+toward that goal is measured, not the goal itself.
 
 ### Assessment
 What one Grader run emits: one evaluation event carrying an overall score, a
@@ -124,16 +142,23 @@ _Avoid_: "finding" for the raw item (a Finding is its durable, reconciled form).
 
 ### Finding
 The durable, triageable record of one recurring problem or improvement, into
-which matching **Observations** are reconciled across grading runs. Carries a
-lifecycle (`awaiting_triage → triaged → approved_for_planning → structured →
-deferred | rejected`), portfolio metadata (risk, effort, expected value,
-`dependsOn`/`blocks`), an **Origin** (`system` | `human`), and links to a
-**Component**/**Repo** and optionally a **KPI**. A Finding's identity is
+which matching **Observations** are reconciled across grading runs. It is
+`Opportunity` *renamed and extended*: beyond portfolio metadata (risk/severity,
+effort, expected value, `dependsOn`/`blocks`, **Origin** `system | human`,
+`source` grader, links to **Component**/**Repo**/**KPI**) it carries the
+**structured text-gradient** — `dimension`, `location`, `why_it_matters`, and
+`recommended_action` (the direction the **Change Request** synthesis reads) — plus
+reconciliation metadata (`fingerprint`, `last_seen_at`). Lifecycle:
+`awaiting_triage → triaged → approved_for_planning → structured →
+deferred | rejected`, plus **`resolved`** — set *automatically* by
+**Reconciliation** when the issue vanishes (the per-Finding convergence signal),
+firmly distinct from the human `rejected`/`deferred` (Reconciliation never
+resurrects a human-closed Finding; it reopens a `resolved` one if it recurs). A Finding's identity is
 **assigned and maintained by Newton via Reconciliation — never taken from a
-Grader** (Graders are non-deterministic and cannot supply stable ids). The loop
-edge written "grade → change-request" is concretely **Observation → Finding**:
-the text-gradient promoted into the durable work pipeline (Finding → **Request**
-→ **Plan** → **Execution** → re-grade).
+Grader** (Graders are non-deterministic and cannot supply stable ids). Findings
+are the standing text-gradient that the loop synthesizes (Score-prioritized) into
+a **Change Request** — the durable work pipeline is
+`Finding → Change Request → Plan → Execution → re-grade`.
 _Avoid_: "Opportunity" (the former name, being retired), "Issue", "Ticket",
 "suggestion", "recommendation".
 
@@ -249,8 +274,8 @@ _Avoid_: "degradation", "decline".
 
 ## Planning & improvement
 
-The durable work pipeline a **Finding** feeds: Finding → Request → Plan →
-Execution. (**Finding** and **Plan** are defined above.)
+The durable work pipeline a **Finding** feeds: Finding → Change Request → Plan →
+Execution. (**Finding**, **Change Request**, and **Plan** are defined above.)
 
 ### Effort
 T-shirt sizing on a **Finding**: `XS | S | M | L | XL`. Set by triage, never by a
@@ -262,11 +287,21 @@ Whether a **Finding** was surfaced by the system or submitted by a human:
 `system | human`.
 _Avoid_: "source", "provenance".
 
-### Request
-A work request that, once approved, produces a **Plan**. Lifecycle:
-`draft → submitted → planning → rejected`. A Request may link the **Finding(s)**
-it addresses.
-_Avoid_: "ticket", "suggestion form".
+### Change Request
+The synthesized, reviewable proposal of changes derived from reading the standing
+**Findings** (prioritized by **Scores**) — the loop's *optimizer step* (it
+applies the aggregated text-gradient). It is **WHAT/WHY**; the **Plan** it drives
+is the **HOW**. Once approved it produces a Plan. Lifecycle:
+`proposed → approved → planned → rejected`. A Change Request is a concrete,
+pipeline-bound change even while `proposed` — not a loose suggestion. Read as
+"Request for Change" (change-management sense). Unifies the loop's
+`change-request` phase and the former `Request` entity — it is `Request` renamed
+and extended: it links **many** Findings (`finding_ids[]`, not a single
+opportunity), carries a structured `body` (the synthesized proposal) and an
+**Origin** (`system` synthesized | `human` authored).
+_Avoid_: "Proposal"/"suggestion" (too soft), "Request for Comments" (wrong
+sense), "changelist"/"changeset" (that is a diff, not a request to change),
+"ticket".
 
 ### PlanSection
 An authored content subdivision within a **Plan** (e.g. "Background", "Proposed

@@ -94,8 +94,11 @@ fn operator_output_schemas_covers_all_registered_operators() {
 #[test]
 fn real_workflows_validate_against_composed_schema() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // CARGO_MANIFEST_DIR = crates/core; workspace root is two levels up
-    let workflows_dir = manifest_dir.join("../../.newton/workflows");
+    // Prefer the committed fixture copy (always present in CI).
+    // Fall back to the live workspace directory for local runs.
+    let committed = manifest_dir.join("tests/fixtures/workflows");
+    let live = manifest_dir.join("../../.newton/workflows");
+    let workflows_dir = if committed.exists() { committed } else { live };
 
     let registry = build_test_registry();
     let composed = schema_export::composed_workflow_schema(&registry);

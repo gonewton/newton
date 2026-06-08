@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://newton.dev/schemas/assessment-v1.schema.json",
+  "title": "Assessment",
+  "description": "The wire contract a Grader emits for one grading run. An Assessment is an absolute statement about the project's current state (no baseline/delta) and carries no pass/fail self-veto — the goal gate decides that by policy. NOTE: one cross-field rule is NOT expressible in JSON Schema and is enforced by Newton: every observations[].dimension MUST appear in scores[].dimension (a scored dimension may have zero observations, but never the reverse).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "grader",
+    "scope",
+    "scope_id",
+    "evaluated_at",
+    "overall_score",
+    "verdict",
+    "summary",
+    "scores",
+    "observations"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Contract version. Bumped only on a breaking change to this shape.",
+      "type": "string",
+      "const": "1"
+    },
+    "grader": {
+      "description": "Stable name of the Grader that produced this Assessment. Maps to EvalRun.source.",
+      "type": "string",
+      "minLength": 1
+    },
+    "scope": {
+      "description": "The portfolio level this Assessment evaluates.",
+      "type": "string",
+      "enum": ["product", "component", "repo", "module"]
+    },
+    "scope_id": {
+      "description": "Identifier of the scoped entity (e.g. the Component or Repo id).",
+      "type": "string",
+      "minLength": 1
+    },
+    "evaluated_at": {
+      "description": "When the grading run was performed.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "overall_score": {
+      "description": "Grader-reported holistic progress toward the Objective. NOT a mandated aggregation of scores[] — the Grader owns its weighting.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "verdict": {
+      "description": "The Grader's advisory recommendation. Ordered worst→best in reverse: reject < request_changes < approve_with_comments < approve. Advisory only — the goal gate owns the binding decision.",
+      "type": "string",
+      "enum": ["approve", "approve_with_comments", "request_changes", "reject"]
+    },
+    "summary": {
+      "description": "One-paragraph human-readable summary of the Assessment.",
+      "type": "string",
+      "minLength": 1
+    },
+    "scores": {
+      "description": "Per-dimension scalar layer. Persisted as Grade rows. At least one dimension must be scored.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/score" }
+    },
+    "observations": {
+      "description": "The text-gradient: localized, actionable critiques. Reconciled into durable Findings. May be empty (a clean Assessment).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/observation" }
+    },
+    "extensions": {
+      "description": "Optional escape hatch for domain-specific payloads (e.g. a security grader's vulnerability counts). Opaque to the loop; not interpreted by Newton.",
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "score": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dimension", "score"],
+      "properties": {
+        "dimension": {
+          "description": "The qualitative axis graded. Unique within an Assessment.",
+          "type": "string",
+          "minLength": 1
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "rationale": {
+          "description": "One line on why this number.",
+          "type": "string"
+        }
+      }
+    },
+    "observation": {
+      "description": "One unit of the text-gradient. The directional triple (observation + why_it_matters + recommended_action) is mandatory: without the action it is a complaint, not a gradient. Deliberately has NO id — identity is assigned by Newton via Reconciliation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimension",
+        "severity",
+        "observation",
+        "why_it_matters",
+        "recommended_action"
+      ],
+      "properties": {
+        "dimension": {
+          "description": "The axis this critique belongs to. MUST match one of scores[].dimension (enforced by Newton).",
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"]
+        },
+        "observation": {
+          "description": "WHAT is wrong or suboptimal.",
+          "type": "string",
+          "minLength": 1
+        },
+        "why_it_matters": {
+          "description": "WHY it matters — sharpens the direction.",
+          "type": "string",
+          "minLength": 1
+        },
+        "recommended_action": {
+          "description": "The DIRECTION — what to change. This is the gradient vector.",
+          "type": "string",
+          "minLength": 1
+        },
+        "location": {
+          "description": "Where the critique applies. Optional and flexible: may be coarse or omitted for non-local (e.g. architectural) critiques.",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "path": { "type": "string" },
+            "range": {
+              "description": "A line range (e.g. \"L40-L78\") or other locator within the path.",
+              "type": "string"
+            },
+            "symbol": {
+              "description": "A named symbol/module the critique targets.",
+              "type": "string"
+            }
+          }
+        },
+        "confidence": {
+          "description": "The Grader's certainty in this Observation.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "evidence": {
+          "description": "Supporting paths, links, or references.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}
