@@ -5,6 +5,7 @@ pub mod command;
 pub mod engine;
 pub mod gh;
 pub mod gh_authorization;
+pub mod git;
 pub mod human_approval;
 pub mod human_decision;
 pub mod noop;
@@ -106,6 +107,7 @@ pub fn register_builtins_with_deps(
         .register(workflow::WorkflowOperator::new(child_runner))
         .register(agent_operator)
         .register(gh_operator)
+        .register(git::GitOperator::new())
         .register(human_approval::HumanApprovalOperator::new(
             interviewer_provider.clone(),
             human_settings.clone(),
