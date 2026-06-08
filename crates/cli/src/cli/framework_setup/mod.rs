@@ -185,7 +185,6 @@ pub const REGISTERED_COMMAND_IDS: &[&str] = &[
     "doctor",
     "config",
     "schema",
-    "schema/export",
     "data/get",
     "data/post",
     "data/put",
