@@ -636,6 +636,458 @@
           "if": {
             "properties": {
               "operator": {
+                "const": "GitOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "oneOf": [
+                  {
+                    "properties": {
+                      "operation": {
+                        "anyOf": [
+                          {
+                            "const": "clean_check",
+                            "type": "string"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operation"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "operation": {
+                        "anyOf": [
+                          {
+                            "const": "sync_main",
+                            "type": "string"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operation"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "operation": {
+                        "anyOf": [
+                          {
+                            "const": "create_branch",
+                            "type": "string"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "exclude": {
+                        "anyOf": [
+                          {
+                            "default": [],
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "operation": {
+                        "anyOf": [
+                          {
+                            "const": "stage",
+                            "type": "string"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operation"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "allow_empty": {
+                        "anyOf": [
+                          {
+                            "default": false,
+                            "type": "boolean"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "message": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "operation": {
+                        "anyOf": [
+                          {
+                            "const": "commit",
+                            "type": "string"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "message"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "operation": {
+                        "anyOf": [
+                          {
+                            "const": "push",
+                            "type": "string"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "remote": {
+                        "anyOf": [
+                          {
+                            "default": "origin",
+                            "type": "string"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "retry_count": {
+                        "anyOf": [
+                          {
+                            "default": 3,
+                            "format": "uint32",
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "retry_delay_ms": {
+                        "anyOf": [
+                          {
+                            "default": 5000,
+                            "format": "uint64",
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "set_upstream": {
+                        "anyOf": [
+                          {
+                            "default": true,
+                            "type": "boolean"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operation"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "base": {
+                        "anyOf": [
+                          {
+                            "default": "main",
+                            "type": "string"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "max_bytes": {
+                        "anyOf": [
+                          {
+                            "default": 262144,
+                            "format": "uint64",
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "operation": {
+                        "anyOf": [
+                          {
+                            "const": "diff",
+                            "type": "string"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operation"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "operation": {
+                        "anyOf": [
+                          {
+                            "const": "cleanup_merge",
+                            "type": "string"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "$expr": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operation"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "title": "GitParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
                 "const": "HumanApprovalOperator"
               }
             }
@@ -726,22 +1178,6 @@
           "if": {
             "properties": {
               "operator": {
-                "const": "HumanDecisionOperator"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "params": {
-                "type": "object"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "operator": {
                 "const": "barrier"
               }
             }
@@ -786,58 +1222,13 @@
           "if": {
             "properties": {
               "operator": {
-                "const": "NoOpOperator"
+                "const": "HumanDecisionOperator"
               }
             }
           },
           "then": {
             "properties": {
               "params": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "title": "NoOpParams",
-                "type": "object"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "operator": {
-                "const": "ReadControlFileOperator"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "params": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "properties": {
-                  "path": {
-                    "anyOf": [
-                      {
-                        "default": null,
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  }
-                },
-                "title": "ReadControlFileParams",
                 "type": "object"
               }
             }
@@ -1057,46 +1448,6 @@
           "if": {
             "properties": {
               "operator": {
-                "const": "SetContextOperator"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "params": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "properties": {
-                  "patch": {
-                    "anyOf": [
-                      true,
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "patch"
-                ],
-                "title": "SetContextParams",
-                "type": "object"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "operator": {
                 "const": "AssertCompletedOperator"
               }
             }
@@ -1133,6 +1484,46 @@
                   "require"
                 ],
                 "title": "AssertCompletedParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "SetContextOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "patch": {
+                    "anyOf": [
+                      true,
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "patch"
+                ],
+                "title": "SetContextParams",
                 "type": "object"
               }
             }
@@ -1548,6 +1939,67 @@
                   "workflow_path"
                 ],
                 "title": "WorkflowOperatorParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "ReadControlFileOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "path": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "title": "ReadControlFileParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "NoOpOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "title": "NoOpParams",
                 "type": "object"
               }
             }

@@ -400,3 +400,32 @@ def test_compiler_rejects_dangling_edge() -> None:
 
     with pytest.raises(CompilerError, match="undefined task"):
         wf.to_yaml()
+
+
+def test_compiler_warns_unreachable_task() -> None:
+    """Compiler emits a CompilerWarning for tasks unreachable from entry_task."""
+    import warnings as _warnings
+
+    wf = Workflow("test-unreachable")
+    wf.task("a", command("echo a"))
+    wf.task("orphan", command("echo orphan"))  # no edges lead here
+
+    # to_yaml should succeed but warn about 'orphan'
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        yaml_str = wf.to_yaml()
+
+    assert yaml_str  # compiled successfully
+    messages = [str(w.message) for w in caught]
+    assert any("orphan" in m for m in messages), (
+        f"Expected unreachable warning for 'orphan', got: {messages}"
+    )
+
+
+def test_compiler_rejects_unknown_out_field() -> None:
+    """Compiler raises CompilerError when .out.field is not in the operator's output schema."""
+    wf = Workflow("test-out-field")
+    t = wf.task("cmd", command("echo hi"))
+
+    with pytest.raises(CompilerError, match="no output field"):
+        _ = t.out.nonexistent_field

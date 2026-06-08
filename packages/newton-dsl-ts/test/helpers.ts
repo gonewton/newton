@@ -8,41 +8,21 @@ import * as Y from "yaml";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// The conformance cases live in the shared checkout, not in the worktree.
-// Resolve by walking up to the git root via the .git file/dir.
-function findConformanceRoot(): string {
-  // In a worktree, .git is a file pointing to the worktree data.
-  // Walk upward from __dirname to find the root checkout.
-  let dir = __dirname;
-  for (let i = 0; i < 10; i++) {
-    // Check if the main packages dir is present
-    const candidate = path.join(dir, "packages", "workflow-schema", "conformance");
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  // Fallback: try hard-coded path
-  return "/home/sysuser/ws001/gonewton/newton/packages/workflow-schema/conformance";
-}
-
-const CONFORMANCE_ROOT = findConformanceRoot();
+// Resolve conformance root relative to this file: test/ → newton-dsl-ts/ → packages/ → repo root
+const CONFORMANCE_ROOT = path.resolve(
+  __dirname,
+  "..",  // test/ → newton-dsl-ts/
+  "..",  // newton-dsl-ts/ → packages/
+  "workflow-schema",
+  "conformance"
+);
 
 export function loadFixture(name: string): Record<string, unknown> {
   const fixturePath = path.join(CONFORMANCE_ROOT, "cases", name, "expected.yaml");
-  const candidates = [fixturePath];
-
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      return Y.parse(fs.readFileSync(p, "utf-8")) as Record<string, unknown>;
-    }
+  if (!fs.existsSync(fixturePath)) {
+    throw new Error(`Fixture not found: ${fixturePath}`);
   }
-  // If CONFORMANCE_ROOT fallback didn't work, try the hard-coded path
-  const hardcoded = `/home/sysuser/ws001/gonewton/newton/packages/workflow-schema/conformance/cases/${name}/expected.yaml`;
-  if (fs.existsSync(hardcoded)) {
-    return Y.parse(fs.readFileSync(hardcoded, "utf-8")) as Record<string, unknown>;
-  }
-  throw new Error(`Fixture not found: ${name}. Tried: ${[...candidates, hardcoded].join(", ")}`);
+  return Y.parse(fs.readFileSync(fixturePath, "utf-8")) as Record<string, unknown>;
 }
 
 /**

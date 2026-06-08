@@ -5,7 +5,7 @@ cd "$SCRIPT_DIR/.."
 
 uv run --with datamodel-code-generator \
   datamodel-codegen \
-  --input "$(realpath ../../workflow-schema/workflow.schema.json)" \
+  --input "$(realpath ../workflow-schema/workflow.schema.json)" \
   --input-file-type jsonschema \
   --output src/newton/_generated/ir.py \
   --output-model-type pydantic_v2.BaseModel \
@@ -16,7 +16,7 @@ echo "Regenerated src/newton/_generated/ir.py"
 
 python3 - << 'PYEOF'
 import json, pathlib
-schema = json.loads(pathlib.Path("../../workflow-schema/output_schemas.json").read_text())
+schema = json.loads(pathlib.Path("../workflow-schema/output_schemas.json").read_text())
 entries = []
 for op in sorted(schema):
     props = schema[op].get("properties", {})
