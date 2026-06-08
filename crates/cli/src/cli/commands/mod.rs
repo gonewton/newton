@@ -7,6 +7,7 @@ pub mod import;
 pub mod log;
 pub mod optimize;
 pub mod serve;
+pub mod shared_execution;
 pub mod workflow;
 
 use crate::cli::args::KeyValuePair;

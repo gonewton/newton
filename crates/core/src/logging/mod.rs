@@ -399,7 +399,7 @@ mod tests {
         LogInvocation::new(LogInvocationKind::Run, Some(PathBuf::from(".")))
     }
 
-    fn make_batch_command() -> LogInvocation {
+    fn make_optimize_command() -> LogInvocation {
         LogInvocation::new(LogInvocationKind::Optimize, Some(PathBuf::from(".")))
     }
 
@@ -418,7 +418,7 @@ mod tests {
         let mapping = vec![
             (make_run_command(), ExecutionContext::LocalDev),
             (make_init_command(), ExecutionContext::LocalDev),
-            (make_batch_command(), ExecutionContext::Batch),
+            (make_optimize_command(), ExecutionContext::Batch),
             (make_monitor_command(), ExecutionContext::Tui),
         ];
 
@@ -436,7 +436,7 @@ mod tests {
             ExecutionContext::RemoteAgent
         );
         assert_eq!(
-            detect_context(&make_batch_command()),
+            detect_context(&make_optimize_command()),
             ExecutionContext::RemoteAgent
         );
         assert_eq!(

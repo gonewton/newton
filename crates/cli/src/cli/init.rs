@@ -116,7 +116,7 @@ fn write_default_config(newton_dir: &Path, project_root: &Path) -> Result<()> {
     writeln!(config_file)?;
     writeln!(
         config_file,
-        "# Required for newton batch <project_id>: path to a workflow YAML (relative to project_root or workspace)"
+        "# Required for newton optimize <project_id>: path to a workflow YAML (relative to project_root or workspace)"
     )?;
     writeln!(config_file, "# workflow_file=path/to/workflow.yaml")?;
 

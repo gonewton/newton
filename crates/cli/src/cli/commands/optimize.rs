@@ -1,16 +1,15 @@
 use crate::cli::args::OptimizeArgs;
 use crate::Result;
 use anyhow::anyhow;
-use newton_core::core::batch_config::PlanQueueConfig;
-use newton_core::workflow::{
-    executor::ExecutionOverrides, schema as workflow_schema, transform as workflow_transform,
-};
+use newton_core::core::plan_queue_config::PlanQueueConfig;
+use newton_core::workflow::{schema as workflow_schema, transform as workflow_transform};
 use serde_json::json;
 use std::{
     env, fs,
     path::{Path, PathBuf},
     time::Duration,
 };
+
 struct OptimizeDirs {
     todo_dir: PathBuf,
     completed_dir: PathBuf,
@@ -103,24 +102,51 @@ async fn execute_workflow_for_plan(
     plan_config: &PlanQueueConfig,
     task_layout: &TaskLayout,
 ) -> Result<()> {
-    fs::create_dir_all(task_layout.state_dir.join("workflows"))?;
-    fs::create_dir_all(task_layout.state_dir.join("artifacts").join("workflows"))?;
-
     let workspace = plan_config.project_root.clone();
     let workflow_path = plan_config.workflow_file.clone();
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
     let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
-    document.triggers = Some(workflow_schema::WorkflowTrigger::manual(json!({
+
+    let trigger_payload = json!({
         "input_file": task_layout.input_file.display().to_string(),
         "workspace": plan_config.project_root.display().to_string(),
-    })));
+    });
+    document.triggers = Some(workflow_schema::WorkflowTrigger::manual(
+        trigger_payload.clone(),
+    ));
 
-    let overrides = ExecutionOverrides {
-        checkpoint_base_path: Some(task_layout.state_dir.join("workflows")),
-        artifact_base_path: Some(task_layout.state_dir.join("artifacts").join("workflows")),
-        pre_seed_nodes: true,
-        ..Default::default()
-    };
+    // Input validation: max_input_bytes
+    let settings = &document.workflow.settings;
+    if let Some(max_bytes) = settings.io_settings.max_input_bytes {
+        let serialized = serde_json::to_string(&trigger_payload).unwrap_or_default();
+        if serialized.len() > max_bytes {
+            return Err(anyhow!(
+                "WFG-IO-001: trigger payload exceeds max_input_bytes ({})",
+                max_bytes
+            ));
+        }
+    }
+
+    // Input validation: input_schema
+    if let Some(schema) = &settings.io.input_schema {
+        if let Err(e) = newton_core::workflow::io::validate_input_schema(schema, &trigger_payload) {
+            return Err(anyhow!(
+                "{}: input schema validation failed: {}",
+                e.code,
+                e.message
+            ));
+        }
+    }
+
+    // Use the shared execution builder for backend + sink wiring
+    let exec_setup = super::shared_execution::build_execution_setup(
+        task_layout.state_dir.clone(),
+        None,
+        None,
+        None,
+    )
+    .await
+    .map_err(|e| anyhow!("{}: {}", e.code, e.message))?;
 
     let settings = document.workflow.settings.clone();
     let ailoop_ctx =
@@ -137,7 +163,7 @@ async fn execute_workflow_for_plan(
         workflow_path,
         registry,
         workspace,
-        overrides,
+        exec_setup.overrides,
     )
     .await;
 

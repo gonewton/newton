@@ -1,4 +1,4 @@
-use crate::core::batch_config::parse_conf;
+use crate::core::plan_queue_config::parse_conf;
 use crate::logging::invocation::{LogInvocation, LogInvocationKind};
 use crate::Result;
 use anyhow::anyhow;
