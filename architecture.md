@@ -115,8 +115,11 @@ Built-in operators register in `crates/core/src/workflow/operators/mod.rs`:
 | `WorkflowOperator` | `workflow.rs` | Nested workflow (in-process) |
 | `AgentOperator` | `agent/` | aikit-sdk agent engines |
 | `GhOperator` | `gh.rs` | GitHub CLI wrapper |
+| `GitOperator` | `git/` | Typed git operations (`clean_check`, `sync_main`, `create_branch`, `commit`, `push`, `diff`, `cleanup_merge`) |
 | `HumanApprovalOperator` | `human_approval.rs` | Boolean HITL gate |
 | `HumanDecisionOperator` | `human_decision.rs` | Multiple-choice HITL gate |
+
+Each operator implements `params_schema()` and `output_schema()` ([ADR 0006](docs/adr/0006-operators-own-param-and-output-schemas.md)); `newton schema export` (`schema_export.rs`) composes these into a single operator-discriminated JSON Schema. Recurring shell patterns are promoted to typed operators (`GitOperator`), with `CommandOperator` (typed `success` / `exit_code` outputs) as the escape hatch ([ADR 0008](docs/adr/0008-shell-patterns-promoted-to-typed-operators.md)).
 
 Agent quota detection is delegated to **aikit-sdk** (`RunResult.quota_exceeded` → Newton error `WFG-AGENT-008`).
 
@@ -257,6 +260,8 @@ engine internals — relocated here from the former `docs/context.md`.
 | **IoBlock** | The workflow's I/O contract: `{ input_schema, output_schema, result_map, error_schema }`. | Schema, contract |
 | **Macro** / **MacroInvocation** | A named reusable list of task templates; a reference to one with optional parameter substitution `{ macro, with }`. | Template, include |
 
+The YAML IR is the single, provenance-blind compile target ([ADR 0005](docs/adr/0005-authoring-surfaces-compile-to-one-provenance-blind-ir.md)): the engine cannot tell whether a definition was handwritten or produced by a code-based authoring surface (`packages/newton-dsl-py`, `packages/newton-dsl-ts`). Both surfaces validate against the committed schema in `packages/workflow-schema`, which is generated from `newton schema export`.
+
 ### Tasks
 
 | Term | Definition | Aliases to avoid |
@@ -315,7 +320,8 @@ engine internals — relocated here from the former `docs/context.md`.
 
 | Term | Definition |
 | --- | --- |
-| **CommandOperator** | Executes a shell command; captures stdout/stderr as JSON. |
+| **CommandOperator** | Executes a shell command; captures stdout/stderr as JSON, with typed `success` / `exit_code` outputs. The escape hatch for bespoke glue. |
+| **GitOperator** | Typed git operations (clean check, sync, branch, commit, push with retry, diff, cleanup merge) — a promoted shell pattern (ADR 0008). |
 | **SetContextOperator** | Deep-merges a JSON patch into the workflow **Context**. |
 | **NoOpOperator** | Pass-through for routing/branching without side effects. |
 | **WorkflowOperator** | Runs a nested workflow in-process, incrementing **Nesting Depth**. |
