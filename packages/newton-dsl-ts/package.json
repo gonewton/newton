@@ -1,0 +1,35 @@
+{
+  "name": "@newton/dsl",
+  "version": "0.1.0",
+  "description": "TypeScript authoring surface for Newton workflow graphs",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --outDir dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "codegen": "bash codegen/generate.sh",
+    "check-drift": "bash codegen/check_drift.sh"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "tsup": "^8.3.5",
+    "vitest": "^2.1.8",
+    "json-schema-to-typescript": "^15.0.4"
+  },
+  "files": [
+    "dist"
+  ]
+}
