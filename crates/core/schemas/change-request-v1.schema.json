@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ChangeRequestV1",
+  "description": "Output schema for ChangeRequestOperator",
+  "type": "object",
+  "required": ["decision"],
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": ["propose", "none"],
+      "description": "propose = a Change Request was created; none = convergence / nothing actionable"
+    },
+    "change_request_id": {
+      "type": ["string", "null"],
+      "description": "ID of the created Change Request (null when decision=none)"
+    }
+  }
+}

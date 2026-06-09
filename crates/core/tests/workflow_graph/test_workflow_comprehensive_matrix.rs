@@ -488,6 +488,7 @@ fn command_deps(plans: HashMap<String, VecDeque<MockCommandStep>>) -> BuiltinOpe
         child_workflow_runner: None,
         gh_approver: None,
         git_runner: None,
+        backend_store: None,
     }
 }
 
@@ -744,6 +745,7 @@ async fn scenario_human_approval_and_decision_path() -> Result<(), String> {
     const NAME: &str = "human_approval_and_decision_path";
     let workspace = scenario_workspace(NAME)?;
     let deps = BuiltinOperatorDeps {
+        backend_store: None,
         interviewer: Some({
             let fake: Arc<dyn Interviewer> = Arc::new(FakeInterviewer::approve_and_choose("ship"));
             Arc::new(move || Ok(fake.clone()))
@@ -823,6 +825,7 @@ async fn scenario_command_execution_error_fails_workflow() -> Result<(), String>
         child_workflow_runner: None,
         gh_approver: None,
         git_runner: None,
+        backend_store: None,
     };
     let err = execute_yaml(
         workspace.path(),

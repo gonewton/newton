@@ -95,6 +95,7 @@ pub(super) struct EvalRunRow {
     pub summary: Option<String>,
     pub evaluated_at: String,
     pub ingested_at: String,
+    pub raw_assessment: Option<String>,
 }
 
 impl EvalRunRow {
@@ -109,6 +110,7 @@ impl EvalRunRow {
             summary: self.summary,
             evaluated_at: self.evaluated_at,
             ingested_at: self.ingested_at,
+            raw_assessment: self.raw_assessment,
         }
     }
 }
@@ -224,9 +226,9 @@ pub(super) struct SavedViewKindRow {
 
 #[allow(dead_code)]
 #[derive(Debug, FromRow)]
-pub(super) struct OpportunityRow {
+pub(super) struct FindingRow {
     pub id: String,
-    pub title: String,
+    pub source: String,
     pub origin: String,
     pub component_id: Option<String>,
     pub component_name: Option<String>,
@@ -234,31 +236,42 @@ pub(super) struct OpportunityRow {
     pub repo_id: Option<String>,
     pub repo_name: Option<String>,
     pub kpi_id: Option<String>,
-    pub confidence: Option<f64>,
+    pub dimension: String,
+    pub location: Option<String>,
+    pub fingerprint: String,
+    pub title: String,
+    pub why_it_matters: String,
+    pub recommended_action: String,
+    pub severity: String,
     pub risk: String,
-    pub expected_value: f64,
+    pub confidence: Option<f64>,
+    pub evidence: Option<String>,
+    pub expected_value: Option<f64>,
     pub effort: Option<String>,
     pub status: String,
-    pub age: Option<String>,
-    pub rationale: Option<String>,
+    pub last_seen_at: String,
     pub depends_on: Option<String>,
     pub blocks: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[allow(dead_code)]
 #[derive(Debug, FromRow)]
-pub(super) struct RequestRow {
+pub(super) struct ChangeRequestRow {
     pub id: String,
     pub title: String,
-    pub description: Option<String>,
+    pub body: Option<String>,
+    pub origin: String,
+    pub author: Option<String>,
     pub component_id: Option<String>,
     pub component_name: Option<String>,
     pub repo_id: Option<String>,
     pub repo_name: Option<String>,
-    pub requested_by: String,
     pub status: String,
-    pub linked_opportunity_id: Option<String>,
+    pub finding_ids: Option<String>,
     pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -270,7 +283,7 @@ pub(super) struct PlanRow {
     pub repo_id: Option<String>,
     pub repo_name: Option<String>,
     pub status: String,
-    pub linked_request_id: Option<String>,
+    pub linked_change_request_id: Option<String>,
     pub confidence: i64,
     pub risk: String,
     pub expected_value: Option<String>,

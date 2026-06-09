@@ -86,11 +86,13 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
         "eval-runs",
         "grade",
         "grades",
-        "opportunity",
-        "opportunities",
+        "finding",
+        "findings",
+        "change-request",
+        "change-requests",
     ];
     if !valid_resources.contains(&resource) {
-        eprintln!("DATA-003: unknown resource '{resource}'; must be one of: product, products, component, components, repo, repos, module, modules, module-dependency, module-dependencies, kpi, kpis, eval-run, eval-runs, grade, grades, opportunity, opportunities");
+        eprintln!("DATA-003: unknown resource '{resource}'; must be one of: product, products, component, components, repo, repos, module, modules, module-dependency, module-dependencies, kpi, kpis, eval-run, eval-runs, grade, grades, finding, findings, change-request, change-requests");
         std::process::exit(1);
     }
 
@@ -111,7 +113,8 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
                 | "kpis"
                 | "eval-runs"
                 | "grades"
-                | "opportunities"
+                | "findings"
+                | "change-requests"
         ),
         DataVerb::Post => false,
         DataVerb::Put | DataVerb::Patch | DataVerb::Delete => true,
@@ -484,23 +487,54 @@ async fn dispatch_data(
                 .map_err(api_err)
                 .and_then(to_json)
         }
-        (DataVerb::Get, "opportunities") => store
-            .list_opportunities(None)
+        (DataVerb::Get, "findings") => store
+            .list_findings(None, None)
             .await
             .map_err(api_err)
             .and_then(to_json),
-        (DataVerb::Post, "opportunity" | "opportunities") => {
-            let b = parse_body::<newton_backend::CreateOpportunityBody>(body)?;
+        (DataVerb::Get, "finding") => store
+            .get_finding(id)
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Post, "finding" | "findings") => {
+            let b = parse_body::<newton_backend::CreateFindingBody>(body)?;
             store
-                .create_opportunity(b)
+                .create_finding(b)
                 .await
                 .map_err(api_err)
                 .and_then(to_json)
         }
-        (DataVerb::Patch, "opportunity" | "opportunities") => {
-            let b = parse_body::<newton_backend::PatchOpportunityBody>(body)?;
+        (DataVerb::Patch, "finding" | "findings") => {
+            let b = parse_body::<newton_backend::PatchFindingBody>(body)?;
             store
-                .patch_opportunity(id, b)
+                .patch_finding(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Get, "change-requests") => store
+            .list_change_requests(None)
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Get, "change-request") => store
+            .get_change_request(id)
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Post, "change-request" | "change-requests") => {
+            let b = parse_body::<newton_backend::CreateChangeRequestBody>(body)?;
+            store
+                .create_change_request(b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Patch, "change-request" | "change-requests") => {
+            let b = parse_body::<newton_backend::PatchChangeRequestBody>(body)?;
+            store
+                .patch_change_request(id, b)
                 .await
                 .map_err(api_err)
                 .and_then(to_json)

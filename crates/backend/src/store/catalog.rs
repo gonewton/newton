@@ -185,7 +185,7 @@ impl super::SqliteBackendStore {
             component: row.component_name.unwrap_or_default(),
             repo: row.repo_name.unwrap_or_default(),
             status: row.status,
-            linked_request_id: row.linked_request_id,
+            linked_change_request_id: row.linked_change_request_id,
             execution_ids: exec_ids.into_iter().map(|e| e.id).collect(),
             confidence: row.confidence,
             risk: row.risk,

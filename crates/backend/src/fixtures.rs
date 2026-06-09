@@ -119,8 +119,6 @@ mod tests {
             "PendingApproval",
             "KPI",
             "Regression",
-            "Opportunity",
-            "Request",
             "Plan",
             "PlanSection",
             "PlanPolicyCheck",

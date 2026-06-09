@@ -124,6 +124,7 @@ fn build_registry_with_git_runner(
         child_workflow_runner: None,
         gh_approver: None,
         git_runner: Some(git_runner),
+        backend_store: None,
     };
     operators::register_builtins_with_deps(&mut builder, workspace, Default::default(), deps);
     builder.build()
@@ -141,6 +142,7 @@ fn build_registry_with_gh_runner(
         child_workflow_runner: None,
         gh_approver: None,
         git_runner: None,
+        backend_store: None,
     };
     operators::register_builtins_with_deps(&mut builder, workspace, Default::default(), deps);
     builder.build()

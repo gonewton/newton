@@ -71,22 +71,33 @@ pub trait BackendStore: Send + Sync {
     ) -> Result<ModuleDependencyItem, ApiError>;
     async fn list_saved_views(&self, kind: Option<String>) -> Result<serde_json::Value, ApiError>;
 
-    async fn list_opportunities(
+    async fn list_findings(
         &self,
         status: Option<String>,
-    ) -> Result<Vec<OpportunityItem>, ApiError>;
-    async fn patch_opportunity(
+        scope_id: Option<String>,
+    ) -> Result<Vec<FindingItem>, ApiError>;
+    async fn get_finding(&self, id: &str) -> Result<FindingItem, ApiError>;
+    async fn create_finding(&self, body: CreateFindingBody) -> Result<FindingItem, ApiError>;
+    async fn patch_finding(
         &self,
         id: &str,
-        body: PatchOpportunityBody,
-    ) -> Result<OpportunityItem, ApiError>;
-    async fn create_opportunity(
-        &self,
-        body: CreateOpportunityBody,
-    ) -> Result<OpportunityItem, ApiError>;
+        body: PatchFindingBody,
+    ) -> Result<FindingItem, ApiError>;
 
-    async fn list_requests(&self) -> Result<Vec<RequestItem>, ApiError>;
-    async fn create_request(&self, body: CreateRequestBody) -> Result<RequestItem, ApiError>;
+    async fn list_change_requests(
+        &self,
+        status: Option<String>,
+    ) -> Result<Vec<ChangeRequestItem>, ApiError>;
+    async fn get_change_request(&self, id: &str) -> Result<ChangeRequestItem, ApiError>;
+    async fn create_change_request(
+        &self,
+        body: CreateChangeRequestBody,
+    ) -> Result<ChangeRequestItem, ApiError>;
+    async fn patch_change_request(
+        &self,
+        id: &str,
+        body: PatchChangeRequestBody,
+    ) -> Result<ChangeRequestItem, ApiError>;
 
     async fn list_plans(&self) -> Result<Vec<PlanItem>, ApiError>;
     async fn get_plan(&self, id: &str) -> Result<PlanDetail, ApiError>;

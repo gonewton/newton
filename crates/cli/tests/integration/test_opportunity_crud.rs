@@ -1,3 +1,6 @@
+//! Integration tests for the Finding and ChangeRequest data commands.
+//! Replaces the old opportunity_crud suite (spec 061 clean-break rename).
+
 #[path = "../support/mod.rs"]
 mod support;
 
@@ -11,12 +14,30 @@ fn setup_workspace_with_db() -> TempDir {
     dir
 }
 
-fn post_opportunity(dir: &TempDir, body: serde_json::Value) -> serde_json::Value {
+fn minimal_finding_body(id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "source": "test",
+        "origin": "system",
+        "dimension": "tests",
+        "fingerprint": format!("fp-{id}"),
+        "title": "Test finding",
+        "whyItMatters": "Coverage gap detected",
+        "recommendedAction": "Add more tests",
+        "severity": "medium",
+        "risk": "low",
+        "status": "awaiting_triage",
+        "dependsOn": [],
+        "blocks": []
+    })
+}
+
+fn post_finding(dir: &TempDir, body: serde_json::Value) -> serde_json::Value {
     let out = newton()
         .args([
             "data",
             "post",
-            "opportunity",
+            "finding",
             "--workspace",
             &dir.path().to_string_lossy(),
             "--body",
@@ -33,57 +54,36 @@ fn post_opportunity(dir: &TempDir, body: serde_json::Value) -> serde_json::Value
 // ── Test 1: POST happy path → 201 and correct id ─────────────────────────────
 
 #[test]
-fn opportunity_post_happy_path() {
+fn finding_post_happy_path() {
     let dir = setup_workspace_with_db();
+    let created = post_finding(&dir, minimal_finding_body("find-001"));
 
-    let body = serde_json::json!({
-        "id": "test-001",
-        "title": "Test opportunity",
-        "origin": "test",
-        "risk": "low",
-        "expectedValue": 1.0
-    });
-    let created = post_opportunity(&dir, body);
-
-    assert_eq!(created["id"].as_str().unwrap(), "test-001");
-    assert_eq!(created["title"].as_str().unwrap(), "Test opportunity");
+    assert_eq!(created["id"].as_str().unwrap(), "find-001");
     assert_eq!(created["status"].as_str().unwrap(), "awaiting_triage");
+    assert_eq!(created["dimension"].as_str().unwrap(), "tests");
     assert_eq!(created["risk"].as_str().unwrap(), "low");
 }
 
 // ── Test 2: POST duplicate id → upsert, count remains 1 ──────────────────────
 
 #[test]
-fn opportunity_post_duplicate_upserts() {
+fn finding_post_duplicate_upserts() {
     let dir = setup_workspace_with_db();
 
-    let body1 = serde_json::json!({
-        "id": "test-002",
-        "title": "Original title",
-        "origin": "test",
-        "risk": "low",
-        "expectedValue": 1.0
-    });
-    post_opportunity(&dir, body1);
+    post_finding(&dir, minimal_finding_body("find-002"));
 
-    let body2 = serde_json::json!({
-        "id": "test-002",
-        "title": "Updated title",
-        "origin": "test",
-        "risk": "medium",
-        "expectedValue": 2.0
-    });
-    let updated = post_opportunity(&dir, body2);
+    let mut body2 = minimal_finding_body("find-002");
+    body2["title"] = serde_json::json!("Updated title");
+    let updated = post_finding(&dir, body2);
 
-    assert_eq!(updated["id"].as_str().unwrap(), "test-002");
+    assert_eq!(updated["id"].as_str().unwrap(), "find-002");
     assert_eq!(updated["title"].as_str().unwrap(), "Updated title");
 
-    // Verify only one record with that id exists
     let out = newton()
         .args([
             "data",
             "get",
-            "opportunities",
+            "findings",
             "--workspace",
             &dir.path().to_string_lossy(),
             "--json",
@@ -98,33 +98,25 @@ fn opportunity_post_duplicate_upserts() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|o| o["id"].as_str() == Some("test-002"))
+        .filter(|f| f["id"].as_str() == Some("find-002"))
         .count();
-    assert_eq!(count, 1, "expected exactly one record with id test-002");
+    assert_eq!(count, 1, "upsert must not create duplicate records");
 }
 
-// ── Test 3: PATCH still works after opportunity arms added ────────────────────
+// ── Test 3: PATCH status works ────────────────────────────────────────────────
 
 #[test]
-fn opportunity_patch_still_works() {
+fn finding_patch_still_works() {
     let dir = setup_workspace_with_db();
-
-    let body = serde_json::json!({
-        "id": "test-003",
-        "title": "Patchable",
-        "origin": "test",
-        "risk": "low",
-        "expectedValue": 0.5
-    });
-    post_opportunity(&dir, body);
+    post_finding(&dir, minimal_finding_body("find-003"));
 
     let patch_body = serde_json::json!({"status": "triaged"});
     let out = newton()
         .args([
             "data",
             "patch",
-            "opportunity",
-            "test-003",
+            "finding",
+            "find-003",
             "--workspace",
             &dir.path().to_string_lossy(),
             "--body",
@@ -140,75 +132,17 @@ fn opportunity_patch_still_works() {
     assert_eq!(patched["status"].as_str().unwrap(), "triaged");
 }
 
-// ── Test 4: POST invalid status → validation error ────────────────────────────
+// ── Test 4: GET findings (list) exits 0 ──────────────────────────────────────
 
 #[test]
-fn opportunity_post_invalid_status() {
-    let dir = setup_workspace_with_db();
-
-    let body_str = serde_json::to_string(&serde_json::json!({
-        "id": "test-004",
-        "title": "Bad status",
-        "origin": "test",
-        "risk": "low",
-        "expectedValue": 1.0,
-        "status": "invalid-value"
-    }))
-    .unwrap();
-
-    let out = newton()
-        .args([
-            "data",
-            "post",
-            "opportunity",
-            "--workspace",
-            &dir.path().to_string_lossy(),
-            "--body",
-            &body_str,
-            "--json",
-        ])
-        .assert()
-        .failure()
-        .get_output()
-        .clone();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("ERR_VALIDATION"),
-        "expected ERR_VALIDATION in stderr, got: {stderr}"
-    );
-}
-
-// ── Test 5: POST with unknown component → succeeds (soft warn) ────────────────
-
-#[test]
-fn opportunity_post_unknown_component_soft_warn() {
-    let dir = setup_workspace_with_db();
-
-    let body = serde_json::json!({
-        "id": "test-005",
-        "title": "Unknown component",
-        "origin": "test",
-        "risk": "low",
-        "expectedValue": 0.0,
-        "component": "nonexistent-component-xyz"
-    });
-    let created = post_opportunity(&dir, body);
-
-    assert_eq!(created["id"].as_str().unwrap(), "test-005");
-    assert_eq!(created["component"].as_str().unwrap(), "");
-}
-
-// ── Test 6: GET opportunities (list) exits 0 ─────────────────────────────────
-
-#[test]
-fn opportunity_get_list_exits_ok() {
+fn finding_get_list_exits_ok() {
     let dir = setup_workspace_with_db();
 
     newton()
         .args([
             "data",
             "get",
-            "opportunities",
+            "findings",
             "--workspace",
             &dir.path().to_string_lossy(),
             "--json",
@@ -217,31 +151,49 @@ fn opportunity_get_list_exits_ok() {
         .success();
 }
 
-// ── Test 7: POST confidence > 1.0 → validation error ─────────────────────────
+// ── Test 5: POST finding then GET by id exits 0 ───────────────────────────────
 
 #[test]
-fn opportunity_post_invalid_confidence() {
+fn finding_get_by_id_exits_ok() {
     let dir = setup_workspace_with_db();
-
-    let body_str = serde_json::to_string(&serde_json::json!({
-        "id": "test-007",
-        "title": "Bad confidence",
-        "origin": "test",
-        "risk": "low",
-        "expectedValue": 1.0,
-        "confidence": 1.5
-    }))
-    .unwrap();
+    post_finding(&dir, minimal_finding_body("find-005"));
 
     let out = newton()
         .args([
             "data",
-            "post",
-            "opportunity",
+            "get",
+            "finding",
+            "find-005",
+            "--workspace",
+            &dir.path().to_string_lossy(),
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let item: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert_eq!(item["id"].as_str().unwrap(), "find-005");
+}
+
+// ── Test 6: PATCH unknown finding returns error ───────────────────────────────
+
+#[test]
+fn finding_patch_not_found_returns_error() {
+    let dir = setup_workspace_with_db();
+
+    let patch_body = serde_json::json!({"status": "triaged"});
+    let out = newton()
+        .args([
+            "data",
+            "patch",
+            "finding",
+            "no-such-id",
             "--workspace",
             &dir.path().to_string_lossy(),
             "--body",
-            &body_str,
+            &serde_json::to_string(&patch_body).unwrap(),
             "--json",
         ])
         .assert()
@@ -250,44 +202,59 @@ fn opportunity_post_invalid_confidence() {
         .clone();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("ERR_VALIDATION"),
-        "expected ERR_VALIDATION in stderr, got: {stderr}"
+        stderr.contains("ERR_NOT_FOUND"),
+        "expected ERR_NOT_FOUND in stderr, got: {stderr}"
     );
 }
 
-// ── Test 8: POST expectedValue < 0 → validation error ────────────────────────
+// ── Test 7: GET change-requests (list) exits 0 ────────────────────────────────
 
 #[test]
-fn opportunity_post_negative_expected_value() {
+fn change_request_get_list_exits_ok() {
     let dir = setup_workspace_with_db();
 
-    let body_str = serde_json::to_string(&serde_json::json!({
-        "id": "test-008",
-        "title": "Negative value",
-        "origin": "test",
-        "risk": "low",
-        "expectedValue": -1.0
-    }))
-    .unwrap();
+    newton()
+        .args([
+            "data",
+            "get",
+            "change-requests",
+            "--workspace",
+            &dir.path().to_string_lossy(),
+            "--json",
+        ])
+        .assert()
+        .success();
+}
 
+// ── Test 8: POST change-request happy path ────────────────────────────────────
+
+#[test]
+fn change_request_post_happy_path() {
+    let dir = setup_workspace_with_db();
+
+    let body = serde_json::json!({
+        "id": "cr-001",
+        "title": "Add MFA to login flow",
+        "origin": "system",
+        "findingIds": []
+    });
     let out = newton()
         .args([
             "data",
             "post",
-            "opportunity",
+            "change-request",
             "--workspace",
             &dir.path().to_string_lossy(),
             "--body",
-            &body_str,
+            &serde_json::to_string(&body).unwrap(),
             "--json",
         ])
         .assert()
-        .failure()
+        .success()
         .get_output()
         .clone();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("ERR_VALIDATION"),
-        "expected ERR_VALIDATION in stderr, got: {stderr}"
-    );
+    let created: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert_eq!(created["id"].as_str().unwrap(), "cr-001");
+    assert_eq!(created["status"].as_str().unwrap(), "proposed");
 }

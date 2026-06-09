@@ -2,7 +2,7 @@ use super::helpers::{query_err, tx_err};
 
 pub(super) const PLAN_SELECT: &str =
     "SELECT p.id, p.title, p.componentId as component_id, c.name as component_name, \
-     p.repoId as repo_id, r.name as repo_name, p.status, p.linkedRequestId as linked_request_id, \
+     p.repoId as repo_id, r.name as repo_name, p.status, p.linkedChangeRequestId as linked_change_request_id, \
      p.confidence, p.risk, p.expectedValue as expected_value, p.agentGenerated as agent_generated, \
      p.waitingSince as waiting_since, p.createdAt as created_at \
      FROM Plan p LEFT JOIN Component c ON p.componentId = c.id LEFT JOIN Repo r ON p.repoId = r.id";
@@ -10,7 +10,6 @@ use super::rows::*;
 use crate::err_conflict;
 use crate::err_internal;
 use crate::err_not_found;
-use crate::err_validation;
 use crate::models::*;
 use newton_types::ApiError;
 use uuid::Uuid;
@@ -142,276 +141,6 @@ impl super::SqliteBackendStore {
         }
     }
 
-    pub(super) async fn list_opportunities_db(
-        &self,
-        status: Option<String>,
-    ) -> Result<Vec<OpportunityItem>, ApiError> {
-        let base_sql = "SELECT o.id, o.title, o.origin, o.componentId as component_id, c.name as component_name, o.module, o.repoId as repo_id, r.name as repo_name, o.kpiId as kpi_id, o.confidence, o.risk, o.expectedValue as expected_value, o.effort, o.status, o.age, o.rationale, o.dependsOn as depends_on, o.blocks FROM Opportunity o LEFT JOIN Component c ON o.componentId = c.id LEFT JOIN Repo r ON o.repoId = r.id";
-
-        let rows = if let Some(ref s) = status {
-            sqlx::query_as::<_, OpportunityRow>(&format!(
-                "{base_sql} WHERE o.status = ? ORDER BY o.id ASC"
-            ))
-            .bind(s)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(query_err)?
-        } else {
-            sqlx::query_as::<_, OpportunityRow>(&format!("{base_sql} ORDER BY o.id ASC"))
-                .fetch_all(&self.pool)
-                .await
-                .map_err(query_err)?
-        };
-
-        Ok(rows
-            .into_iter()
-            .map(|row| {
-                let depends_on: Vec<String> = row
-                    .depends_on
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_default();
-                let blocks: Vec<String> = row
-                    .blocks
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_default();
-
-                OpportunityItem {
-                    id: row.id,
-                    title: row.title,
-                    origin: row.origin,
-                    component: row.component_name.unwrap_or_default(),
-                    module: row.module,
-                    repo: row.repo_name.unwrap_or_default(),
-                    kpi_id: row.kpi_id,
-                    confidence: row.confidence,
-                    risk: row.risk,
-                    expected_value: row.expected_value,
-                    effort: row.effort,
-                    status: row.status,
-                    age: row.age,
-                    rationale: row.rationale,
-                    depends_on,
-                    blocks,
-                }
-            })
-            .collect())
-    }
-
-    pub(super) async fn patch_opportunity_db(
-        &self,
-        id: &str,
-        body: PatchOpportunityBody,
-    ) -> Result<OpportunityItem, ApiError> {
-        let valid_statuses = [
-            "awaiting_triage",
-            "triaged",
-            "approved_for_planning",
-            "structured",
-            "deferred",
-            "rejected",
-        ];
-        if !valid_statuses.contains(&body.status.as_str()) {
-            return Err(err_validation("Invalid opportunity status"));
-        }
-
-        if !self.row_exists("Opportunity", id).await? {
-            return Err(err_not_found("Opportunity not found"));
-        }
-
-        let now = Self::now_iso();
-        sqlx::query("UPDATE Opportunity SET status = ?, updatedAt = ? WHERE id = ?")
-            .bind(&body.status)
-            .bind(&now)
-            .bind(id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| err_internal(&format!("update error: {e}")))?;
-
-        self.list_opportunities_db(None)
-            .await?
-            .into_iter()
-            .find(|o| o.id == id)
-            .ok_or_else(|| err_internal("Failed to read back updated opportunity"))
-    }
-
-    pub(super) async fn create_opportunity_db(
-        &self,
-        body: CreateOpportunityBody,
-    ) -> Result<OpportunityItem, ApiError> {
-        let valid_statuses = [
-            "awaiting_triage",
-            "triaged",
-            "approved_for_planning",
-            "structured",
-            "deferred",
-            "rejected",
-        ];
-        if !valid_statuses.contains(&body.status.as_str()) {
-            return Err(err_validation("Invalid opportunity status"));
-        }
-        if let Some(c) = body.confidence {
-            if !(0.0..=1.0).contains(&c) {
-                return Err(err_validation("confidence must be between 0.0 and 1.0"));
-            }
-        }
-        if body.expected_value < 0.0 {
-            return Err(err_validation("expectedValue must be non-negative"));
-        }
-        if body.id.trim().is_empty() {
-            return Err(err_validation("id must not be empty"));
-        }
-        if body.title.trim().is_empty() {
-            return Err(err_validation("title must not be empty"));
-        }
-        if body.origin.trim().is_empty() {
-            return Err(err_validation("origin must not be empty"));
-        }
-
-        let component_id = if let Some(ref cid) = body.component {
-            if !self.row_exists("Component", cid).await? {
-                tracing::warn!("component '{}' not found, proceeding", cid);
-                None
-            } else {
-                Some(cid.clone())
-            }
-        } else {
-            None
-        };
-        let repo_id = if let Some(ref rid) = body.repo {
-            if !self.row_exists("Repo", rid).await? {
-                tracing::warn!("repo '{}' not found, proceeding", rid);
-                None
-            } else {
-                Some(rid.clone())
-            }
-        } else {
-            None
-        };
-
-        let now = Self::now_iso();
-        let depends_on_json =
-            serde_json::to_string(&body.depends_on).unwrap_or_else(|_| "[]".to_string());
-        let blocks_json = serde_json::to_string(&body.blocks).unwrap_or_else(|_| "[]".to_string());
-
-        sqlx::query(
-            "INSERT INTO Opportunity (
-                id, title, origin, componentId, module, repoId,
-                kpiId, confidence, risk, expectedValue, effort,
-                status, rationale, dependsOn, blocks, createdAt, updatedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                title       = excluded.title,
-                origin      = excluded.origin,
-                componentId = excluded.componentId,
-                module      = excluded.module,
-                repoId      = excluded.repoId,
-                kpiId       = excluded.kpiId,
-                confidence  = excluded.confidence,
-                risk        = excluded.risk,
-                expectedValue = excluded.expectedValue,
-                effort      = excluded.effort,
-                status      = excluded.status,
-                rationale   = excluded.rationale,
-                dependsOn   = excluded.dependsOn,
-                blocks      = excluded.blocks,
-                updatedAt   = excluded.updatedAt",
-        )
-        .bind(&body.id)
-        .bind(&body.title)
-        .bind(&body.origin)
-        .bind(&component_id)
-        .bind(&body.module)
-        .bind(&repo_id)
-        .bind(&body.kpi_id)
-        .bind(body.confidence)
-        .bind(&body.risk)
-        .bind(body.expected_value)
-        .bind(&body.effort)
-        .bind(&body.status)
-        .bind(&body.rationale)
-        .bind(&depends_on_json)
-        .bind(&blocks_json)
-        .bind(&now)
-        .bind(&now)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| err_internal(&format!("upsert error: {e}")))?;
-
-        self.list_opportunities_db(None)
-            .await?
-            .into_iter()
-            .find(|o| o.id == body.id)
-            .ok_or_else(|| err_internal("Failed to read back created opportunity"))
-    }
-
-    pub(super) async fn list_requests_db(&self) -> Result<Vec<RequestItem>, ApiError> {
-        let rows = sqlx::query_as::<_, RequestRow>(
-            "SELECT req.id, req.title, req.description, req.componentId as component_id, c.name as component_name, req.repoId as repo_id, r.name as repo_name, req.requestedBy as requested_by, req.status, req.linkedOpportunityId as linked_opportunity_id, req.createdAt as created_at FROM Request req LEFT JOIN Component c ON req.componentId = c.id LEFT JOIN Repo r ON req.repoId = r.id ORDER BY req.id ASC"
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(query_err)?;
-
-        Ok(rows
-            .into_iter()
-            .map(|row| RequestItem {
-                id: row.id,
-                title: row.title,
-                description: row.description,
-                component: row.component_name.unwrap_or_default(),
-                repo: row.repo_name.unwrap_or_default(),
-                requested_by: row.requested_by,
-                status: row.status,
-                linked_opportunity_id: row.linked_opportunity_id,
-                created_at: row.created_at,
-            })
-            .collect())
-    }
-
-    pub(super) async fn create_request_db(
-        &self,
-        body: CreateRequestBody,
-    ) -> Result<RequestItem, ApiError> {
-        let id = Uuid::new_v4().to_string();
-        let now = Self::now_iso();
-
-        let component_id = if let Some(ref name) = body.component {
-            let r: Option<IdRow> =
-                sqlx::query_as::<_, IdRow>("SELECT id FROM Component WHERE name = ?")
-                    .bind(name)
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(query_err)?;
-            r.map(|r| r.id)
-        } else {
-            None
-        };
-        let repo_id = if let Some(ref name) = body.repo {
-            let r: Option<IdRow> = sqlx::query_as::<_, IdRow>("SELECT id FROM Repo WHERE name = ?")
-                .bind(name)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(query_err)?;
-            r.map(|r| r.id)
-        } else {
-            None
-        };
-
-        sqlx::query(
-            "INSERT INTO Request (id, title, description, componentId, repoId, requestedBy, status, linkedOpportunityId, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)"
-        )
-        .bind(&id).bind(&body.title).bind(&body.description).bind(&component_id).bind(&repo_id).bind(&body.requested_by).bind(&body.linked_opportunity_id).bind(&now).bind(&now)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| err_internal(&format!("insert error: {e}")))?;
-
-        self.list_requests_db()
-            .await?
-            .into_iter()
-            .find(|r| r.id == id)
-            .ok_or_else(|| err_internal("Failed to read back created request"))
-    }
-
     pub(super) async fn list_plans_db(&self) -> Result<Vec<PlanItem>, ApiError> {
         let rows = sqlx::query_as::<_, PlanRow>(&format!("{PLAN_SELECT} ORDER BY p.id ASC"))
             .fetch_all(&self.pool)
@@ -434,7 +163,7 @@ impl super::SqliteBackendStore {
                 component: row.component_name.unwrap_or_default(),
                 repo: row.repo_name.unwrap_or_default(),
                 status: row.status,
-                linked_request_id: row.linked_request_id,
+                linked_change_request_id: row.linked_change_request_id,
                 execution_ids: exec_ids.into_iter().map(|e| e.id).collect(),
                 confidence: row.confidence,
                 risk: row.risk,
@@ -713,9 +442,9 @@ impl super::SqliteBackendStore {
             "PlanPolicyCheck",
             "PlanSection",
             "Plan",
-            "Request",
+            "ChangeRequest",
+            "Finding",
             "ModuleDependency",
-            "Opportunity",
             "PendingApproval",
             "Regression",
             "Grade",

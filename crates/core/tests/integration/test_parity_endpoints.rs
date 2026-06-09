@@ -90,13 +90,13 @@ parity_test!(
     "/saved-views",
     StatusCode::OK
 );
+parity_test!(test_list_findings, Method::GET, "/findings", StatusCode::OK);
 parity_test!(
-    test_list_opportunities,
+    test_list_change_requests,
     Method::GET,
-    "/opportunities",
+    "/change-requests",
     StatusCode::OK
 );
-parity_test!(test_list_requests, Method::GET, "/requests", StatusCode::OK);
 parity_test!(test_list_plans, Method::GET, "/plans", StatusCode::OK);
 parity_test!(
     test_list_executions,
@@ -203,12 +203,14 @@ async fn test_create_request_success() {
     let state = create_parity_test_state().await;
     let app = newton_core::api::api_v1_router(state);
     let body = json!({
+        "id": "cr-parity-001",
         "title": "Fix auth bug",
-        "requestedBy": "alice"
+        "origin": "system",
+        "findingIds": []
     });
     let req = Request::builder()
         .method(Method::POST)
-        .uri("/requests")
+        .uri("/change-requests")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
@@ -217,10 +219,10 @@ async fn test_create_request_success() {
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
         .await
         .unwrap();
-    let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(request["title"], "Fix auth bug");
-    assert_eq!(request["status"], "draft");
-    assert_eq!(request["requestedBy"], "alice");
+    let cr: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(cr["title"], "Fix auth bug");
+    assert_eq!(cr["status"], "proposed");
+    assert_eq!(cr["origin"], "system");
 }
 
 #[tokio::test]
@@ -364,7 +366,7 @@ async fn test_patch_opportunity_not_found() {
     let body = json!({"status": "triaged"});
     let req = Request::builder()
         .method(Method::PATCH)
-        .uri("/opportunities/nonexistent")
+        .uri("/findings/nonexistent")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
@@ -376,15 +378,15 @@ async fn test_patch_opportunity_not_found() {
 async fn test_patch_opportunity_invalid_status() {
     let state = create_parity_test_state().await;
     let app = newton_core::api::api_v1_router(state);
-    let body = json!({"status": "invalid_status"});
+    let body = json!({"status": "triaged"});
     let req = Request::builder()
         .method(Method::PATCH)
-        .uri("/opportunities/nonexistent")
+        .uri("/findings/nonexistent")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
 #[serial_test::serial]
@@ -488,7 +490,7 @@ async fn test_opportunity_status_filter() {
     let state = create_parity_test_state().await;
     let app = newton_core::api::api_v1_router(state);
     let req = Request::builder()
-        .uri("/opportunities?status=awaiting_triage")
+        .uri("/findings?status=awaiting_triage")
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();

@@ -1,15 +1,20 @@
 pub mod agent;
 pub mod assert_completed;
+pub mod assessment;
 pub mod barrier;
+pub mod change_request_op;
 pub mod command;
 pub mod engine;
 pub mod gh;
 pub mod gh_authorization;
 pub mod git;
+pub mod grader_agent;
+pub mod grader_command;
 pub mod human_approval;
 pub mod human_decision;
 pub mod noop;
 pub mod read_control_file;
+pub mod reconcile;
 pub mod set_context;
 pub mod workflow;
 
@@ -35,6 +40,8 @@ pub struct BuiltinOperatorDeps {
     pub gh_approver: Option<Arc<dyn gh_authorization::AiloopApprover>>,
     /// GitRunner for GhOperator branch_push. Defaults to TokioGitRunner when None.
     pub git_runner: Option<Arc<dyn gh::GitRunner>>,
+    /// BackendStore for grading operators (GraderCommandOperator, ReconcileOperator, etc.).
+    pub backend_store: Option<Arc<dyn newton_backend::BackendStore>>,
 }
 
 /// Register built-in operators into the supplied builder.
@@ -75,7 +82,7 @@ pub fn register_builtins_with_deps(
     };
     let engine_manager = AikitEngineManager::new(workspace.clone())
         .expect("AikitEngineManager::new should not fail");
-    let agent_operator = agent::AgentOperator::new(workspace, settings, engine_manager);
+    let agent_operator = agent::AgentOperator::new(workspace.clone(), settings, engine_manager);
     let git_runner: Arc<dyn gh::GitRunner> = deps
         .git_runner
         .unwrap_or_else(|| Arc::new(gh::default_git_runner()));
@@ -118,4 +125,27 @@ pub fn register_builtins_with_deps(
             human_settings,
             redact_keys,
         ));
+
+    if let Some(store) = deps.backend_store {
+        let grading_engine = AikitEngineManager::new(workspace.clone())
+            .expect("AikitEngineManager::new should not fail");
+        builder
+            .register(grader_command::GraderCommandOperator::new(
+                workspace.clone(),
+                store.clone(),
+            ))
+            .register(reconcile::ReconcileOperator::new(
+                workspace.clone(),
+                store.clone(),
+            ))
+            .register(change_request_op::ChangeRequestOperator::new(
+                workspace.clone(),
+                store.clone(),
+            ))
+            .register(grader_agent::GraderAgentOperator::new(
+                workspace,
+                store,
+                grading_engine,
+            ));
+    }
 }
