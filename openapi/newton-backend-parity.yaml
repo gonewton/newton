@@ -10,6 +10,135 @@ info:
 servers:
 - url: /api/v1
 paths:
+  /change-requests:
+    get:
+      tags:
+      - change-requests
+      operationId: list_change_requests
+      parameters:
+      - name: status
+        in: query
+        description: Optional change request status filter
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Change request list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChangeRequestItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+      - change-requests
+      operationId: create_change_request
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChangeRequestBody'
+        required: true
+      responses:
+        '201':
+          description: Created change request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestItem'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /change-requests/{id}:
+    get:
+      tags:
+      - change-requests
+      operationId: get_change_request
+      parameters:
+      - name: id
+        in: path
+        description: Change request id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Change request detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestItem'
+        '404':
+          description: Change request not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      tags:
+      - change-requests
+      operationId: patch_change_request
+      parameters:
+      - name: id
+        in: path
+        description: Change request id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchChangeRequestBody'
+        required: true
+      responses:
+        '200':
+          description: Updated change request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestItem'
+        '404':
+          description: Change request not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /components:
     get:
       tags:
@@ -371,6 +500,141 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ExecutionItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /findings:
+    get:
+      tags:
+      - findings
+      operationId: list_findings
+      parameters:
+      - name: status
+        in: query
+        description: Optional finding status filter
+        required: false
+        schema:
+          type: string
+      - name: scope_id
+        in: query
+        description: Optional component or repo id filter
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Finding list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FindingItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+      - findings
+      operationId: create_finding
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFindingBody'
+        required: true
+      responses:
+        '201':
+          description: Created or upserted finding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingItem'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /findings/{id}:
+    get:
+      tags:
+      - findings
+      operationId: get_finding
+      parameters:
+      - name: id
+        in: path
+        description: Finding id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Finding detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingItem'
+        '404':
+          description: Finding not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      tags:
+      - findings
+      operationId: patch_finding
+      parameters:
+      - name: id
+        in: path
+        description: Finding id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchFindingBody'
+        required: true
+      responses:
+        '200':
+          description: Updated finding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingItem'
+        '404':
+          description: Finding not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Internal error
           content:
@@ -1002,105 +1266,6 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/OperatorDescriptor'
-  /opportunities:
-    get:
-      tags:
-      - opportunities
-      operationId: list_opportunities
-      parameters:
-      - name: status
-        in: query
-        description: Optional opportunity status filter
-        required: false
-        schema:
-          type: string
-      responses:
-        '200':
-          description: Opportunity list
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/OpportunityItem'
-        '500':
-          description: Internal error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-    post:
-      tags:
-      - opportunities
-      operationId: create_opportunity
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateOpportunityBody'
-        required: true
-      responses:
-        '201':
-          description: Created or upserted opportunity
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OpportunityItem'
-        '422':
-          description: Validation error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '500':
-          description: Internal error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-  /opportunities/{id}:
-    patch:
-      tags:
-      - opportunities
-      operationId: patch_opportunity
-      parameters:
-      - name: id
-        in: path
-        description: Opportunity id
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PatchOpportunityBody'
-        required: true
-      responses:
-        '200':
-          description: Updated opportunity
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OpportunityItem'
-        '404':
-          description: Opportunity not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '422':
-          description: Validation error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '500':
-          description: Internal error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
   /pending-approvals:
     get:
       tags:
@@ -1802,49 +1967,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /requests:
-    get:
-      tags:
-      - requests
-      operationId: list_requests
-      responses:
-        '200':
-          description: Request list
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/RequestItem'
-        '500':
-          description: Internal error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-    post:
-      tags:
-      - requests
-      operationId: create_request
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateRequestBody'
-        required: true
-      responses:
-        '201':
-          description: Created request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RequestItem'
-        '500':
-          description: Internal error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
   /saved-views:
     get:
       tags:
@@ -2249,6 +2371,49 @@ components:
         details: {}
         message:
           type: string
+    ChangeRequestItem:
+      type: object
+      required:
+      - id
+      - title
+      - origin
+      - status
+      - findingIds
+      - createdAt
+      - updatedAt
+      properties:
+        author:
+          type:
+          - string
+          - 'null'
+        body:
+          type:
+          - string
+          - 'null'
+        componentId:
+          type:
+          - string
+          - 'null'
+        createdAt:
+          type: string
+        findingIds:
+          type: array
+          items:
+            type: string
+        id:
+          type: string
+        origin:
+          type: string
+        repoId:
+          type:
+          - string
+          - 'null'
+        status:
+          type: string
+        title:
+          type: string
+        updatedAt:
+          type: string
     ComponentItem:
       type: object
       required:
@@ -2300,6 +2465,38 @@ components:
         trend:
           type: integer
           format: int64
+    CreateChangeRequestBody:
+      type: object
+      required:
+      - id
+      - title
+      properties:
+        author:
+          type:
+          - string
+          - 'null'
+        body:
+          type:
+          - string
+          - 'null'
+        componentId:
+          type:
+          - string
+          - 'null'
+        findingIds:
+          type: array
+          items:
+            type: string
+        id:
+          type: string
+        origin:
+          type: string
+        repoId:
+          type:
+          - string
+          - 'null'
+        title:
+          type: string
     CreateComponentBody:
       type: object
       required:
@@ -2348,6 +2545,10 @@ components:
             $ref: '#/components/schemas/CreateGradeInlineBody'
         id:
           type: string
+        rawAssessment:
+          type:
+          - string
+          - 'null'
         scope:
           type: string
         scopeId:
@@ -2367,6 +2568,85 @@ components:
           type:
           - string
           - 'null'
+    CreateFindingBody:
+      type: object
+      required:
+      - id
+      - source
+      - dimension
+      - fingerprint
+      - title
+      - whyItMatters
+      - recommendedAction
+      - severity
+      - risk
+      properties:
+        blocks:
+          type: array
+          items:
+            type: string
+        componentId:
+          type:
+          - string
+          - 'null'
+        confidence:
+          type:
+          - number
+          - 'null'
+          format: double
+        dependsOn:
+          type: array
+          items:
+            type: string
+        dimension:
+          type: string
+        effort:
+          type:
+          - string
+          - 'null'
+        evidence: {}
+        expectedValue:
+          type:
+          - number
+          - 'null'
+          format: double
+        fingerprint:
+          type: string
+        id:
+          type: string
+        kpiId:
+          type:
+          - string
+          - 'null'
+        lastSeenAt:
+          type:
+          - string
+          - 'null'
+        location: {}
+        module:
+          type:
+          - string
+          - 'null'
+        origin:
+          type: string
+        recommendedAction:
+          type: string
+        repoId:
+          type:
+          - string
+          - 'null'
+        risk:
+          type: string
+        severity:
+          type: string
+        source:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        whyItMatters:
+          type: string
     CreateGradeBody:
       type: object
       required:
@@ -2469,65 +2749,6 @@ components:
           type: string
         type:
           type: string
-    CreateOpportunityBody:
-      type: object
-      required:
-      - id
-      - title
-      - origin
-      - risk
-      - expectedValue
-      properties:
-        blocks:
-          type: array
-          items:
-            type: string
-        component:
-          type:
-          - string
-          - 'null'
-        confidence:
-          type:
-          - number
-          - 'null'
-          format: double
-        dependsOn:
-          type: array
-          items:
-            type: string
-        effort:
-          type:
-          - string
-          - 'null'
-        expectedValue:
-          type: number
-          format: double
-        id:
-          type: string
-        kpiId:
-          type:
-          - string
-          - 'null'
-        module:
-          type:
-          - string
-          - 'null'
-        origin:
-          type: string
-        rationale:
-          type:
-          - string
-          - 'null'
-        repo:
-          type:
-          - string
-          - 'null'
-        risk:
-          type: string
-        status:
-          type: string
-        title:
-          type: string
     CreateProductBody:
       type: object
       required:
@@ -2560,32 +2781,6 @@ components:
           type: string
         owner:
           type: string
-    CreateRequestBody:
-      type: object
-      required:
-      - title
-      - requestedBy
-      properties:
-        component:
-          type:
-          - string
-          - 'null'
-        description:
-          type:
-          - string
-          - 'null'
-        linkedOpportunityId:
-          type:
-          - string
-          - 'null'
-        repo:
-          type:
-          - string
-          - 'null'
-        requestedBy:
-          type: string
-        title:
-          type: string
     DeletedItem:
       type: object
       required:
@@ -2609,6 +2804,10 @@ components:
           type: string
         ingestedAt:
           type: string
+        rawAssessment:
+          type:
+          - string
+          - 'null'
         scope:
           type: string
         scopeId:
@@ -2701,6 +2900,94 @@ components:
           type:
           - string
           - 'null'
+    FindingItem:
+      type: object
+      required:
+      - id
+      - source
+      - origin
+      - dimension
+      - fingerprint
+      - title
+      - whyItMatters
+      - recommendedAction
+      - severity
+      - risk
+      - status
+      - lastSeenAt
+      - dependsOn
+      - blocks
+      - createdAt
+      - updatedAt
+      properties:
+        blocks:
+          type: array
+          items:
+            type: string
+        componentId:
+          type:
+          - string
+          - 'null'
+        confidence:
+          type:
+          - number
+          - 'null'
+          format: double
+        createdAt:
+          type: string
+        dependsOn:
+          type: array
+          items:
+            type: string
+        dimension:
+          type: string
+        effort:
+          type:
+          - string
+          - 'null'
+        evidence: {}
+        expectedValue:
+          type:
+          - number
+          - 'null'
+          format: double
+        fingerprint:
+          type: string
+        id:
+          type: string
+        kpiId:
+          type:
+          - string
+          - 'null'
+        lastSeenAt:
+          type: string
+        location: {}
+        module:
+          type:
+          - string
+          - 'null'
+        origin:
+          type: string
+        recommendedAction:
+          type: string
+        repoId:
+          type:
+          - string
+          - 'null'
+        risk:
+          type: string
+        severity:
+          type: string
+        source:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        updatedAt:
+          type: string
+        whyItMatters:
+          type: string
     GradeItem:
       type: object
       required:
@@ -3002,70 +3289,13 @@ components:
           - string
           - 'null'
         params_schema: {}
-    OpportunityItem:
+    PatchChangeRequestBody:
       type: object
-      required:
-      - id
-      - title
-      - origin
-      - component
-      - repo
-      - risk
-      - expectedValue
-      - status
-      - dependsOn
-      - blocks
       properties:
-        age:
-          type:
-          - string
-          - 'null'
-        blocks:
-          type: array
-          items:
-            type: string
-        component:
-          type: string
-        confidence:
-          type:
-          - number
-          - 'null'
-          format: double
-        dependsOn:
-          type: array
-          items:
-            type: string
-        effort:
-          type:
-          - string
-          - 'null'
-        expectedValue:
-          type: number
-          format: double
-        id:
-          type: string
-        kpiId:
-          type:
-          - string
-          - 'null'
-        module:
-          type:
-          - string
-          - 'null'
-        origin:
-          type: string
-        rationale:
-          type:
-          - string
-          - 'null'
-        repo:
-          type: string
-        risk:
-          type: string
         status:
-          type: string
-        title:
-          type: string
+          type:
+          - string
+          - 'null'
     PatchComponentBody:
       type: object
       properties:
@@ -3102,6 +3332,30 @@ components:
           - integer
           - 'null'
           format: int64
+    PatchFindingBody:
+      type: object
+      properties:
+        effort:
+          type:
+          - string
+          - 'null'
+        expectedValue:
+          type:
+          - number
+          - 'null'
+          format: double
+        lastSeenAt:
+          type:
+          - string
+          - 'null'
+        risk:
+          type:
+          - string
+          - 'null'
+        status:
+          type:
+          - string
+          - 'null'
     PatchModuleBody:
       type: object
       properties:
@@ -3128,13 +3382,6 @@ components:
           type:
           - string
           - 'null'
-    PatchOpportunityBody:
-      type: object
-      required:
-      - status
-      properties:
-        status:
-          type: string
     PatchProductBody:
       type: object
       properties:
@@ -3285,7 +3532,7 @@ components:
           - 'null'
         id:
           type: string
-        linkedRequestId:
+        linkedChangeRequestId:
           type:
           - string
           - 'null'
@@ -3528,39 +3775,6 @@ components:
         regressions:
           type: integer
           format: int64
-    RequestItem:
-      type: object
-      required:
-      - id
-      - title
-      - component
-      - repo
-      - requestedBy
-      - status
-      - createdAt
-      properties:
-        component:
-          type: string
-        createdAt:
-          type: string
-        description:
-          type:
-          - string
-          - 'null'
-        id:
-          type: string
-        linkedOpportunityId:
-          type:
-          - string
-          - 'null'
-        repo:
-          type: string
-        requestedBy:
-          type: string
-        status:
-          type: string
-        title:
-          type: string
     SavedViewItem:
       type: object
       required:
@@ -3717,10 +3931,10 @@ tags:
   description: Product, component, KPI, and activity aggregate endpoints
 - name: portfolio
   description: Repository, module graph, and saved view endpoints
-- name: opportunities
-  description: Opportunity listing and state transition endpoints
-- name: requests
-  description: Change request intake endpoints
+- name: findings
+  description: Finding listing, creation, and state transition endpoints
+- name: change-requests
+  description: Change request intake and management endpoints
 - name: plans
   description: Plan listing, detail, and approval workflow endpoints
 - name: executions
