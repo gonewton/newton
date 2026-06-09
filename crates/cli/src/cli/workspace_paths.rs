@@ -232,6 +232,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_resolve_state_dir_env_var() {
         let ws = PathBuf::from("/tmp/test-ws-resolve-env-set");
         let env_state = PathBuf::from("/tmp/test-state-from-env-var");
@@ -243,6 +244,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_resolve_state_dir_toml() {
         let tmp = tempfile::TempDir::new().unwrap();
         let ws = tmp.path().to_path_buf();
@@ -258,6 +260,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_resolve_state_dir_fallback() {
         // Use a path that has no .newton/configs ancestor and no env var
         let ws = PathBuf::from("/tmp/test-ws-resolve-fallback-999abc");
@@ -282,6 +285,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_resolve_state_dir_walkup() {
         // Create a temp dir with .newton/configs to test walk-up
         let tmp = tempfile::TempDir::new().unwrap();
