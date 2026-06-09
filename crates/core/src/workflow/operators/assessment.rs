@@ -5,6 +5,7 @@ use crate::core::types::ErrorCategory;
 use newton_backend::{BackendStore, CreateEvalRunBody, CreateGradeInlineBody};
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +55,17 @@ pub fn validate_assessment(json: &Value) -> Result<AssessmentContent, AppError> 
     Ok(content)
 }
 
+/// Build a dimension → kpi_id map by listing KPIs and matching by name.
+async fn dimension_kpi_map(store: &Arc<dyn BackendStore>) -> HashMap<String, String> {
+    match store.list_kpis().await {
+        Ok(kpis) => kpis
+            .into_iter()
+            .map(|k| (k.name.to_lowercase(), k.id))
+            .collect(),
+        Err(_) => HashMap::new(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn persist_assessment(
     store: &Arc<dyn BackendStore>,
@@ -65,11 +77,14 @@ pub async fn persist_assessment(
     raw_json: &Value,
     evaluated_at: &str,
 ) -> Result<(), AppError> {
+    // M5: resolve dimension → kpiId when a matching KPI exists.
+    let kpi_map = dimension_kpi_map(store).await;
+
     let grades: Vec<CreateGradeInlineBody> = content
         .scores
         .iter()
         .map(|s| CreateGradeInlineBody {
-            kpi_id: None,
+            kpi_id: kpi_map.get(&s.dimension.to_lowercase()).cloned(),
             dimension: s.dimension.clone(),
             score: s.score,
             evidence: None,
@@ -110,8 +125,10 @@ pub fn build_output(content: &AssessmentContent, raw_json: Value) -> Value {
         score_by_dim.insert(s.dimension.clone(), serde_json::json!(s.score));
     }
 
+    // M3: always emit all four severity buckets + total so gate expressions like
+    // `counts.critical == 0` never encounter a missing key.
     let mut counts = serde_json::Map::new();
-    let mut by_sev: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut by_sev: HashMap<String, usize> = HashMap::new();
     for obs in &content.observations {
         *by_sev
             .entry(obs.severity.clone().unwrap_or_else(|| "medium".to_string()))
@@ -121,8 +138,11 @@ pub fn build_output(content: &AssessmentContent, raw_json: Value) -> Value {
         "total".to_string(),
         serde_json::json!(content.observations.len()),
     );
-    for (k, v) in &by_sev {
-        counts.insert(k.clone(), serde_json::json!(v));
+    for bucket in ["critical", "high", "medium", "low"] {
+        counts.insert(
+            bucket.to_string(),
+            serde_json::json!(by_sev.get(bucket).copied().unwrap_or(0)),
+        );
     }
 
     serde_json::json!({

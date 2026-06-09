@@ -142,9 +142,10 @@ impl BackendStore for SqliteBackendStore {
     async fn list_findings(
         &self,
         status: Option<String>,
+        scope: Option<String>,
         scope_id: Option<String>,
     ) -> Result<Vec<FindingItem>, ApiError> {
-        self.list_findings_db(status, scope_id).await
+        self.list_findings_db(status, scope, scope_id).await
     }
     async fn get_finding(&self, id: &str) -> Result<FindingItem, ApiError> {
         self.get_finding_db(id).await
@@ -957,7 +958,7 @@ mod finding_store_tests {
         body2.title = "Updated title".to_string();
         let item = store.create_finding(body2).await.unwrap();
         assert_eq!(item.title, "Updated title");
-        let all = store.list_findings(None, None).await.unwrap();
+        let all = store.list_findings(None, None, None).await.unwrap();
         assert_eq!(all.iter().filter(|f| f.id == "find-002").count(), 1);
     }
 }

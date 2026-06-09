@@ -22,6 +22,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
 #[derive(Debug, Deserialize)]
 pub(crate) struct FindingQuery {
     status: Option<String>,
+    scope: Option<String>,
     scope_id: Option<String>,
 }
 
@@ -31,7 +32,8 @@ pub(crate) struct FindingQuery {
     tag = "findings",
     params(
         ("status" = Option<String>, Query, description = "Optional finding status filter"),
-        ("scope_id" = Option<String>, Query, description = "Optional component or repo id filter"),
+        ("scope" = Option<String>, Query, description = "Scope kind: component | repo | module"),
+        ("scope_id" = Option<String>, Query, description = "Optional scope entity id filter"),
     ),
     responses(
         (status = 200, description = "Finding list", body = [newton_backend::FindingItem]),
@@ -45,7 +47,7 @@ pub(crate) async fn list_findings(
     ok_json(
         state
             .backend
-            .list_findings(query.status, query.scope_id)
+            .list_findings(query.status, query.scope, query.scope_id)
             .await,
     )
 }

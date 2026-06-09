@@ -518,9 +518,15 @@ paths:
         required: false
         schema:
           type: string
+      - name: scope
+        in: query
+        description: 'Scope kind: component | repo | module'
+        required: false
+        schema:
+          type: string
       - name: scope_id
         in: query
-        description: Optional component or repo id filter
+        description: Optional scope entity id filter
         required: false
         schema:
           type: string

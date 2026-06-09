@@ -488,7 +488,7 @@ async fn dispatch_data(
                 .and_then(to_json)
         }
         (DataVerb::Get, "findings") => store
-            .list_findings(None, None)
+            .list_findings(None, None, None)
             .await
             .map_err(api_err)
             .and_then(to_json),

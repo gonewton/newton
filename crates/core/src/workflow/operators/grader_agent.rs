@@ -1,5 +1,5 @@
-//! GraderAgentOperator — rubric-based grader using AI via aikit-sdk.
-//! Spec 065.
+//! GraderAgentOperator — rubric-based grader using AI via aikit-sdk Pipeline.
+//! Spec 065 + 067.
 
 #![allow(clippy::result_large_err)]
 
@@ -7,7 +7,6 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
 use crate::workflow::operators::assessment;
-use crate::workflow::operators::engine::{extract_text_from_sdk_event, AikitEngineManager};
 use async_trait::async_trait;
 use chrono::Utc;
 use newton_backend::BackendStore;
@@ -15,25 +14,22 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 use uuid::Uuid;
 
 pub struct GraderAgentOperator {
-    _workspace_root: PathBuf,
+    workspace_root: PathBuf,
     store: Arc<dyn BackendStore>,
-    engine_manager: AikitEngineManager,
 }
 
 impl GraderAgentOperator {
     pub fn new(
-        _workspace_root: PathBuf,
+        workspace_root: PathBuf,
         store: Arc<dyn BackendStore>,
-        engine_manager: AikitEngineManager,
+        _engine_manager: crate::workflow::operators::engine::AikitEngineManager,
     ) -> Self {
         Self {
-            _workspace_root,
+            workspace_root,
             store,
-            engine_manager,
         }
     }
 }
@@ -54,46 +50,79 @@ pub struct GraderAgentParams {
     /// Engine to use (default: "claude").
     #[serde(default = "default_engine")]
     pub engine: String,
+    /// Timeout in seconds (default: 120).
+    #[serde(default = "default_timeout")]
+    pub timeout_seconds: u64,
 }
 
 fn default_engine() -> String {
     "claude".to_string()
 }
 
+fn default_timeout() -> u64 {
+    120
+}
+
+/// Assessment output schema for Pipeline validation.
+const ASSESSMENT_SCHEMA: &str = r#"{
+  "type": "object",
+  "properties": {
+    "overall_score": {"type": "number", "minimum": 0, "maximum": 100},
+    "verdict": {"type": "string", "enum": ["pass", "fail", "needs_improvement"]},
+    "summary": {"type": "string"},
+    "scores": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "dimension": {"type": "string"},
+          "score": {"type": "number"},
+          "rationale": {"type": "string"}
+        },
+        "required": ["dimension", "score"]
+      }
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "dimension": {"type": "string"},
+          "severity": {"type": "string"},
+          "observation": {"type": "string"},
+          "why_it_matters": {"type": "string"},
+          "recommended_action": {"type": "string"},
+          "confidence": {"type": "number"}
+        },
+        "required": ["dimension", "observation"]
+      }
+    }
+  },
+  "required": ["overall_score", "verdict", "scores"]
+}"#;
+
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 pub struct GraderAgentOutput {
     pub overall_score: f64,
     pub verdict: String,
+    pub score_by_dimension: Value,
+    pub counts: Value,
+    pub assessment: Value,
 }
 
 const ASSESSMENT_PROMPT_TEMPLATE: &str = r#"You are a grader evaluating quality against a rubric.
 
 Rubric:
-{rubric}
+{{rubric}}
 
-Scope: {scope}/{scope_id}
+Scope: {{scope}}/{{scope_id}}
 
-Evaluate the scope using the rubric above. Return ONLY a valid JSON Assessment object with this structure:
-{{
-  "overall_score": <number 0-100>,
-  "verdict": "<pass|fail|needs_improvement>",
-  "summary": "<brief summary>",
-  "scores": [
-    {{"dimension": "<dim>", "score": <0-100>, "rationale": "<why>"}}
-  ],
-  "observations": [
-    {{
-      "dimension": "<dim>",
-      "severity": "<critical|high|medium|low>",
-      "observation": "<what was observed>",
-      "why_it_matters": "<impact>",
-      "recommended_action": "<action>",
-      "confidence": <0.0-1.0>
-    }}
-  ]
-}}
-
-Return ONLY the JSON object, no markdown fences or other text."#;
+Evaluate the scope using the rubric above. Return ONLY a valid JSON Assessment object matching the schema provided. Include:
+- overall_score (0-100)
+- verdict (pass | fail | needs_improvement)
+- summary (brief summary)
+- scores: array of {dimension, score, rationale}
+- observations: array of {dimension, severity, observation, why_it_matters, recommended_action, confidence}"#;
 
 #[async_trait]
 impl Operator for GraderAgentOperator {
@@ -143,85 +172,80 @@ impl Operator for GraderAgentOperator {
             .with_code("GRADER-AGENT-001")
         })?;
 
-        // Build prompt
-        let prompt = ASSESSMENT_PROMPT_TEMPLATE
-            .replace("{rubric}", &parsed.rubric)
-            .replace("{scope}", &parsed.scope)
-            .replace("{scope_id}", &parsed.scope_id);
+        let engine = parsed.engine.clone();
+        let model = parsed.model.clone();
+        let rubric = parsed.rubric.clone();
+        let scope = parsed.scope.clone();
+        let scope_id = parsed.scope_id.clone();
+        let timeout_secs = parsed.timeout_seconds;
+        let workspace_root = self.workspace_root.clone();
 
         tracing::debug!(
             grader = %parsed.grader,
-            engine = %parsed.engine,
-            scope = %parsed.scope,
-            scope_id = %parsed.scope_id,
-            "GraderAgentOperator: invoking AI engine"
+            engine = %engine,
+            scope = %scope,
+            scope_id = %scope_id,
+            "GraderAgentOperator: invoking AI engine via Pipeline"
         );
 
-        // Call engine
-        let (events, run_result) = self
-            .engine_manager
-            .execute_engine_events(
-                &parsed.engine,
-                &prompt,
-                parsed.model.as_deref(),
-                Some(Duration::from_secs(120)),
-            )
-            .await?;
+        // R2: run via aikit Pipeline (schema-in → schema-out → validate → retry).
+        // Pipeline::run is blocking; wrap in spawn_blocking.
+        let pipeline_result = tokio::task::spawn_blocking(move || {
+            let runner = aikit_sdk::AgentRunner::new()
+                .agent(&engine)
+                .working_dir(&workspace_root.to_string_lossy())
+                .timeout(std::time::Duration::from_secs(timeout_secs));
+            let runner = if let Some(ref m) = model {
+                runner.model(m)
+            } else {
+                runner
+            };
 
-        // Surface engine errors
-        run_result.map_err(|e| {
+            let pipeline =
+                aikit_sdk::pipeline::Pipeline::new(ASSESSMENT_PROMPT_TEMPLATE, ASSESSMENT_SCHEMA)
+                    .max_retries(2);
+
+            pipeline.run(
+                &[
+                    ("rubric", rubric.as_str()),
+                    ("scope", scope.as_str()),
+                    ("scope_id", scope_id.as_str()),
+                ],
+                runner,
+            )
+        })
+        .await
+        .map_err(|e| {
             AppError::new(
                 ErrorCategory::ToolExecutionError,
-                format!("GraderAgentOperator: AI engine returned error: {e:?}"),
+                format!("GraderAgentOperator: spawn_blocking panicked: {e}"),
+            )
+            .with_code("GRADER-AGENT-002")
+        })?
+        .map_err(|e| {
+            AppError::new(
+                ErrorCategory::ToolExecutionError,
+                format!("GraderAgentOperator: Pipeline failed: {e}"),
             )
             .with_code("GRADER-AGENT-002")
         })?;
 
-        // Extract text from events
-        let text: String = events
-            .iter()
-            .filter_map(extract_text_from_sdk_event)
-            .collect::<Vec<_>>()
-            .join("");
+        let mut assessment_json = pipeline_result.data;
 
-        if text.is_empty() {
-            return Err(AppError::new(
-                ErrorCategory::ToolExecutionError,
-                "GraderAgentOperator: AI engine produced no text output",
-            )
-            .with_code("GRADER-AGENT-003"));
-        }
-
-        // Parse extracted text as Assessment JSON
-        // Try to find JSON in the text (strip markdown fences if present)
-        let json_text = extract_json(&text);
-        let mut assessment_json: Value = serde_json::from_str(&json_text).map_err(|e| {
-            AppError::new(
-                ErrorCategory::ToolExecutionError,
-                format!(
-                    "GraderAgentOperator: AI output is not valid Assessment JSON: {e}. text: {text}"
-                ),
-            )
-            .with_code("GRADER-AGENT-004")
-        })?;
-
-        // Stamp envelope
+        // M1: overwrite envelope fields authoritatively (ignore whatever the grader emitted).
         let now = Utc::now().to_rfc3339();
         if let Some(obj) = assessment_json.as_object_mut() {
-            obj.entry("grader")
-                .or_insert_with(|| Value::String(parsed.grader.clone()));
-            obj.entry("scope")
-                .or_insert_with(|| Value::String(parsed.scope.clone()));
-            obj.entry("scope_id")
-                .or_insert_with(|| Value::String(parsed.scope_id.clone()));
-            obj.entry("evaluated_at")
-                .or_insert_with(|| Value::String(now.clone()));
+            obj.insert("grader".to_string(), Value::String(parsed.grader.clone()));
+            obj.insert("scope".to_string(), Value::String(parsed.scope.clone()));
+            obj.insert(
+                "scope_id".to_string(),
+                Value::String(parsed.scope_id.clone()),
+            );
+            obj.insert("evaluated_at".to_string(), Value::String(now.clone()));
         }
 
-        // Validate assessment
         let content = assessment::validate_assessment(&assessment_json)?;
 
-        // Persist assessment
         let run_id = Uuid::new_v4().to_string();
         assessment::persist_assessment(
             &self.store,
@@ -237,23 +261,4 @@ impl Operator for GraderAgentOperator {
 
         Ok(assessment::build_output(&content, assessment_json))
     }
-}
-
-/// Extract JSON from text, stripping markdown code fences if present.
-fn extract_json(text: &str) -> String {
-    let trimmed = text.trim();
-    // Try to strip ```json ... ``` or ``` ... ```
-    if let Some(inner) = trimmed
-        .strip_prefix("```json")
-        .or_else(|| trimmed.strip_prefix("```"))
-    {
-        if let Some(end) = inner.rfind("```") {
-            return inner[..end].trim().to_string();
-        }
-    }
-    // Try to find first { and last }
-    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
-        return trimmed[start..=end].to_string();
-    }
-    trimmed.to_string()
 }

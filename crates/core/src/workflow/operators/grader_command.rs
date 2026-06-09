@@ -68,6 +68,9 @@ fn default_shell() -> String {
 pub struct GraderCommandOutput {
     pub overall_score: f64,
     pub verdict: String,
+    pub score_by_dimension: Value,
+    pub counts: Value,
+    pub assessment: Value,
 }
 
 #[async_trait]
@@ -156,13 +159,27 @@ impl Operator for GraderCommandOperator {
         cmd.stderr(Stdio::piped());
         cmd.stdin(Stdio::null());
 
-        let output = cmd.output().await.map_err(|e| {
-            AppError::new(
-                ErrorCategory::ToolExecutionError,
-                format!("GraderCommandOperator: failed to spawn command: {e}"),
-            )
-            .with_code("GRADER-CMD-002")
-        })?;
+        // M2: enforce timeout_seconds (default 120 s).
+        let timeout_dur = std::time::Duration::from_secs(parsed.timeout_seconds.unwrap_or(120));
+        let output = tokio::time::timeout(timeout_dur, cmd.output())
+            .await
+            .map_err(|_| {
+                AppError::new(
+                    ErrorCategory::ToolExecutionError,
+                    format!(
+                        "GraderCommandOperator: command timed out after {}s",
+                        parsed.timeout_seconds.unwrap_or(120)
+                    ),
+                )
+                .with_code("GRADER-CMD-005")
+            })?
+            .map_err(|e| {
+                AppError::new(
+                    ErrorCategory::ToolExecutionError,
+                    format!("GraderCommandOperator: failed to spawn command: {e}"),
+                )
+                .with_code("GRADER-CMD-002")
+            })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -187,17 +204,16 @@ impl Operator for GraderCommandOperator {
             .with_code("GRADER-CMD-004")
         })?;
 
-        // Stamp envelope fields if missing
+        // M1: overwrite envelope fields authoritatively (operator owns these).
         let now = Utc::now().to_rfc3339();
         if let Some(obj) = assessment_json.as_object_mut() {
-            obj.entry("grader")
-                .or_insert_with(|| Value::String(parsed.grader.clone()));
-            obj.entry("scope")
-                .or_insert_with(|| Value::String(parsed.scope.clone()));
-            obj.entry("scope_id")
-                .or_insert_with(|| Value::String(parsed.scope_id.clone()));
-            obj.entry("evaluated_at")
-                .or_insert_with(|| Value::String(now.clone()));
+            obj.insert("grader".to_string(), Value::String(parsed.grader.clone()));
+            obj.insert("scope".to_string(), Value::String(parsed.scope.clone()));
+            obj.insert(
+                "scope_id".to_string(),
+                Value::String(parsed.scope_id.clone()),
+            );
+            obj.insert("evaluated_at".to_string(), Value::String(now.clone()));
         }
 
         // Validate assessment schema
