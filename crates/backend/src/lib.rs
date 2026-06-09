@@ -74,6 +74,7 @@ pub trait BackendStore: Send + Sync {
     async fn list_findings(
         &self,
         status: Option<String>,
+        scope: Option<String>,
         scope_id: Option<String>,
     ) -> Result<Vec<FindingItem>, ApiError>;
     async fn get_finding(&self, id: &str) -> Result<FindingItem, ApiError>;

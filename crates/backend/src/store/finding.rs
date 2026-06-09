@@ -90,15 +90,25 @@ impl super::SqliteBackendStore {
     pub(super) async fn list_findings_db(
         &self,
         status: Option<String>,
+        scope: Option<String>,
         scope_id: Option<String>,
     ) -> Result<Vec<FindingItem>, ApiError> {
         let mut conditions = Vec::new();
         if status.is_some() {
-            conditions.push("f.status = ?");
+            conditions.push("f.status = ?".to_string());
         }
-        if scope_id.is_some() {
-            conditions.push("(f.componentId = ? OR f.repoId = ?)");
-        }
+        let scope_condition = if scope_id.is_some() {
+            let col = match scope.as_deref() {
+                Some("component") => "f.componentId = ?",
+                Some("repo") => "f.repoId = ?",
+                Some("module") => "f.module = ?",
+                _ => "(f.componentId = ? OR f.repoId = ?)",
+            };
+            conditions.push(col.to_string());
+            col
+        } else {
+            ""
+        };
 
         let where_clause = if conditions.is_empty() {
             String::new()
@@ -113,7 +123,12 @@ impl super::SqliteBackendStore {
             q = q.bind(s);
         }
         if let Some(ref sid) = scope_id {
-            q = q.bind(sid).bind(sid);
+            // Multi-bind for the fallback OR clause; single bind for specific columns.
+            if scope_condition == "(f.componentId = ? OR f.repoId = ?)" {
+                q = q.bind(sid).bind(sid);
+            } else {
+                q = q.bind(sid);
+            }
         }
 
         let rows = q.fetch_all(&self.pool).await.map_err(query_err)?;
