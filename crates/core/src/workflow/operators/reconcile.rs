@@ -293,7 +293,10 @@ impl Operator for ReconcileOperator {
 
         for (idx, obs) in observations.iter().enumerate() {
             let fp = stable_fingerprint(scope, scope_id, &obs.dimension, obs.location.as_ref());
-            if fp_index.contains_key(&fp) {
+            // Deterministic match only when location is present. Location-less observations
+            // share a bare-dimension fingerprint and cannot be distinguished structurally —
+            // route them to the LLM adjudicator which judges semantic sameness.
+            if obs.location.is_some() && fp_index.contains_key(&fp) {
                 matched_by_fp.push((idx, fp));
             } else {
                 unmatched.push((idx, obs));
@@ -424,12 +427,19 @@ impl Operator for ReconcileOperator {
         // Track finding IDs seen/touched in this run (for auto-resolve sweep).
         let mut seen_finding_ids: std::collections::HashSet<String> =
             std::collections::HashSet::new();
+        // Track FPs already patched to avoid double-counting when multiple observations
+        // hit the same fingerprint within a single run.
+        let mut patched_fps: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         // Phase 1: handle deterministically matched observations.
         for (idx, fp) in &matched_by_fp {
             let _ = idx; // used implicitly via fp
             if let Some(existing) = fp_index.get(fp.as_str()) {
                 seen_finding_ids.insert(existing.id.clone());
+                if !patched_fps.insert(fp.clone()) {
+                    // Already patched this finding in this run — skip to avoid double-count.
+                    continue;
+                }
                 if existing.status == "resolved" {
                     self.store
                         .patch_finding(
@@ -659,15 +669,19 @@ mod tests {
         })
     }
 
-    fn make_obs(dimension: &str, observation: &str) -> serde_json::Value {
-        json!({
+    fn make_obs(dimension: &str, observation: &str, location: Option<&str>) -> serde_json::Value {
+        let mut v = json!({
             "dimension": dimension,
             "severity": "medium",
             "observation": observation,
             "why_it_matters": "matters",
             "recommended_action": "fix it",
             "confidence": 0.9
-        })
+        });
+        if let Some(loc) = location {
+            v["location"] = json!({"file": loc});
+        }
+        v
     }
 
     #[tokio::test]
@@ -679,8 +693,8 @@ mod tests {
         let operator = ReconcileOperator::new(std::path::PathBuf::from("/tmp"), store.clone());
 
         let assessment = make_assessment(vec![
-            make_obs("tests", "Coverage is below threshold"),
-            make_obs("security", "Dependency has known CVE"),
+            make_obs("tests", "Coverage is below threshold", Some("src/main.rs")),
+            make_obs("security", "Dependency has known CVE", Some("Cargo.toml")),
         ]);
 
         let params = json!({
@@ -713,8 +727,8 @@ mod tests {
 
         // Second identical reconcile: creates 0 new, refreshes 2, resolves 0.
         let assessment2 = make_assessment(vec![
-            make_obs("tests", "Coverage is below threshold"),
-            make_obs("security", "Dependency has known CVE"),
+            make_obs("tests", "Coverage is below threshold", Some("src/main.rs")),
+            make_obs("security", "Dependency has known CVE", Some("Cargo.toml")),
         ]);
         let params2 = json!({
             "scope": "module",
@@ -741,7 +755,7 @@ mod tests {
             "scope": "module",
             "scope_id": "mod-002",
             "grader": "grader-a",
-            "assessment": make_assessment(vec![make_obs("tests", "No tests")]),
+            "assessment": make_assessment(vec![make_obs("tests", "No tests", Some("src/lib.rs"))]),
         });
         op.execute(params_a, make_ctx()).await.unwrap();
 
@@ -750,7 +764,7 @@ mod tests {
             "scope": "module",
             "scope_id": "mod-002",
             "grader": "grader-b",
-            "assessment": make_assessment(vec![make_obs("docs", "No docs")]),
+            "assessment": make_assessment(vec![make_obs("docs", "No docs", Some("README.md"))]),
         });
         let result_b = op.execute(params_b, make_ctx()).await.unwrap();
 
@@ -773,5 +787,54 @@ mod tests {
             findings.iter().filter(|f| f.source == "grader-a").collect();
         assert_eq!(grader_a_findings.len(), 1);
         assert_eq!(grader_a_findings[0].status, "awaiting_triage");
+    }
+
+    /// Two distinct observations with no location in the same dimension must produce
+    /// two separate findings, not one (fingerprint-collision bug fixed in spec 067).
+    #[tokio::test]
+    async fn no_location_observations_are_not_merged() {
+        let store: Arc<dyn BackendStore> =
+            Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
+        let op = ReconcileOperator::new(std::path::PathBuf::from("/tmp"), store.clone());
+
+        let assessment = make_assessment(vec![
+            make_obs(
+                "architecture",
+                "Circular dependency between layers A and B",
+                None,
+            ),
+            make_obs(
+                "architecture",
+                "Service boundary violation in module X",
+                None,
+            ),
+        ]);
+
+        let params = json!({
+            "scope": "module",
+            "scope_id": "mod-003",
+            "grader": "arch-grader",
+            "assessment": assessment,
+        });
+
+        let result = op.execute(params, make_ctx()).await.unwrap();
+        assert_eq!(
+            result["created"], 2,
+            "two distinct no-location observations must produce two findings, not one"
+        );
+
+        let findings = store
+            .list_findings(
+                None,
+                Some("module".to_string()),
+                Some("mod-003".to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            findings.len(),
+            2,
+            "both findings must be stored and retrievable"
+        );
     }
 }

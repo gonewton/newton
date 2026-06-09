@@ -263,6 +263,11 @@ impl Operator for ChangeRequestOperator {
         };
 
         let cr_id = Uuid::new_v4().to_string();
+        let (cr_component_id, cr_repo_id) = match scope.as_str() {
+            "component" => (Some(scope_id.clone()), None),
+            "repo" => (None, Some(scope_id.clone())),
+            _ => (None, None),
+        };
 
         self.store
             .create_change_request(CreateChangeRequestBody {
@@ -271,8 +276,8 @@ impl Operator for ChangeRequestOperator {
                 body: Some(body),
                 origin: "system".to_string(),
                 author: None,
-                component_id: None,
-                repo_id: None,
+                component_id: cr_component_id,
+                repo_id: cr_repo_id,
                 finding_ids,
             })
             .await
