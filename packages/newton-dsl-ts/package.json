@@ -31,8 +31,5 @@
   },
   "files": [
     "dist"
-  ],
-  "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
-  }
+  ]
 }
