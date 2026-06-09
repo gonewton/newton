@@ -1,5 +1,6 @@
 mod catalog;
 mod eval;
+mod finding;
 mod helpers;
 mod migration;
 mod plan;
@@ -54,6 +55,13 @@ impl SqliteBackendStore {
             "migration 003",
         )
         .await?;
+        Self::run_migration(
+            &pool,
+            include_str!("../../migrations/004_grading.sql"),
+            "migration 004",
+        )
+        .await?;
+        migration::upgrade_eval_run_raw_assessment(&pool).await?;
 
         migration::upgrade_legacy_indicator_schema(&pool).await?;
         migration::upgrade_legacy_component_schema(&pool).await?;
@@ -131,30 +139,47 @@ impl BackendStore for SqliteBackendStore {
     async fn list_saved_views(&self, kind: Option<String>) -> Result<serde_json::Value, ApiError> {
         self.list_saved_views_db(kind).await
     }
-    async fn list_opportunities(
+    async fn list_findings(
         &self,
         status: Option<String>,
-    ) -> Result<Vec<OpportunityItem>, ApiError> {
-        self.list_opportunities_db(status).await
+        scope_id: Option<String>,
+    ) -> Result<Vec<FindingItem>, ApiError> {
+        self.list_findings_db(status, scope_id).await
     }
-    async fn patch_opportunity(
+    async fn get_finding(&self, id: &str) -> Result<FindingItem, ApiError> {
+        self.get_finding_db(id).await
+    }
+    async fn create_finding(&self, body: CreateFindingBody) -> Result<FindingItem, ApiError> {
+        self.create_finding_db(body).await
+    }
+    async fn patch_finding(
         &self,
         id: &str,
-        body: PatchOpportunityBody,
-    ) -> Result<OpportunityItem, ApiError> {
-        self.patch_opportunity_db(id, body).await
+        body: PatchFindingBody,
+    ) -> Result<FindingItem, ApiError> {
+        self.patch_finding_db(id, body).await
     }
-    async fn create_opportunity(
+    async fn list_change_requests(
         &self,
-        body: CreateOpportunityBody,
-    ) -> Result<OpportunityItem, ApiError> {
-        self.create_opportunity_db(body).await
+        status: Option<String>,
+    ) -> Result<Vec<ChangeRequestItem>, ApiError> {
+        self.list_change_requests_db(status).await
     }
-    async fn list_requests(&self) -> Result<Vec<RequestItem>, ApiError> {
-        self.list_requests_db().await
+    async fn get_change_request(&self, id: &str) -> Result<ChangeRequestItem, ApiError> {
+        self.get_change_request_db(id).await
     }
-    async fn create_request(&self, body: CreateRequestBody) -> Result<RequestItem, ApiError> {
-        self.create_request_db(body).await
+    async fn create_change_request(
+        &self,
+        body: CreateChangeRequestBody,
+    ) -> Result<ChangeRequestItem, ApiError> {
+        self.create_change_request_db(body).await
+    }
+    async fn patch_change_request(
+        &self,
+        id: &str,
+        body: PatchChangeRequestBody,
+    ) -> Result<ChangeRequestItem, ApiError> {
+        self.patch_change_request_db(id, body).await
     }
     async fn list_plans(&self) -> Result<Vec<PlanItem>, ApiError> {
         self.list_plans_db().await
@@ -625,6 +650,7 @@ mod kpi_evalrun_grade_tests {
                 summary: Some("first".to_string()),
                 evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
                 grades: None,
+                raw_assessment: None,
             })
             .await
             .unwrap();
@@ -639,6 +665,7 @@ mod kpi_evalrun_grade_tests {
                 summary: Some("second".to_string()),
                 evaluated_at: Some("2026-05-26T00:05:00Z".to_string()),
                 grades: None,
+                raw_assessment: None,
             })
             .await
             .unwrap();
@@ -667,6 +694,7 @@ mod kpi_evalrun_grade_tests {
                 summary: None,
                 evaluated_at: None,
                 grades: None,
+                raw_assessment: None,
             })
             .await
             .unwrap_err();
@@ -683,6 +711,7 @@ mod kpi_evalrun_grade_tests {
                 summary: None,
                 evaluated_at: None,
                 grades: None,
+                raw_assessment: None,
             })
             .await
             .unwrap_err();
@@ -699,6 +728,7 @@ mod kpi_evalrun_grade_tests {
                 summary: None,
                 evaluated_at: None,
                 grades: None,
+                raw_assessment: None,
             })
             .await
             .unwrap_err();
@@ -771,6 +801,7 @@ mod kpi_evalrun_grade_tests {
                 summary: None,
                 evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
                 grades: None,
+                raw_assessment: None,
             })
             .await
             .unwrap();
@@ -805,6 +836,7 @@ mod kpi_evalrun_grade_tests {
                 summary: None,
                 evaluated_at: Some("2026-05-26T00:00:00Z".to_string()),
                 grades: None,
+                raw_assessment: None,
             })
             .await
             .unwrap();
@@ -871,103 +903,62 @@ mod fk_tests {
 }
 
 #[cfg(test)]
-mod opportunity_tests {
+mod finding_store_tests {
     use super::*;
-    use crate::models::CreateOpportunityBody;
+    use crate::models::CreateFindingBody;
 
-    fn make_opportunity(id: &str) -> CreateOpportunityBody {
-        CreateOpportunityBody {
+    fn make_finding(id: &str) -> CreateFindingBody {
+        CreateFindingBody {
             id: id.to_string(),
-            title: "Test opportunity".to_string(),
-            origin: "test".to_string(),
-            component: None,
+            source: "test".to_string(),
+            origin: "system".to_string(),
+            component_id: None,
             module: None,
-            repo: None,
+            repo_id: None,
             kpi_id: None,
-            confidence: None,
+            dimension: "tests".to_string(),
+            location: None,
+            fingerprint: format!("fp-{id}"),
+            title: "Test finding".to_string(),
+            why_it_matters: "Coverage gap detected".to_string(),
+            recommended_action: "Add more tests".to_string(),
+            severity: "medium".to_string(),
             risk: "low".to_string(),
-            expected_value: 1.0,
+            confidence: None,
+            evidence: None,
+            expected_value: None,
             effort: None,
             status: "awaiting_triage".to_string(),
-            rationale: None,
+            last_seen_at: None,
             depends_on: vec![],
             blocks: vec![],
         }
     }
 
     #[tokio::test]
-    async fn create_opportunity_happy_path() {
+    async fn create_finding_happy_path() {
         let store = SqliteBackendStore::new_in_memory().await.unwrap();
-        let body = make_opportunity("opp-001");
-        let item = store.create_opportunity(body).await.unwrap();
-        assert_eq!(item.id, "opp-001");
-        assert_eq!(item.title, "Test opportunity");
-        assert_eq!(item.origin, "test");
-        assert_eq!(item.risk, "low");
+        let body = make_finding("find-001");
+        let item = store.create_finding(body).await.unwrap();
+        assert_eq!(item.id, "find-001");
         assert_eq!(item.status, "awaiting_triage");
+        assert_eq!(item.dimension, "tests");
+        assert_eq!(item.risk, "low");
     }
 
     #[tokio::test]
-    async fn create_opportunity_duplicate_upsert_preserves_created_at() {
+    async fn create_finding_upsert_updates_title() {
         let store = SqliteBackendStore::new_in_memory().await.unwrap();
-        let body1 = make_opportunity("opp-002");
-        store.create_opportunity(body1).await.unwrap();
-
-        let created_at_1: (String,) =
-            sqlx::query_as("SELECT createdAt FROM Opportunity WHERE id = ?")
-                .bind("opp-002")
-                .fetch_one(&store.pool)
-                .await
-                .unwrap();
-
-        let mut body2 = make_opportunity("opp-002");
+        store
+            .create_finding(make_finding("find-002"))
+            .await
+            .unwrap();
+        let mut body2 = make_finding("find-002");
         body2.title = "Updated title".to_string();
-        let item2 = store.create_opportunity(body2).await.unwrap();
-
-        assert_eq!(item2.id, "opp-002");
-        assert_eq!(item2.title, "Updated title");
-
-        let created_at_2: (String,) =
-            sqlx::query_as("SELECT createdAt FROM Opportunity WHERE id = ?")
-                .bind("opp-002")
-                .fetch_one(&store.pool)
-                .await
-                .unwrap();
-        assert_eq!(
-            created_at_1.0, created_at_2.0,
-            "createdAt must not change on upsert"
-        );
-
-        let all = store.list_opportunities(None).await.unwrap();
-        let count = all.iter().filter(|o| o.id == "opp-002").count();
-        assert_eq!(count, 1, "duplicate upsert must not create a second record");
-    }
-
-    #[tokio::test]
-    async fn create_opportunity_invalid_status_returns_validation_error() {
-        let store = SqliteBackendStore::new_in_memory().await.unwrap();
-        let mut body = make_opportunity("opp-003");
-        body.status = "not-a-valid-status".to_string();
-        let err = store.create_opportunity(body).await.unwrap_err();
-        assert_eq!(err.code, "ERR_VALIDATION");
-    }
-
-    #[tokio::test]
-    async fn create_opportunity_confidence_above_one_returns_validation_error() {
-        let store = SqliteBackendStore::new_in_memory().await.unwrap();
-        let mut body = make_opportunity("opp-004");
-        body.confidence = Some(1.5);
-        let err = store.create_opportunity(body).await.unwrap_err();
-        assert_eq!(err.code, "ERR_VALIDATION");
-    }
-
-    #[tokio::test]
-    async fn create_opportunity_negative_expected_value_returns_validation_error() {
-        let store = SqliteBackendStore::new_in_memory().await.unwrap();
-        let mut body = make_opportunity("opp-005");
-        body.expected_value = -1.0;
-        let err = store.create_opportunity(body).await.unwrap_err();
-        assert_eq!(err.code, "ERR_VALIDATION");
+        let item = store.create_finding(body2).await.unwrap();
+        assert_eq!(item.title, "Updated title");
+        let all = store.list_findings(None, None).await.unwrap();
+        assert_eq!(all.iter().filter(|f| f.id == "find-002").count(), 1);
     }
 }
 
@@ -1325,22 +1316,27 @@ mod legacy_indicator_migration_tests {
         .unwrap();
         assert!(indicator_table.is_none(), "Indicator table must be dropped");
 
-        let (opportunity_has_kpi,): (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM pragma_table_info('Opportunity') WHERE name = 'kpiId'",
+        // Post-spec-061: Opportunity table is replaced by Finding table.
+        let opportunity_table: Option<(String,)> = sqlx::query_as(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'Opportunity'",
         )
-        .fetch_one(&store.pool)
+        .fetch_optional(&store.pool)
         .await
         .unwrap();
-        let (opportunity_has_indicator,): (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM pragma_table_info('Opportunity') WHERE name = 'indicator'",
+        assert!(
+            opportunity_table.is_none(),
+            "Opportunity table must be dropped by migration 004"
+        );
+
+        let finding_table: Option<(String,)> = sqlx::query_as(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'Finding'",
         )
-        .fetch_one(&store.pool)
+        .fetch_optional(&store.pool)
         .await
         .unwrap();
-        assert_eq!(opportunity_has_kpi, 1, "Opportunity.kpiId must exist");
-        assert_eq!(
-            opportunity_has_indicator, 0,
-            "Opportunity.indicator must be removed"
+        assert!(
+            finding_table.is_some(),
+            "Finding table must exist after migration 004"
         );
 
         let (regression_has_kpi,): (i64,) = sqlx::query_as(
@@ -1361,31 +1357,12 @@ mod legacy_indicator_migration_tests {
             "Regression.indicator must be removed"
         );
 
-        let (opp_kpi_nulls,): (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM Opportunity WHERE kpiId IS NULL")
-                .fetch_one(&store.pool)
-                .await
-                .unwrap();
-        assert_eq!(opp_kpi_nulls, 1, "migrated Opportunity.kpiId must be NULL");
-
         let (reg_kpi_nulls,): (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM Regression WHERE kpiId IS NULL")
                 .fetch_one(&store.pool)
                 .await
                 .unwrap();
         assert_eq!(reg_kpi_nulls, 1, "migrated Regression.kpiId must be NULL");
-
-        let (preserved_component_id,): (Option<String>,) =
-            sqlx::query_as("SELECT componentId FROM Opportunity WHERE id = ?")
-                .bind("opp-legacy")
-                .fetch_one(&store.pool)
-                .await
-                .unwrap();
-        assert_eq!(
-            preserved_component_id.as_deref(),
-            Some("comp-legacy"),
-            "non-legacy columns must be preserved"
-        );
 
         let (component_has_health,): (i64,) = sqlx::query_as(
             "SELECT COUNT(*) FROM pragma_table_info('Component') WHERE name = 'health'",
@@ -1626,6 +1603,7 @@ mod kpi_create_inline_grade_tests {
                         evaluated_at: None,
                     },
                 ]),
+                raw_assessment: None,
             })
             .await
             .unwrap();
@@ -1669,6 +1647,7 @@ mod kpi_create_inline_grade_tests {
                     evidence: None,
                     evaluated_at: None,
                 }]),
+                raw_assessment: None,
             })
             .await
             .unwrap_err();
@@ -1716,6 +1695,7 @@ mod kpi_create_inline_grade_tests {
                         evaluated_at: None,
                     },
                 ]),
+                raw_assessment: None,
             })
             .await
             .unwrap_err();
@@ -1745,6 +1725,7 @@ mod kpi_create_inline_grade_tests {
                     evidence: None,
                     evaluated_at: None,
                 }]),
+                raw_assessment: None,
             })
             .await
             .unwrap_err();
@@ -1768,6 +1749,7 @@ mod kpi_create_inline_grade_tests {
                 summary: None,
                 evaluated_at: None,
                 grades: None,
+                raw_assessment: None,
             })
             .await
             .unwrap();

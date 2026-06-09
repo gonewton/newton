@@ -4,6 +4,24 @@ use newton_types::ApiError;
 use sqlx::FromRow;
 use sqlx::SqlitePool;
 
+pub(super) async fn upgrade_eval_run_raw_assessment(pool: &SqlitePool) -> Result<(), ApiError> {
+    let has_col: bool = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM pragma_table_info('EvalRun') WHERE name='rawAssessment'",
+    )
+    .fetch_one(pool)
+    .await
+    .map(|n| n > 0)
+    .unwrap_or(false);
+
+    if !has_col {
+        sqlx::query("ALTER TABLE EvalRun ADD COLUMN rawAssessment TEXT NULL")
+            .execute(pool)
+            .await
+            .map_err(|e| err_internal(&format!("add rawAssessment column: {e}")))?;
+    }
+    Ok(())
+}
+
 pub(super) async fn upgrade_legacy_grade_schema(pool: &SqlitePool) -> Result<(), ApiError> {
     #[derive(Debug, FromRow)]
     struct TableInfoRow {

@@ -166,8 +166,8 @@ impl super::SqliteBackendStore {
         }
 
         sqlx::query(
-            "INSERT INTO EvalRun (id, source, scope, scopeId, score, verdict, summary, evaluatedAt, ingestedAt) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO EvalRun (id, source, scope, scopeId, score, verdict, summary, evaluatedAt, ingestedAt, rawAssessment) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&body.id)
         .bind(&body.source)
@@ -178,6 +178,7 @@ impl super::SqliteBackendStore {
         .bind(&body.summary)
         .bind(&evaluated_at)
         .bind(&now)
+        .bind(&body.raw_assessment)
         .execute(&mut *tx)
         .await
         .map_err(|e| unique_err(e, "EvalRun id already exists", "insert error"))?;
@@ -239,7 +240,7 @@ impl super::SqliteBackendStore {
         limit: Option<u32>,
     ) -> Result<Vec<EvalRunItem>, ApiError> {
         let mut sql = String::from(
-            "SELECT id, source, scope, scopeId AS scope_id, score, verdict, summary, evaluatedAt AS evaluated_at, ingestedAt AS ingested_at FROM EvalRun",
+            "SELECT id, source, scope, scopeId AS scope_id, score, verdict, summary, evaluatedAt AS evaluated_at, ingestedAt AS ingested_at, rawAssessment AS raw_assessment FROM EvalRun",
         );
         let mut conditions = Vec::new();
         if scope.is_some() {
@@ -280,7 +281,7 @@ impl super::SqliteBackendStore {
 
     pub(super) async fn get_eval_run_db(&self, id: &str) -> Result<EvalRunItem, ApiError> {
         let row: Option<EvalRunRow> = sqlx::query_as::<_, EvalRunRow>(
-            "SELECT id, source, scope, scopeId AS scope_id, score, verdict, summary, evaluatedAt AS evaluated_at, ingestedAt AS ingested_at \
+            "SELECT id, source, scope, scopeId AS scope_id, score, verdict, summary, evaluatedAt AS evaluated_at, ingestedAt AS ingested_at, rawAssessment AS raw_assessment \
              FROM EvalRun WHERE id = ?",
         )
         .bind(id)

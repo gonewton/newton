@@ -1,0 +1,36 @@
+# grading.yaml — reference grading loop workflow (Spec 066)
+# Closes the grade → reconcile → change-request edge per ADR 0003.
+id: grading
+version: "1"
+description: |
+  Reference grading workflow. Runs a command Grader, reconciles Observations
+  into Findings, and synthesizes a Change Request (or halts on convergence).
+
+  Required context vars: grader, scope, scope_id, grader_cmd
+tasks:
+  grade:
+    operator: GraderCommandOperator
+    params:
+      cmd: "{{ grader_cmd }}"
+      grader: "{{ grader }}"
+      scope: "{{ scope }}"
+      scope_id: "{{ scope_id }}"
+
+  reconcile:
+    operator: ReconcileOperator
+    depends_on: [grade]
+    params:
+      scope_id: "{{ scope_id }}"
+      grader: "{{ grader }}"
+      assessment: "{{ tasks.grade.output.assessment }}"
+
+  change_request:
+    operator: ChangeRequestOperator
+    depends_on: [reconcile]
+    params:
+      scope_id: "{{ scope_id }}"
+      max_findings: 10
+
+goal:
+  # Convergence: high score AND no critical findings.
+  condition: "tasks.grade.output.overall_score >= 90 || tasks.change_request.output.decision == 'none'"

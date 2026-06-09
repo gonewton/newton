@@ -338,6 +338,7 @@ impl WorkflowTestHarness {
         document.validate(&newton_core::workflow::expression::ExpressionEngine::default())?;
 
         let deps = BuiltinOperatorDeps {
+            backend_store: None,
             command_runner: Some(Arc::new(self.cmd_runner.clone())),
             interviewer: Some({
                 let fake: Arc<dyn Interviewer> = Arc::new(self.interviewer.clone());
@@ -919,6 +920,7 @@ async fn test_scenario_17_checkpoint_resume() {
             harness.temp_dir.path().to_path_buf(),
             GraphSettings::default(),
             BuiltinOperatorDeps {
+                backend_store: None,
                 command_runner: Some(Arc::new(cmd_runner.clone())),
                 interviewer: Some({
                     let fake: Arc<dyn Interviewer> = Arc::new(harness.interviewer.clone());
@@ -1840,6 +1842,7 @@ async fn test_scenario_47_gh_operator_branch_push() {
             child_workflow_runner: None,
             gh_approver: None,
             git_runner: Some(git_runner.clone()),
+            backend_store: None,
         },
     );
     let registry = builder.build();

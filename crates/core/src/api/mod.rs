@@ -1,14 +1,14 @@
 pub mod catalog;
+pub mod change_requests;
 pub mod dashboard;
+pub mod findings;
 pub mod hil;
 pub mod magic_tools;
 pub mod openapi;
 pub mod operators;
-pub mod opportunities;
 pub mod persistence;
 pub mod plans;
 pub mod portfolio;
-pub mod requests;
 pub mod state;
 pub mod streaming;
 pub mod testing_reset;
@@ -60,8 +60,8 @@ pub fn api_v1_router(state: AppState) -> Router {
         .merge(operators::routes(arc_state.clone()))
         .merge(dashboard::routes(arc_state.clone()))
         .merge(portfolio::routes(arc_state.clone()))
-        .merge(opportunities::routes(arc_state.clone()))
-        .merge(requests::routes(arc_state.clone()))
+        .merge(findings::routes(arc_state.clone()))
+        .merge(change_requests::routes(arc_state.clone()))
         .merge(plans::routes(arc_state.clone()))
         .merge(persistence::routes(arc_state.clone()))
         .merge(catalog::routes(arc_state.clone()))

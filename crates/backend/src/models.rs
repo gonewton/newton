@@ -96,6 +96,8 @@ pub struct EvalRunItem {
     pub summary: Option<String>,
     pub evaluated_at: String,
     pub ingested_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_assessment: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -121,6 +123,8 @@ pub struct CreateEvalRunBody {
     pub evaluated_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grades: Option<Vec<CreateGradeInlineBody>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_assessment: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -223,64 +227,89 @@ pub struct SavedViewItem {
     pub sort_dir: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct OpportunityItem {
-    pub id: String,
-    pub title: String,
-    pub origin: String,
-    pub component: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub module: Option<String>,
-    pub repo: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kpi_id: Option<String>,
-    pub confidence: Option<f64>,
-    pub risk: String,
-    pub expected_value: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
-    pub status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub age: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rationale: Option<String>,
-    pub depends_on: Vec<String>,
-    pub blocks: Vec<String>,
+fn default_finding_origin() -> String {
+    "system".to_string()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct PatchOpportunityBody {
-    pub status: String,
-}
-
-fn default_opportunity_status() -> String {
+fn default_finding_status() -> String {
     "awaiting_triage".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateOpportunityBody {
+pub struct FindingItem {
     pub id: String,
-    pub title: String,
+    pub source: String,
     pub origin: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub component: Option<String>,
+    pub component_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub module: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub repo: Option<String>,
+    pub repo_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kpi_id: Option<String>,
-    pub confidence: Option<f64>,
+    pub dimension: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<serde_json::Value>,
+    pub fingerprint: String,
+    pub title: String,
+    pub why_it_matters: String,
+    pub recommended_action: String,
+    pub severity: String,
     pub risk: String,
-    pub expected_value: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_value: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
-    #[serde(default = "default_opportunity_status")]
+    pub status: String,
+    pub last_seen_at: String,
+    pub depends_on: Vec<String>,
+    pub blocks: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateFindingBody {
+    pub id: String,
+    pub source: String,
+    #[serde(default = "default_finding_origin")]
+    pub origin: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kpi_id: Option<String>,
+    pub dimension: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<serde_json::Value>,
+    pub fingerprint: String,
+    pub title: String,
+    pub why_it_matters: String,
+    pub recommended_action: String,
+    pub severity: String,
+    pub risk: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_value: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default = "default_finding_status")]
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub rationale: Option<String>,
+    pub last_seen_at: Option<String>,
     #[serde(default)]
     pub depends_on: Vec<String>,
     #[serde(default)]
@@ -289,32 +318,67 @@ pub struct CreateOpportunityBody {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct RequestItem {
-    pub id: String,
-    pub title: String,
+pub struct PatchFindingBody {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    pub component: String,
-    pub repo: String,
-    pub requested_by: String,
-    pub status: String,
-    pub linked_opportunity_id: Option<String>,
-    pub created_at: String,
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_value: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub risk: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seen_at: Option<String>,
+}
+
+fn default_cr_origin() -> String {
+    "system".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateRequestBody {
+pub struct ChangeRequestItem {
+    pub id: String,
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
+    pub body: Option<String>,
+    pub origin: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub component: Option<String>,
+    pub author: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub repo: Option<String>,
-    pub requested_by: String,
+    pub component_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub linked_opportunity_id: Option<String>,
+    pub repo_id: Option<String>,
+    pub status: String,
+    pub finding_ids: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateChangeRequestBody {
+    pub id: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(default = "default_cr_origin")]
+    pub origin: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_id: Option<String>,
+    #[serde(default)]
+    pub finding_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchChangeRequestBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -326,7 +390,7 @@ pub struct PlanItem {
     pub repo: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub linked_request_id: Option<String>,
+    pub linked_change_request_id: Option<String>,
     pub execution_ids: Vec<String>,
     pub confidence: i64,
     pub risk: String,
