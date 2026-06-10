@@ -225,6 +225,27 @@ _Avoid_: "history"/"log" (too generic — it is the structured per-cycle series 
 break conditions read), confusing it with an **Execution** (one develop run *within*
 a cycle; the Trajectory spans *all* cycles).
 
+### Optimize Run
+One invocation of the **Optimization loop** over a scope — the durable, addressable
+record of "this project being driven toward its Objective from start to stop." It
+owns a `status` (`running | converged | stalled_on_blocked | max_cycles | regressed
+| no_progress`), the configured graders, and an ordered set of **Cycles**; its
+**Trajectory** is the per-cycle series within it. A Run is the **top of the nesting**
+— one Run contains many Cycles; each Cycle fires several **Steps** and produces one
+**Execution**. This is the proper-noun entity behind the `optimize` driver.
+_Avoid_: bare "run" (ambiguous — a **Step** is also "a workflow run" and an
+**Execution** is colloquially "this run"); say **Optimize Run** for the loop
+invocation, **Step** for one workflow run, **Execution** for one develop run.
+
+### Cycle
+One iteration of an **Optimize Run**: a single pass of `grade → reconcile →
+change-request → (approve) → plan → develop → re-grade`. A Cycle contains several
+**Steps** (the grading / planner / develop workflow runs) and at most one develop
+**Execution**; it is the unit recorded as one row of the **Trajectory**. Many Cycles
+make one **Optimize Run**.
+_Avoid_: "iteration"/"round" (informal), "Step" (a Step is *one workflow run within*
+a Cycle, not the Cycle itself).
+
 ### Driver
 A way to set Steps running over the one execution engine. Newton has exactly
 these drivers, distinguished only by what originates the work:
