@@ -1,8 +1,8 @@
 # Newton
 
-**Newton** is a workflow-first CLI for deterministic automation and orchestration. You define steps in YAML (shell commands, agents, human approvals, branching, nested workflows), and Newton runs them with explicit completion rules, checkpoints, and artifacts. It fits agent-assisted coding, release checklists, and batch plan queues where you want a defined graph instead of ad hoc scripts.
+**Newton** is a workflow-first CLI for deterministic automation and orchestration — **and an autonomous optimizer**. You define steps in YAML (shell commands, agents, human approvals, branching, nested workflows), and Newton runs them with explicit completion rules, checkpoints, and artifacts. On top of that, Newton drives an **optimization loop** that grades a project and improves it toward a target Grade. It fits agent-assisted coding, release checklists, and self-improving optimization loops where you want a defined graph instead of ad hoc scripts.
 
-Version: **0.5.109** · Repository: [github.com/gonewton/newton](https://github.com/gonewton/newton)
+Version: **0.5.117** · Repository: [github.com/gonewton/newton](https://github.com/gonewton/newton)
 
 ## Installation
 
@@ -25,7 +25,7 @@ Verify: `newton --version` and `newton --help`.
 ## Prerequisites
 
 - The **Newton CLI** (installed above).
-- **Optional**: Git for version control, hooks, and batch workflows.
+- **Optional**: Git for version control, hooks, and the optimization loop's local-merge delivery.
 
 `newton init .` scaffolds a workspace and installs the default template via the bundled **aikit-sdk** (statically linked). You do **not** need the `aikit` binary on your `PATH` for init.
 
@@ -44,7 +44,7 @@ Verify: `newton --version` and `newton --help`.
    newton workflow run path/to/workflow.yaml --workspace .
    ```
 
-For an existing repository, run `newton init .` at the repo root. Edit `.newton/configs/default.conf` to set `workflow_file` when using batch mode (see [Batch mode](#batch-mode) below).
+For an existing repository, run `newton init .` at the repo root. Edit `.newton/configs/default.conf` to set `workflow_file`, or add an `optimize_*` block to drive the [optimization loop](#optimization-loop).
 
 ## What you get
 
@@ -69,10 +69,13 @@ For operator reference, see [docs/operators/](docs/operators/) and the [Newton s
 | `newton workflow runs list\|show` | Inspect past executions |
 | `newton workflow checkpoint\|artifact` | Manage checkpoints and artifacts |
 | `newton init [path]` | Scaffold `.newton/` and install template |
-| `newton batch <project_id>` | Process queued plan files |
-| `newton serve` | HTTP/WebSocket API for workflow state and integrations |
-| `newton webhook serve\|status` | Trigger workflows from external HTTP events |
+| `newton optimize <project_id>` | Drive the optimization loop / drain the Plan queue (renamed from `batch`) |
+| `newton serve` | HTTP/WebSocket API for workflow state, loop observation, and integrations |
+| `newton data <verb> <entity>` | Catalog CRUD (`finding`, `change-request`, `plan`, `optimize-run`, …) |
+| `newton doctor` | Environment readiness diagnostics |
 | `newton schema export` | Emit the workflow IR JSON Schema (operator-discriminated) |
+
+> `webhook` (external HTTP ingress) and `health` were removed: the optimizer is self-driving (ADR 0004), and `health` folded into `doctor`.
 
 Run `newton <command> --help` for flags and examples. The top-level `newton run` command is deprecated; use `newton workflow run`.
 
@@ -86,21 +89,25 @@ newton workflow run workflow.yaml --timeout 3600 --parallel-limit 4 --verbose
 
 Trigger payload merge order: `--parameters-json` (base object), then each `--trigger KEY=VAL` in order. Values prefixed with `@` load file contents.
 
-### Batch mode
+### Optimization loop
 
-Batch mode processes markdown plan files from `.newton/plan/<project_id>/todo/` using the workflow named in `.newton/configs/<project_id>.conf`:
+Newton's autonomous loop improves a project toward a **Grade**:
 
-```conf
-project_root=/path/to/project
-workflow_file=path/to/workflow.yaml
 ```
+grade ─→ reconcile ─→ change-request ─→ plan ─→ develop ─→ merge ─→ re-grade
+(Assessment) (Findings)  (Change Request)  (HOW)  (tests)   (local git)
+```
+
+The durable work spine — `Finding → Change Request → Plan → Execution` — lives in Newton's store (never a board). It runs **GitHub-free** and terminates on a break condition (converged / max-cycles / per-grader target / regression / no-progress / `stalled_on_blocked`).
 
 ```bash
-newton batch default          # poll and process plans
-newton batch default --once     # process one plan then exit
+# Closed loop (interim driver; reads the optimize_* block in .newton/configs/<id>.conf)
+.newton/scripts/optimize.sh my-project --once
+# Rust command (currently drains the Plan queue under .newton/plan/<id>/todo/)
+newton optimize my-project --once
 ```
 
-Plans move to `completed/` on success or `failed/` on error. See [skill/newton/references/batch.md](skill/newton/references/batch.md) for plan file format and lifecycle.
+Observe runs over `serve`: `GET /api/v1/optimize-runs[/{id}/trajectory]`, `GET /api/v1/findings?status=blocked`, `POST /api/v1/findings/{id}/unblock`. See [skill/newton/references/optimize.md](skill/newton/references/optimize.md) and [CONTEXT.md](CONTEXT.md).
 
 ### HTTP serve API
 
@@ -178,8 +185,10 @@ After `newton init`, Newton expects:
 workspace/
 ├── .newton/
 │   ├── workflows/       # Workflow YAML (from template)
-│   ├── configs/         # Batch and integration config (*.conf)
-│   ├── plan/            # Batch plan queues by project_id
+│   ├── grader/          # Command-Graders: <name>/generate.sh (prints an Assessment)
+│   ├── configs/         # Workflow, optimize, and integration config (*.conf)
+│   ├── plan/            # Plan queues by project_id
+│   ├── optimize/        # Per-project loop trajectory.jsonl (audit trail)
 │   ├── tasks/           # Per-plan execution state
 │   ├── state/           # Workflow run records
 │   ├── checkpoints/     # Resume checkpoints

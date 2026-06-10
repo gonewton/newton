@@ -1,0 +1,44 @@
+--- a/src/widgets/cli.py
++++ b/src/widgets/cli.py
+@@ -2,6 +2,15 @@
+ import sys
+ from widgets.inventory import process
+ from widgets.formatting import print_table
++from widgets.report import print_table as report_table
++
++
++_DISPATCH = {
++    "add": lambda args: process(("add", args[0] if args else "")),
++    "remove": lambda args: process(("remove", args[0] if args else "")),
++    "list": lambda args: print_table(process(("list",))),
++    "report": lambda args: report_table(process(("list",))),
++}
+
+
+ def main() -> None:
+@@ -11,21 +20,11 @@
+         sys.exit(1)
+
+     cmd = args[0]
++    rest = args[1:]
+
+-    # ISSUE D: substring-match dispatch — branching_discipline
+-    if cmd.find("add") != -1:
+-        name = args[1] if len(args) > 1 else ""
+-        process(("add", name))
+-    elif cmd.find("remove") != -1:
+-        name = args[1] if len(args) > 1 else ""
+-        process(("remove", name))
+-    elif cmd.find("list") != -1:
+-        items = process(("list",))
+-        print_table(items)
+-    elif cmd.find("report") != -1:
+-        items = process(("list",))
+-        from widgets.report import print_table as report_table
+-        report_table(items)
++    handler = _DISPATCH.get(cmd)
++    if handler is not None:
++        handler(rest)
+     else:
+         print(f"Unknown command: {cmd}")
+         sys.exit(1)

@@ -18,6 +18,11 @@ use utoipa::OpenApi;
         crate::api::findings::create_finding,
         crate::api::findings::get_finding,
         crate::api::findings::patch_finding,
+        crate::api::findings::unblock_finding,
+        crate::api::optimize_run::list_optimize_runs,
+        crate::api::optimize_run::get_optimize_run,
+        crate::api::optimize_run::get_optimize_run_trajectory,
+        crate::api::optimize_run::list_optimize_cycles,
         crate::api::change_requests::list_change_requests,
         crate::api::change_requests::create_change_request,
         crate::api::change_requests::get_change_request,
@@ -127,6 +132,10 @@ use utoipa::OpenApi;
         newton_backend::CreateGradeBody,
         newton_backend::CreateKpiBody,
         newton_backend::CreateGradeInlineBody,
+        newton_backend::OptimizeRunItem,
+        newton_backend::OptimizeRunDetail,
+        newton_backend::OptimizeRunTrajectory,
+        newton_backend::OptimizeCycleItem,
         newton_types::WorkflowInstance,
         newton_types::WorkflowStatus,
         newton_types::NodeState,
@@ -158,7 +167,8 @@ use utoipa::OpenApi;
         (name = "persistence", description = "Key-value persistence endpoints"),
         (name = "catalog", description = "Catalog entity CRUD endpoints"),
         (name = "testing", description = "Test-only maintenance endpoints"),
-        (name = "workflow-files", description = "Workflow definition file CRUD endpoints")
+        (name = "workflow-files", description = "Workflow definition file CRUD endpoints"),
+        (name = "optimize", description = "Optimization loop run and cycle endpoints")
     ),
     servers((url = "/api/v1")),
     info(

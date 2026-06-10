@@ -2,7 +2,7 @@
 
 > Status: **design** (not yet implemented). Settled via the grading design
 > sessions; see [CONTEXT.md](../../CONTEXT.md) (Grader, Assessment, …) and
-> [ADR 0005](../adr/0005-grading-is-text-gradient-driven.md).
+> [ADR 0009](../adr/0009-grading-is-text-gradient-driven.md).
 
 Runs a **command Grader** — an external program, in any language, that evaluates
 the project's current state and prints an **Assessment** — then validates it and

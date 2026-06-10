@@ -1,17 +1,16 @@
 version: '2.0'
 mode: workflow_graph
 metadata:
-  name: rust-workflow
-  description: Implement from a repo-local spec path. Prefer raw_spec_path + board_issue_number + board_item_title (develop.sh); workflow copies into tmp/<issue>-<slug>.md before git work.
+  name: develop-workflow
+  description: 'Implement from a Plan id or raw_spec_path. Pluggable delivery: local (ff-merge) or pr.'
 triggers:
   type: manual
   schema_version: '1.0'
   payload:
-    prompt: ''
+    plan_id: ''
     raw_spec_path: ''
-    board_item_id: ''
-    board_issue_number: ''
-    board_item_title: ''
+    delivery: 'local'
+    test_cmd: './scripts/run-tests.sh'
     skip_gh_pr_approve: 'true'
 workflow:
   settings:
@@ -34,11 +33,11 @@ workflow:
   context:
     preamble: |-
       Implement the following spec in the target source code target.
-      After you have applied the changes and ./scripts/run-tests.sh completes with no errors, print exactly <status>COMPLETED</status> in your final output.
-    codescene_preamble: Fix code health issues reported by CodeScene. Work in the target source code base; run ./scripts/run-tests.sh to verify. Do not require a COMPLETED marker.
+      After you have applied the changes and the test command completes with no errors, print exactly <status>COMPLETED</status> in your final output.
+    codescene_preamble: Fix code health issues reported by CodeScene. Work in the target source code base; run the configured test command to verify. Do not require a COMPLETED marker.
     precommit_fix_preamble: |-
       The pre-commit hook rejected a commit. The full hook output is below.
-      Fix all reported issues in the codebase. Run ./scripts/run-tests.sh to verify.
+      Fix all reported issues in the codebase. Run the configured test command to verify.
       Do not attempt to commit; only fix the code.
     validation_preamble: |-
       You are a reviewer. You will be given the spec path (read the spec file in the workspace) and a bounded diff vs main (stat plus truncated patch).
@@ -72,69 +71,38 @@ workflow:
       params:
         operation: sync_main
       transitions:
-        - to: resolve_board_ids
-      name: Sync main branch
-    - id: resolve_board_ids
-      operator: GhOperator
-      params:
-        operation: project_resolve_board
-        owner:
-          $expr: env("GH_PROJECT_OWNER")
-        project_number:
-          $expr: env("GH_PROJECT_NUMBER")
-      transitions:
-        - to: move_to_in_progress
-      name: Pick next Issue
-    - id: move_to_in_progress
-      operator: GhOperator
-      params:
-        operation: project_item_set_status
-        item_id:
-          $expr: triggers.board_item_id
-        board:
-          $expr: tasks.resolve_board_ids.output
-        status: In progress
-        on_error: warn
-      transitions:
         - to: prepare_spec_paths
-      name: Move Issue to In Progress
+      name: Sync main branch
     - id: prepare_spec_paths
       operator: CommandOperator
       params:
         shell: true
         capture_stdout: true
         env:
-          ISSUE:
-            $expr: triggers.board_issue_number
-          TITLE:
-            $expr: triggers.board_item_title
+          PLAN_ID:
+            $expr: triggers.plan_id
           RAW_SPEC:
             $expr: triggers.raw_spec_path
-          LEGACY_PROMPT:
-            $expr: triggers.prompt
+          WORKSPACE:
+            $expr: 'triggers.workspace'
         cmd: |
           set -eo pipefail
           mkdir -p .newton/plan tmp
-          slugify() {
-            s=$(printf '%s' "${TITLE:-}" | iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null || printf '%s' "${TITLE:-}")
-            s=$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')
-            [ -z "$s" ] && s="spec"
-            printf '%s' "$s" | cut -c1-60 | sed -E 's/-+$//'
-          }
-          if [ -n "$RAW_SPEC" ] && [ -f "$RAW_SPEC" ]; then
-            slug=$(slugify)
-            OUT="tmp/${ISSUE}-${slug}.md"
-            if [ "$RAW_SPEC" != "$OUT" ]; then
-              cp "$RAW_SPEC" "$OUT"
-            fi
+          if [ -n "$PLAN_ID" ]; then
+            OUT="tmp/plan-${PLAN_ID}.md"
+            newton --workspace "${WORKSPACE:-.}" data get plan "$PLAN_ID" \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('body',''))" > "$OUT"
+            BRANCH="feature/plan-${PLAN_ID}"
+          elif [ -n "$RAW_SPEC" ] && [ -f "$RAW_SPEC" ]; then
+            OUT="$RAW_SPEC"
+            SLUG=$(basename "$RAW_SPEC" .md | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//')
+            BRANCH="feature/${SLUG}"
           else
-            OUT="$LEGACY_PROMPT"
-            if [ -z "$OUT" ] || [ ! -f "$OUT" ]; then
-              echo "prepare_spec_paths: set raw_spec_path to an existing file or pass prompt with a readable path"
-              exit 1
-            fi
+            echo "prepare_spec_paths: set plan_id or raw_spec_path to an existing file" >&2
+            exit 1
           fi
           printf '%s\n' "$OUT" > .newton/plan/.develop-prompt-path
+          printf '%s\n' "$BRANCH" > .newton/plan/.develop-branch
           echo "spec_path=$OUT"
       transitions:
         - to: read_develop_spec_path
@@ -153,7 +121,7 @@ workflow:
       params:
         operation: create_branch
         name:
-          $expr: '"feature/" + file_stem(tasks.read_develop_spec_path.output.stdout)'
+          $expr: '"feature/plan-" + triggers.plan_id'
       transitions:
         - to: load_spec
       name: Create Branch
@@ -195,7 +163,8 @@ workflow:
       operator: CommandOperator
       params:
         shell: true
-        cmd: ./scripts/run-tests.sh
+        cmd:
+          $expr: triggers.test_cmd
         capture_stdout: true
         capture_stderr: true
       transitions:
@@ -214,7 +183,7 @@ workflow:
         model:
           $expr: develop_secondary_model
         prompt:
-          $expr: 'context.preamble + "\n\nSpec path: " + tasks.read_develop_spec_path.output.stdout + "\n\nSpec content:\n" + tasks.load_spec.output.stdout + "\n\nTests failed. Fix the issues and re-run ./scripts/run-tests.sh:\n" + tasks.run_tests.output.stdout'
+          $expr: 'context.preamble + "\n\nSpec path: " + tasks.read_develop_spec_path.output.stdout + "\n\nSpec content:\n" + tasks.load_spec.output.stdout + "\n\nTests failed. Fix the issues and re-run the test command:\n" + tasks.run_tests.output.stdout'
       transitions:
         - to: run_tests
     - id: snapshot_commit
@@ -223,7 +192,7 @@ workflow:
       params:
         operation: commit
         message:
-          $expr: '"chore(develop): " + file_stem(tasks.read_develop_spec_path.output.stdout)'
+          $expr: '"chore(develop): snapshot " + triggers.plan_id'
         allow_empty: false
       transitions:
         - to: get_diff
@@ -245,7 +214,7 @@ workflow:
         model:
           $expr: develop_secondary_model
         prompt:
-          $expr: context.precommit_fix_preamble + "\n\nPre-commit hook rejected the snapshot commit. Run ./scripts/run-tests.sh to verify fixes."
+          $expr: context.precommit_fix_preamble + "\n\nPre-commit hook rejected the snapshot commit. Run the configured test command to verify fixes."
       transitions:
         - to: snapshot_commit
     - id: get_diff
@@ -291,7 +260,6 @@ workflow:
         shell: true
         cmd: |
           echo "develop: validation preflight failed — spec+diff exceeds safe prompt budget." >&2
-          echo "See validation_preflight output for byte counts. Split the change or spec before re-running." >&2
           exit 1
         capture_stdout: false
       terminal: failure
@@ -386,7 +354,7 @@ workflow:
       operator: CommandOperator
       params:
         shell: true
-        cmd: echo "No changes to commit; skipping PR."
+        cmd: echo "No changes to commit; skipping delivery."
         capture_stdout: false
       terminal: success
     - id: git_commit
@@ -394,10 +362,10 @@ workflow:
       params:
         operation: commit
         message:
-          $expr: '"feat: implement " + file_stem(tasks.read_develop_spec_path.output.stdout)'
+          $expr: '"feat: implement plan " + triggers.plan_id'
         allow_empty: false
       transitions:
-        - to: git_push
+        - to: route_delivery
           priority: 0
           when:
             $expr: tasks.git_commit.output.committed == true || tasks.git_commit.output.skipped == true
@@ -416,9 +384,55 @@ workflow:
         model:
           $expr: develop_secondary_model
         prompt:
-          $expr: context.precommit_fix_preamble + "\n\nPre-commit hook rejected the final commit. Run ./scripts/run-tests.sh to verify fixes."
+          $expr: context.precommit_fix_preamble + "\n\nPre-commit hook rejected the final commit. Run the configured test command to verify fixes."
       transitions:
         - to: git_commit
+
+    # ── Delivery routing ────────────────────────────────────────────────────────
+    - id: route_delivery
+      operator: CommandOperator
+      params:
+        shell: true
+        cmd: 'echo "routing delivery: ${DELIVERY}"'
+        capture_stdout: false
+        env:
+          DELIVERY:
+            $expr: triggers.delivery
+      transitions:
+        - to: local_merge
+          priority: 0
+          when:
+            $expr: triggers.delivery == "local"
+        - to: git_push
+          priority: 10
+
+    # ── Local delivery ──────────────────────────────────────────────────────────
+    - id: local_merge
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: true
+        env:
+          BRANCH:
+            $expr: '"feature/plan-" + triggers.plan_id'
+          PLAN_ID:
+            $expr: triggers.plan_id
+          WORKSPACE:
+            $expr: 'triggers.workspace'
+        cmd: |
+          set -eo pipefail
+          git checkout main
+          git merge --ff-only "$BRANCH" || git merge --no-edit "$BRANCH"
+          echo "local_merge: merged $BRANCH into main"
+          # Update Plan status to complete
+          if [ -n "$PLAN_ID" ]; then
+            newton --workspace "${WORKSPACE:-.}" data patch plan "$PLAN_ID" \
+              --body '{"status":"complete"}' || true
+          fi
+      transitions:
+        - to: success
+
+    # ── PR delivery ─────────────────────────────────────────────────────────────
     - id: git_push
       operator: GitOperator
       params:
@@ -435,22 +449,10 @@ workflow:
         operation: pr_create
         base: main
         title:
-          $expr: '"feat: implement " + file_stem(tasks.read_develop_spec_path.output.stdout)'
-        body: Implements spec. Merge with squash.
+          $expr: '"feat: implement plan " + triggers.plan_id'
+        body: Implements plan. Merge with squash.
         retry_count: 3
         retry_delay_ms: 5000
-      transitions:
-        - to: move_to_in_review
-    - id: move_to_in_review
-      operator: GhOperator
-      params:
-        operation: project_item_set_status
-        item_id:
-          $expr: triggers.board_item_id
-        board:
-          $expr: tasks.resolve_board_ids.output
-        status: In review
-        on_error: warn
       transitions:
         - to: poll_pr
           priority: 0
@@ -481,7 +483,7 @@ workflow:
           priority: 0
           when:
             $expr: tasks.poll_pr.output.state == "MERGED"
-        - to: move_to_ready_on_close
+        - to: fail_pr_closed
           priority: 1
           when:
             $expr: tasks.poll_pr.output.state == "CLOSED"
@@ -491,8 +493,6 @@ workflow:
             $expr: tasks.poll_pr.output.state == "OPEN"
         - to: sleep_merge_unknown
           priority: 10
-          when:
-            $expr: tasks.poll_pr.output.state != "OPEN" && tasks.poll_pr.output.state != "MERGED" && tasks.poll_pr.output.state != "CLOSED"
       name: Wait for PR Acceptance
     - id: sleep_merge_wait
       operator: CommandOperator
@@ -512,18 +512,6 @@ workflow:
         capture_stdout: false
       transitions:
         - to: poll_pr
-    - id: move_to_ready_on_close
-      operator: GhOperator
-      params:
-        operation: project_item_set_status
-        item_id:
-          $expr: triggers.board_item_id
-        board:
-          $expr: tasks.resolve_board_ids.output
-        status: Ready
-        on_error: warn
-      transitions:
-        - to: fail_pr_closed
     - id: fail_pr_closed
       operator: CommandOperator
       params:
@@ -537,25 +525,35 @@ workflow:
       params:
         operation: cleanup_merge
       transitions:
-        - to: move_to_done
-    - id: move_to_done
-      operator: GhOperator
+        - to: mark_plan_complete_pr
+
+    - id: mark_plan_complete_pr
+      operator: CommandOperator
       params:
-        operation: project_item_set_status
-        item_id:
-          $expr: triggers.board_item_id
-        board:
-          $expr: tasks.resolve_board_ids.output
-        status: Done
-        on_error: warn
+        shell: true
+        capture_stdout: false
+        env:
+          PLAN_ID:
+            $expr: triggers.plan_id
+          WORKSPACE:
+            $expr: 'triggers.workspace'
+        cmd: |
+          if [ -n "$PLAN_ID" ]; then
+            newton --workspace "${WORKSPACE:-.}" data patch plan "$PLAN_ID" \
+              --body '{"status":"complete"}' || true
+          fi
       transitions:
         - to: success
+
     - id: success
       operator: CommandOperator
       params:
         shell: true
-        cmd: echo "Job is completed based on opencode output" | tee /dev/tty
+        cmd: echo "develop: completed plan ${PLAN_ID}"
         capture_stdout: false
+        env:
+          PLAN_ID:
+            $expr: triggers.plan_id
       terminal: success
     - id: retry_implementation
       operator: CommandOperator

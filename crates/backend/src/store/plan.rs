@@ -1,10 +1,32 @@
 use super::helpers::{query_err, tx_err};
 
+const PLAN_STATUSES: &[&str] = &[
+    "draft",
+    "ready",
+    "running",
+    "complete",
+    "failed",
+    "abandoned",
+];
+
+fn validate_plan_status(status: &str) -> Result<(), newton_types::ApiError> {
+    if PLAN_STATUSES.contains(&status) {
+        Ok(())
+    } else {
+        Err(crate::err_validation(&format!(
+            "invalid Plan status '{}'; must be one of: {}",
+            status,
+            PLAN_STATUSES.join(", ")
+        )))
+    }
+}
+
 pub(super) const PLAN_SELECT: &str =
     "SELECT p.id, p.title, p.componentId as component_id, c.name as component_name, \
      p.repoId as repo_id, r.name as repo_name, p.status, p.linkedChangeRequestId as linked_change_request_id, \
      p.confidence, p.risk, p.expectedValue as expected_value, p.agentGenerated as agent_generated, \
-     p.waitingSince as waiting_since, p.createdAt as created_at \
+     p.waitingSince as waiting_since, p.body, p.executionId as execution_id, \
+     COALESCE(p.attempts, 0) as attempts, p.lastError as last_error, p.module, p.createdAt as created_at \
      FROM Plan p LEFT JOIN Component c ON p.componentId = c.id LEFT JOIN Repo r ON p.repoId = r.id";
 use super::rows::*;
 use crate::err_conflict;
@@ -141,11 +163,81 @@ impl super::SqliteBackendStore {
         }
     }
 
-    pub(super) async fn list_plans_db(&self) -> Result<Vec<PlanItem>, ApiError> {
-        let rows = sqlx::query_as::<_, PlanRow>(&format!("{PLAN_SELECT} ORDER BY p.id ASC"))
-            .fetch_all(&self.pool)
-            .await
-            .map_err(query_err)?;
+    pub(super) fn plan_row_to_item(row: PlanRow, exec_ids: Vec<String>) -> PlanItem {
+        PlanItem {
+            id: row.id,
+            title: row.title,
+            component: row.component_name.unwrap_or_default(),
+            repo: row.repo_name.unwrap_or_default(),
+            status: row.status,
+            linked_change_request_id: row.linked_change_request_id,
+            execution_ids: exec_ids,
+            confidence: row.confidence,
+            risk: row.risk,
+            expected_value: row.expected_value,
+            agent_generated: row.agent_generated,
+            waiting_since: row.waiting_since,
+            body: row.body,
+            execution_id: row.execution_id,
+            attempts: row.attempts,
+            last_error: row.last_error,
+            module: row.module,
+            created_at: row.created_at,
+        }
+    }
+
+    pub(super) async fn fetch_plan_item(&self, id: &str) -> Result<PlanItem, ApiError> {
+        let row: Option<PlanRow> =
+            sqlx::query_as::<_, PlanRow>(&format!("{PLAN_SELECT} WHERE p.id = ?"))
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(query_err)?;
+        let row = row.ok_or_else(|| err_not_found("Plan not found"))?;
+        let exec_ids: Vec<IdRow> = sqlx::query_as::<_, IdRow>(
+            "SELECT id FROM ExecutionRecord WHERE planId = ? ORDER BY id ASC",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(query_err)?;
+        Ok(Self::plan_row_to_item(
+            row,
+            exec_ids.into_iter().map(|e| e.id).collect(),
+        ))
+    }
+
+    pub(super) async fn list_plans_db(
+        &self,
+        status: Option<String>,
+        scope: Option<String>,
+        scope_id: Option<String>,
+    ) -> Result<Vec<PlanItem>, ApiError> {
+        let mut conditions: Vec<String> = Vec::new();
+        if status.is_some() {
+            conditions.push("p.status = ?".to_string());
+        }
+        if scope_id.is_some() {
+            let col = match scope.as_deref() {
+                Some("component") => "p.componentId",
+                _ => "p.repoId",
+            };
+            conditions.push(format!("{col} = ?"));
+        }
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", conditions.join(" AND "))
+        };
+        let sql = format!("{PLAN_SELECT}{where_clause} ORDER BY p.createdAt DESC");
+        let mut q = sqlx::query_as::<_, PlanRow>(&sql);
+        if let Some(ref s) = status {
+            q = q.bind(s);
+        }
+        if let Some(ref sid) = scope_id {
+            q = q.bind(sid);
+        }
+        let rows = q.fetch_all(&self.pool).await.map_err(query_err)?;
 
         let mut result = Vec::new();
         for row in rows {
@@ -156,33 +248,117 @@ impl super::SqliteBackendStore {
             .fetch_all(&self.pool)
             .await
             .map_err(query_err)?;
-
-            result.push(PlanItem {
-                id: row.id,
-                title: row.title,
-                component: row.component_name.unwrap_or_default(),
-                repo: row.repo_name.unwrap_or_default(),
-                status: row.status,
-                linked_change_request_id: row.linked_change_request_id,
-                execution_ids: exec_ids.into_iter().map(|e| e.id).collect(),
-                confidence: row.confidence,
-                risk: row.risk,
-                expected_value: row.expected_value,
-                agent_generated: row.agent_generated,
-                waiting_since: row.waiting_since,
-                created_at: row.created_at,
-            });
+            result.push(Self::plan_row_to_item(
+                row,
+                exec_ids.into_iter().map(|e| e.id).collect(),
+            ));
         }
         Ok(result)
     }
 
+    pub(super) async fn create_plan_db(&self, body: CreatePlanBody) -> Result<PlanItem, ApiError> {
+        let now = Self::now_iso();
+        let status = if body.status.is_empty() {
+            "draft".to_string()
+        } else {
+            body.status.clone()
+        };
+        validate_plan_status(&status)?;
+        sqlx::query(
+            "INSERT INTO Plan (
+                id, title, linkedChangeRequestId, body, status,
+                componentId, repoId, module, confidence, risk,
+                expectedValue, expectedDelta,
+                agentGenerated, createdAt, updatedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+        )
+        .bind(&body.id)
+        .bind(&body.title)
+        .bind(&body.linked_change_request_id)
+        .bind(&body.body)
+        .bind(&status)
+        .bind(&body.component_id)
+        .bind(&body.repo_id)
+        .bind(&body.module)
+        .bind(body.confidence)
+        .bind(&body.risk)
+        .bind(&body.expected_value)
+        .bind(&body.expected_delta)
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("UNIQUE") {
+                err_conflict("Plan id already exists")
+            } else {
+                err_internal(&format!("insert Plan error: {e}"))
+            }
+        })?;
+
+        self.fetch_plan_item(&body.id).await
+    }
+
+    pub(super) async fn patch_plan_db(
+        &self,
+        id: &str,
+        body: PatchPlanBody,
+    ) -> Result<PlanItem, ApiError> {
+        if !self.row_exists("Plan", id).await? {
+            return Err(err_not_found("Plan not found"));
+        }
+        let now = Self::now_iso();
+        if let Some(ref s) = body.status {
+            validate_plan_status(s)?;
+            sqlx::query("UPDATE Plan SET status = ?, updatedAt = ? WHERE id = ?")
+                .bind(s)
+                .bind(&now)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("update Plan status: {e}")))?;
+        }
+        if let Some(ref eid) = body.execution_id {
+            sqlx::query("UPDATE Plan SET executionId = ?, updatedAt = ? WHERE id = ?")
+                .bind(eid)
+                .bind(&now)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("update Plan executionId: {e}")))?;
+        }
+        if let Some(attempts) = body.attempts {
+            sqlx::query("UPDATE Plan SET attempts = ?, updatedAt = ? WHERE id = ?")
+                .bind(attempts)
+                .bind(&now)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("update Plan attempts: {e}")))?;
+        }
+        if let Some(ref le) = body.last_error {
+            sqlx::query("UPDATE Plan SET lastError = ?, updatedAt = ? WHERE id = ?")
+                .bind(le)
+                .bind(&now)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("update Plan lastError: {e}")))?;
+        }
+        if let Some(ref b) = body.body {
+            sqlx::query("UPDATE Plan SET body = ?, updatedAt = ? WHERE id = ?")
+                .bind(b)
+                .bind(&now)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("update Plan body: {e}")))?;
+        }
+        self.fetch_plan_item(id).await
+    }
+
     pub(super) async fn get_plan_db(&self, id: &str) -> Result<PlanDetail, ApiError> {
-        let plan = self
-            .list_plans_db()
-            .await?
-            .into_iter()
-            .find(|p| p.id == id)
-            .ok_or_else(|| err_not_found("Plan not found"))?;
+        let plan = self.fetch_plan_item(id).await?;
 
         let delta: Option<ExpectedDeltaRow> = sqlx::query_as::<_, ExpectedDeltaRow>(
             "SELECT expectedDelta as expected_delta FROM Plan WHERE id = ?",

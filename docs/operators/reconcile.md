@@ -2,7 +2,7 @@
 
 > Status: **design** (not yet implemented). See [CONTEXT.md](../../CONTEXT.md)
 > (Reconciliation, Observation, Finding) and
-> [ADR 0005](../adr/0005-grading-is-text-gradient-driven.md).
+> [ADR 0009](../adr/0009-grading-is-text-gradient-driven.md).
 
 Reconciles this run's transient **Observations** into the durable **Finding**
 set: it gives Findings stable identity across non-deterministic grading runs and

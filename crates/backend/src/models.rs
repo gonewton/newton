@@ -270,6 +270,14 @@ pub struct FindingItem {
     pub last_seen_at: String,
     pub depends_on: Vec<String>,
     pub blocks: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked_by_plan_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked_plan_attempts: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked_last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked_change_request_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -316,7 +324,7 @@ pub struct CreateFindingBody {
     pub blocks: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchFindingBody {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -329,10 +337,141 @@ pub struct PatchFindingBody {
     pub risk: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_seen_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked_by_plan_id: Option<String>,
+}
+
+// ── OptimizeRun ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizeRunItem {
+    pub id: String,
+    pub project_id: String,
+    pub scope: String,
+    pub scope_id: String,
+    pub status: String,
+    pub cycle: i64,
+    pub max_cycles: i64,
+    pub graders: Vec<String>,
+    pub latest_grades: serde_json::Value,
+    pub open_findings: i64,
+    pub blocked_findings: i64,
+    pub started_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizeRunDetail {
+    #[serde(flatten)]
+    pub run: OptimizeRunItem,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome_reason: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizeCycleItem {
+    pub id: String,
+    pub run_id: String,
+    pub cycle: i64,
+    pub grades: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grade_min: Option<f64>,
+    pub decision: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub change_request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub develop_status: Option<String>,
+    pub open_findings: i64,
+    pub resolved_this_cycle: i64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizeRunTrajectory {
+    #[serde(flatten)]
+    pub detail: OptimizeRunDetail,
+    pub cycles: Vec<OptimizeCycleItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateOptimizeRunBody {
+    pub id: String,
+    pub project_id: String,
+    #[serde(default = "default_run_scope")]
+    pub scope: String,
+    pub scope_id: String,
+    #[serde(default = "default_max_cycles")]
+    pub max_cycles: i64,
+    #[serde(default)]
+    pub graders: Vec<String>,
+}
+
+fn default_run_scope() -> String {
+    "repo".to_string()
+}
+
+fn default_max_cycles() -> i64 {
+    8
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchOptimizeRunBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cycle: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_grades: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_findings: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked_findings: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome_reason: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateOptimizeCycleBody {
+    pub id: String,
+    pub run_id: String,
+    pub cycle: i64,
+    pub grades: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grade_min: Option<f64>,
+    pub decision: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub change_request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub develop_status: Option<String>,
+    pub open_findings: i64,
+    pub resolved_this_cycle: i64,
 }
 
 fn default_cr_origin() -> String {
     "system".to_string()
+}
+
+fn default_cr_risk() -> String {
+    "medium".to_string()
+}
+
+fn default_plan_status() -> String {
+    "draft".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -351,6 +490,9 @@ pub struct ChangeRequestItem {
     pub repo_id: Option<String>,
     pub status: String,
     pub finding_ids: Vec<String>,
+    pub risk: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -372,6 +514,10 @@ pub struct CreateChangeRequestBody {
     pub repo_id: Option<String>,
     #[serde(default)]
     pub finding_ids: Vec<String>,
+    #[serde(default = "default_cr_risk")]
+    pub risk: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -399,7 +545,55 @@ pub struct PlanItem {
     pub agent_generated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub waiting_since: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
+    pub attempts: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePlanBody {
+    pub id: String,
+    pub title: String,
+    pub linked_change_request_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(default = "default_plan_status")]
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+    pub confidence: i64,
+    pub risk: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_delta: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchPlanBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attempts: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

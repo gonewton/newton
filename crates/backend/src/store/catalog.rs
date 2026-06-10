@@ -1,5 +1,4 @@
 use super::helpers::{query_err, unique_err};
-use super::plan::PLAN_SELECT;
 use super::rows::*;
 use crate::err_conflict;
 use crate::err_internal;
@@ -159,41 +158,6 @@ impl super::SqliteBackendStore {
             }
         }
         Ok(false)
-    }
-
-    pub(super) async fn fetch_plan_item(&self, id: &str) -> Result<PlanItem, ApiError> {
-        let row: Option<PlanRow> =
-            sqlx::query_as::<_, PlanRow>(&format!("{PLAN_SELECT} WHERE p.id = ?"))
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(query_err)?;
-
-        let row = row.ok_or_else(|| err_not_found("Plan not found"))?;
-
-        let exec_ids: Vec<IdRow> = sqlx::query_as::<_, IdRow>(
-            "SELECT id FROM ExecutionRecord WHERE planId = ? ORDER BY id ASC",
-        )
-        .bind(id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(query_err)?;
-
-        Ok(PlanItem {
-            id: row.id,
-            title: row.title,
-            component: row.component_name.unwrap_or_default(),
-            repo: row.repo_name.unwrap_or_default(),
-            status: row.status,
-            linked_change_request_id: row.linked_change_request_id,
-            execution_ids: exec_ids.into_iter().map(|e| e.id).collect(),
-            confidence: row.confidence,
-            risk: row.risk,
-            expected_value: row.expected_value,
-            agent_generated: row.agent_generated,
-            waiting_since: row.waiting_since,
-            created_at: row.created_at,
-        })
     }
 }
 

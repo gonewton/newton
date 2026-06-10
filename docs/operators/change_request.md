@@ -2,7 +2,7 @@
 
 > Status: **design** (not yet implemented). See [CONTEXT.md](../../CONTEXT.md)
 > (Change Request, Finding, Reconciliation) and
-> [ADR 0005](../adr/0005-grading-is-text-gradient-driven.md).
+> [ADR 0009](../adr/0009-grading-is-text-gradient-driven.md).
 
 The loop's **optimizer step**: reads the standing **Findings** (the aggregated
 text-gradient), synthesizes a coherent **Change Request**, and persists it. It is

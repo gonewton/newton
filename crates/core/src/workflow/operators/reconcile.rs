@@ -450,6 +450,7 @@ impl Operator for ReconcileOperator {
                                 expected_value: None,
                                 effort: None,
                                 risk: None,
+                                blocked_by_plan_id: None,
                             },
                         )
                         .await
@@ -471,6 +472,7 @@ impl Operator for ReconcileOperator {
                                 expected_value: None,
                                 effort: None,
                                 risk: None,
+                                blocked_by_plan_id: None,
                             },
                         )
                         .await
@@ -500,6 +502,7 @@ impl Operator for ReconcileOperator {
                             expected_value: None,
                             effort: None,
                             risk: None,
+                            blocked_by_plan_id: None,
                         },
                     )
                     .await
@@ -576,6 +579,7 @@ impl Operator for ReconcileOperator {
                             expected_value: None,
                             effort: None,
                             risk: None,
+                            blocked_by_plan_id: None,
                         },
                     )
                     .await
@@ -603,6 +607,7 @@ impl Operator for ReconcileOperator {
                                 expected_value: None,
                                 effort: None,
                                 risk: None,
+                                blocked_by_plan_id: None,
                             },
                         )
                         .await

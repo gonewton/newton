@@ -1,5 +1,10 @@
 # newton batch
 
+> **DEPRECATED — renamed to `optimize` (ADR 0003).** This file describes the legacy
+> queue-runner behavior, which now lives under `newton optimize`. For the command
+> and the full optimization loop, see **[optimize.md](optimize.md)**. Kept only as a
+> migration aid.
+
 ## Purpose
 
 Headless **queue runner**: for each markdown plan in `.newton/plan/<project_id>/todo/`, copy it into the per-task layout under `project_root/.newton/tasks/<task_id>/` and execute the **configured workflow YAML** the same way as `newton run`, then move the plan to `completed/` or `failed/`.

@@ -1,0 +1,24 @@
+diff --git a/src/widgets/report.py b/src/widgets/report.py
+index 7c9eb43..3ef88e0 100644
+--- a/src/widgets/report.py
++++ b/src/widgets/report.py
+@@ -1,18 +1,6 @@
+ """Reporting utilities."""
+ from __future__ import annotations
+-
+-
+-# ISSUE B: print_table duplicated verbatim from formatting.py — canonical_placement
+-def print_table(items: list[str]) -> None:
+-    """Print items as a simple ASCII table."""
+-    if not items:
+-        print("(empty)")
+-        return
+-    width = max(len(i) for i in items) + 2
+-    print("+" + "-" * width + "+")
+-    for item in items:
+-        print("| " + item.ljust(width - 2) + " |")
+-    print("+" + "-" * width + "+")
++from widgets.formatting import print_table
+ 
+ 
+ def report_summary(items: list[str]) -> str:

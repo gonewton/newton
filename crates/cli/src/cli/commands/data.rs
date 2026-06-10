@@ -53,8 +53,13 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
 
     let resource = args.resource.as_str();
 
-    if (args.run_id.is_some() || args.kpi_id.is_some()) && resource != "grades" {
-        eprintln!("DATA-006: --run-id/--kpi-id are only supported with: resource=grades");
+    if (args.run_id.is_some() || args.kpi_id.is_some())
+        && resource != "grades"
+        && resource != "optimize-cycles"
+    {
+        eprintln!(
+            "DATA-006: --run-id/--kpi-id are only supported with: resource=grades, optimize-cycles"
+        );
         std::process::exit(1);
     }
     if (args.scope.is_some()
@@ -90,9 +95,15 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
         "findings",
         "change-request",
         "change-requests",
+        "plan",
+        "plans",
+        "optimize-run",
+        "optimize-runs",
+        "optimize-cycle",
+        "optimize-cycles",
     ];
     if !valid_resources.contains(&resource) {
-        eprintln!("DATA-003: unknown resource '{resource}'; must be one of: product, products, component, components, repo, repos, module, modules, module-dependency, module-dependencies, kpi, kpis, eval-run, eval-runs, grade, grades, finding, findings, change-request, change-requests");
+        eprintln!("DATA-003: unknown resource '{resource}'; must be one of: product, products, component, components, repo, repos, module, modules, module-dependency, module-dependencies, kpi, kpis, eval-run, eval-runs, grade, grades, finding, findings, change-request, change-requests, plan, plans, optimize-run, optimize-runs, optimize-cycle, optimize-cycles");
         std::process::exit(1);
     }
 
@@ -115,6 +126,9 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
                 | "grades"
                 | "findings"
                 | "change-requests"
+                | "plans"
+                | "optimize-runs"
+                | "optimize-cycles"
         ),
         DataVerb::Post => false,
         DataVerb::Put | DataVerb::Patch | DataVerb::Delete => true,
@@ -535,6 +549,74 @@ async fn dispatch_data(
             let b = parse_body::<newton_backend::PatchChangeRequestBody>(body)?;
             store
                 .patch_change_request(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Get, "plans") => store
+            .list_plans(None, None, None)
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Get, "plan") => store.get_plan(id).await.map_err(api_err).and_then(to_json),
+        (DataVerb::Post, "plan" | "plans") => {
+            let b = parse_body::<newton_backend::CreatePlanBody>(body)?;
+            store
+                .create_plan(b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Patch, "plan" | "plans") => {
+            let b = parse_body::<newton_backend::PatchPlanBody>(body)?;
+            store
+                .patch_plan(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Get, "optimize-runs") => store
+            .list_optimize_runs()
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Get, "optimize-run") => store
+            .get_optimize_run(id)
+            .await
+            .map_err(api_err)
+            .and_then(to_json),
+        (DataVerb::Post, "optimize-run" | "optimize-runs") => {
+            let b = parse_body::<newton_backend::CreateOptimizeRunBody>(body)?;
+            store
+                .create_optimize_run(b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Patch, "optimize-run" | "optimize-runs") => {
+            let b = parse_body::<newton_backend::PatchOptimizeRunBody>(body)?;
+            store
+                .patch_optimize_run(id, b)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Get, "optimize-cycles") => {
+            let run_id = args.run_id.as_deref().unwrap_or(id);
+            store
+                .list_optimize_cycles(run_id)
+                .await
+                .map_err(api_err)
+                .and_then(to_json)
+        }
+        (DataVerb::Get, "optimize-cycle") => {
+            // For single cycle GET we reuse get_optimize_run by run_id + trajectory; use list and filter by id
+            Err("use 'optimize-cycles --run-id <run_id>' to list cycles; single cycle GET not supported".to_string())
+        }
+        (DataVerb::Post, "optimize-cycle" | "optimize-cycles") => {
+            let b = parse_body::<newton_backend::CreateOptimizeCycleBody>(body)?;
+            store
+                .create_optimize_cycle(b)
                 .await
                 .map_err(api_err)
                 .and_then(to_json)

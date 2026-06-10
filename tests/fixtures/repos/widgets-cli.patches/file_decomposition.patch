@@ -1,0 +1,109 @@
+diff --git a/src/widgets/inventory.py b/src/widgets/inventory.py
+index f2a8f0a..1c5a738 100644
+--- a/src/widgets/inventory.py
++++ b/src/widgets/inventory.py
+@@ -1,54 +1,23 @@
+-"""Inventory management — ISSUE A: god-function (file_decomposition)."""
++"""Inventory management."""
+ from __future__ import annotations
+ 
+ _STORE: list[str] = []
+ 
+ 
+-# ISSUE A: process() is a ~120-line god-function mixing validation,
+-# state mutation, logging, and error handling — file_decomposition
+ def process(command: tuple) -> list[str]:
+     """Process an inventory command. Returns current item list."""
+     action = command[0] if command else ""
+ 
+     if action == "add":
+         name = command[1] if len(command) > 1 else ""
+-        if not name:
+-            raise ValueError("add requires a name")
+-        # validation block
+-        if len(name) > 64:
+-            raise ValueError("name too long (max 64 chars)")
+-        if not name.replace("-", "").replace("_", "").isalnum():
+-            raise ValueError("name must be alphanumeric (hyphens/underscores allowed)")
+-        if name in _STORE:
+-            raise ValueError(f"item already exists: {name}")
+-        # normalise
+-        name = name.lower().strip()
+-        if name in _STORE:
+-            raise ValueError(f"normalised item already exists: {name}")
+-        # audit log
+-        _log_action("add", name)
+-        # persistence stub
+-        _persist_add(name)
+-        # state mutation
+-        _STORE.append(name)
+-        # post-add hook stubs
+-        _notify_add(name)
+-        _update_index(name)
+-        # return updated list
++        name = _validate_add(name)
++        _do_add(name)
+         return list(_STORE)
+ 
+     elif action == "remove":
+         name = command[1] if len(command) > 1 else ""
+-        if not name:
+-            raise ValueError("remove requires a name")
+-        name = name.lower().strip()
+-        if name not in _STORE:
+-            raise ValueError(f"item not found: {name}")
+-        _log_action("remove", name)
+-        _persist_remove(name)
+-        _STORE.remove(name)
+-        _notify_remove(name)
+-        _update_index_remove(name)
++        name = _validate_remove(name)
++        _do_remove(name)
+         return list(_STORE)
+ 
+     elif action == "list":
+@@ -62,6 +31,44 @@ def process(command: tuple) -> list[str]:
+         raise ValueError(f"unknown action: {action}")
+ 
+ 
++def _validate_add(name: str) -> str:
++    if not name:
++        raise ValueError("add requires a name")
++    if len(name) > 64:
++        raise ValueError("name too long (max 64 chars)")
++    if not name.replace("-", "").replace("_", "").isalnum():
++        raise ValueError("name must be alphanumeric (hyphens/underscores allowed)")
++    name = name.lower().strip()
++    if name in _STORE:
++        raise ValueError(f"item already exists: {name}")
++    return name
++
++
++def _do_add(name: str) -> None:
++    _log_action("add", name)
++    _persist_add(name)
++    _STORE.append(name)
++    _notify_add(name)
++    _update_index(name)
++
++
++def _validate_remove(name: str) -> str:
++    if not name:
++        raise ValueError("remove requires a name")
++    name = name.lower().strip()
++    if name not in _STORE:
++        raise ValueError(f"item not found: {name}")
++    return name
++
++
++def _do_remove(name: str) -> None:
++    _log_action("remove", name)
++    _persist_remove(name)
++    _STORE.remove(name)
++    _notify_remove(name)
++    _update_index_remove(name)
++
++
+ def _log_action(action: str, name: str) -> None:
+     pass  # stub: would write to audit log
+ 

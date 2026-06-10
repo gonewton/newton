@@ -1,0 +1,6 @@
+# Python build/runtime artifacts generated when the Tier-1 optimize-loop test
+# runs pytest against this fixture — never commit them.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/

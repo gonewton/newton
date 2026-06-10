@@ -30,7 +30,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
     )
 )]
 pub(crate) async fn list_plans(State(state): State<Arc<AppState>>) -> Response {
-    match state.backend.list_plans().await {
+    match state.backend.list_plans(None, None, None).await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }

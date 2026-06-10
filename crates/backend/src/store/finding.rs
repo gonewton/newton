@@ -5,6 +5,26 @@ use crate::err_not_found;
 use crate::models::*;
 use newton_types::ApiError;
 
+const FINDING_STATUSES: &[&str] = &[
+    "awaiting_triage",
+    "triaged",
+    "approved_for_planning",
+    "blocked",
+    "resolved",
+];
+
+fn validate_finding_status(status: &str) -> Result<(), ApiError> {
+    if FINDING_STATUSES.contains(&status) {
+        Ok(())
+    } else {
+        Err(crate::err_validation(&format!(
+            "invalid Finding status '{}'; must be one of: {}",
+            status,
+            FINDING_STATUSES.join(", ")
+        )))
+    }
+}
+
 const FINDING_SELECT: &str =
     "SELECT f.id, f.source, f.origin, f.componentId as component_id, c.name as component_name, \
      f.module, f.repoId as repo_id, r.name as repo_name, f.kpiId as kpi_id, \
@@ -12,16 +32,21 @@ const FINDING_SELECT: &str =
      f.whyItMatters as why_it_matters, f.recommendedAction as recommended_action, \
      f.severity, f.risk, f.confidence, f.evidence, f.expectedValue as expected_value, \
      f.effort, f.status, f.lastSeenAt as last_seen_at, \
-     f.dependsOn as depends_on, f.blocks, f.createdAt as created_at, f.updatedAt as updated_at \
+     f.dependsOn as depends_on, f.blocks, f.blockedByPlanId as blocked_by_plan_id, \
+     p.attempts as blocked_plan_attempts, p.lastError as blocked_last_error, \
+     p.linkedChangeRequestId as blocked_change_request_id, \
+     f.createdAt as created_at, f.updatedAt as updated_at \
      FROM Finding f \
      LEFT JOIN Component c ON f.componentId = c.id \
-     LEFT JOIN Repo r ON f.repoId = r.id";
+     LEFT JOIN Repo r ON f.repoId = r.id \
+     LEFT JOIN Plan p ON f.blockedByPlanId = p.id";
 
-const CR_SELECT: &str =
-    "SELECT cr.id, cr.title, cr.body, cr.origin, cr.author, \
+const CR_SELECT: &str = "SELECT cr.id, cr.title, cr.body, cr.origin, cr.author, \
      cr.componentId as component_id, c.name as component_name, \
      cr.repoId as repo_id, r.name as repo_name, \
-     cr.status, cr.findingIds as finding_ids, cr.createdAt as created_at, cr.updatedAt as updated_at \
+     cr.status, cr.findingIds as finding_ids, \
+     cr.risk, cr.confidence, \
+     cr.createdAt as created_at, cr.updatedAt as updated_at \
      FROM ChangeRequest cr \
      LEFT JOIN Component c ON cr.componentId = c.id \
      LEFT JOIN Repo r ON cr.repoId = r.id";
@@ -60,6 +85,10 @@ fn finding_row_to_item(row: FindingRow) -> FindingItem {
         last_seen_at: row.last_seen_at,
         depends_on,
         blocks,
+        blocked_by_plan_id: row.blocked_by_plan_id,
+        blocked_plan_attempts: row.blocked_plan_attempts,
+        blocked_last_error: row.blocked_last_error,
+        blocked_change_request_id: row.blocked_change_request_id,
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
@@ -81,6 +110,8 @@ fn cr_row_to_item(row: ChangeRequestRow) -> ChangeRequestItem {
         repo_id: row.repo_id,
         status: row.status,
         finding_ids,
+        risk: row.risk,
+        confidence: row.confidence,
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
@@ -151,6 +182,7 @@ impl super::SqliteBackendStore {
         &self,
         body: CreateFindingBody,
     ) -> Result<FindingItem, ApiError> {
+        validate_finding_status(&body.status)?;
         let now = Self::now_iso();
         let last_seen_at = body.last_seen_at.unwrap_or_else(|| now.clone());
         let depends_on_json =
@@ -241,6 +273,7 @@ impl super::SqliteBackendStore {
         let now = Self::now_iso();
 
         if let Some(ref status) = body.status {
+            validate_finding_status(status)?;
             sqlx::query("UPDATE Finding SET status = ?, updatedAt = ? WHERE id = ?")
                 .bind(status)
                 .bind(&now)
@@ -285,7 +318,33 @@ impl super::SqliteBackendStore {
                 .await
                 .map_err(|e| err_internal(&format!("update Finding lastSeenAt error: {e}")))?;
         }
+        if let Some(ref plan_id) = body.blocked_by_plan_id {
+            sqlx::query("UPDATE Finding SET blockedByPlanId = ?, updatedAt = ? WHERE id = ?")
+                .bind(plan_id)
+                .bind(&now)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| err_internal(&format!("update Finding blockedByPlanId error: {e}")))?;
+        }
 
+        self.get_finding_db(id).await
+    }
+
+    pub(super) async fn unblock_finding_db(&self, id: &str) -> Result<FindingItem, ApiError> {
+        let finding = self.get_finding_db(id).await?;
+        if finding.status != "blocked" {
+            return Err(crate::err_conflict("finding is not blocked"));
+        }
+        let now = Self::now_iso();
+        sqlx::query(
+            "UPDATE Finding SET status = 'awaiting_triage', blockedByPlanId = NULL, updatedAt = ? WHERE id = ?",
+        )
+        .bind(&now)
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| err_internal(&format!("unblock Finding error: {e}")))?;
         self.get_finding_db(id).await
     }
 
@@ -334,8 +393,8 @@ impl super::SqliteBackendStore {
         sqlx::query(
             "INSERT INTO ChangeRequest (
                 id, title, body, origin, author, componentId, repoId,
-                status, findingIds, createdAt, updatedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?, ?)
+                status, findingIds, risk, confidence, createdAt, updatedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title       = excluded.title,
                 body        = excluded.body,
@@ -344,6 +403,8 @@ impl super::SqliteBackendStore {
                 componentId = excluded.componentId,
                 repoId      = excluded.repoId,
                 findingIds  = excluded.findingIds,
+                risk        = excluded.risk,
+                confidence  = excluded.confidence,
                 updatedAt   = excluded.updatedAt",
         )
         .bind(&body.id)
@@ -354,6 +415,8 @@ impl super::SqliteBackendStore {
         .bind(&body.component_id)
         .bind(&body.repo_id)
         .bind(&finding_ids_json)
+        .bind(&body.risk)
+        .bind(body.confidence)
         .bind(&now)
         .bind(&now)
         .execute(&self.pool)
@@ -443,6 +506,8 @@ mod finding_tests {
             component_id: None,
             repo_id: None,
             finding_ids: vec![],
+            risk: "medium".to_string(),
+            confidence: None,
         };
         let item = store.create_change_request_db(body).await.unwrap();
         assert_eq!(item.id, "cr-001");

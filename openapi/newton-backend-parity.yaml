@@ -647,6 +647,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /findings/{id}/unblock:
+    post:
+      tags:
+      - findings
+      operationId: unblock_finding
+      parameters:
+      - name: id
+        in: path
+        description: Finding id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Unblocked finding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingItem'
+        '404':
+          description: Finding not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Finding is not blocked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /grades:
     get:
       tags:
@@ -1272,6 +1309,115 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/OperatorDescriptor'
+  /optimize-runs:
+    get:
+      tags:
+      - optimize
+      operationId: list_optimize_runs
+      responses:
+        '200':
+          description: List of optimize runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OptimizeRunItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /optimize-runs/{id}:
+    get:
+      tags:
+      - optimize
+      operationId: get_optimize_run
+      parameters:
+      - name: id
+        in: path
+        description: Optimize run id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Optimize run detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptimizeRunDetail'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /optimize-runs/{id}/cycles:
+    get:
+      tags:
+      - optimize
+      operationId: list_optimize_cycles
+      parameters:
+      - name: id
+        in: path
+        description: Optimize run id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Cycles for run
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OptimizeCycleItem'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /optimize-runs/{id}/trajectory:
+    get:
+      tags:
+      - optimize
+      operationId: get_optimize_run_trajectory
+      parameters:
+      - name: id
+        in: path
+        description: Optimize run id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Run detail with cycles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptimizeRunTrajectory'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /pending-approvals:
     get:
       tags:
@@ -2385,6 +2531,7 @@ components:
       - origin
       - status
       - findingIds
+      - risk
       - createdAt
       - updatedAt
       properties:
@@ -2400,6 +2547,11 @@ components:
           type:
           - string
           - 'null'
+        confidence:
+          type:
+          - number
+          - 'null'
+          format: double
         createdAt:
           type: string
         findingIds:
@@ -2414,6 +2566,8 @@ components:
           type:
           - string
           - 'null'
+        risk:
+          type: string
         status:
           type: string
         title:
@@ -2489,6 +2643,11 @@ components:
           type:
           - string
           - 'null'
+        confidence:
+          type:
+          - number
+          - 'null'
+          format: double
         findingIds:
           type: array
           items:
@@ -2501,6 +2660,8 @@ components:
           type:
           - string
           - 'null'
+        risk:
+          type: string
         title:
           type: string
     CreateComponentBody:
@@ -2926,6 +3087,23 @@ components:
       - createdAt
       - updatedAt
       properties:
+        blockedByPlanId:
+          type:
+          - string
+          - 'null'
+        blockedChangeRequestId:
+          type:
+          - string
+          - 'null'
+        blockedLastError:
+          type:
+          - string
+          - 'null'
+        blockedPlanAttempts:
+          type:
+          - integer
+          - 'null'
+          format: int64
         blocks:
           type: array
           items:
@@ -3295,6 +3473,122 @@ components:
           - string
           - 'null'
         params_schema: {}
+    OptimizeCycleItem:
+      type: object
+      required:
+      - id
+      - runId
+      - cycle
+      - grades
+      - decision
+      - openFindings
+      - resolvedThisCycle
+      - createdAt
+      properties:
+        changeRequestId:
+          type:
+          - string
+          - 'null'
+        createdAt:
+          type: string
+        cycle:
+          type: integer
+          format: int64
+        decision:
+          type: string
+        developStatus:
+          type:
+          - string
+          - 'null'
+        executionId:
+          type:
+          - string
+          - 'null'
+        gradeMin:
+          type:
+          - number
+          - 'null'
+          format: double
+        grades: {}
+        id:
+          type: string
+        openFindings:
+          type: integer
+          format: int64
+        planId:
+          type:
+          - string
+          - 'null'
+        resolvedThisCycle:
+          type: integer
+          format: int64
+        runId:
+          type: string
+    OptimizeRunDetail:
+      allOf:
+      - $ref: '#/components/schemas/OptimizeRunItem'
+      - type: object
+        properties:
+          outcomeReason: {}
+    OptimizeRunItem:
+      type: object
+      required:
+      - id
+      - projectId
+      - scope
+      - scopeId
+      - status
+      - cycle
+      - maxCycles
+      - graders
+      - latestGrades
+      - openFindings
+      - blockedFindings
+      - startedAt
+      - updatedAt
+      properties:
+        blockedFindings:
+          type: integer
+          format: int64
+        cycle:
+          type: integer
+          format: int64
+        graders:
+          type: array
+          items:
+            type: string
+        id:
+          type: string
+        latestGrades: {}
+        maxCycles:
+          type: integer
+          format: int64
+        openFindings:
+          type: integer
+          format: int64
+        projectId:
+          type: string
+        scope:
+          type: string
+        scopeId:
+          type: string
+        startedAt:
+          type: string
+        status:
+          type: string
+        updatedAt:
+          type: string
+    OptimizeRunTrajectory:
+      allOf:
+      - $ref: '#/components/schemas/OptimizeRunDetail'
+      - type: object
+        required:
+        - cycles
+        properties:
+          cycles:
+            type: array
+            items:
+              $ref: '#/components/schemas/OptimizeCycleItem'
     PatchChangeRequestBody:
       type: object
       properties:
@@ -3341,6 +3635,10 @@ components:
     PatchFindingBody:
       type: object
       properties:
+        blockedByPlanId:
+          type:
+          - string
+          - 'null'
         effort:
           type:
           - string
@@ -3517,10 +3815,18 @@ components:
       - confidence
       - risk
       - agentGenerated
+      - attempts
       - createdAt
       properties:
         agentGenerated:
           type: boolean
+        attempts:
+          type: integer
+          format: int64
+        body:
+          type:
+          - string
+          - 'null'
         component:
           type: string
         confidence:
@@ -3528,6 +3834,10 @@ components:
           format: int64
         createdAt:
           type: string
+        executionId:
+          type:
+          - string
+          - 'null'
         executionIds:
           type: array
           items:
@@ -3538,7 +3848,15 @@ components:
           - 'null'
         id:
           type: string
+        lastError:
+          type:
+          - string
+          - 'null'
         linkedChangeRequestId:
+          type:
+          - string
+          - 'null'
+        module:
           type:
           - string
           - 'null'
@@ -3959,6 +4277,8 @@ tags:
   description: Test-only maintenance endpoints
 - name: workflow-files
   description: Workflow definition file CRUD endpoints
+- name: optimize
+  description: Optimization loop run and cycle endpoints
 externalDocs:
   url: ./newton-realtime.asyncapi.yaml
   description: Realtime (WebSocket + SSE) contract — AsyncAPI 3.0
