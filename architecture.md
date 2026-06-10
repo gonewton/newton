@@ -135,23 +135,18 @@ Goal gates, terminal tasks, and explicit completion policy produce deterministic
 
 ## Major subsystems
 
-### Batch runner
+### Optimize driver / optimization loop
 
-Implemented primarily in `crates/cli/src/cli/commands/batch.rs` using `newton_core::core::batch_config` and the workflow executor.
+The `optimize` command (renamed from `batch`, ADR 0003; `crates/cli/src/cli/commands/optimize.rs`) drains the **Plan** queue under `.newton/plan/<project_id>/todo/`, running the configured workflow per Plan.
 
-Flow:
+The **full closed loop** — `grade → reconcile → change-request → plan → develop → re-grade` — is driven by `.newton/scripts/optimize.sh` (interim; the in-process `newton optimize` is spec 073). It composes the grading operators and the board-stripped `grading.yaml`/`planner.yaml`/`develop.yaml` workflows, evaluates break conditions over the **Trajectory**, and mirrors `OptimizeRun`/`OptimizeCycle` state into the store via the local CLI.
 
-1. Discover workspace root (walk up to `.newton/`).
-2. Load `.newton/configs/<project_id>.conf` (`project_root`, `workflow_file`).
-3. Poll `.newton/plan/<project_id>/todo/` for plan markdown files.
-4. Copy plan to `.newton/tasks/<task_id>/input/spec.md`.
-5. Run configured workflow with plan path in trigger payload.
-6. Move plan to `completed/` or `failed/`.
+The durable spine — `Finding → Change Request → Plan → Execution` — lives in the store (ADR 0010). Operators: `GraderCommandOperator` (runs a command-Grader, persists its Assessment), `ReconcileOperator` (Observations → Findings), `ChangeRequestOperator` (Findings → Change Request). A failed Plan quarantines its Findings as `blocked` and the loop continues (ADR 0012).
 
 ### HTTP serve API
 
 - **Router**: `crates/core/src/api/mod.rs` — Axum 0.8, mounted at `/api/v1/`.
-- **Modules**: workflows, streaming (SSE/WebSocket), HIL, operators, dashboard, portfolio, opportunities, plans, catalog, persistence, magic tools (aikit-magictool).
+- **Modules**: workflows, streaming (SSE/WebSocket), HIL, operators, dashboard, portfolio, findings, change-requests, plans, optimize-runs (read-only), catalog, persistence, magic tools (aikit-magictool). (`opportunities` is the legacy alias of `findings`.)
 - **OpenAPI**: generated from utoipa annotations; canonical file at [openapi/newton-backend-parity.yaml](openapi/newton-backend-parity.yaml).
 - **Realtime**: [openapi/newton-realtime.asyncapi.yaml](openapi/newton-realtime.asyncapi.yaml).
 - **Static UI**: optional `--static-ui` serves a built frontend via `tower-http` `ServeDir`.

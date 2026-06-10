@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### feat: close the optimization loop (specs 069/070/071)
+
+Newton now drives an autonomous, GitHub-free **optimization loop**: `grade → reconcile → change-request → plan → develop → merge → re-grade`, over the durable `Finding → Change Request → Plan → Execution` spine in Newton's store (no board).
+
+- **Entities/store**: `Plan` extended (`body`, `executionId`, `attempts`, `lastError`, `module`; status `draft→ready→running→complete|failed`, plus `abandoned`); `Finding` gains a system-set **`blocked`** state; `ChangeRequest` rolls up `risk`/`confidence`. New `OptimizeRun`/`OptimizeCycle` tables (migrations 005/006).
+- **Loop**: board-stripped `grading.yaml`/`planner.yaml`/`develop.yaml`; `.newton/scripts/optimize.sh` driver; six break conditions incl. **failed-Plan quarantine** (`blocked` → `stalled_on_blocked`); multi-grader gates (per-grader target conjunction, regression disjunction); deterministic-grader `K=1` convergence forcing.
+- **Read API (070)**: `GET /api/v1/optimize-runs[/{id}/trajectory|/cycles]`, `POST /api/v1/findings/{id}/unblock` (409-safe), blocked-context inline on findings, new Plan fields on `/plans`. Read-only over HTTP (ADR 0004); run/cycle state mirrored to the store via the local CLI.
+- **Tests**: deterministic Tier-1 loop test on the `widgets-cli` fixture (content-coupled patches, strict oracle asserts, zero-GitHub guard).
+- **Removed**: `flow.yaml` (board flow); the `webhook` and `health` CLI commands (ADR 0004; `health`→`doctor`).
+- **Rename**: `Opportunity` → **`Finding`** (061); `batch` command → **`optimize`** (ADR 0003).
+
+> The earlier `POST /opportunities` ingest below is superseded by the Finding/grading surface above.
+
 ### feat: POST /opportunities — create/upsert opportunity records from external analysis tools (issue #388)
 
 `POST /api/v1/opportunities` accepts a `CreateOpportunityBody` and upserts by `id`, returning the upserted `OpportunityItem` with HTTP 201. Repeated POSTs with the same `id` update all fields except `createdAt` (idempotent ingest). `newton data post opportunity` and `newton data get opportunities` CLI dispatch now works against a local workspace. A companion ingest script `.newton/scripts/ingest-dk-review.sh` supports feeding `dk review --output-format json` findings directly into Newton's opportunity surface.
