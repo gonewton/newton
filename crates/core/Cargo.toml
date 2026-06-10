@@ -201,3 +201,7 @@ path = "tests/workflow_graph/test_schema_export.rs"
 [[test]]
 name = "test_git_operator"
 path = "tests/workflow_graph/test_git_operator.rs"
+
+[[test]]
+name = "test_optimize_loop"
+path = "tests/integration/test_optimize_loop.rs"

@@ -79,6 +79,30 @@ fn severity_rank(s: &str) -> u8 {
     }
 }
 
+fn rollup_risk<'a>(risks: impl Iterator<Item = &'a str>) -> String {
+    let worst = risks.map(severity_rank).min().unwrap_or(2);
+    match worst {
+        0 => "critical".to_string(),
+        1 => "high".to_string(),
+        2 => "medium".to_string(),
+        _ => "low".to_string(),
+    }
+}
+
+fn rollup_confidence(confidences: impl Iterator<Item = f64>) -> Option<f64> {
+    let mut sum = 0.0_f64;
+    let mut count = 0usize;
+    for c in confidences {
+        sum += c;
+        count += 1;
+    }
+    if count == 0 {
+        None
+    } else {
+        Some(sum / count as f64)
+    }
+}
+
 fn is_open_status(status: &str) -> bool {
     matches!(
         status,
@@ -269,6 +293,10 @@ impl Operator for ChangeRequestOperator {
             _ => (None, None),
         };
 
+        // Roll up risk and confidence from the selected Findings.
+        let rolled_risk = rollup_risk(selected.iter().map(|f| f.risk.as_str()));
+        let rolled_confidence = rollup_confidence(selected.iter().filter_map(|f| f.confidence));
+
         self.store
             .create_change_request(CreateChangeRequestBody {
                 id: cr_id.clone(),
@@ -279,6 +307,8 @@ impl Operator for ChangeRequestOperator {
                 component_id: cr_component_id,
                 repo_id: cr_repo_id,
                 finding_ids,
+                risk: rolled_risk,
+                confidence: rolled_confidence,
             })
             .await
             .map_err(|e| {

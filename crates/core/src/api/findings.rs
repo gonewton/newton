@@ -4,7 +4,7 @@ use axum::{
     extract::Json,
     extract::{Path, Query, State},
     response::Response,
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use newton_backend::{CreateFindingBody, PatchFindingBody};
@@ -16,6 +16,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/findings", get(list_findings).post(create_finding))
         .route("/findings/{id}", get(get_finding).patch(patch_finding))
+        .route("/findings/{id}/unblock", post(unblock_finding))
         .with_state(state)
 }
 
@@ -107,4 +108,23 @@ pub(crate) async fn patch_finding(
     Json(body): Json<PatchFindingBody>,
 ) -> Response {
     ok_json(state.backend.patch_finding(&id, body).await)
+}
+
+#[utoipa::path(
+    post,
+    path = "/findings/{id}/unblock",
+    tag = "findings",
+    params(("id" = String, Path, description = "Finding id")),
+    responses(
+        (status = 200, description = "Unblocked finding", body = newton_backend::FindingItem),
+        (status = 404, description = "Finding not found", body = newton_types::ApiError),
+        (status = 409, description = "Finding is not blocked", body = newton_types::ApiError),
+        (status = 500, description = "Internal error", body = newton_types::ApiError)
+    )
+)]
+pub(crate) async fn unblock_finding(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    ok_json(state.backend.unblock_finding(&id).await)
 }

@@ -41,7 +41,7 @@ The `change-request` phase is the loop's *optimizer step*: it reads the standing
 `grade (→ Assessment) → reconcile (→ Findings) → change-request (→ Change Request)
 → plan → implement → grade`.
 (As of this writing the edge is **designed but not yet wired** in code; the
-vocabulary and ADR 0005 describe the target.)
+vocabulary and ADR 0009 describe the target.)
 
 ### Objective
 The project-defined goal the optimization loop drives toward — *what progress
@@ -153,7 +153,18 @@ reconciliation metadata (`fingerprint`, `last_seen_at`). Lifecycle:
 deferred | rejected`, plus **`resolved`** — set *automatically* by
 **Reconciliation** when the issue vanishes (the per-Finding convergence signal),
 firmly distinct from the human `rejected`/`deferred` (Reconciliation never
-resurrects a human-closed Finding; it reopens a `resolved` one if it recurs). A Finding's identity is
+resurrects a human-closed Finding; it reopens a `resolved` one if it recurs) —
+and **`blocked`** — set *automatically* by the loop when the **Plan** implementing
+this Finding **fails** develop after the configured retry budget. A `blocked`
+Finding is **fenced from the work pipeline** (the `change-request` synthesis skips
+it, so it never re-enters Plan/develop) yet stays open and keeps being refreshed
+by Reconciliation (the problem is still in the code); it is **cleared only by a
+human** (un-block to retry, or fix it directly so it auto-`resolved`s). Distinct
+from `deferred`/`rejected` (human-closed) and `resolved` (auto-closed): `blocked`
+means "the loop tried and could not, a human must act." A loop run that reaches
+no-more-actionable-work with `blocked` Findings still open ends in
+**`stalled_on_blocked`** (needs-human), *not* the clean **`converged`** success
+endpoint. A Finding's identity is
 **assigned and maintained by Newton via Reconciliation — never taken from a
 Grader** (Graders are non-deterministic and cannot supply stable ids). Findings
 are the standing text-gradient that the loop synthesizes (Score-prioritized) into
@@ -174,6 +185,18 @@ cannot be matched by equality. Reconciliation is what gives Findings stable
 identity and yields per-Finding resolution tracking, a richer convergence signal
 than the scalar Grade delta.
 
+**Resolution tracking is best-effort, not exact — by design.** With
+non-deterministic graders (different wording each run) and location-less findings
+(no natural key), perfectly accounting for every Finding's open/resolved transition
+is **not achievable in principle**, only approximated. The loop is therefore a
+**fuzzy optimizer** (closer to a genetic/stochastic search than a crisp state
+machine): it tolerates imperfect matching and converges through **re-grading plus
+the break conditions** (a still-present problem is simply re-reported next run and
+re-matched), never relying on exact per-Finding bookkeeping. Mis-matches degrade
+*quality and efficiency* (blurry tracking, an occasional merged/muddled Change
+Request), not *correctness* — the loop does not declare victory while a problem is
+still detectable.
+
 ### Plan
 A unit of queued work a project's optimization loop consumes — the spec for one
 Step. This is the canonical noun; "work item", "task", and "batch item" are
@@ -181,8 +204,26 @@ deprecated synonyms to be removed.
 
 ### Plan queue
 The per-project backlog of Plans and their lifecycle:
-`todo → completed | failed` (with `draft`, `abandoned` as holding states). The
-queue is the only durable state the loop owns between Steps.
+`draft → ready → running → complete | failed`, plus **`abandoned`** as a holding
+state (a human shelved or rejected the Plan, distinct from `failed` which is a
+develop/test failure). `draft` = planner emitted, not yet approved; `ready` =
+approved, queued for develop; `running` = develop executing; `complete` = develop
+succeeded and merged; `failed` = develop/tests failed after retries. The queue is
+the only durable state the loop owns between Steps.
+
+### Trajectory
+The **Optimization loop**'s flight recorder: the ordered, per-cycle record of the
+path a scope takes toward its **Objective** — one entry per cycle capturing that
+cycle's `Grade`(s), `decision` (`propose | none`), the `Plan`/`Execution` it ran,
+`develop` outcome, and open/resolved **Finding** counts. Written by the loop driver
+(as `.newton/optimize/<scope>/trajectory.jsonl`). It has two jobs: the **audit
+trail** ("what did the loop do, and why did it stop?") and the **input to the break
+conditions** — regression, no-progress, max-cycles, and convergence are all judged
+over the Trajectory, never from a single moment. Borrowed from optimization: the
+sequence of states a system traces through its state-space over time.
+_Avoid_: "history"/"log" (too generic — it is the structured per-cycle series the
+break conditions read), confusing it with an **Execution** (one develop run *within*
+a cycle; the Trajectory spans *all* cycles).
 
 ### Driver
 A way to set Steps running over the one execution engine. Newton has exactly
@@ -193,6 +234,18 @@ these drivers, distinguished only by what originates the work:
 
 External HTTP *ingress* (an outside system POSTing to start a Step) is **out of
 scope**: Newton's optimizer is self-driving, not event-driven. See ADR 0004.
+
+### Projection
+A representation of Newton-owned state in an external work surface, such as a
+project board or issue tracker. A Projection may help humans discover or trigger
+work, but it is never the source of truth for the loop. The durable entity remains
+in Newton — for example, a **Change Request** may be projected as an external
+issue, but the issue is not the Change Request, the **Finding**, or the **Plan**.
+External status is a mirror of Newton lifecycle state; in the ideal loop Newton
+drives Projection state changes rather than inferring domain truth from the
+external surface.
+_Avoid_: treating external issue status as the durable Plan queue or using
+"issue" as a synonym for any Newton entity.
 
 ### ailoop (not a Driver)
 Outbound, WebSocket-only human-in-the-loop: mid-Step, Newton reaches *out* to a
@@ -205,6 +258,26 @@ is unrelated.
 The portfolio model is the cross-scope view that *consumes* loop outputs for
 human resourcing decisions. It does not drive any single loop's steps.
 
+### Scope hierarchy (read this first)
+The four scopes nest **Product → Component → Repo → Module**, largest to smallest:
+
+```
+Product        e.g. "Newton"              (business product)
+└─ Component   e.g. "newton-engine"       (team-owned system; a microservice/platform)
+   └─ Repo     e.g. github.com/org/newton (one git repository)
+      └─ Module e.g. crate `newton-core`  (one crate/package inside the repo)
+```
+
+**The ordering is counterintuitive on purpose — guard against it.** A *Component*
+is **larger** than a *Repo* (it can own several), even though "component" colloquially
+sounds like a small part; and a *Module* is **smaller** than a Repo (a Repo holds
+many), even though a Repo may have exactly one. A **Component can contain multiple
+Repos; a Repo can contain multiple Modules.** Graders target a **Repo** by default;
+a **Plan** may narrow to a single **Module** within that Repo (e.g. "refactor crate
+`newton-core`") when work is crate-scoped. When in doubt: Module = the publishable
+unit (a crate/npm package), Repo = the git boundary, Component = the ownership/
+deployment boundary, Product = the business boundary.
+
 ### Product
 The top of the portfolio hierarchy: a business-level product or service that
 groups **Components** under a common ownership boundary.
@@ -212,9 +285,12 @@ _Avoid_: "service", "project".
 
 ### Component
 A bounded technical system owned by one team, belonging to one **Product**;
-roughly a microservice or platform. Carries `owner`, **Criticality**, and
+roughly a microservice or platform. **It is larger than a Repo and may own several
+Repos** — not a part *of* a Repo. Carries `owner`, **Criticality**, and
 **Autonomy**.
-_Avoid_: "service", "domain".
+_Avoid_: "service", "domain"; **and do not read it as a *code* component** (a UI
+widget, a Rust crate, a software sub-module) — those are **Modules**, the smallest
+scope, the opposite end of the hierarchy.
 
 ### Repo
 A git repository belonging to a **Component**, and the scope most Graders target
@@ -222,10 +298,13 @@ directly. Carries quality **Scores** (e.g. qualityScore, coverage, secScore) and
 execution state.
 
 ### Module
-A package or library inside a **Repo** (Rust crate, npm/pip package, gem, jar).
-The lowest-granularity portfolio unit; the unit of reasoning for **Dependency
-mapping**.
-_Avoid_: "package"/"library" except in language-specific contexts.
+A package or library inside a **Repo** (Rust crate, npm/pip package, gem, jar) —
+a **whole publishable unit**, the lowest-granularity portfolio scope and the unit
+of reasoning for **Dependency mapping**. A Repo holds **one or many** Modules.
+_Avoid_: "package"/"library" except in language-specific contexts; **and do not
+read it as a *language-level* module** (a Rust `mod`, a Python `.py` file) — those
+are intra-crate, far below this scope. In Rust terms a Module here is a **crate/
+package**, never a `mod`.
 
 ### Portfolio
 An aggregated view linking a **Product** to its active **Plans** and

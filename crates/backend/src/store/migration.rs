@@ -436,3 +436,156 @@ pub(super) async fn upgrade_legacy_repo_schema(pool: &SqlitePool) -> Result<(), 
 
     Ok(())
 }
+
+pub(super) async fn upgrade_optimize_run(pool: &SqlitePool) -> Result<(), ApiError> {
+    let has_table: bool = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='OptimizeRun'",
+    )
+    .fetch_one(pool)
+    .await
+    .map(|n| n > 0)
+    .unwrap_or(false);
+
+    if !has_table {
+        sqlx::query(
+            "CREATE TABLE OptimizeRun (\
+              id TEXT PRIMARY KEY,\
+              projectId TEXT NOT NULL,\
+              scope TEXT NOT NULL DEFAULT 'repo',\
+              scopeId TEXT NOT NULL,\
+              status TEXT NOT NULL DEFAULT 'running',\
+              cycle INTEGER NOT NULL DEFAULT 0,\
+              maxCycles INTEGER NOT NULL DEFAULT 8,\
+              graders TEXT NOT NULL DEFAULT '[]',\
+              latestGrades TEXT NOT NULL DEFAULT '{}',\
+              openFindings INTEGER NOT NULL DEFAULT 0,\
+              blockedFindings INTEGER NOT NULL DEFAULT 0,\
+              outcomeReason TEXT NULL,\
+              startedAt TEXT NOT NULL,\
+              updatedAt TEXT NOT NULL\
+            )",
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| err_internal(&format!("create OptimizeRun failed: {e}")))?;
+    }
+
+    let has_cycle_table: bool = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='OptimizeCycle'",
+    )
+    .fetch_one(pool)
+    .await
+    .map(|n| n > 0)
+    .unwrap_or(false);
+
+    if !has_cycle_table {
+        sqlx::query(
+            "CREATE TABLE OptimizeCycle (\
+              id TEXT PRIMARY KEY,\
+              runId TEXT NOT NULL,\
+              cycle INTEGER NOT NULL,\
+              grades TEXT NOT NULL DEFAULT '{}',\
+              gradeMin REAL NULL,\
+              decision TEXT NOT NULL DEFAULT 'none',\
+              changeRequestId TEXT NULL,\
+              planId TEXT NULL,\
+              executionId TEXT NULL,\
+              developStatus TEXT NULL,\
+              openFindings INTEGER NOT NULL DEFAULT 0,\
+              resolvedThisCycle INTEGER NOT NULL DEFAULT 0,\
+              createdAt TEXT NOT NULL,\
+              FOREIGN KEY(runId) REFERENCES OptimizeRun(id)\
+            )",
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| err_internal(&format!("create OptimizeCycle failed: {e}")))?;
+    }
+
+    Ok(())
+}
+
+pub(super) async fn upgrade_finding_blocked_by_plan(pool: &SqlitePool) -> Result<(), ApiError> {
+    let has_col: bool = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM pragma_table_info('Finding') WHERE name='blockedByPlanId'",
+    )
+    .fetch_one(pool)
+    .await
+    .map(|n| n > 0)
+    .unwrap_or(false);
+
+    if !has_col {
+        sqlx::query("ALTER TABLE Finding ADD COLUMN blockedByPlanId TEXT NULL")
+            .execute(pool)
+            .await
+            .map_err(|e| err_internal(&format!("add blockedByPlanId column: {e}")))?;
+    }
+    Ok(())
+}
+
+pub(super) async fn upgrade_plan_optimize(pool: &SqlitePool) -> Result<(), ApiError> {
+    #[derive(Debug, FromRow)]
+    struct ColRow {
+        name: String,
+    }
+
+    let plan_cols: Vec<ColRow> = sqlx::query_as::<_, ColRow>("PRAGMA table_info(Plan)")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| err_internal(&format!("schema check Plan failed: {e}")))?;
+
+    let plan_col_names: std::collections::HashSet<String> =
+        plan_cols.into_iter().map(|r| r.name).collect();
+
+    for (col, ddl) in [
+        ("body", "ALTER TABLE Plan ADD COLUMN body TEXT NULL"),
+        (
+            "executionId",
+            "ALTER TABLE Plan ADD COLUMN executionId TEXT NULL",
+        ),
+        (
+            "attempts",
+            "ALTER TABLE Plan ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "lastError",
+            "ALTER TABLE Plan ADD COLUMN lastError TEXT NULL",
+        ),
+        ("module", "ALTER TABLE Plan ADD COLUMN module TEXT NULL"),
+    ] {
+        if !plan_col_names.contains(col) {
+            sqlx::query(ddl)
+                .execute(pool)
+                .await
+                .map_err(|e| err_internal(&format!("add Plan.{col} failed: {e}")))?;
+        }
+    }
+
+    let cr_cols: Vec<ColRow> = sqlx::query_as::<_, ColRow>("PRAGMA table_info(ChangeRequest)")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| err_internal(&format!("schema check ChangeRequest failed: {e}")))?;
+
+    let cr_col_names: std::collections::HashSet<String> =
+        cr_cols.into_iter().map(|r| r.name).collect();
+
+    for (col, ddl) in [
+        (
+            "risk",
+            "ALTER TABLE ChangeRequest ADD COLUMN risk TEXT NOT NULL DEFAULT 'medium'",
+        ),
+        (
+            "confidence",
+            "ALTER TABLE ChangeRequest ADD COLUMN confidence REAL NULL",
+        ),
+    ] {
+        if !cr_col_names.contains(col) {
+            sqlx::query(ddl)
+                .execute(pool)
+                .await
+                .map_err(|e| err_internal(&format!("add ChangeRequest.{col} failed: {e}")))?;
+        }
+    }
+
+    Ok(())
+}

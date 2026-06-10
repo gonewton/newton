@@ -3,6 +3,7 @@ mod eval;
 mod finding;
 mod helpers;
 mod migration;
+mod optimize_run;
 mod plan;
 mod rows;
 mod workflow_runtime;
@@ -66,6 +67,10 @@ impl SqliteBackendStore {
         migration::upgrade_legacy_indicator_schema(&pool).await?;
         migration::upgrade_legacy_component_schema(&pool).await?;
         migration::upgrade_legacy_repo_schema(&pool).await?;
+
+        migration::upgrade_plan_optimize(&pool).await?;
+        migration::upgrade_optimize_run(&pool).await?;
+        migration::upgrade_finding_blocked_by_plan(&pool).await?;
 
         Ok(Self { pool })
     }
@@ -182,17 +187,59 @@ impl BackendStore for SqliteBackendStore {
     ) -> Result<ChangeRequestItem, ApiError> {
         self.patch_change_request_db(id, body).await
     }
-    async fn list_plans(&self) -> Result<Vec<PlanItem>, ApiError> {
-        self.list_plans_db().await
+    async fn list_plans(
+        &self,
+        status: Option<String>,
+        scope: Option<String>,
+        scope_id: Option<String>,
+    ) -> Result<Vec<PlanItem>, ApiError> {
+        self.list_plans_db(status, scope, scope_id).await
     }
     async fn get_plan(&self, id: &str) -> Result<PlanDetail, ApiError> {
         self.get_plan_db(id).await
+    }
+    async fn create_plan(&self, body: CreatePlanBody) -> Result<PlanItem, ApiError> {
+        self.create_plan_db(body).await
+    }
+    async fn patch_plan(&self, id: &str, body: PatchPlanBody) -> Result<PlanItem, ApiError> {
+        self.patch_plan_db(id, body).await
     }
     async fn approve_plan(&self, id: &str) -> Result<ApprovedPlan, ApiError> {
         self.approve_plan_db(id).await
     }
     async fn reject_plan(&self, id: &str) -> Result<PlanItem, ApiError> {
         self.reject_plan_db(id).await
+    }
+    async fn unblock_finding(&self, id: &str) -> Result<FindingItem, ApiError> {
+        self.unblock_finding_db(id).await
+    }
+    async fn list_optimize_runs(&self) -> Result<Vec<OptimizeRunItem>, ApiError> {
+        self.list_optimize_runs_db().await
+    }
+    async fn get_optimize_run(&self, id: &str) -> Result<OptimizeRunDetail, ApiError> {
+        self.get_optimize_run_db(id).await
+    }
+    async fn create_optimize_run(
+        &self,
+        body: CreateOptimizeRunBody,
+    ) -> Result<OptimizeRunItem, ApiError> {
+        self.create_optimize_run_db(body).await
+    }
+    async fn patch_optimize_run(
+        &self,
+        id: &str,
+        body: PatchOptimizeRunBody,
+    ) -> Result<OptimizeRunItem, ApiError> {
+        self.patch_optimize_run_db(id, body).await
+    }
+    async fn create_optimize_cycle(
+        &self,
+        body: CreateOptimizeCycleBody,
+    ) -> Result<OptimizeCycleItem, ApiError> {
+        self.create_optimize_cycle_db(body).await
+    }
+    async fn list_optimize_cycles(&self, run_id: &str) -> Result<Vec<OptimizeCycleItem>, ApiError> {
+        self.list_optimize_cycles_db(run_id).await
     }
     async fn list_executions(
         &self,

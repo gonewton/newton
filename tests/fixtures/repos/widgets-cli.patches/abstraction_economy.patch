@@ -1,0 +1,12 @@
+diff --git a/src/widgets/inventory.py b/src/widgets/inventory.py
+index f2a8f0a..28b8a74 100644
+--- a/src/widgets/inventory.py
++++ b/src/widgets/inventory.py
+@@ -89,7 +89,3 @@ def _update_index(name: str) -> None:
+ def _update_index_remove(name: str) -> None:
+     pass  # stub: would remove from search index
+ 
+-
+-def validate_unused(name: str) -> bool:
+-    # ISSUE C: dead stub — abstraction_economy; never called
+-    return bool(name)

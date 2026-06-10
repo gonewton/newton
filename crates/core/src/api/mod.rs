@@ -6,6 +6,7 @@ pub mod hil;
 pub mod magic_tools;
 pub mod openapi;
 pub mod operators;
+pub mod optimize_run;
 pub mod persistence;
 pub mod plans;
 pub mod portfolio;
@@ -65,6 +66,7 @@ pub fn api_v1_router(state: AppState) -> Router {
         .merge(plans::routes(arc_state.clone()))
         .merge(persistence::routes(arc_state.clone()))
         .merge(catalog::routes(arc_state.clone()))
+        .merge(optimize_run::routes(arc_state.clone()))
         .merge(testing_reset::routes(arc_state.clone()))
         .merge(workflow_files::routes(arc_state.clone()))
         .merge(aikit_magictool::router(magic_tools::build_state()))

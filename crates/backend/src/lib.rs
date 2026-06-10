@@ -100,10 +100,36 @@ pub trait BackendStore: Send + Sync {
         body: PatchChangeRequestBody,
     ) -> Result<ChangeRequestItem, ApiError>;
 
-    async fn list_plans(&self) -> Result<Vec<PlanItem>, ApiError>;
+    async fn list_plans(
+        &self,
+        status: Option<String>,
+        scope: Option<String>,
+        scope_id: Option<String>,
+    ) -> Result<Vec<PlanItem>, ApiError>;
     async fn get_plan(&self, id: &str) -> Result<PlanDetail, ApiError>;
+    async fn create_plan(&self, body: CreatePlanBody) -> Result<PlanItem, ApiError>;
+    async fn patch_plan(&self, id: &str, body: PatchPlanBody) -> Result<PlanItem, ApiError>;
     async fn approve_plan(&self, id: &str) -> Result<ApprovedPlan, ApiError>;
     async fn reject_plan(&self, id: &str) -> Result<PlanItem, ApiError>;
+
+    async fn unblock_finding(&self, id: &str) -> Result<FindingItem, ApiError>;
+
+    async fn list_optimize_runs(&self) -> Result<Vec<OptimizeRunItem>, ApiError>;
+    async fn get_optimize_run(&self, id: &str) -> Result<OptimizeRunDetail, ApiError>;
+    async fn create_optimize_run(
+        &self,
+        body: CreateOptimizeRunBody,
+    ) -> Result<OptimizeRunItem, ApiError>;
+    async fn patch_optimize_run(
+        &self,
+        id: &str,
+        body: PatchOptimizeRunBody,
+    ) -> Result<OptimizeRunItem, ApiError>;
+    async fn create_optimize_cycle(
+        &self,
+        body: CreateOptimizeCycleBody,
+    ) -> Result<OptimizeCycleItem, ApiError>;
+    async fn list_optimize_cycles(&self, run_id: &str) -> Result<Vec<OptimizeCycleItem>, ApiError>;
 
     async fn list_executions(
         &self,

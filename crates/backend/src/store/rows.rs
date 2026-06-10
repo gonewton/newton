@@ -252,6 +252,10 @@ pub(super) struct FindingRow {
     pub last_seen_at: String,
     pub depends_on: Option<String>,
     pub blocks: Option<String>,
+    pub blocked_by_plan_id: Option<String>,
+    pub blocked_plan_attempts: Option<i64>,
+    pub blocked_last_error: Option<String>,
+    pub blocked_change_request_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -270,6 +274,8 @@ pub(super) struct ChangeRequestRow {
     pub repo_name: Option<String>,
     pub status: String,
     pub finding_ids: Option<String>,
+    pub risk: String,
+    pub confidence: Option<f64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -289,6 +295,11 @@ pub(super) struct PlanRow {
     pub expected_value: Option<String>,
     pub agent_generated: bool,
     pub waiting_since: Option<String>,
+    pub body: Option<String>,
+    pub execution_id: Option<String>,
+    pub attempts: i64,
+    pub last_error: Option<String>,
+    pub module: Option<String>,
     pub created_at: String,
 }
 
@@ -443,4 +454,39 @@ pub(super) struct WorkflowLogRow {
 pub(super) struct InstanceIdRow {
     #[sqlx(rename = "instanceId")]
     pub instance_id: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct OptimizeRunRow {
+    pub id: String,
+    pub project_id: String,
+    pub scope: String,
+    pub scope_id: String,
+    pub status: String,
+    pub cycle: i64,
+    pub max_cycles: i64,
+    pub graders: String,
+    pub latest_grades: String,
+    pub open_findings: i64,
+    pub blocked_findings: i64,
+    pub outcome_reason: Option<String>,
+    pub started_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct OptimizeCycleRow {
+    pub id: String,
+    pub run_id: String,
+    pub cycle: i64,
+    pub grades: String,
+    pub grade_min: Option<f64>,
+    pub decision: String,
+    pub change_request_id: Option<String>,
+    pub plan_id: Option<String>,
+    pub execution_id: Option<String>,
+    pub develop_status: Option<String>,
+    pub open_findings: i64,
+    pub resolved_this_cycle: i64,
+    pub created_at: String,
 }
