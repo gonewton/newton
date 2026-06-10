@@ -1,5 +1,26 @@
 use super::helpers::{query_err, tx_err};
 
+const PLAN_STATUSES: &[&str] = &[
+    "draft",
+    "ready",
+    "running",
+    "complete",
+    "failed",
+    "abandoned",
+];
+
+fn validate_plan_status(status: &str) -> Result<(), newton_types::ApiError> {
+    if PLAN_STATUSES.contains(&status) {
+        Ok(())
+    } else {
+        Err(crate::err_validation(&format!(
+            "invalid Plan status '{}'; must be one of: {}",
+            status,
+            PLAN_STATUSES.join(", ")
+        )))
+    }
+}
+
 pub(super) const PLAN_SELECT: &str =
     "SELECT p.id, p.title, p.componentId as component_id, c.name as component_name, \
      p.repoId as repo_id, r.name as repo_name, p.status, p.linkedChangeRequestId as linked_change_request_id, \
@@ -242,6 +263,7 @@ impl super::SqliteBackendStore {
         } else {
             body.status.clone()
         };
+        validate_plan_status(&status)?;
         sqlx::query(
             "INSERT INTO Plan (
                 id, title, linkedChangeRequestId, body, status,
@@ -287,6 +309,7 @@ impl super::SqliteBackendStore {
         }
         let now = Self::now_iso();
         if let Some(ref s) = body.status {
+            validate_plan_status(s)?;
             sqlx::query("UPDATE Plan SET status = ?, updatedAt = ? WHERE id = ?")
                 .bind(s)
                 .bind(&now)

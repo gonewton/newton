@@ -57,6 +57,9 @@ GRADERS="${optimize_graders:-}"
 MAX_FAILED_ATTEMPTS="${optimize_max_failed_attempts:-2}"
 REGRESSION_TOLERANCE="${optimize_regression_tolerance:-3}"
 
+GRADERS_LIST=()
+read -ra GRADERS_LIST <<< "$GRADERS"
+
 if [ -z "$REPO_ID" ]; then
   echo "optimize_repo_id must be set in $CONF" >&2
   exit 1
@@ -71,6 +74,22 @@ newton() { command newton --workspace "$WORKSPACE" "$@"; }
 
 log() { echo "[optimize] $*" >&2; }
 traj_append() { echo "$1" >> "$TRAJ"; }
+
+# ── Deterministic-grader K=1 forcing (§13.7) ──────────────────────────────────
+# If ALL active graders are marked deterministic in the conf, force CONVERGE_ROUNDS=1.
+# A deterministic grader's second identical round proves nothing.
+_all_deterministic=true
+for _g in "${GRADERS_LIST[@]:-}"; do
+  _det_var="optimize_grader_deterministic_${_g}"
+  if [ "${!_det_var:-false}" != "true" ]; then
+    _all_deterministic=false
+    break
+  fi
+done
+if [ "$_all_deterministic" = "true" ] && [ "${#GRADERS_LIST[@]}" -gt 0 ]; then
+  CONVERGE_ROUNDS=1
+  log "All graders are deterministic — forcing CONVERGE_ROUNDS=1 (§13.7)"
+fi
 
 # ── Helper: read trajectory into arrays ──────────────────────────────────────
 traj_grades() {
@@ -254,9 +273,6 @@ trap _on_exit EXIT
 CYCLE=0
 log "Starting optimize loop for project=${PROJECT_ID} repo=${REPO_ID} graders=${GRADERS}"
 log "max_cycles=${MAX_CYCLES} converge_rounds=${CONVERGE_ROUNDS} delivery=${DELIVERY} auto_approve=${AUTO_APPROVE}"
-
-GRADERS_LIST=()
-read -ra GRADERS_LIST <<< "$GRADERS"
 
 # ── Create OptimizeRun record ────────────────────────────────────────────────
 GRADERS_JSON=$(python3 -c "import json,sys; print(json.dumps(sys.argv[1:]))" "${GRADERS_LIST[@]}")

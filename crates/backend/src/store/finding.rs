@@ -5,6 +5,26 @@ use crate::err_not_found;
 use crate::models::*;
 use newton_types::ApiError;
 
+const FINDING_STATUSES: &[&str] = &[
+    "awaiting_triage",
+    "triaged",
+    "approved_for_planning",
+    "blocked",
+    "resolved",
+];
+
+fn validate_finding_status(status: &str) -> Result<(), ApiError> {
+    if FINDING_STATUSES.contains(&status) {
+        Ok(())
+    } else {
+        Err(crate::err_validation(&format!(
+            "invalid Finding status '{}'; must be one of: {}",
+            status,
+            FINDING_STATUSES.join(", ")
+        )))
+    }
+}
+
 const FINDING_SELECT: &str =
     "SELECT f.id, f.source, f.origin, f.componentId as component_id, c.name as component_name, \
      f.module, f.repoId as repo_id, r.name as repo_name, f.kpiId as kpi_id, \
@@ -162,6 +182,7 @@ impl super::SqliteBackendStore {
         &self,
         body: CreateFindingBody,
     ) -> Result<FindingItem, ApiError> {
+        validate_finding_status(&body.status)?;
         let now = Self::now_iso();
         let last_seen_at = body.last_seen_at.unwrap_or_else(|| now.clone());
         let depends_on_json =
@@ -252,6 +273,7 @@ impl super::SqliteBackendStore {
         let now = Self::now_iso();
 
         if let Some(ref status) = body.status {
+            validate_finding_status(status)?;
             sqlx::query("UPDATE Finding SET status = ?, updatedAt = ? WHERE id = ?")
                 .bind(status)
                 .bind(&now)

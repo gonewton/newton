@@ -47,8 +47,25 @@ fn patches_dir() -> PathBuf {
     workspace_root().join("tests/fixtures/repos/widgets-cli.patches")
 }
 
+fn shim_path_with_failing_gh(shim_dir: &std::path::Path) -> String {
+    // Write a fake `gh` script that exits 1 with a clear error.
+    let gh_shim = shim_dir.join("gh");
+    std::fs::write(
+        &gh_shim,
+        "#!/bin/sh\necho 'gh invoked — zero-GitHub guard triggered' >&2\nexit 1\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&gh_shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let orig = std::env::var("PATH").unwrap_or_default();
+    format!("{}:{}", shim_dir.display(), orig)
+}
+
 /// Copy the fixture directory to a temp location and init a git repo.
-fn setup_repo(tmp: &Path) {
+fn setup_repo(tmp: &Path, env_path: &str) {
     let src = fixture_dir();
     copy_dir_all(&src, tmp).expect("copy fixture");
 
@@ -61,6 +78,7 @@ fn setup_repo(tmp: &Path) {
             .env("GIT_COMMITTER_NAME", "Test")
             .env("GIT_COMMITTER_EMAIL", "test@test.test")
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("PATH", env_path)
             .status()
             .expect("git");
         assert!(status.success(), "git {:?} failed", args);
@@ -128,12 +146,13 @@ async fn seed_repo_id(store: &SqliteBackendStore) -> String {
 }
 
 /// Run the seed grader and return the Assessment as a JSON value.
-fn run_seed_grader(repo_id: &str, repo_path: &Path) -> serde_json::Value {
+fn run_seed_grader(repo_id: &str, repo_path: &Path, env_path: &str) -> serde_json::Value {
     let script = grader_script();
     let out = Command::new("bash")
         .arg(script)
         .arg(repo_id)
         .arg(repo_path)
+        .env("PATH", env_path)
         .output()
         .expect("seed-grader.sh");
     assert!(
@@ -145,29 +164,31 @@ fn run_seed_grader(repo_id: &str, repo_path: &Path) -> serde_json::Value {
 }
 
 /// Run pytest in the repo dir; returns true if all tests passed.
-fn run_pytest(repo_path: &Path) -> bool {
+fn run_pytest(repo_path: &Path, env_path: &str) -> bool {
     Command::new("python3")
         .args(["-m", "pytest", "-q", "--tb=short"])
         .current_dir(repo_path)
         .env("PYTHONPATH", repo_path.join("src"))
+        .env("PATH", env_path)
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
 }
 
 /// Apply a patch file with `git apply`. Returns true on success.
-fn apply_patch(repo_path: &Path, patch_file: &Path) -> bool {
+fn apply_patch(repo_path: &Path, patch_file: &Path, env_path: &str) -> bool {
     Command::new("git")
         .args(["apply", patch_file.to_str().unwrap()])
         .current_dir(repo_path)
         .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("PATH", env_path)
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
 }
 
 /// Commit everything staged in the repo.
-fn git_commit(repo_path: &Path, message: &str) {
+fn git_commit(repo_path: &Path, message: &str, env_path: &str) {
     let git = |args: &[&str]| {
         let status = Command::new("git")
             .args(args)
@@ -177,6 +198,7 @@ fn git_commit(repo_path: &Path, message: &str) {
             .env("GIT_COMMITTER_NAME", "Test")
             .env("GIT_COMMITTER_EMAIL", "test@test.test")
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("PATH", env_path)
             .status()
             .expect("git");
         assert!(status.success(), "git {:?} failed", args);
@@ -192,6 +214,7 @@ struct CycleRecord {
     cycle: usize,
     score: f64,
     open_findings: usize,
+    resolved_count: usize,
     decision: String,
     targeted_dimension: Option<String>,
     resolved_dimension: Option<String>,
@@ -205,7 +228,9 @@ async fn test_optimize_loop_tier1_deterministic() {
     // ── Setup ────────────────────────────────────────────────────────────────
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo_path = tmp.path().to_path_buf();
-    setup_repo(&repo_path);
+    let shim_dir = tempfile::tempdir().expect("shim_dir");
+    let env_path = shim_path_with_failing_gh(shim_dir.path());
+    setup_repo(&repo_path, &env_path);
 
     let store = Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
 
@@ -224,7 +249,7 @@ async fn test_optimize_loop_tier1_deterministic() {
 
     for cycle in 1..=MAX_CYCLES {
         // ── Grade ─────────────────────────────────────────────────────────
-        let assessment = run_seed_grader(&repo_id, &repo_path);
+        let assessment = run_seed_grader(&repo_id, &repo_path, &env_path);
         let score = assessment["overall_score"].as_f64().unwrap_or(0.0);
         let observations: Vec<serde_json::Value> = assessment["observations"]
             .as_array()
@@ -279,16 +304,6 @@ async fn test_optimize_loop_tier1_deterministic() {
             .await
             .unwrap();
 
-        let open_count = all_findings
-            .iter()
-            .filter(|f| {
-                matches!(
-                    f.status.as_str(),
-                    "awaiting_triage" | "triaged" | "approved_for_planning"
-                )
-            })
-            .count();
-
         // Resolve findings no longer observed (dimension no longer reported)
         for f in &all_findings {
             if !open_dims.contains(&f.dimension)
@@ -308,6 +323,14 @@ async fn test_optimize_loop_tier1_deterministic() {
                     .await;
             }
         }
+
+        let resolved_count = {
+            let all = store
+                .list_findings(None, Some("repo".to_string()), Some(repo_id.clone()))
+                .await
+                .unwrap();
+            all.iter().filter(|f| f.status == "resolved").count()
+        };
 
         // ── Change Request synthesis ──────────────────────────────────────
         // Re-fetch after resolution so we see the updated statuses.
@@ -332,6 +355,7 @@ async fn test_optimize_loop_tier1_deterministic() {
                 cycle,
                 score,
                 open_findings: 0,
+                resolved_count,
                 decision: "none".to_string(),
                 targeted_dimension: None,
                 resolved_dimension: None,
@@ -383,7 +407,7 @@ async fn test_optimize_loop_tier1_deterministic() {
         // ── Deterministic develop: apply dimension-matched patch ───────────
         let patch_file = patches_dir().join(format!("{}.patch", target_dim));
         let patch_applied = if patch_file.exists() {
-            apply_patch(&repo_path, &patch_file)
+            apply_patch(&repo_path, &patch_file, &env_path)
         } else {
             false
         };
@@ -395,7 +419,7 @@ async fn test_optimize_loop_tier1_deterministic() {
         );
 
         // pytest gate: must pass after the patch
-        let pytest_ok = run_pytest(&repo_path);
+        let pytest_ok = run_pytest(&repo_path, &env_path);
         assert!(
             pytest_ok,
             "cycle {cycle}: pytest failed after applying '{target_dim}' patch — behaviour regression"
@@ -404,6 +428,7 @@ async fn test_optimize_loop_tier1_deterministic() {
         git_commit(
             &repo_path,
             &format!("fix({target_dim}): apply deterministic patch"),
+            &env_path,
         );
 
         // Mark Plan complete
@@ -419,7 +444,7 @@ async fn test_optimize_loop_tier1_deterministic() {
 
         // Content-coupling: re-grade to see which dimension actually resolved.
         // A "fixed the wrong thing" regression would leave target_dim still present.
-        let post_patch_assessment = run_seed_grader(&repo_id, &repo_path);
+        let post_patch_assessment = run_seed_grader(&repo_id, &repo_path, &env_path);
         let post_patch_dims: std::collections::HashSet<String> = post_patch_assessment
             ["observations"]
             .as_array()
@@ -437,7 +462,8 @@ async fn test_optimize_loop_tier1_deterministic() {
         trajectory.push(CycleRecord {
             cycle,
             score,
-            open_findings: open_count,
+            open_findings: open_findings.len(),
+            resolved_count,
             decision: "propose".to_string(),
             targeted_dimension: Some(target_dim),
             resolved_dimension,
@@ -452,7 +478,7 @@ async fn test_optimize_loop_tier1_deterministic() {
     // Last cycle must have converged (decision=none) or we ran out of issues
     let last = trajectory.last().unwrap();
     let final_score = {
-        let assessment = run_seed_grader(&repo_id, &repo_path);
+        let assessment = run_seed_grader(&repo_id, &repo_path, &env_path);
         assessment["overall_score"].as_f64().unwrap_or(0.0)
     };
     assert!(
@@ -468,8 +494,8 @@ async fn test_optimize_loop_tier1_deterministic() {
     for window in propose_cycles.windows(2) {
         let (a, b) = (window[0], window[1]);
         assert!(
-            b.score >= a.score,
-            "score regression: cycle {} score={} → cycle {} score={}",
+            b.score > a.score,
+            "score did not strictly increase: cycle {} score={} → cycle {} score={}",
             a.cycle,
             a.score,
             b.cycle,
@@ -485,12 +511,29 @@ async fn test_optimize_loop_tier1_deterministic() {
     for window in propose_with_open.windows(2) {
         let (a, b) = (window[0], window[1]);
         assert!(
-            b.open_findings <= a.open_findings,
-            "open findings increased: cycle {} had {} → cycle {} had {}",
+            b.open_findings < a.open_findings,
+            "open findings did not strictly decrease: cycle {} had {} → cycle {} had {}",
             a.cycle,
             a.open_findings,
             b.cycle,
             b.open_findings
+        );
+    }
+
+    // resolved_count must strictly increase across propose cycles
+    let propose_resolved: Vec<&CycleRecord> = trajectory
+        .iter()
+        .filter(|r| r.decision == "propose")
+        .collect();
+    for window in propose_resolved.windows(2) {
+        let (a, b) = (window[0], window[1]);
+        assert!(
+            b.resolved_count > a.resolved_count,
+            "resolved count did not strictly increase: cycle {} had {} → cycle {} had {}",
+            a.cycle,
+            a.resolved_count,
+            b.cycle,
+            b.resolved_count
         );
     }
 
