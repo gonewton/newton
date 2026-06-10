@@ -55,6 +55,14 @@ jobs:
        - name: Build
          run: cargo build --workspace --release
 
+       - name: Set up Python (optimize-loop fixture test)
+         uses: actions/setup-python@v5
+         with:
+           python-version: '3.12'
+
+       - name: Install pytest
+         run: python3 -m pip install pytest
+
        - name: Run tests
          run: cargo test --workspace --all-features
 
@@ -208,6 +216,14 @@ jobs:
 
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked
+
+      - name: Set up Python (optimize-loop fixture test)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pytest
+        run: python3 -m pip install pytest
 
       - name: Run workflow-graph coverage
         run: |
