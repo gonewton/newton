@@ -91,7 +91,7 @@ workflow:
           mkdir -p .newton/plan tmp
           if [ -n "$PLAN_ID" ]; then
             OUT="tmp/plan-${PLAN_ID}.md"
-            newton --workspace "${WORKSPACE:-.}" data get plan "$PLAN_ID" \
+            newton data get plan "$PLAN_ID" --workspace "${WORKSPACE:-.}" \
               | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('body',''))" > "$OUT"
             BRANCH="feature/plan-${PLAN_ID}"
           elif [ -n "$RAW_SPEC" ] && [ -f "$RAW_SPEC" ]; then
@@ -427,7 +427,7 @@ workflow:
           echo "local_merge: merged $BRANCH into main"
           # Update Plan status to complete
           if [ -n "$PLAN_ID" ]; then
-            newton --workspace "${WORKSPACE:-.}" data patch plan "$PLAN_ID" \
+            newton data patch plan "$PLAN_ID" --workspace "${WORKSPACE:-.}" \
               --body '{"status":"complete"}' || true
           fi
       transitions:
@@ -540,7 +540,7 @@ workflow:
             $expr: 'triggers.workspace'
         cmd: |
           if [ -n "$PLAN_ID" ]; then
-            newton --workspace "${WORKSPACE:-.}" data patch plan "$PLAN_ID" \
+            newton data patch plan "$PLAN_ID" --workspace "${WORKSPACE:-.}" \
               --body '{"status":"complete"}' || true
           fi
       transitions:

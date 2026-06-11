@@ -71,7 +71,7 @@ workflow:
             $expr: 'triggers.workspace'
         cmd: |
           set -eo pipefail
-          newton --workspace "${WORKSPACE:-.}" data get change-request "$CR_ID"
+          newton data get change-request "$CR_ID" --workspace "${WORKSPACE:-.}"
       transitions:
         - to: build_spec_prompt
 
@@ -150,7 +150,7 @@ workflow:
             $expr: 'triggers.workspace'
         cmd: |
           set -eo pipefail
-          newton --workspace "${WORKSPACE:-.}" data get change-request "$CR_ID"
+          newton data get change-request "$CR_ID" --workspace "${WORKSPACE:-.}"
       transitions:
         - to: write_plan
 
@@ -197,7 +197,7 @@ workflow:
           print(json.dumps(d))
           ")
 
-          echo "$PAYLOAD" | newton --workspace "${WORKSPACE:-.}" data post plan --file -
+          echo "$PAYLOAD" | newton data post plan --file - --workspace "${WORKSPACE:-.}"
           echo "$PLAN_ID"
       transitions:
         - to: done
