@@ -257,6 +257,7 @@ run_develop() {
   local plan_id="$1"
   newton workflow run "${WORKSPACE}/.newton/workflows/develop.yaml" \
     --trigger "plan_id=${plan_id}" \
+    --trigger "workspace=${WORKSPACE}" \
     --trigger "delivery=${DELIVERY}" \
     --trigger "test_cmd=${TEST_CMD}"
 }
