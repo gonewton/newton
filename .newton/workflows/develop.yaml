@@ -9,6 +9,7 @@ triggers:
   payload:
     plan_id: ''
     raw_spec_path: ''
+    workspace: ''
     delivery: 'local'
     test_cmd: './scripts/run-tests.sh'
     skip_gh_pr_approve: 'true'
@@ -549,7 +550,7 @@ workflow:
       operator: CommandOperator
       params:
         shell: true
-        cmd: echo "develop: completed plan ${PLAN_ID}"
+        cmd: 'echo "develop: completed plan ${PLAN_ID}"'
         capture_stdout: false
         env:
           PLAN_ID:
