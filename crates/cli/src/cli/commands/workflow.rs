@@ -101,7 +101,7 @@ async fn execute_run_command(args: &RunArgs) -> StdResult<(), AppError> {
         newton_core::integrations::ailoop::init_context_for_command_name(&workspace, "run")
             .ok()
             .flatten();
-    let registry = super::build_operator_registry(workspace.clone(), &settings, ailoop_ctx);
+    let registry = super::build_operator_registry(workspace.clone(), &settings, ailoop_ctx).await;
 
     let summary_result = workflow_executor::execute_workflow(
         document,
@@ -322,7 +322,7 @@ pub async fn resume(args: ResumeArgs) -> StdResult<(), AppError> {
     let execution =
         checkpoint::load_execution_from_base(&state_checkpoints_dir(&state_dir), &args.run_id)?;
     let settings = execution.settings_effective.clone();
-    let registry = super::build_operator_registry(workspace.clone(), &settings, None);
+    let registry = super::build_operator_registry(workspace.clone(), &settings, None).await;
     let summary = workflow_executor::resume_workflow(
         registry,
         workspace.clone(),

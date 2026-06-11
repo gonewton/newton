@@ -84,7 +84,7 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     info!("Starting Newton API server on {}: {}", args.host, args.port);
 
     let serve_settings: workflow_schema::WorkflowSettings = Default::default();
-    let registry = super::build_operator_registry(PathBuf::from("."), &serve_settings, None);
+    let registry = super::build_operator_registry(PathBuf::from("."), &serve_settings, None).await;
 
     let operator_names = registry.operator_names();
     let operator_descriptors: Vec<newton_types::OperatorDescriptor> = operator_names

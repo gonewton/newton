@@ -153,7 +153,7 @@ async fn execute_workflow_for_plan(
         newton_core::integrations::ailoop::init_context_for_command_name(&workspace, "optimize")
             .ok()
             .flatten();
-    let registry = super::build_operator_registry(workspace.clone(), &settings, ailoop_ctx);
+    let registry = super::build_operator_registry(workspace.clone(), &settings, ailoop_ctx).await;
 
     let previous_state_dir = env::var_os("NEWTON_STATE_DIR");
     env::set_var("NEWTON_STATE_DIR", &task_layout.state_dir);
