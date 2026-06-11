@@ -56,6 +56,8 @@ GRADERS="${optimize_graders:-}"
 : "${AUTO_APPROVE:=${optimize_auto_approve:-false}}"
 MAX_FAILED_ATTEMPTS="${optimize_max_failed_attempts:-2}"
 REGRESSION_TOLERANCE="${optimize_regression_tolerance:-3}"
+DEVELOP_ENGINE="${optimize_develop_engine:-${develop_primary_engine:-codex}}"
+DEVELOP_MODEL="${optimize_develop_model:-${develop_primary_model:-}}"
 
 # Operate from the workspace so `newton data` / `newton workflow run` resolve it
 # via cwd discovery (most data calls below do not pass --workspace explicitly).
@@ -235,7 +237,10 @@ approve_cr() {
 run_planner() {
   local cr_id="$1"
   newton workflow run "${WORKSPACE}/.newton/workflows/planner.yaml" \
-    --trigger "change_request_id=${cr_id}" >&2 || true
+    --trigger "change_request_id=${cr_id}" \
+    --trigger "workspace=${WORKSPACE}" \
+    --trigger "develop_primary_engine=${DEVELOP_ENGINE}" \
+    --trigger "develop_primary_model=${DEVELOP_MODEL}" >&2 || true
   # Read the Plan the planner wrote for this CR from the store.
   newton data get plans 2>/dev/null \
     | CR="$cr_id" python3 -c "
