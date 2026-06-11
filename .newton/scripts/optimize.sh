@@ -57,6 +57,10 @@ GRADERS="${optimize_graders:-}"
 MAX_FAILED_ATTEMPTS="${optimize_max_failed_attempts:-2}"
 REGRESSION_TOLERANCE="${optimize_regression_tolerance:-3}"
 
+# Operate from the workspace so `newton data` / `newton workflow run` resolve it
+# via cwd discovery (most data calls below do not pass --workspace explicitly).
+cd "${WORKSPACE}" || { echo "workspace not found: ${WORKSPACE}" >&2; exit 1; }
+
 GRADERS_LIST=()
 read -ra GRADERS_LIST <<< "$GRADERS"
 
@@ -70,7 +74,6 @@ TRAJ_DIR="${WORKSPACE}/.newton/optimize/${PROJECT_ID}"
 mkdir -p "$TRAJ_DIR"
 TRAJ="${TRAJ_DIR}/trajectory.jsonl"
 
-newton() { command newton --workspace "$WORKSPACE" "$@"; }
 
 log() { echo "[optimize] $*" >&2; }
 traj_append() { echo "$1" >> "$TRAJ"; }
@@ -136,12 +139,12 @@ PY
 traj_blocked_count() {
   # Count Findings with status=blocked for this repo
   newton data get findings 2>/dev/null \
-    | python3 -c "
+    | REPO_ID="$REPO_ID" python3 -c "
 import sys, json, os
 repo_id = os.environ.get('REPO_ID','')
 data = json.load(sys.stdin)
 blocked = [f for f in data if f.get('status') == 'blocked' and (not repo_id or f.get('repoId') == repo_id)]
-print(len(blocked))" REPO_ID="$REPO_ID" 2>/dev/null || echo 0
+print(len(blocked))" 2>/dev/null || echo 0
 }
 
 traj_prev_grade() {
@@ -190,12 +193,25 @@ run_grading() {
     return
   fi
   local grader_cmd="${grader_script} ${scope_id} ${REPO_PATH}"
-  newton run "${WORKSPACE}/.newton/workflows/grading.yaml" \
-    --arg "grader=${grader}" \
-    --arg "grader_cmd=${grader_cmd}" \
-    --arg "scope=${scope}" \
-    --arg "scope_id=${scope_id}" \
-    2>&1 | tee /dev/stderr | grep -E "^PROPOSED |^CONVERGED" | head -1 || echo "none"
+  # grade → reconcile → change-request. Workflow output is logged to stderr; the
+  # decision + CR id are read from the store, because the terminal echo
+  # ("PROPOSED <id>") uses capture_stdout:false and does not reliably reach the
+  # CLI's stdout.
+  newton workflow run "${WORKSPACE}/.newton/workflows/grading.yaml" \
+    --trigger "grader=${grader}" \
+    --trigger "grader_cmd=${grader_cmd}" \
+    --trigger "scope=${scope}" \
+    --trigger "scope_id=${scope_id}" >&2 || true
+  local cr_id
+  cr_id=$(newton data get change-requests 2>/dev/null \
+    | RID="$scope_id" python3 -c "
+import sys, json, os
+data = json.load(sys.stdin)
+rid = os.environ.get('RID','')
+props = sorted((c for c in data if c.get('repoId') == rid and c.get('status') == 'proposed'),
+               key=lambda c: c.get('createdAt',''))
+print(props[-1]['id'] if props else '')" 2>/dev/null || echo "")
+  if [ -n "$cr_id" ]; then echo "PROPOSED ${cr_id}"; else echo "CONVERGED"; fi
 }
 
 # ── Approve CR ───────────────────────────────────────────────────────────────
@@ -218,18 +234,26 @@ approve_cr() {
 # ── Run planner ──────────────────────────────────────────────────────────────
 run_planner() {
   local cr_id="$1"
-  newton run "${WORKSPACE}/.newton/workflows/planner.yaml" \
-    --arg "change_request_id=${cr_id}" \
-    2>&1 | grep -oE '[0-9a-f-]{36}' | tail -1 || echo ""
+  newton workflow run "${WORKSPACE}/.newton/workflows/planner.yaml" \
+    --trigger "change_request_id=${cr_id}" >&2 || true
+  # Read the Plan the planner wrote for this CR from the store.
+  newton data get plans 2>/dev/null \
+    | CR="$cr_id" python3 -c "
+import sys, json, os
+data = json.load(sys.stdin)
+cr = os.environ.get('CR','')
+plans = sorted((p for p in data if p.get('linkedChangeRequestId') == cr),
+               key=lambda p: p.get('createdAt',''))
+print(plans[-1]['id'] if plans else '')" 2>/dev/null || echo ""
 }
 
 # ── Run develop ──────────────────────────────────────────────────────────────
 run_develop() {
   local plan_id="$1"
-  newton run "${WORKSPACE}/.newton/workflows/develop.yaml" \
-    --arg "plan_id=${plan_id}" \
-    --arg "delivery=${DELIVERY}" \
-    --arg "test_cmd=${TEST_CMD}"
+  newton workflow run "${WORKSPACE}/.newton/workflows/develop.yaml" \
+    --trigger "plan_id=${plan_id}" \
+    --trigger "delivery=${DELIVERY}" \
+    --trigger "test_cmd=${TEST_CMD}"
 }
 
 # ── Break condition helpers ──────────────────────────────────────────────────
@@ -301,7 +325,7 @@ while true; do
 
     # Extract grade from most recent EvalRun
     CURRENT_GRADE=$(newton data get eval-runs --scope repo --scope-id "$REPO_ID" 2>/dev/null \
-      | python3 -c "
+      | GRADER="$grader" python3 -c "
 import sys, json, os
 data = json.load(sys.stdin)
 grader = os.environ.get('GRADER','')
@@ -312,16 +336,16 @@ for r in reversed(data):
         if score is not None:
             print(score)
             sys.exit(0)
-print(0)" GRADER="$grader" 2>/dev/null || echo "0")
+print(0)" 2>/dev/null || echo "0")
 
     OPEN_FINDINGS=$(newton data get findings 2>/dev/null \
-      | python3 -c "
+      | REPO_ID="$REPO_ID" python3 -c "
 import sys, json, os
 data = json.load(sys.stdin)
 repo_id = os.environ.get('REPO_ID','')
 open_s = {'awaiting_triage','triaged','approved_for_planning'}
 open_f = [f for f in data if f.get('repoId') == repo_id and f.get('status') in open_s]
-print(len(open_f))" REPO_ID="$REPO_ID" 2>/dev/null || echo "0")
+print(len(open_f))" 2>/dev/null || echo "0")
 
     # Break: regression guard (per-grader disjunction)
     if ! check_regression "$grader" "$CURRENT_GRADE"; then
