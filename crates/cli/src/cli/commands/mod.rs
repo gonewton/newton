@@ -50,7 +50,7 @@ fn resolve_workflow_workspace(path: Option<PathBuf>) -> StdResult<PathBuf, AppEr
     }
 }
 
-fn build_operator_registry(
+async fn build_operator_registry(
     workspace: PathBuf,
     settings: &workflow_schema::WorkflowSettings,
     ailoop_ctx: Option<newton_core::integrations::ailoop::AiloopContext>,
@@ -60,16 +60,48 @@ fn build_operator_registry(
         ailoop_ctx,
         Duration::from_secs(settings.human.default_timeout_seconds),
     );
+    // Wire the workspace backend store so the grading operators
+    // (GraderCommandOperator, ReconcileOperator, ChangeRequestOperator,
+    // GraderAgentOperator) register — they are only available when a store is
+    // present. Without this, `optimize` / `workflow run` cannot run grading.yaml
+    // (operator 'GraderCommandOperator' is not registered).
+    let backend_store = open_workspace_store(&workspace).await;
     workflow_operators::register_builtins_with_deps(
         &mut builder,
         workspace,
         settings.clone(),
         workflow_operators::BuiltinOperatorDeps {
             interviewer: Some(interviewer),
+            backend_store,
             ..Default::default()
         },
     );
     builder.build()
+}
+
+/// Open the workspace SQLite backend store when it exists, so grading operators
+/// can be registered. Returns None (with a warning) if absent or unopenable —
+/// non-grading workflows still run.
+async fn open_workspace_store(
+    workspace: &Path,
+) -> Option<std::sync::Arc<dyn newton_backend::BackendStore>> {
+    let paths = crate::cli::workspace_paths::WorkspacePaths::new(workspace.to_path_buf());
+    if !paths.backend_sqlite_exists() {
+        return None;
+    }
+    match newton_backend::SqliteBackendStore::new(&paths.backend_sqlite_url()).await {
+        Ok(store) => {
+            Some(std::sync::Arc::new(store) as std::sync::Arc<dyn newton_backend::BackendStore>)
+        }
+        Err(e) => {
+            eprintln!(
+                "warning: could not open backend store at {}: {} — grading operators unavailable",
+                paths.backend_sqlite.display(),
+                e.message
+            );
+            None
+        }
+    }
 }
 
 fn parse_kvp_value(s: &str) -> Value {
