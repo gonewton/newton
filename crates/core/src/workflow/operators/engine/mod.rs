@@ -112,10 +112,12 @@ impl AikitEngineManager {
         AppError,
     > {
         if !aikit_sdk::is_runnable(engine_name) {
+            // Don't hardcode the engine roster — defer to aikit for the source of truth.
             return Err(AppError::new(
                 ErrorCategory::ValidationError,
                 format!(
-                    "engine '{engine_name}' is not runnable by aikit-sdk; supported: codex, claude, gemini, opencode, agent"
+                    "engine '{engine_name}' is not runnable by aikit-sdk; supported: {}",
+                    aikit_sdk::runnable_agents().join(", ")
                 ),
             )
             .with_code("WFG-SDK-002"));

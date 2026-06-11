@@ -46,7 +46,7 @@ dependencies = [
 [[package]]
 name = "aikit-agent"
 version = "0.1.0"
-source = "git+https://github.com/goaikit/aikit.git?branch=main#8f97c8889127864357bd5e82e07cb6e2a1645602"
+source = "git+https://github.com/goaikit/aikit.git?branch=main#a5eca636651625fbb5ab89d128c1d4884a61fc99"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -72,7 +72,7 @@ dependencies = [
 [[package]]
 name = "aikit-magictool"
 version = "0.1.0"
-source = "git+https://github.com/goaikit/aikit.git?branch=main#8f97c8889127864357bd5e82e07cb6e2a1645602"
+source = "git+https://github.com/goaikit/aikit.git?branch=main#a5eca636651625fbb5ab89d128c1d4884a61fc99"
 dependencies = [
  "aikit-sdk 0.3.0 (git+https://github.com/goaikit/aikit.git?branch=main)",
  "axum",
@@ -87,7 +87,7 @@ dependencies = [
 [[package]]
 name = "aikit-sdk"
 version = "0.3.0"
-source = "git+https://github.com/goaikit/aikit.git?branch=main#8f97c8889127864357bd5e82e07cb6e2a1645602"
+source = "git+https://github.com/goaikit/aikit.git?branch=main#a5eca636651625fbb5ab89d128c1d4884a61fc99"
 dependencies = [
  "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?branch=main)",
  "dirs 6.0.0",
