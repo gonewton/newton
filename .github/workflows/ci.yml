@@ -202,6 +202,63 @@ jobs:
             fi
           done
 
+  web-ui-vendor-drift:
+    name: Web UI vendor drift
+    runs-on: ubuntu-latest
+    # The embedded UI bundle (crates/core/assets/web/index.html.gz) is vendored
+    # from the SEPARATE, PRIVATE gonewton/newton-ui repo via scripts/vendor-web.sh.
+    # This job rebuilds the UI and fails if the committed bundle is stale. Because
+    # newton-ui is private, it only runs when a read-only PAT is configured as the
+    # NEWTON_UI_RO_TOKEN secret; otherwise it is a no-op (forks / unconfigured
+    # repos stay green). The vite build is deterministic, so the exact-content
+    # comparison is not flaky as long as this job's pinned node/pnpm match the
+    # versions used when vendoring.
+    steps:
+      - name: Checkout newton
+        uses: actions/checkout@v4
+
+      - name: Detect newton-ui token
+        id: tok
+        env:
+          NEWTON_UI_RO_TOKEN: ${{ secrets.NEWTON_UI_RO_TOKEN }}
+        run: |
+          if [ -n "$NEWTON_UI_RO_TOKEN" ]; then
+            echo "has=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::NEWTON_UI_RO_TOKEN not set; skipping embedded-UI drift check."
+          fi
+
+      - name: Checkout newton-ui
+        if: steps.tok.outputs.has == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: gonewton/newton-ui
+          token: ${{ secrets.NEWTON_UI_RO_TOKEN }}
+          path: newton-ui
+
+      - name: Set up pnpm
+        if: steps.tok.outputs.has == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: "10.21.0"
+
+      - name: Set up Node.js
+        if: steps.tok.outputs.has == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: newton-ui/pnpm-lock.yaml
+
+      - name: Install newton-ui dependencies
+        if: steps.tok.outputs.has == 'true'
+        run: cd newton-ui && pnpm install --frozen-lockfile
+
+      - name: Verify embedded UI bundle is up to date
+        if: steps.tok.outputs.has == 'true'
+        run: scripts/vendor-web.sh --check ./newton-ui
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
