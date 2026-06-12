@@ -507,4 +507,17 @@ print(json.dumps({'cycle':int(sys.argv[1]),'latestGrades':json.loads(sys.argv[2]
 done
 
 log "Optimize loop finished. Trajectory: $TRAJ"
-newton data patch optimize-run "$RUN_ID" --body '{"status":"complete"}' > /dev/null 2>&1 || true
+# Map the last recorded stop reason to a canonical OptimizeRun status
+# (running|converged|stalled_on_blocked|max_cycles|regressed|no_progress) instead
+# of an out-of-vocabulary "complete" that downstream consumers (UI) can't render.
+STOP_REASON=$(grep '"event":"stop"' "$TRAJ" 2>/dev/null | tail -1 \
+  | python3 -c "import sys,json; print(json.loads(sys.stdin.readline() or '{}').get('reason',''))" 2>/dev/null || echo "")
+case "$STOP_REASON" in
+  converged|target_grade) FINAL_STATUS="converged" ;;
+  stalled_on_blocked)     FINAL_STATUS="stalled_on_blocked" ;;
+  regression|regressed)   FINAL_STATUS="regressed" ;;
+  no_progress)            FINAL_STATUS="no_progress" ;;
+  *)                      FINAL_STATUS="max_cycles" ;;
+esac
+log "Final status: ${FINAL_STATUS} (stop reason: ${STOP_REASON:-none})"
+newton data patch optimize-run "$RUN_ID" --body "{\"status\":\"${FINAL_STATUS}\"}" > /dev/null 2>&1 || true
