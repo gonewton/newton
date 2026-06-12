@@ -9,11 +9,19 @@ fn pick_free_port() -> u16 {
 }
 
 fn start_serve(port: u16) -> (std::process::Child, tempfile::TempDir) {
+    start_serve_with(port, &[])
+}
+
+fn start_serve_with(port: u16, extra: &[&str]) -> (std::process::Child, tempfile::TempDir) {
     let dir = tempdir().expect("tempdir");
     let bin = assert_cmd::cargo::cargo_bin("newton");
+    let mut args = vec!["serve", "--host", "127.0.0.1", "--port"];
+    let port_s = port.to_string();
+    args.push(&port_s);
+    args.extend_from_slice(extra);
     let child = Command::new(bin)
         .current_dir(dir.path())
-        .args(["serve", "--host", "127.0.0.1", "--port", &port.to_string()])
+        .args(&args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -137,8 +145,11 @@ fn api_root_redirects_to_v1() {
 
 #[test]
 fn health_old_path_returns_404() {
+    // The deprecated `/health` API endpoint is gone (replaced by `/healthz`).
+    // Run with --no-web so the SPA catch-all (which serves the UI for every
+    // non-API path by default) doesn't mask the API-surface assertion.
     let port = pick_free_port();
-    let (mut child, _dir) = start_serve(port);
+    let (mut child, _dir) = start_serve_with(port, &["--no-web"]);
 
     if !wait_ready(port) {
         let _ = child.kill();
@@ -160,4 +171,56 @@ fn health_old_path_returns_404() {
         404,
         "/health must return 404 after migration"
     );
+}
+
+#[test]
+fn embedded_web_ui_serves_spa_deeplinks_by_default() {
+    // `newton serve` (no flags) serves the embedded UI at every non-API path,
+    // including SPA deep links, with a clean 200 (not the prior ServeDir 404).
+    let port = pick_free_port();
+    let (mut child, _dir) = start_serve(port);
+
+    if !wait_ready(port) {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("server did not become ready within 30s");
+    }
+
+    let client = make_no_redirect_client();
+    let mut results = Vec::new();
+    for path in ["/", "/optimize", "/findings"] {
+        let resp = client
+            .get(format!("http://127.0.0.1:{}{}", port, path))
+            .header("Accept-Encoding", "gzip")
+            .send()
+            .expect("ui request");
+        let status = resp.status().as_u16();
+        let ctype = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        results.push((path, status, ctype));
+    }
+
+    // healthz must still win over the UI fallback.
+    let healthz = client
+        .get(format!("http://127.0.0.1:{}/healthz", port))
+        .send()
+        .expect("healthz request")
+        .status()
+        .as_u16();
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    for (path, status, ctype) in results {
+        assert_eq!(status, 200, "{path} should serve the SPA with 200");
+        assert!(
+            ctype.starts_with("text/html"),
+            "{path} should be text/html, got {ctype}"
+        );
+    }
+    assert_eq!(healthz, 200, "/healthz must still be handled by the API");
 }

@@ -2510,6 +2510,7 @@ dependencies = [
  "chrono",
  "dashmap 6.1.0",
  "dirs-next",
+ "flate2",
  "futures",
  "hex",
  "humantime",

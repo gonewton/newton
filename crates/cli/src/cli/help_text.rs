@@ -59,8 +59,8 @@ EXAMPLES:
   Start on custom host and port:
     newton serve --host 0.0.0.0 --port 9000
 
-  Serve a built UI from a static directory:
-    newton serve --static-ui ./ui/dist";
+  Start API-only (no embedded web UI):
+    newton serve --no-web";
 
 pub(super) const WORKFLOW_LONG_ABOUT: &str = "\
 Workflow groups all commands for operating on workflow YAML files and managing \

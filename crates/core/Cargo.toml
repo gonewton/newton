@@ -65,6 +65,7 @@ async-stream = { workspace = true }
 tokio-stream = { workspace = true }
 jsonschema = { workspace = true }
 schemars = { workspace = true }
+flate2 = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

@@ -149,7 +149,7 @@ The durable spine — `Finding → Change Request → Plan → Execution` — li
 - **Modules**: workflows, streaming (SSE/WebSocket), HIL, operators, dashboard, portfolio, findings, change-requests, plans, optimize-runs (read-only), catalog, persistence, magic tools (aikit-magictool). (`opportunities` is the legacy alias of `findings`.)
 - **OpenAPI**: generated from utoipa annotations; canonical file at [openapi/newton-backend-parity.yaml](openapi/newton-backend-parity.yaml).
 - **Realtime**: [openapi/newton-realtime.asyncapi.yaml](openapi/newton-realtime.asyncapi.yaml).
-- **Static UI**: optional `--static-ui` serves a built frontend via `tower-http` `ServeDir`.
+- **Web UI**: the Newton UI is compiled into the binary (a single gzip-compressed `index.html`, vendored via `scripts/vendor-web.sh`) and served at all non-API paths by default. `--no-web` disables it (API only); for UI development run `newton serve --no-web` alongside the Vite dev server.
 
 Health probes: `GET /healthz` (liveness), `GET /readyz` (readiness). Swagger UI at `GET /api/docs`.
 
