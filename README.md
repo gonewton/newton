@@ -111,13 +111,18 @@ Observe runs over `serve`: `GET /api/v1/optimize-runs[/{id}/trajectory]`, `GET /
 
 ### HTTP serve API
 
-`newton serve` exposes REST, WebSocket, and SSE endpoints for workflow state, portfolio data, human-in-the-loop, and AI tool sessions:
+`newton serve` exposes REST, WebSocket, and SSE endpoints for workflow state, portfolio data, human-in-the-loop, and AI tool sessions — and serves the **web UI** (embedded in the binary) at the root by default:
 
 ```bash
 newton serve --host 127.0.0.1 --port 8080
+# open http://127.0.0.1:8080/ in a browser for the UI (optimize runs, findings,
+# change requests, plans). On startup the command prints a banner with these URLs.
+
 newton serve --with-mcp    # mount MCP at /mcp on the same port
+newton serve --no-web      # API only (no web UI); pair with the Vite dev server for UI work
 ```
 
+- **Web UI**: served at `/` by default. The bundle is built from the separate `newton-ui` repo and vendored via [`scripts/vendor-web.sh`](scripts/vendor-web.sh); `--no-web` disables it.
 - **OpenAPI contract**: [openapi/newton-backend-parity.yaml](openapi/newton-backend-parity.yaml)
 - **Realtime contract**: [openapi/newton-realtime.asyncapi.yaml](openapi/newton-realtime.asyncapi.yaml)
 - **Health**: `GET /healthz` · **API docs**: `GET /api/docs`

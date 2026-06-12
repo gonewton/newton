@@ -73,7 +73,7 @@ There is **no** `step`, `status`, `report`, or `error` subcommand in current rel
 1. **New workspace**: `newton init .` then set `workflow_file` in `.newton/configs/default.conf`; run workflows with `newton workflow run path/to/workflow.yaml --workspace .`.
 2. **Optimization loop**: Configure `.newton/configs/<project_id>.conf` with the `optimize_*` block (repo, test cmd, graders, break-condition thresholds — see [Optimization loop](#optimization-loop)); run the closed loop with `.newton/scripts/optimize.sh <project_id> [--once]`. (The Rust `newton optimize <project_id>` currently drains the Plan queue.)
 3. **Live HIL**: Use `HumanApprovalOperator` or `HumanDecisionOperator` in your workflow YAML to pause for human input via [ailoop](https://github.com/goailoop/ailoop). Interact with ailoop channels using ailoop's own clients.
-4. **API / dashboards**: `newton serve` exposes REST, WebSocket, and SSE endpoints for workflow instances, streams, and the optimization loop (`/api/v1/optimize-runs`, trajectory, findings) — see `newton serve --help` and the Newton `README.md`.
+4. **API / dashboards**: `newton serve` exposes REST, WebSocket, and SSE endpoints for workflow instances, streams, and the optimization loop (`/api/v1/optimize-runs`, trajectory, findings), and serves the **embedded web UI** at `/` by default (open the URL printed on startup in a browser to visualize optimize runs, findings, change requests, and plans; `--no-web` disables it). See `newton serve --help` and the Newton `README.md`.
 5. **Grade a project (Finding ingest)**: Write a **command-Grader** at `.newton/grader/<name>/generate.sh <repo_id> <repo_path>` that runs your analyzer (e.g. `dk review`) and **prints an Assessment JSON to stdout** (it must NOT self-persist). The loop's grade phase runs it via `GraderCommandOperator`, which validates and persists the Assessment; `ReconcileOperator` then turns its Observations into durable **Findings**.
 
 ## Usage notes
@@ -194,8 +194,9 @@ Mount the MCP HTTP router on the **same listener** as the Newton REST API. One p
 
 ```bash
 newton serve --host 127.0.0.1 --port 8080 --with-mcp --mcp-path /mcp
-# REST:  http://127.0.0.1:8080/health
-# MCP:   http://127.0.0.1:8080/mcp
+# Web UI: http://127.0.0.1:8080/
+# REST:   http://127.0.0.1:8080/healthz
+# MCP:    http://127.0.0.1:8080/mcp
 ```
 
 | Flag | Default | Description |

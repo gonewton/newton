@@ -76,6 +76,21 @@ cargo run -p newton-cli -- workflow run examples/hello.yaml
 cargo run -p newton-cli -- workflow run examples/hello.yaml --workspace ./ws --verbose
 ```
 
+### Embedded web UI
+
+`newton serve` serves the web UI from a single gzip-compressed `index.html`
+compiled into the binary at `crates/core/assets/web/index.html.gz`. The UI source
+lives in the **separate** `newton-ui` repo. After changing the UI, regenerate the
+vendored bundle and commit it:
+
+```bash
+scripts/vendor-web.sh [path-to-newton-ui]   # default: ../newton-ui
+scripts/vendor-web.sh --check                # CI/pre-PR: fail if the bundle is stale
+```
+
+CI runs `--check` only when a `NEWTON_UI_RO_TOKEN` secret is configured (newton-ui
+is private), so refreshing the bundle is currently a manual step.
+
 ### OpenAPI parity
 
 When adding or modifying backend CRUD endpoints (NEWTON-0028):
