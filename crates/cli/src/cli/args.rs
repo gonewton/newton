@@ -377,9 +377,10 @@ pub struct ServeArgs {
     #[arg(long, default_value = "8080")]
     pub port: u16,
 
-    /// Path to the built Newton UI dist directory (optional)
-    #[arg(long = "static-ui", value_name = "PATH")]
-    pub static_ui: Option<PathBuf>,
+    /// Disable serving the embedded web UI (API-only). By default `newton serve`
+    /// serves the UI compiled into the binary at all non-API paths.
+    #[arg(long = "no-web", default_value_t = false)]
+    pub no_web: bool,
 
     /// Mount the MCP HTTP router on the same listener as the Newton API.
     #[arg(long = "with-mcp", default_value_t = false)]

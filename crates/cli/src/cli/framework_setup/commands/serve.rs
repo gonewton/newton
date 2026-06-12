@@ -21,7 +21,7 @@ pub(crate) fn serve_command() -> Command {
             examples: vec![
                 "newton serve",
                 "newton serve --host 0.0.0.0 --port 9000",
-                "newton serve --static-ui ./ui/dist",
+                "newton serve --no-web",
             ],
             args: vec![
                 ArgSpec {
@@ -43,12 +43,12 @@ pub(crate) fn serve_command() -> Command {
                     ..Default::default()
                 },
                 ArgSpec {
-                    name: "static-ui",
-                    kind: ArgKind::Option,
-                    long: Some("static-ui"),
-                    value_type: ArgValueType::String,
+                    name: "no-web",
+                    kind: ArgKind::Flag,
+                    long: Some("no-web"),
+                    value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
-                    help: "Path to the built Newton UI dist directory (optional)",
+                    help: "Disable serving the embedded web UI (API-only)",
                     ..Default::default()
                 },
                 ArgSpec {

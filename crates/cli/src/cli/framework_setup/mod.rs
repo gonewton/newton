@@ -317,7 +317,7 @@ impl FromArgValueMap for ServeArgs {
         ServeArgs {
             host,
             port,
-            static_ui: get_opt_path(map, "static-ui"),
+            no_web: get_bool(map, "no-web"),
             with_mcp,
             with_embedded_ailoop,
             ailoop_base_path,

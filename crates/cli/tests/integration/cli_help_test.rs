@@ -226,7 +226,7 @@ fn serve_help_lists_route_groups_and_pointers() {
         "EXAMPLES:",
         "--host",
         "--port",
-        "--static-ui",
+        "--no-web",
         "openapi/newton-backend-parity.yaml",
     ] {
         assert!(

@@ -179,11 +179,19 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         .cors(CorsLayer::permissive())
         .health_version(env!("CARGO_PKG_VERSION"));
 
-    if let Some(dir) = args.static_ui.as_ref() {
-        if dir.exists() {
-            builder = builder.root_fallback(api::static_ui_router(dir.clone()));
-        }
-    }
+    // Web UI: the embedded bundle is served at all non-API paths by default;
+    // `--no-web` opts out (API only).
+    let web_ui_mode: &str = if args.no_web {
+        "disabled"
+    } else {
+        builder = builder.root_fallback(api::embedded_web_router());
+        "embedded"
+    };
+    info!(
+        event = "web_ui",
+        mode = web_ui_mode,
+        "web UI serving mode resolved"
+    );
 
     if args.with_mcp {
         let ctx = crate::cli::context::NewtonContext::new();

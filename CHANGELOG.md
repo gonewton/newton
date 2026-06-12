@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### feat: embed the web UI in `newton serve`; replace `--static-ui`
+
+The Newton UI is now compiled into the `newton` binary as a single gzip-compressed `index.html` (~0.46 MB; vendored via `scripts/vendor-web.sh`) and served at all non-API paths **by default** — `newton serve` then opening the browser just works, including deep links like `/optimize` and `/findings` (a true `200` SPA fallback, not the prior `ServeDir` 404). Only document `GET`/`HEAD` requests get the SPA shell, so an unknown `POST`/`PUT` (e.g. an API typo) still returns a proper `404`.
+
+- **Added**: `--no-web` (serve API only; pair with the Vite dev server for UI work).
+- **Breaking — removed**: `--static-ui <PATH>`. The UI is now embedded and served by default.
+
 ### feat: close the optimization loop (specs 069/070/071)
 
 Newton now drives an autonomous, GitHub-free **optimization loop**: `grade → reconcile → change-request → plan → develop → merge → re-grade`, over the durable `Finding → Change Request → Plan → Execution` spine in Newton's store (no board).
