@@ -274,6 +274,37 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         );
     }
 
+    // Human-readable startup banner. Newton's `info!` startup logs are silenced
+    // in the serve (Server) console context, and cli-framework's `serve()` prints
+    // nothing, so without this `newton serve` looks like it hangs with no output.
+    {
+        // 0.0.0.0 / :: aren't browsable; point the user at a loopback address.
+        let browse_host = match args.host.as_str() {
+            "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
+            h => h,
+        };
+        let base = format!("http://{browse_host}:{}", args.port);
+        eprintln!();
+        eprintln!("  Newton serving on {base}");
+        if web_ui_mode != "disabled" {
+            eprintln!("    Web UI     {base}/");
+        }
+        eprintln!("    REST API   {base}/api/v1/");
+        eprintln!("    Health     {base}/healthz");
+        eprintln!("    API docs   {base}/api/docs");
+        if args.with_mcp {
+            eprintln!("    MCP        {base}/mcp");
+        }
+        if args.with_embedded_ailoop {
+            eprintln!("    ailoop     {base}{}", args.ailoop_base_path);
+        }
+        if web_ui_mode == "disabled" {
+            eprintln!("    (web UI disabled via --no-web)");
+        }
+        eprintln!("  Press Ctrl+C to stop.");
+        eprintln!();
+    }
+
     server
         .serve(&addr)
         .await

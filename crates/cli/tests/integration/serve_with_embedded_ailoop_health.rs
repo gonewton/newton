@@ -60,6 +60,25 @@ fn start_embedded_ailoop_server(port: u16, base_path: &str) -> (std::process::Ch
             panic!("structured ailoop_serve_started log line not observed within 30s");
         }
     };
+
+    // The `ailoop_serve_started` line is emitted just before the listener binds,
+    // so it is NOT a reliable "accepting connections" signal. Poll the socket
+    // until it actually accepts before returning — otherwise callers race the
+    // bind and get a spurious connection-refused (flaky under the slow
+    // coverage-instrumented binary).
+    let ready_deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            break;
+        }
+        if Instant::now() >= ready_deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("server did not accept connections on port {port} within 30s");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
     (child, startup_line)
 }
 
