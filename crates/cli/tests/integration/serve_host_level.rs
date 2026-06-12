@@ -224,3 +224,49 @@ fn embedded_web_ui_serves_spa_deeplinks_by_default() {
     }
     assert_eq!(healthz, 200, "/healthz must still be handled by the API");
 }
+
+#[test]
+fn serve_prints_startup_banner_with_urls() {
+    use std::io::Read;
+    // `newton serve` must print a human-readable banner: its `info!` startup logs
+    // are silenced in the serve console context and cli-framework prints nothing,
+    // so without the banner the process looks like it hangs.
+    let port = pick_free_port();
+    let dir = tempdir().unwrap();
+    let errpath = dir.path().join("stderr.log");
+    let errfile = std::fs::File::create(&errpath).unwrap();
+    let bin = assert_cmd::cargo::cargo_bin("newton");
+    let mut child = Command::new(bin)
+        .current_dir(dir.path())
+        .args(["serve", "--host", "127.0.0.1", "--port", &port.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(errfile))
+        .spawn()
+        .expect("spawn newton serve");
+
+    let ready = wait_ready(port);
+    // The banner is flushed just before the listener binds; give it a beat.
+    std::thread::sleep(Duration::from_millis(250));
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(ready, "server did not become ready");
+
+    let mut stderr = String::new();
+    std::fs::File::open(&errpath)
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+
+    assert!(
+        stderr.contains("Newton serving on"),
+        "startup banner missing; stderr=\n{stderr}"
+    );
+    assert!(
+        stderr.contains(&format!("http://127.0.0.1:{port}/")),
+        "web UI URL missing from banner; stderr=\n{stderr}"
+    );
+    assert!(
+        stderr.contains("/api/v1/"),
+        "REST API URL missing from banner; stderr=\n{stderr}"
+    );
+}
