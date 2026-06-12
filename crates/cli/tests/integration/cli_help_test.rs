@@ -227,7 +227,7 @@ fn serve_help_lists_route_groups_and_pointers() {
         "--host",
         "--port",
         "--no-web",
-        "openapi/newton-backend-parity.yaml",
+        "openapi/newton-api.yaml",
     ] {
         assert!(
             stdout.contains(required),

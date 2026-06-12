@@ -1,4 +1,4 @@
-//! Test-only fixtures loaded from `openapi/newton-backend-parity.fixtures.json`.
+//! Test-only fixtures loaded from `openapi/newton-api.fixtures.json`.
 //!
 //! Production deployments do NOT load fixtures — migrations create empty
 //! tables and real data accumulates from user actions. This module is only
@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 /// declaration order so we insert in FK-safe order (parents before children).
 pub type Fixtures = IndexMap<String, Vec<IndexMap<String, Value>>>;
 
-const FIXTURES_RAW: &str = include_str!("../../../openapi/newton-backend-parity.fixtures.json");
+const FIXTURES_RAW: &str = include_str!("../../../openapi/newton-api.fixtures.json");
 
 /// Lazily parse the embedded fixtures. Parse errors panic at first use,
 /// loud and intentional — a malformed fixtures file is a build-time bug.

@@ -50,7 +50,7 @@ EXAMPLES:
 
 pub(super) const SERVE_LONG_ABOUT: &str = "\
 Serve runs the Newton HTTP/WebSocket API for UIs, agents, and integrations.
-Full REST contract: openapi/newton-backend-parity.yaml.
+Full REST contract: openapi/newton-api.yaml.
 
 EXAMPLES:
   Start API server on default port:

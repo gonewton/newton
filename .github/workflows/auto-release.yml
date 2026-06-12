@@ -112,13 +112,13 @@ jobs:
         with:
           toolchain: 1.94
 
-      - name: Regenerate OpenAPI parity spec
+      - name: Regenerate OpenAPI spec
         run: ./scripts/generate-openapi.sh
 
       - name: Commit version bump
         run: |
           NEXT_VERSION="${{ steps.next-version.outputs.next_version }}"
-          git add Cargo.toml Cargo.lock openapi/newton-backend-parity.yaml
+          git add Cargo.toml Cargo.lock openapi/newton-api.yaml
           if git diff --cached --quiet; then
             echo "::error::Nothing staged after version bump to $NEXT_VERSION — Cargo.toml may already be at this version. Investigate version/tag drift."
             exit 1
