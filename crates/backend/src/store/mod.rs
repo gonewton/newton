@@ -68,6 +68,10 @@ impl SqliteBackendStore {
         migration::upgrade_legacy_component_schema(&pool).await?;
         migration::upgrade_legacy_repo_schema(&pool).await?;
 
+        // Must run after 004 created ChangeRequest (the new FK target) and before
+        // upgrade_plan_optimize re-adds the optimize-loop columns on the rebuilt table.
+        migration::upgrade_plan_change_request_link(&pool).await?;
+
         migration::upgrade_plan_optimize(&pool).await?;
         migration::upgrade_optimize_run(&pool).await?;
         migration::upgrade_finding_blocked_by_plan(&pool).await?;
@@ -1811,6 +1815,74 @@ mod kpi_create_inline_grade_tests {
             grades.len(),
             0,
             "no grades must be created when grades is None"
+        );
+    }
+}
+
+#[cfg(test)]
+mod plan_link_persistence_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    /// Regression: `004_grading.sql` is re-executed on every store open. It used
+    /// to rebuild the Plan table with `INSERT ... SELECT ..., NULL, ...`, wiping
+    /// every plan's `linkedChangeRequestId` (and body) on each re-open. The
+    /// rebuild is now guarded (`upgrade_plan_change_request_link`), so links must
+    /// survive a re-open.
+    #[tokio::test]
+    async fn plan_link_and_body_survive_store_reopen() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("plan_link.sqlite");
+        let url = format!("sqlite://{}", db_path.display());
+
+        let store = SqliteBackendStore::new(&url).await.unwrap();
+
+        // Seed a ChangeRequest so the Plan FK is satisfiable.
+        let now = "2026-01-01T00:00:00Z";
+        sqlx::query(
+            "INSERT INTO ChangeRequest (id, title, status, findingIds, createdAt, updatedAt) \
+             VALUES (?, ?, 'approved', '[]', ?, ?)",
+        )
+        .bind("cr-1")
+        .bind("CR One")
+        .bind(now)
+        .bind(now)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        let created = store
+            .create_plan(CreatePlanBody {
+                id: "plan-1".into(),
+                title: "Plan One".into(),
+                linked_change_request_id: "cr-1".into(),
+                body: Some("enriched body".into()),
+                status: "ready".into(),
+                component_id: None,
+                repo_id: None,
+                module: None,
+                confidence: 80,
+                risk: "low".into(),
+                expected_value: None,
+                expected_delta: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(created.linked_change_request_id.as_deref(), Some("cr-1"));
+        drop(store);
+
+        // Re-open the SAME file: migrations run again.
+        let store2 = SqliteBackendStore::new(&url).await.unwrap();
+        let fetched = store2.get_plan("plan-1").await.unwrap().plan;
+        assert_eq!(
+            fetched.linked_change_request_id.as_deref(),
+            Some("cr-1"),
+            "linkedChangeRequestId must survive a store re-open (regression: 004 rebuild wiped it)"
+        );
+        assert_eq!(
+            fetched.body.as_deref(),
+            Some("enriched body"),
+            "Plan.body must survive a store re-open"
         );
     }
 }

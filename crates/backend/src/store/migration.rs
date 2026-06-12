@@ -523,6 +523,111 @@ pub(super) async fn upgrade_finding_blocked_by_plan(pool: &SqlitePool) -> Result
     Ok(())
 }
 
+/// Migrate the legacy Plan schema (`linkedRequestId` -> `Request`) to the
+/// grading-era schema (`linkedChangeRequestId` -> `ChangeRequest`).
+///
+/// This is the one-time rebuild that used to live in `004_grading.sql`. Because
+/// that file is re-run on every store open, performing the rebuild there wiped
+/// every plan's `linkedChangeRequestId` (the `INSERT ... SELECT ..., NULL, ...`)
+/// on each open. Here it is guarded: if the Plan table already has
+/// `linkedChangeRequestId`, this is a no-op, so existing links are preserved.
+pub(super) async fn upgrade_plan_change_request_link(pool: &SqlitePool) -> Result<(), ApiError> {
+    #[derive(Debug, FromRow)]
+    struct ColRow {
+        name: String,
+    }
+
+    let cols: Vec<ColRow> = sqlx::query_as::<_, ColRow>("PRAGMA table_info(Plan)")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| err_internal(&format!("schema check Plan failed: {e}")))?;
+
+    // No Plan table yet, or already migrated: nothing to do (and, crucially,
+    // never rebuild a Plan that already has the column — that is what wiped links).
+    if cols.is_empty() || cols.iter().any(|c| c.name == "linkedChangeRequestId") {
+        return Ok(());
+    }
+
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|e| err_internal(&format!("acquire conn error: {e}")))?;
+
+    sqlx::query("PRAGMA foreign_keys = OFF;")
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| err_internal(&format!("pragma error: {e}")))?;
+
+    sqlx::query(
+        "CREATE TABLE Plan_new (\
+          id TEXT PRIMARY KEY,\
+          title TEXT NOT NULL,\
+          componentId TEXT NULL,\
+          repoId TEXT NULL,\
+          status TEXT NOT NULL,\
+          linkedChangeRequestId TEXT NULL,\
+          confidence INTEGER NOT NULL,\
+          risk TEXT NOT NULL,\
+          expectedValue TEXT NULL,\
+          agentGenerated INTEGER NOT NULL DEFAULT 0,\
+          waitingSince TEXT NULL,\
+          expectedDelta TEXT NULL,\
+          createdAt TEXT NOT NULL,\
+          updatedAt TEXT NOT NULL,\
+          FOREIGN KEY(componentId) REFERENCES Component(id),\
+          FOREIGN KEY(repoId) REFERENCES Repo(id),\
+          FOREIGN KEY(linkedChangeRequestId) REFERENCES ChangeRequest(id)\
+        );",
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| err_internal(&format!("create Plan_new failed: {e}")))?;
+
+    // The legacy link pointed at the (now-dropped) Request table, so it cannot be
+    // carried over; new links are populated going forward by create_plan.
+    sqlx::query(
+        "INSERT OR IGNORE INTO Plan_new \
+          (id, title, componentId, repoId, status, linkedChangeRequestId, \
+           confidence, risk, expectedValue, agentGenerated, waitingSince, \
+           expectedDelta, createdAt, updatedAt) \
+         SELECT \
+          id, title, componentId, repoId, status, NULL, \
+          confidence, risk, expectedValue, agentGenerated, waitingSince, \
+          expectedDelta, createdAt, updatedAt \
+         FROM Plan;",
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| err_internal(&format!("copy Plan failed: {e}")))?;
+
+    sqlx::query("DROP TABLE Plan;")
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| err_internal(&format!("drop Plan failed: {e}")))?;
+
+    sqlx::query("ALTER TABLE Plan_new RENAME TO Plan;")
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| err_internal(&format!("rename Plan failed: {e}")))?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_plan_status ON Plan(status);")
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| err_internal(&format!("index Plan status failed: {e}")))?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_plan_componentId ON Plan(componentId);")
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| err_internal(&format!("index Plan componentId failed: {e}")))?;
+
+    sqlx::query("PRAGMA foreign_keys = ON;")
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| err_internal(&format!("pragma error: {e}")))?;
+
+    Ok(())
+}
+
 pub(super) async fn upgrade_plan_optimize(pool: &SqlitePool) -> Result<(), ApiError> {
     #[derive(Debug, FromRow)]
     struct ColRow {
