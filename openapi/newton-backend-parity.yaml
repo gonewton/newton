@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
-  title: Newton Backend Parity API
-  description: Contract for Rust `newton serve` parity endpoints sourced from Rust DTOs and handlers.
+  title: Newton API
+  description: HTTP API served by `newton serve`.
   contact:
     name: Newton Loop Framework
   license:

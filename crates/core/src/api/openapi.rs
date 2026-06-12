@@ -1,6 +1,6 @@
 use utoipa::OpenApi;
 
-/// Generated OpenAPI document for the Newton backend parity surface.
+/// Generated OpenAPI document for the Newton HTTP API.
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -172,9 +172,9 @@ use utoipa::OpenApi;
     ),
     servers((url = "/api/v1")),
     info(
-        title = "Newton Backend Parity API",
+        title = "Newton API",
         version = env!("CARGO_PKG_VERSION"),
-        description = "Contract for Rust `newton serve` parity endpoints sourced from Rust DTOs and handlers."
+        description = "HTTP API served by `newton serve`."
     ),
     external_docs(
         url = "./newton-realtime.asyncapi.yaml",
