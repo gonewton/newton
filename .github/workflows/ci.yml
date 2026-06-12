@@ -44,7 +44,7 @@ jobs:
        - name: Verify OpenAPI parity contract
          run: |
            ./scripts/generate-openapi.sh
-           git diff --exit-code openapi/newton-backend-parity.yaml
+           git diff --exit-code openapi/newton-api.yaml
 
        - name: Validate AsyncAPI realtime contract
          run: npx -y @asyncapi/cli@3 validate openapi/newton-realtime.asyncapi.yaml

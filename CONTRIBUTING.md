@@ -97,10 +97,10 @@ When adding or modifying backend CRUD endpoints (NEWTON-0028):
 
 ```bash
 ./scripts/generate-openapi.sh
-git diff openapi/newton-backend-parity.yaml   # commit updated contract in the same PR
+git diff openapi/newton-api.yaml   # commit updated contract in the same PR
 ```
 
-CI runs the generator and fails if `openapi/newton-backend-parity.yaml` is out of date.
+CI runs the generator and fails if `openapi/newton-api.yaml` is out of date.
 
 ### Operators and the IR schema
 

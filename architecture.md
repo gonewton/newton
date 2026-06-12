@@ -147,7 +147,7 @@ The durable spine — `Finding → Change Request → Plan → Execution` — li
 
 - **Router**: `crates/core/src/api/mod.rs` — Axum 0.8, mounted at `/api/v1/`.
 - **Modules**: workflows, streaming (SSE/WebSocket), HIL, operators, dashboard, portfolio, findings, change-requests, plans, optimize-runs (read-only), catalog, persistence, magic tools (aikit-magictool). (`opportunities` is the legacy alias of `findings`.)
-- **OpenAPI**: generated from utoipa annotations; canonical file at [openapi/newton-backend-parity.yaml](openapi/newton-backend-parity.yaml).
+- **OpenAPI**: generated from utoipa annotations; canonical file at [openapi/newton-api.yaml](openapi/newton-api.yaml).
 - **Realtime**: [openapi/newton-realtime.asyncapi.yaml](openapi/newton-realtime.asyncapi.yaml).
 - **Web UI**: the Newton UI is compiled into the binary (a single gzip-compressed `index.html`, vendored via `scripts/vendor-web.sh`) and served at all non-API paths by default. `--no-web` disables it (API only); for UI development run `newton serve --no-web` alongside the Vite dev server.
 
@@ -158,7 +158,7 @@ Health probes: `GET /healthz` (liveness), `GET /readyz` (readiness). Swagger UI 
 - **Crate**: `newton-backend` — `SqliteBackendStore` in `crates/backend/src/store/`.
 - Modular store: `catalog`, `eval`, `plan`, `workflow_runtime`, etc.
 - Schema migrations in `crates/backend/migrations/`.
-- SQL reference: [openapi/newton-backend-parity.sqlite.sql](openapi/newton-backend-parity.sqlite.sql).
+- SQL reference: [openapi/newton-api.sqlite.sql](openapi/newton-api.sqlite.sql).
 
 Serve reads/writes through this store for portfolio, workflow instances, grades, and opportunities parity with the UI.
 
@@ -378,6 +378,6 @@ The YAML IR is the single, provenance-blind compile target ([ADR 0005](docs/adr/
 ## Related documents
 
 - [CONTEXT.md](CONTEXT.md) — domain glossary (loop, grading, portfolio, planning, dependency mapping)
-- [openapi/newton-backend-parity.yaml](openapi/newton-backend-parity.yaml) — HTTP API contract
+- [openapi/newton-api.yaml](openapi/newton-api.yaml) — HTTP API contract
 - [CONTRIBUTING.md](CONTRIBUTING.md) — build, test, PR process
 - [AGENTS.md](AGENTS.md) — contributor constraints

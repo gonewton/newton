@@ -123,7 +123,7 @@ newton serve --no-web      # API only (no web UI); pair with the Vite dev server
 ```
 
 - **Web UI**: served at `/` by default. The bundle is built from the separate `newton-ui` repo and vendored via [`scripts/vendor-web.sh`](scripts/vendor-web.sh); `--no-web` disables it.
-- **OpenAPI contract**: [openapi/newton-backend-parity.yaml](openapi/newton-backend-parity.yaml)
+- **OpenAPI contract**: [openapi/newton-api.yaml](openapi/newton-api.yaml)
 - **Realtime contract**: [openapi/newton-realtime.asyncapi.yaml](openapi/newton-realtime.asyncapi.yaml)
 - **Health**: `GET /healthz` · **API docs**: `GET /api/docs`
 
