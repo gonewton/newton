@@ -36,6 +36,17 @@ else
     exit 1
 fi
 
+# Verify the OpenAPI contract is regenerated (mirrors the CI parity step)
+echo ""
+echo "📜 Verifying OpenAPI contract..."
+if ./scripts/generate-openapi.sh && git diff --exit-code openapi/newton-api.yaml; then
+    echo "✅ OpenAPI contract is up to date"
+else
+    echo "❌ openapi/newton-api.yaml is out of date."
+    echo "   Run ./scripts/generate-openapi.sh and commit the updated file."
+    exit 1
+fi
+
 # Check documentation builds
 echo ""
 echo "📚 Building documentation..."
