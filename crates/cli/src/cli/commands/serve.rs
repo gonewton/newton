@@ -17,8 +17,6 @@ const NEWTON_REST_ROUTE_PREFIXES: &[&str] = &[
     "/operators",
     "/dashboard",
     "/portfolio",
-    "/opportunities",
-    "/requests",
     "/plans",
     "/persistence",
     "/testing",
