@@ -44,7 +44,6 @@ use utoipa::OpenApi;
         crate::api::persistence::get_persistence,
         crate::api::persistence::put_persistence,
         crate::api::persistence::delete_persistence,
-        crate::api::testing_reset::reset_testing,
         crate::api::workflow_files::list_workflow_files,
         crate::api::workflow_files::get_workflow_file,
         crate::api::workflow_files::put_workflow_file,
@@ -166,7 +165,6 @@ use utoipa::OpenApi;
         (name = "operators", description = "Operator catalog endpoint"),
         (name = "persistence", description = "Key-value persistence endpoints"),
         (name = "catalog", description = "Catalog entity CRUD endpoints"),
-        (name = "testing", description = "Test-only maintenance endpoints"),
         (name = "workflow-files", description = "Workflow definition file CRUD endpoints"),
         (name = "optimize", description = "Optimization loop run and cycle endpoints")
     ),

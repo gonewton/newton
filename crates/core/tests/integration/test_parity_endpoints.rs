@@ -2,7 +2,7 @@ use axum::{
     body::Body,
     http::{header, method::Method, Request, StatusCode},
 };
-use newton_backend::{BackendStore, SqliteBackendStore};
+use newton_backend::{BackendStore, CreateFindingBody, SqliteBackendStore};
 use newton_core::api::state::AppState;
 use newton_types::OperatorDescriptor;
 use serde_json::json;
@@ -389,11 +389,61 @@ async fn test_patch_opportunity_invalid_status() {
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
+/// A finding id that is not part of the embedded fixtures, so its
+/// presence/absence unambiguously reflects the seed step and the reset call
+/// (reset reloads fixtures, it doesn't merely truncate — see
+/// `crates/backend/src/store/plan.rs::reset_db`).
+const RESET_TEST_FINDING_ID: &str = "testing-reset-seed-finding";
+
+fn seed_finding_body() -> CreateFindingBody {
+    CreateFindingBody {
+        id: RESET_TEST_FINDING_ID.to_string(),
+        source: "reset-test-seed".to_string(),
+        origin: "system".to_string(),
+        component_id: None,
+        module: None,
+        repo_id: None,
+        kpi_id: None,
+        dimension: "quality".to_string(),
+        location: None,
+        fingerprint: RESET_TEST_FINDING_ID.to_string(),
+        title: "seed finding for testing-reset gate test".to_string(),
+        why_it_matters: "proves reset does/doesn't run".to_string(),
+        recommended_action: "n/a".to_string(),
+        severity: "low".to_string(),
+        risk: "low".to_string(),
+        confidence: None,
+        evidence: None,
+        expected_value: None,
+        effort: None,
+        status: "awaiting_triage".to_string(),
+        last_seen_at: None,
+        depends_on: vec![],
+        blocks: vec![],
+    }
+}
+
+async fn seed_finding_present(backend: &Arc<dyn BackendStore>) -> bool {
+    backend
+        .list_findings(None, None, None)
+        .await
+        .unwrap()
+        .into_iter()
+        .any(|f| f.id == RESET_TEST_FINDING_ID)
+}
+
 #[serial_test::serial]
 #[tokio::test]
-async fn test_testing_reset_success() {
-    std::env::remove_var("NEWTON_ENV");
+async fn test_testing_reset_without_env_var_is_forbidden_and_data_intact() {
+    std::env::remove_var("NEWTON_ENABLE_TESTING_RESET");
     let state = create_parity_test_state().await;
+    let backend = state.backend.clone();
+    backend.create_finding(seed_finding_body()).await.unwrap();
+    assert!(
+        seed_finding_present(&backend).await,
+        "seed finding must be present before the reset attempt"
+    );
+
     let app = newton_core::api::api_v1_router(state);
     let req = Request::builder()
         .method(Method::POST)
@@ -401,33 +451,57 @@ async fn test_testing_reset_success() {
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(err["code"], "ERR_TESTING_RESET_DISABLED");
+    assert!(
+        err["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("NEWTON_ENABLE_TESTING_RESET"),
+        "error body should name the gating env var: {err}"
+    );
+
+    assert!(
+        seed_finding_present(&backend).await,
+        "data must be untouched when the reset gate refuses the request"
+    );
+}
+
+#[serial_test::serial]
+#[tokio::test]
+async fn test_testing_reset_with_env_var_succeeds_and_empties_seed_data() {
+    std::env::set_var("NEWTON_ENABLE_TESTING_RESET", "1");
+    let state = create_parity_test_state().await;
+    let backend = state.backend.clone();
+    backend.create_finding(seed_finding_body()).await.unwrap();
+    assert!(
+        seed_finding_present(&backend).await,
+        "seed finding must be present before reset"
+    );
+
+    let app = newton_core::api::api_v1_router(state);
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/testing/reset")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    std::env::remove_var("NEWTON_ENABLE_TESTING_RESET");
     assert_eq!(resp.status(), StatusCode::OK);
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
         .await
         .unwrap();
     let ok: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(ok["ok"], true);
-}
 
-#[serial_test::serial]
-#[tokio::test]
-async fn test_testing_reset_forbidden_in_prod() {
-    std::env::set_var("NEWTON_ENV", "production");
-    let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
-    let req = Request::builder()
-        .method(Method::POST)
-        .uri("/testing/reset")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    std::env::remove_var("NEWTON_ENV");
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let err: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(err["code"], "ERR_FORBIDDEN_IN_PROD");
+    assert!(
+        !seed_finding_present(&backend).await,
+        "seed finding must be gone after an enabled reset"
+    );
 }
 
 #[tokio::test]

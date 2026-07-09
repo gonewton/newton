@@ -38,6 +38,21 @@ fn validate_ailoop_path(p: &str) -> StdResult<(), AppError> {
     Ok(())
 }
 
+/// True when `host` resolves to a loopback interface (127.0.0.0/8, `::1`) or
+/// the `localhost` hostname. `--host` defaults to `127.0.0.1`; passing
+/// anything else is the operator's explicit opt-in to wider exposure (see
+/// spec 074 PR-6 / B5 — no separate `--allow-remote`-style flag is added).
+fn is_loopback_host(host: &str) -> bool {
+    let trimmed = host.trim_start_matches('[').trim_end_matches(']');
+    if trimmed.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    trimmed
+        .parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
 fn ensure_no_ailoop_path_collision(ailoop_path: &str) -> StdResult<(), AppError> {
     for prefix in NEWTON_REST_ROUTE_PREFIXES {
         if ailoop_path == *prefix
@@ -80,6 +95,16 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     })?;
 
     info!("Starting Newton API server on {}: {}", args.host, args.port);
+
+    let non_loopback_bind = !is_loopback_host(&args.host);
+    if non_loopback_bind {
+        tracing::warn!(
+            event = "unauthenticated_exposure",
+            host = %args.host,
+            port = args.port,
+            "newton serve is binding a non-loopback host; the Newton HTTP API is UNAUTHENTICATED and will be reachable from other hosts on this interface"
+        );
+    }
 
     let workspace_paths = WorkspacePaths::from_cwd().map_err(|e| {
         AppError::new(
@@ -303,6 +328,18 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         }
         if web_ui_mode == "disabled" {
             eprintln!("    (web UI disabled via --no-web)");
+        }
+        if non_loopback_bind {
+            eprintln!();
+            eprintln!("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+            eprintln!(
+                "  !! WARNING: bound to non-loopback host \"{}\" — the Newton API is    !!",
+                args.host
+            );
+            eprintln!("  !! UNAUTHENTICATED and exposed to any host that can reach this    !!");
+            eprintln!("  !! interface. --host is your explicit opt-in; real authentication  !!");
+            eprintln!("  !! is not yet implemented (deferred to a future spec).             !!");
+            eprintln!("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
         }
         eprintln!("  Press Ctrl+C to stop.");
         eprintln!();
