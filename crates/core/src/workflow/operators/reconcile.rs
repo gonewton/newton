@@ -345,6 +345,13 @@ impl Operator for ReconcileOperator {
             })
             .collect();
 
+        // NOTE (Fuzziness is not failure tolerance — CONTEXT.md "Reconciliation"):
+        // the fuzzy-optimizer tolerance below covers Observation<->Finding
+        // mis-matches, not a Reconciliation running without its semantic-matching
+        // half. If adjudication itself fails, we must `?` out of `execute` here,
+        // BEFORE any store mutation (Phase 1/2/3 below), so that a transient LLM
+        // outage can never create duplicate Findings or wrongly auto-resolve real
+        // ones (including `blocked` Findings, which only a human may clear).
         let adj_plan: Option<AdjudicationPlan> = if !unmatched_owned.is_empty()
             && !candidates_owned.is_empty()
         {
@@ -374,7 +381,7 @@ impl Operator for ReconcileOperator {
             let obs_str = serde_json::to_string_pretty(&obs_json).unwrap_or_default();
             let findings_str = serde_json::to_string_pretty(&findings_json).unwrap_or_default();
 
-            let result = tokio::task::spawn_blocking(move || {
+            let join_result = tokio::task::spawn_blocking(move || {
                 let template = "You are a semantic matching agent. Your job is ONLY to judge whether observations from a grader run match existing findings by meaning — not to evaluate quality or add new analysis.\n\n## Unmatched observations (this run)\n{{observations}}\n\n## Candidate open findings (existing)\n{{findings}}\n\n## Task\nFor each observation, decide:\n- Does it semantically describe the same issue as an existing finding? If so, record the match.\n- Is it genuinely new? Record its index in `new`.\n- Are any candidate findings NOT covered by any observation (resolved)? Record their IDs in `resolved`.\n\nReturn a JSON object matching the schema. Keep temperature low — judge sameness strictly.";
 
                 let runner = aikit_sdk::AgentRunner::new()
@@ -391,18 +398,40 @@ impl Operator for ReconcileOperator {
                     .max_retries(1);
 
                 match pipeline.run(&[("observations", &obs_str), ("findings", &findings_str)], runner) {
-                    Ok(pr) => serde_json::from_value::<AdjudicationPlan>(pr.data).ok(),
-                    Err(e) => {
-                        tracing::warn!(
-                            "ReconcileOperator: LLM adjudication failed, treating unmatched as new: {e}"
-                        );
-                        None
-                    }
+                    Ok(pr) => serde_json::from_value::<AdjudicationPlan>(pr.data)
+                        .map_err(|e| format!("failed to parse adjudication plan: {e}")),
+                    Err(e) => Err(format!("LLM adjudication failed: {e}")),
                 }
             })
-            .await
-            .unwrap_or(None);
-            result
+            .await;
+
+            // Adjudication failure (LLM error, unparseable plan, or a panicked
+            // blocking task) fails the whole operator BEFORE any store mutation —
+            // see the "Fuzziness is not failure tolerance" note above. This is
+            // NOT a ValidationError (which task_execution::is_retryable treats as
+            // hard-non-retryable): it is a ToolExecutionError so the normal
+            // transient-failure retry/backoff applies, and only a persistent
+            // failure fails the task/cycle.
+            let plan = match join_result {
+                Ok(Ok(plan)) => plan,
+                Ok(Err(msg)) => {
+                    return Err(AppError::new(
+                        ErrorCategory::ToolExecutionError,
+                        format!("ReconcileOperator: adjudication failed: {msg}"),
+                    )
+                    .with_code("WFG-RECONCILE-ADJ-001"));
+                }
+                Err(join_err) => {
+                    return Err(AppError::new(
+                        ErrorCategory::ToolExecutionError,
+                        format!(
+                            "ReconcileOperator: adjudication task did not complete: {join_err}"
+                        ),
+                    )
+                    .with_code("WFG-RECONCILE-ADJ-001"));
+                }
+            };
+            Some(plan)
         } else {
             None
         };
@@ -637,7 +666,7 @@ mod tests {
     use super::*;
     use crate::workflow::executor::{ExecutionOverrides, GraphHandle};
     use crate::workflow::operator::{OperatorRegistry, StateView};
-    use newton_backend::{BackendStore, SqliteBackendStore};
+    use newton_backend::{BackendStore, PatchFindingBody, SqliteBackendStore};
     use serde_json::json;
 
     fn make_ctx() -> crate::workflow::operator::ExecutionContext {
@@ -840,6 +869,141 @@ mod tests {
             findings.len(),
             2,
             "both findings must be stored and retrievable"
+        );
+    }
+
+    /// PR-4 / B2 — "Reconciliation fails closed". When the LLM adjudicator
+    /// fails, `execute` must return an `Err` with code `WFG-RECONCILE-ADJ-001`
+    /// and must not mutate the Finding store at all: no new Findings, no
+    /// `resolved` transitions, and `blocked` Findings must be left completely
+    /// untouched (they are cleared only by a human — CONTEXT.md "Finding").
+    ///
+    /// The adjudicator is forced to fail deterministically and without any
+    /// subprocess/network I/O by passing an `engine` name that is not in
+    /// aikit-sdk's runnable-agent allow-list (`codex|claude|gemini|opencode|
+    /// agent|aikit`); `AgentRunner`/`Pipeline::run` fails fast with
+    /// `RunError::AgentNotRunnable` before spawning anything — the same seam
+    /// `AgentOperator`'s `execute_non_runnable_ai_engine_returns_sdk_002` test
+    /// uses.
+    #[tokio::test]
+    async fn adjudication_failure_fails_closed_with_zero_mutations() {
+        let store: Arc<dyn BackendStore> =
+            Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
+        let op = ReconcileOperator::new(std::path::PathBuf::from("/tmp"), store.clone());
+
+        // Seed run: no existing findings yet, so no adjudication candidates exist
+        // and this call succeeds without needing any LLM call at all.
+        //   - F1 (location-based "tests" observation): will get a stable fp and
+        //     is later flipped to `blocked` to prove blocked Findings survive.
+        //   - F2 (location-less "security" observation): location-less
+        //     observations never match deterministically, so a repeat run always
+        //     routes them to the LLM adjudicator.
+        let seed_assessment = make_assessment(vec![
+            make_obs("tests", "Coverage is below threshold", Some("src/main.rs")),
+            make_obs("security", "Dependency has known CVE", None),
+        ]);
+        let seed_params = json!({
+            "scope": "module",
+            "scope_id": "mod-adj-001",
+            "grader": "adj-grader",
+            "assessment": seed_assessment,
+        });
+        let seed_result = op.execute(seed_params, make_ctx()).await.unwrap();
+        assert_eq!(seed_result["created"], 2, "seed run creates both findings");
+
+        let seeded = store
+            .list_findings(
+                None,
+                Some("module".to_string()),
+                Some("mod-adj-001".to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(seeded.len(), 2);
+        let f1_id = seeded
+            .iter()
+            .find(|f| f.dimension == "tests")
+            .unwrap()
+            .id
+            .clone();
+
+        // Simulate the loop having auto-blocked F1 (a Plan implementing it
+        // failed develop after the retry budget) — only a human may clear this.
+        store
+            .patch_finding(
+                &f1_id,
+                PatchFindingBody {
+                    status: Some("blocked".to_string()),
+                    last_seen_at: None,
+                    expected_value: None,
+                    effort: None,
+                    risk: None,
+                    blocked_by_plan_id: Some("plan-x".to_string()),
+                },
+            )
+            .await
+            .unwrap();
+
+        let before = store
+            .list_findings(
+                None,
+                Some("module".to_string()),
+                Some("mod-adj-001".to_string()),
+            )
+            .await
+            .unwrap();
+        let before_json: Vec<serde_json::Value> = before
+            .iter()
+            .map(|f| serde_json::to_value(f).unwrap())
+            .collect();
+
+        // Second run: repeats the location-less "security" observation (F2 is
+        // therefore an open, unmatched adjudication candidate) with an engine
+        // that aikit-sdk refuses to run — this must trigger adjudication and
+        // fail it before any Phase 1/2/3 store mutation runs.
+        let rerun_assessment =
+            make_assessment(vec![make_obs("security", "Dependency has known CVE", None)]);
+        let rerun_params = json!({
+            "scope": "module",
+            "scope_id": "mod-adj-001",
+            "grader": "adj-grader",
+            "assessment": rerun_assessment,
+            "engine": "not-a-real-agent",
+        });
+
+        let err = op
+            .execute(rerun_params, make_ctx())
+            .await
+            .expect_err("adjudication failure must fail the operator");
+        assert_eq!(err.code, "WFG-RECONCILE-ADJ-001");
+        assert_eq!(err.category, ErrorCategory::ToolExecutionError);
+
+        let after = store
+            .list_findings(
+                None,
+                Some("module".to_string()),
+                Some("mod-adj-001".to_string()),
+            )
+            .await
+            .unwrap();
+        let after_json: Vec<serde_json::Value> = after
+            .iter()
+            .map(|f| serde_json::to_value(f).unwrap())
+            .collect();
+
+        assert_eq!(
+            after.len(),
+            2,
+            "no Finding may be created or removed on the failure path"
+        );
+        assert_eq!(
+            before_json, after_json,
+            "Finding store must be byte-identical before/after a failed adjudication"
+        );
+        let f1_after = after.iter().find(|f| f.id == f1_id).unwrap();
+        assert_eq!(
+            f1_after.status, "blocked",
+            "blocked Findings must be untouched by the failure path"
         );
     }
 }
