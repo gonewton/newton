@@ -6,6 +6,7 @@ use cli_framework::spec::arg_spec::{ArgKind, ArgSpec, ArgValueType, Cardinality}
 use cli_framework::spec::command_tree::CommandSpec;
 
 use crate::cli::categories;
+use crate::cli::exit::CliExit;
 use crate::cli::framework_setup::error_codes;
 use crate::cli::framework_setup::get_opt_path;
 use crate::cli::framework_setup::get_opt_str;
@@ -42,7 +43,7 @@ pub(crate) fn doctor_command() -> Command {
                 let report = ops::doctor::run(ops::doctor::DoctorArgs { workspace })?;
                 report.print();
                 if report.any_failed() {
-                    std::process::exit(1);
+                    return Err(CliExit::new(1, "doctor: one or more probes failed").into());
                 }
                 Ok(())
             })

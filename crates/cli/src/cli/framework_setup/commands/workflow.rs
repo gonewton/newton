@@ -453,7 +453,7 @@ pub(crate) fn workflow_command() -> Command {
                             }
                         }
                         let run_args = RunArgs::from_arg_value_map(&map);
-                        commands::workflow_run(run_args).await.map_err(anyhow::Error::from)
+                        commands::workflow_run(run_args).await
                     }
                     "import" => {
                         let import_args = ImportArgs {

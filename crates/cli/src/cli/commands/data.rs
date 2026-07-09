@@ -1,12 +1,16 @@
 use crate::cli::args::{DataArgs, DataVerb};
+use crate::cli::exit::CliExit;
 use crate::cli::WorkspacePaths;
 use newton_backend::BackendStore;
 use std::fs;
 
 pub async fn data(args: DataArgs) -> anyhow::Result<()> {
     if args.file.is_some() && args.body.is_some() {
-        eprintln!("DATA-001: --file and --body are mutually exclusive; provide at most one");
-        std::process::exit(1);
+        return Err(CliExit::new(
+            1,
+            "DATA-001: --file and --body are mutually exclusive; provide at most one",
+        )
+        .into());
     }
 
     let workspace = match args.workspace {
@@ -18,8 +22,9 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
     let store = match newton_backend::SqliteBackendStore::new(&db_url).await {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Failed to open backend store: {}", e.message);
-            std::process::exit(1);
+            return Err(
+                CliExit::new(1, format!("Failed to open backend store: {}", e.message)).into(),
+            );
         }
     };
 
@@ -35,16 +40,16 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
         match serde_json::from_str::<serde_json::Value>(&raw) {
             Ok(v) => Some(v),
             Err(e) => {
-                eprintln!("DATA-004: invalid JSON in body: {e}");
-                std::process::exit(1);
+                return Err(CliExit::new(1, format!("DATA-004: invalid JSON in body: {e}")).into());
             }
         }
     } else if let Some(ref s) = args.body {
         match serde_json::from_str::<serde_json::Value>(s) {
             Ok(v) => Some(v),
             Err(e) => {
-                eprintln!("DATA-004: invalid JSON in --body: {e}");
-                std::process::exit(1);
+                return Err(
+                    CliExit::new(1, format!("DATA-004: invalid JSON in --body: {e}")).into(),
+                );
             }
         }
     } else {
@@ -57,10 +62,11 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
         && resource != "grades"
         && resource != "optimize-cycles"
     {
-        eprintln!(
-            "DATA-006: --run-id/--kpi-id are only supported with: resource=grades, optimize-cycles"
-        );
-        std::process::exit(1);
+        return Err(CliExit::new(
+            1,
+            "DATA-006: --run-id/--kpi-id are only supported with: resource=grades, optimize-cycles",
+        )
+        .into());
     }
     if (args.scope.is_some()
         || args.scope_id.is_some()
@@ -68,10 +74,11 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
         || args.limit.is_some())
         && resource != "eval-runs"
     {
-        eprintln!(
-            "DATA-008: --scope/--scope-id/--source/--limit are only supported with: resource=eval-runs"
-        );
-        std::process::exit(1);
+        return Err(CliExit::new(
+            1,
+            "DATA-008: --scope/--scope-id/--source/--limit are only supported with: resource=eval-runs",
+        )
+        .into());
     }
 
     let valid_resources = [
@@ -103,14 +110,16 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
         "optimize-cycles",
     ];
     if !valid_resources.contains(&resource) {
-        eprintln!("DATA-003: unknown resource '{resource}'; must be one of: product, products, component, components, repo, repos, module, modules, module-dependency, module-dependencies, kpi, kpis, eval-run, eval-runs, grade, grades, finding, findings, change-request, change-requests, plan, plans, optimize-run, optimize-runs, optimize-cycle, optimize-cycles");
-        std::process::exit(1);
+        return Err(CliExit::new(1, format!("DATA-003: unknown resource '{resource}'; must be one of: product, products, component, components, repo, repos, module, modules, module-dependency, module-dependencies, kpi, kpis, eval-run, eval-runs, grade, grades, finding, findings, change-request, change-requests, plan, plans, optimize-run, optimize-runs, optimize-cycle, optimize-cycles")).into());
     }
 
     if matches!(args.verb, DataVerb::Post | DataVerb::Put | DataVerb::Patch) && body_value.is_none()
     {
-        eprintln!("DATA-005: --file or --body is required for {}", args.verb);
-        std::process::exit(1);
+        return Err(CliExit::new(
+            1,
+            format!("DATA-005: --file or --body is required for {}", args.verb),
+        )
+        .into());
     }
 
     let needs_id = match args.verb {
@@ -134,8 +143,11 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
         DataVerb::Put | DataVerb::Patch | DataVerb::Delete => true,
     };
     if needs_id && args.id.is_none() {
-        eprintln!("DATA-002: ID is required for {} {}", args.verb, resource);
-        std::process::exit(1);
+        return Err(CliExit::new(
+            1,
+            format!("DATA-002: ID is required for {} {}", args.verb, resource),
+        )
+        .into());
     }
 
     if args.dry_run {
@@ -145,30 +157,35 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
                     "component" | "components" => {
                         if let Some(product_id) = v.get("productId").and_then(|p| p.as_str()) {
                             if let Err(e) = store.get_product(product_id).await {
-                                eprintln!(
-                                    "[dry-run] FK validation failed: productId '{}' not found: {}",
-                                    product_id, e.message
-                                );
-                                std::process::exit(1);
+                                return Err(CliExit::new(
+                                    1,
+                                    format!(
+                                        "[dry-run] FK validation failed: productId '{}' not found: {}",
+                                        product_id, e.message
+                                    ),
+                                )
+                                .into());
                             }
                         }
                     }
                     "repo" | "repos" => {
                         if let Some(component_id) = v.get("componentId").and_then(|c| c.as_str()) {
                             if let Err(e) = store.get_component(component_id).await {
-                                eprintln!("[dry-run] FK validation failed: componentId '{}' not found: {}", component_id, e.message);
-                                std::process::exit(1);
+                                return Err(CliExit::new(1, format!("[dry-run] FK validation failed: componentId '{}' not found: {}", component_id, e.message)).into());
                             }
                         }
                     }
                     "module" | "modules" => {
                         if let Some(repo_id) = v.get("repoId").and_then(|r| r.as_str()) {
                             if let Err(e) = store.get_repo(repo_id).await {
-                                eprintln!(
-                                    "[dry-run] FK validation failed: repoId '{}' not found: {}",
-                                    repo_id, e.message
-                                );
-                                std::process::exit(1);
+                                return Err(CliExit::new(
+                                    1,
+                                    format!(
+                                        "[dry-run] FK validation failed: repoId '{}' not found: {}",
+                                        repo_id, e.message
+                                    ),
+                                )
+                                .into());
                             }
                         }
                     }
@@ -176,10 +193,11 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
                         let scope = v.get("scope").and_then(|s| s.as_str()).unwrap_or("");
                         let scope_id = v.get("scopeId").and_then(|s| s.as_str()).unwrap_or("");
                         if scope.is_empty() || scope_id.is_empty() {
-                            eprintln!(
-                                "[dry-run] FK validation failed: scope and scopeId are required"
-                            );
-                            std::process::exit(1);
+                            return Err(CliExit::new(
+                                1,
+                                "[dry-run] FK validation failed: scope and scopeId are required",
+                            )
+                            .into());
                         }
                         let fk_result = match scope {
                             "product" => store.get_product(scope_id).await.map(|_| ()),
@@ -191,33 +209,45 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
                             )),
                         };
                         if let Err(e) = fk_result {
-                            eprintln!(
-                                "[dry-run] FK validation failed: {} '{}' not found: {}",
-                                scope, scope_id, e.message
-                            );
-                            std::process::exit(1);
+                            return Err(CliExit::new(
+                                1,
+                                format!(
+                                    "[dry-run] FK validation failed: {} '{}' not found: {}",
+                                    scope, scope_id, e.message
+                                ),
+                            )
+                            .into());
                         }
                     }
                     "grade" | "grades" => {
                         let run_id = v.get("runId").and_then(|r| r.as_str());
                         let Some(run_id) = run_id else {
-                            eprintln!("[dry-run] FK validation failed: runId is required");
-                            std::process::exit(1);
+                            return Err(CliExit::new(
+                                1,
+                                "[dry-run] FK validation failed: runId is required",
+                            )
+                            .into());
                         };
                         if let Err(e) = store.get_eval_run(run_id).await {
-                            eprintln!(
-                                "[dry-run] FK validation failed: runId '{}' not found: {}",
-                                run_id, e.message
-                            );
-                            std::process::exit(1);
+                            return Err(CliExit::new(
+                                1,
+                                format!(
+                                    "[dry-run] FK validation failed: runId '{}' not found: {}",
+                                    run_id, e.message
+                                ),
+                            )
+                            .into());
                         }
                         if let Some(kpi_id) = v.get("kpiId").and_then(|k| k.as_str()) {
                             if let Err(e) = store.get_kpi(kpi_id).await {
-                                eprintln!(
-                                    "[dry-run] FK validation failed: kpiId '{}' not found: {}",
-                                    kpi_id, e.message
-                                );
-                                std::process::exit(1);
+                                return Err(CliExit::new(
+                                    1,
+                                    format!(
+                                        "[dry-run] FK validation failed: kpiId '{}' not found: {}",
+                                        kpi_id, e.message
+                                    ),
+                                )
+                                .into());
                             }
                         }
                     }
@@ -242,10 +272,7 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&value)?);
             Ok(())
         }
-        Err(msg) => {
-            eprintln!("{msg}");
-            std::process::exit(1);
-        }
+        Err(msg) => Err(CliExit::new(1, msg).into()),
     }
 }
 

@@ -132,7 +132,8 @@ pub async fn probe_bind(flags: &McpFlags) -> Result<(), std::io::Error> {
 }
 
 /// Run MCP mode using cli-framework's `serve_mcp` entry point. Returns the
-/// process exit code; callers `std::process::exit` on it.
+/// process exit code; the caller in `main.rs` terminates the process with it
+/// (the only place outside this MCP-mode short-circuit permitted to do so).
 pub async fn run(argv: Vec<String>, ctx: crate::cli::context::NewtonContext) -> i32 {
     let flags = parse_mcp_flags(&argv);
     let bind_address = format!("{}:{}", flags.host, flags.port);

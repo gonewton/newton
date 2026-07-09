@@ -2,6 +2,7 @@
 pub mod cli;
 
 pub use cli::context::NewtonContext;
+pub use cli::exit::CliExit;
 pub use cli::framework_setup::build_app;
 pub use cli::log_invocation::kind_for_command;
 pub use cli::ops;

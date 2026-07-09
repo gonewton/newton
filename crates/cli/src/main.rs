@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use newton_cli::cli::context::NewtonContext;
+use newton_cli::cli::exit::CliExit;
 use newton_cli::cli::framework_setup::build_app;
 use newton_cli::cli::log_invocation::{kind_for_command, peek_command};
 use newton_cli::cli::mcp;
@@ -22,7 +23,23 @@ async fn main() -> Result<()> {
 
     let mut app = build_app(ctx)?;
 
-    app.run_with_args(app_args).await
+    // Extend the exit seam above: a handler that needs to terminate a direct
+    // CLI invocation with a specific exit code returns `Err(CliExit{..}.into())`
+    // instead of calling `std::process::exit` itself (spec 074, PR-1 / B3).
+    // That keeps the same `Err` safe to flow through `newton serve --with-mcp`
+    // (cli-framework turns it into an MCP error frame; the server keeps
+    // running) while still reproducing the historical CLI exit behavior here,
+    // the only place allowed to call `std::process::exit` outside `mcp::run`.
+    match app.run_with_args(app_args).await {
+        Ok(()) => Ok(()),
+        Err(e) => match e.downcast::<CliExit>() {
+            Ok(exit) => {
+                eprintln!("{}", exit.message);
+                std::process::exit(exit.code);
+            }
+            Err(e) => Err(e),
+        },
+    }
 }
 
 /// Strip `--log-dir <value>` / `--log-dir=<value>` from argv, preserving argv[0].

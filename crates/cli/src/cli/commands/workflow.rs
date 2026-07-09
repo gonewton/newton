@@ -3,6 +3,7 @@
 use crate::cli::args::{
     DotArgs, ExplainArgs, LintArgs, OutputFormat, ResumeArgs, RunArgs, ValidateArgs,
 };
+use crate::cli::exit::CliExit;
 use crate::cli::workspace_paths::{resolve_state_dir, state_checkpoints_dir};
 use newton_core::core::error::AppError;
 use newton_core::core::types::ErrorCategory;
@@ -18,20 +19,28 @@ use newton_core::workflow::{
 use serde_json::Value;
 use std::{fs, result::Result as StdResult};
 
+/// Emits the completion envelope, then either exits (via the returned error,
+/// mapped to `std::process::exit` only in `main.rs`) or returns the
+/// underlying `AppError` for normal (non `--emit-completion-json`) dispatch.
+///
+/// The envelope is always printed to stdout *before* the error is
+/// constructed, so a served invocation (MCP/chat) that turns the `Err` into
+/// an error frame instead of exiting still gets the same stdout envelope a
+/// direct CLI invocation would have seen before exiting.
 fn emit_or_return(
     emit_json: bool,
     envelope: CompletionEnvelope,
     err: AppError,
     exit_code: i32,
-) -> StdResult<(), AppError> {
+) -> anyhow::Result<()> {
     if emit_json {
         println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
-        std::process::exit(exit_code);
+        return Err(CliExit::new(exit_code, err.to_string()).into());
     }
-    Err(err)
+    Err(err.into())
 }
 
-async fn execute_run_command(args: &RunArgs) -> StdResult<(), AppError> {
+async fn execute_run_command(args: &RunArgs) -> anyhow::Result<()> {
     let emit_json = args.emit_completion_json;
     let workflow_path = args.workflow.clone();
     let workspace = super::resolve_workflow_workspace(args.workspace.clone())?;
@@ -198,14 +207,14 @@ async fn execute_run_command(args: &RunArgs) -> StdResult<(), AppError> {
                 };
                 println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
                 let exit_code = if is_workflow_failure { 2 } else { 1 };
-                std::process::exit(exit_code);
+                return Err(CliExit::new(exit_code, app_error.to_string()).into());
             }
-            Err(app_error)
+            Err(app_error.into())
         }
     }
 }
 
-pub async fn workflow_run(args: RunArgs) -> StdResult<(), AppError> {
+pub async fn workflow_run(args: RunArgs) -> anyhow::Result<()> {
     execute_run_command(&args).await
 }
 
