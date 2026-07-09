@@ -108,7 +108,9 @@ impl Drop for ProcessGroupKillGuard {
 pub(super) struct SingleExecResult {
     pub(super) signal: Option<String>,
     pub(super) signal_data: HashMap<String, String>,
-    pub(super) exit_code: i32,
+    /// `None` when the child was killed after a signal match (no exit code
+    /// to report); `Some(_)` on a genuine process exit.
+    pub(super) exit_code: Option<i32>,
 }
 
 /// Bundled paths for an execution run.
@@ -317,6 +319,14 @@ async fn stream_and_process_output(
 
 /// Wait for the process to complete and return the exit code.
 ///
+/// Returns `None` when `exit_status.code()` is `None` — on unix that means
+/// the process was terminated by a signal, which in this codebase happens
+/// exactly when [`stream_and_process_output`] called `child.kill()` after a
+/// configured signal matched. The caller must not paper over that with a
+/// fabricated exit code (e.g. `-1`): a signal-terminated process genuinely
+/// has no exit code, and a workflow gate on `exit_code == 0` must not see a
+/// successful signal-stop as a failure. See spec 074 decision 4 / B9.
+///
 /// Disarms `kill_guard` IMMEDIATELY after a successful `child.wait()` —
 /// before awaiting `stderr_task`. `stderr_task.await` is itself an await
 /// point; if it were reached while the guard was still armed, the *outer*
@@ -339,7 +349,7 @@ async fn wait_for_process_completion(
     mut child: tokio::process::Child,
     stderr_task: tokio::task::JoinHandle<()>,
     kill_guard: &mut ProcessGroupKillGuard,
-) -> Result<i32, AppError> {
+) -> Result<Option<i32>, AppError> {
     let exit_status = child.wait().await.map_err(|err| {
         AppError::new(
             ErrorCategory::IoError,
@@ -353,7 +363,7 @@ async fn wait_for_process_completion(
 
     let _ = stderr_task.await;
 
-    Ok(exit_status.code().unwrap_or(-1))
+    Ok(exit_status.code())
 }
 
 /// Execute a single engine invocation and stream output.
@@ -387,10 +397,10 @@ pub(super) async fn execute_single(params: &ExecParams<'_>) -> Result<SingleExec
 pub(super) async fn execute_loop(
     config: &AgentOperatorConfig,
     params: &ExecParams<'_>,
-) -> Result<(Option<String>, HashMap<String, String>, i32, u32), AppError> {
+) -> Result<(Option<String>, HashMap<String, String>, Option<i32>, u32), AppError> {
     let max_iters = config.max_iterations.unwrap_or(u32::MAX);
     let mut iteration: u32 = 0;
-    let mut last_exit_code: i32;
+    let mut last_exit_code: Option<i32>;
     let mut last_signal: Option<String>;
     let mut last_signal_data: HashMap<String, String>;
 
@@ -417,7 +427,10 @@ pub(super) async fn execute_loop(
             break;
         }
 
-        if result.exit_code != 0 {
+        // `result.exit_code` is only `None` when the child was killed on a
+        // signal match, and that path already broke out above via
+        // `result.signal`, so this comparison never observes `None`.
+        if result.exit_code != Some(0) {
             break;
         }
     }
@@ -603,6 +616,57 @@ mod tests {
         });
         let result = op.execute(params, ctx).await.unwrap();
         assert_eq!(result["signal"], json!("complete"));
+    }
+
+    // ── B9: honest agent stop contract ───────────────────────────────────
+    //
+    // A configured-signal match kills the child (see
+    // `stream_and_process_output`'s `child.kill().await` on match), so
+    // `exit_status.code()` is `None` — there is no genuine exit code to
+    // report. The operator output must say so explicitly (`stop_reason:
+    // "signal_matched"`, `exit_code: null`) instead of fabricating a
+    // sentinel like `-1` that a `exit_code == 0` gate would misread as
+    // failure.
+
+    #[tokio::test]
+    async fn execute_signal_matched_sets_stop_reason_and_null_exit_code() {
+        let tmp = TempDir::new().unwrap();
+        let settings = WorkflowSettings::default();
+        let op = AgentOperator::with_default_registry(tmp.path().to_path_buf(), settings);
+        let ctx = make_ctx(&tmp);
+        // The script must still be alive when `child.kill()` fires after the
+        // signal match, or the process may have already exited on its own
+        // (racing the kill with a genuine `exit_code: 0`) and this test
+        // would not actually exercise the kill path. `sleep` after the
+        // signal line keeps the process running long enough to be killed.
+        let params = json!({
+            "engine": "command",
+            "engine_command": [
+                "bash", "-c",
+                "echo '<promise>COMPLETE</promise>'; sleep 30"
+            ],
+            "signals": { "complete": "<promise>COMPLETE</promise>" }
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+        assert_eq!(result["signal"], json!("complete"));
+        assert_eq!(result["stop_reason"], json!("signal_matched"));
+        assert_eq!(result["exit_code"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn execute_clean_exit_sets_stop_reason_exited_with_numeric_exit_code() {
+        let tmp = TempDir::new().unwrap();
+        let settings = WorkflowSettings::default();
+        let op = AgentOperator::with_default_registry(tmp.path().to_path_buf(), settings);
+        let ctx = make_ctx(&tmp);
+        let params = json!({
+            "engine": "command",
+            "engine_command": ["bash", "-c", "echo hello"]
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+        assert_eq!(result["signal"], json!("exited"));
+        assert_eq!(result["stop_reason"], json!("exited"));
+        assert_eq!(result["exit_code"], json!(0));
     }
 
     #[tokio::test]

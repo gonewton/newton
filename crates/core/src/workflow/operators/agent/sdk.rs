@@ -15,7 +15,11 @@ use std::time::{Duration, Instant};
 pub(super) struct SdkExecResult {
     pub(super) signal: Option<String>,
     pub(super) signal_data: HashMap<String, String>,
-    pub(super) exit_code: i32,
+    /// The SDK engine path never kills a subprocess directly (aikit-sdk owns
+    /// that internally), so this is always `Some(0)` — kept as `Option<i32>`
+    /// only to share a type with the command-engine path's `exit_code`,
+    /// which genuinely can be `None` on a signal-triggered kill.
+    pub(super) exit_code: Option<i32>,
     pub(super) iteration: u32,
     pub(super) events_artifact_path: Option<String>,
     /// Aggregated token usage from the SDK run.
@@ -55,7 +59,7 @@ pub(super) async fn execute_sdk_engine(
     let mut iteration: u32 = 0;
     let mut last_signal: Option<String> = None;
     let mut last_signal_data: HashMap<String, String> = HashMap::new();
-    let last_exit_code: i32 = 0;
+    let last_exit_code: Option<i32> = Some(0);
     let start = Instant::now();
     let mut fallback_token_usage: Option<serde_json::Value> = None;
     let mut primary_token_usage: Option<serde_json::Value> = None;
