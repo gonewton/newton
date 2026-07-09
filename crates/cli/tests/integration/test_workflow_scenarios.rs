@@ -265,6 +265,7 @@ impl WorkflowTestHarness {
                 verbose: false,
                 sink: None,
                 pre_seed_nodes: true,
+                state_dir: None,
             },
         )
         .await
@@ -1465,6 +1466,7 @@ async fn test_scenario_39_nested_depth_limit_enforced() {
                 verbose: false,
                 sink: None,
                 pre_seed_nodes: true,
+                state_dir: None,
             },
         )
         .await
@@ -1861,6 +1863,7 @@ async fn test_scenario_47_gh_operator_branch_push() {
             verbose: false,
             sink: None,
             pre_seed_nodes: true,
+            state_dir: None,
         },
     )
     .await

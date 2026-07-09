@@ -35,6 +35,8 @@ pub fn err_validation(message: &str) -> ApiError {
     }
 }
 
+/// 403 `ApiError` body for the disabled testing-reset endpoint
+/// (code `ERR_TESTING_RESET_DISABLED`).
 pub fn err_testing_reset_disabled(message: &str) -> ApiError {
     ApiError {
         code: "ERR_TESTING_RESET_DISABLED".to_string(),

@@ -48,6 +48,7 @@ fn default_overrides() -> ExecutionOverrides {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     }
 }
 

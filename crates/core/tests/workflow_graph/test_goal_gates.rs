@@ -88,6 +88,7 @@ fn default_overrides() -> ExecutionOverrides {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     }
 }
 
@@ -536,6 +537,7 @@ async fn e8_terminal_success_stops_executor_queued_tasks_not_run() {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
     let registry = build_registry(workspace.clone(), document.workflow.settings.clone());
 

@@ -162,6 +162,7 @@ async fn transitions_deduplicate_targets_per_tick() {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     let summary = executor::execute_workflow(
@@ -196,6 +197,7 @@ async fn loop_exhausts_iteration_limit() {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     let result = executor::execute_workflow(
@@ -226,6 +228,7 @@ async fn higher_priority_transition_wins() {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     let summary = executor::execute_workflow(
@@ -258,6 +261,7 @@ async fn workflow_exhausts_global_iteration_limit() {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     let result = executor::execute_workflow(

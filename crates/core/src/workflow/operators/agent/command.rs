@@ -316,9 +316,29 @@ async fn stream_and_process_output(
 }
 
 /// Wait for the process to complete and return the exit code.
+///
+/// Disarms `kill_guard` IMMEDIATELY after a successful `child.wait()` —
+/// before awaiting `stderr_task`. `stderr_task.await` is itself an await
+/// point; if it were reached while the guard was still armed, the *outer*
+/// per-task timeout could drop this whole future there, and the guard's
+/// `Drop` would `killpg()` a pgid whose leader was already reaped by the
+/// `child.wait()` above. If the rest of the group had also already exited,
+/// that pgid could have been recycled by the OS for an unrelated process
+/// group, which the drop would then SIGKILL.
+///
+/// Trade-off accepted deliberately: disarming here means a future-drop
+/// during the `stderr_task` await no longer group-kills any leftover
+/// grandchildren of *this* child. That window is narrow (stderr draining is
+/// just reading the pipe to EOF, which is fast once the process has already
+/// exited) and is judged acceptable in exchange for eliminating the
+/// kill-innocent-pgid risk described above.
+///
+/// On a failed `wait()` the child's process/group state is unknown, so the
+/// guard is deliberately left armed — its `Drop` remains the safety net.
 async fn wait_for_process_completion(
     mut child: tokio::process::Child,
     stderr_task: tokio::task::JoinHandle<()>,
+    kill_guard: &mut ProcessGroupKillGuard,
 ) -> Result<i32, AppError> {
     let exit_status = child.wait().await.map_err(|err| {
         AppError::new(
@@ -326,6 +346,10 @@ async fn wait_for_process_completion(
             format!("failed to wait for engine process: {err}"),
         )
     })?;
+
+    // Clean wait: the direct child is confirmed reaped. Disarm before the
+    // stderr await below so a drop during that await is a no-op.
+    kill_guard.disarm();
 
     let _ = stderr_task.await;
 
@@ -346,10 +370,11 @@ pub(super) async fn execute_single(params: &ExecParams<'_>) -> Result<SingleExec
     let streaming_result =
         stream_and_process_output(stdout, &mut stdout_file, &mut child, params).await?;
 
-    let exit_code = wait_for_process_completion(child, stderr_task).await?;
-    // Clean wait: the direct child is confirmed reaped. Disarm so the guard's
-    // Drop at the end of this scope is a no-op.
-    kill_guard.disarm();
+    // `wait_for_process_completion` disarms `kill_guard` itself, right after
+    // its internal `child.wait()` succeeds and before it awaits
+    // `stderr_task` — see that function's doc comment for why the disarm
+    // can't be deferred to here.
+    let exit_code = wait_for_process_completion(child, stderr_task, &mut kill_guard).await?;
 
     Ok(SingleExecResult {
         signal: streaming_result.signal,
@@ -478,6 +503,7 @@ mod tests {
                 verbose: false,
                 sink: None,
                 pre_seed_nodes: true,
+                state_dir: None,
             },
             operator_registry: OperatorRegistry::new(),
         }
@@ -1026,6 +1052,7 @@ while true; do printf x >> "{heartbeat}"; sleep 0.02; done"#,
                 verbose: false,
                 sink: None,
                 pre_seed_nodes: true,
+                state_dir: None,
             },
         )
         .await

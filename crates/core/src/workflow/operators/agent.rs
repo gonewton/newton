@@ -139,7 +139,7 @@ impl Operator for AgentOperator {
 
         let eval_ctx = ctx.state_view.evaluation_context();
 
-        let interpolated_env = command::interpolate_env(&config.env, &eval_ctx)?;
+        let mut interpolated_env = command::interpolate_env(&config.env, &eval_ctx)?;
 
         let paths = artifacts::setup_artifact_paths(&self.workspace_root, &self.settings, &ctx)?;
 
@@ -173,6 +173,23 @@ impl Operator for AgentOperator {
                 engine_command: Some(&resolved_engine_command),
             };
             let invocation = driver.build_invocation(&driver_config, &self.workspace_root)?;
+
+            // Inject NEWTON_STATE_DIR only if neither the explicit workflow
+            // YAML `env` nor the driver-built invocation env already set it —
+            // explicit config always wins. `build_command` (command.rs)
+            // applies `invocation.env` first and `extra_env` second, so an
+            // unconditional insert here would silently override an explicit
+            // `invocation.env` entry.
+            if let Some(state_dir) = &ctx.execution_overrides.state_dir {
+                let already_set = interpolated_env.contains_key("NEWTON_STATE_DIR")
+                    || invocation.env.iter().any(|(k, _)| k == "NEWTON_STATE_DIR");
+                if !already_set {
+                    interpolated_env.insert(
+                        "NEWTON_STATE_DIR".to_string(),
+                        state_dir.display().to_string(),
+                    );
+                }
+            }
 
             let timeout_duration = config.timeout_seconds.map_or_else(
                 || Duration::from_secs(self.settings.max_time_seconds),

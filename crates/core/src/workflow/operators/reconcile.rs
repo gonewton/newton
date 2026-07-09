@@ -688,6 +688,7 @@ mod tests {
                 verbose: false,
                 sink: None,
                 pre_seed_nodes: true,
+                state_dir: None,
             },
             operator_registry: OperatorRegistry::new(),
         }
