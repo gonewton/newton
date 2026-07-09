@@ -8,7 +8,7 @@ use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
 use async_trait::async_trait;
 use chrono::Utc;
-use newton_backend::{BackendStore, CreateFindingBody, FindingItem, PatchFindingBody};
+use newton_types::{BackendStore, CreateFindingBody, FindingItem, PatchFindingBody};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -666,7 +666,8 @@ mod tests {
     use super::*;
     use crate::workflow::executor::{ExecutionOverrides, GraphHandle};
     use crate::workflow::operator::{OperatorRegistry, StateView};
-    use newton_backend::{BackendStore, PatchFindingBody, SqliteBackendStore};
+    use newton_backend::SqliteBackendStore;
+    use newton_types::{BackendStore, PatchFindingBody};
     use serde_json::json;
 
     fn make_ctx() -> crate::workflow::operator::ExecutionContext {

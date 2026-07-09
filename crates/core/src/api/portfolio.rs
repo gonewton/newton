@@ -7,8 +7,8 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use newton_backend::CreateModuleDependencyBody;
 use newton_types::ApiError;
+use newton_types::CreateModuleDependencyBody;
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -27,7 +27,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
     path = "/repos",
     tag = "portfolio",
     responses(
-        (status = 200, description = "Repository list", body = [newton_backend::RepoItem]),
+        (status = 200, description = "Repository list", body = [newton_types::RepoItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -40,7 +40,7 @@ pub(crate) async fn list_repos(State(state): State<Arc<AppState>>) -> Response {
     path = "/repo-dependencies",
     tag = "portfolio",
     responses(
-        (status = 200, description = "Repository dependency list", body = [newton_backend::RepoDependencyItem]),
+        (status = 200, description = "Repository dependency list", body = [newton_types::RepoDependencyItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -53,7 +53,7 @@ pub(crate) async fn list_repo_dependencies(State(state): State<Arc<AppState>>) -
     path = "/module-dependencies",
     tag = "portfolio",
     responses(
-        (status = 200, description = "Module dependency list", body = [newton_backend::ModuleDependencyItem]),
+        (status = 200, description = "Module dependency list", body = [newton_types::ModuleDependencyItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -67,7 +67,7 @@ pub(crate) async fn list_module_dependencies(State(state): State<Arc<AppState>>)
     tag = "portfolio",
     request_body = CreateModuleDependencyBody,
     responses(
-        (status = 201, description = "Created module dependency", body = newton_backend::ModuleDependencyItem),
+        (status = 201, description = "Created module dependency", body = newton_types::ModuleDependencyItem),
         (status = 404, description = "Module not found", body = ApiError),
         (status = 409, description = "Dependency conflict", body = ApiError),
         (status = 422, description = "Validation error", body = ApiError),

@@ -69,6 +69,49 @@ impl WorkflowExecutionStatus {
     }
 }
 
+/// S11: unify the workflow-instance status vocabulary. `WorkflowExecutionStatus`
+/// is the engine's richer on-disk execution status; `newton_types::WorkflowStatus`
+/// is the wire vocabulary shared with `newton-backend`/the API. This is a
+/// lossless mapping (every `WorkflowExecutionStatus` variant has exactly one
+/// `WorkflowStatus` counterpart) — `Paused` exists on the wire type but is not
+/// currently produced from this conversion.
+impl From<WorkflowExecutionStatus> for newton_types::WorkflowStatus {
+    fn from(status: WorkflowExecutionStatus) -> Self {
+        match status {
+            WorkflowExecutionStatus::Running => newton_types::WorkflowStatus::Running,
+            WorkflowExecutionStatus::Completed => newton_types::WorkflowStatus::Succeeded,
+            WorkflowExecutionStatus::Failed => newton_types::WorkflowStatus::Failed,
+            WorkflowExecutionStatus::Cancelled => newton_types::WorkflowStatus::Cancelled,
+        }
+    }
+}
+
+#[cfg(test)]
+mod status_conversion_tests {
+    use super::WorkflowExecutionStatus;
+    use newton_types::WorkflowStatus;
+
+    #[test]
+    fn workflow_execution_status_into_workflow_status_is_lossless() {
+        assert_eq!(
+            WorkflowStatus::from(WorkflowExecutionStatus::Running),
+            WorkflowStatus::Running
+        );
+        assert_eq!(
+            WorkflowStatus::from(WorkflowExecutionStatus::Completed),
+            WorkflowStatus::Succeeded
+        );
+        assert_eq!(
+            WorkflowStatus::from(WorkflowExecutionStatus::Failed),
+            WorkflowStatus::Failed
+        );
+        assert_eq!(
+            WorkflowStatus::from(WorkflowExecutionStatus::Cancelled),
+            WorkflowStatus::Cancelled
+        );
+    }
+}
+
 /// Workflow task status for persisted records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

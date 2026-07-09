@@ -2,8 +2,8 @@ use super::helpers::query_err;
 use super::rows::*;
 use crate::err_internal;
 use crate::err_not_found;
-use crate::models::*;
 use newton_types::ApiError;
+use newton_types::*;
 
 const FINDING_STATUSES: &[&str] = &[
     "awaiting_triage",
@@ -454,7 +454,7 @@ impl super::SqliteBackendStore {
 #[cfg(test)]
 mod finding_tests {
     use super::super::SqliteBackendStore;
-    use crate::models::{CreateChangeRequestBody, CreateFindingBody};
+    use newton_types::{CreateChangeRequestBody, CreateFindingBody};
 
     fn make_finding(id: &str) -> CreateFindingBody {
         CreateFindingBody {

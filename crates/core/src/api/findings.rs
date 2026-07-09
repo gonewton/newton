@@ -7,8 +7,8 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use newton_backend::{CreateFindingBody, PatchFindingBody};
 use newton_types::ApiError;
+use newton_types::{CreateFindingBody, PatchFindingBody};
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -37,7 +37,7 @@ pub(crate) struct FindingQuery {
         ("scope_id" = Option<String>, Query, description = "Optional scope entity id filter"),
     ),
     responses(
-        (status = 200, description = "Finding list", body = [newton_backend::FindingItem]),
+        (status = 200, description = "Finding list", body = [newton_types::FindingItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -59,7 +59,7 @@ pub(crate) async fn list_findings(
     tag = "findings",
     request_body = CreateFindingBody,
     responses(
-        (status = 201, description = "Created or upserted finding", body = newton_backend::FindingItem),
+        (status = 201, description = "Created or upserted finding", body = newton_types::FindingItem),
         (status = 422, description = "Validation error", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -77,7 +77,7 @@ pub(crate) async fn create_finding(
     tag = "findings",
     params(("id" = String, Path, description = "Finding id")),
     responses(
-        (status = 200, description = "Finding detail", body = newton_backend::FindingItem),
+        (status = 200, description = "Finding detail", body = newton_types::FindingItem),
         (status = 404, description = "Finding not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -96,7 +96,7 @@ pub(crate) async fn get_finding(
     params(("id" = String, Path, description = "Finding id")),
     request_body = PatchFindingBody,
     responses(
-        (status = 200, description = "Updated finding", body = newton_backend::FindingItem),
+        (status = 200, description = "Updated finding", body = newton_types::FindingItem),
         (status = 404, description = "Finding not found", body = ApiError),
         (status = 422, description = "Validation error", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
@@ -116,7 +116,7 @@ pub(crate) async fn patch_finding(
     tag = "findings",
     params(("id" = String, Path, description = "Finding id")),
     responses(
-        (status = 200, description = "Unblocked finding", body = newton_backend::FindingItem),
+        (status = 200, description = "Unblocked finding", body = newton_types::FindingItem),
         (status = 404, description = "Finding not found", body = newton_types::ApiError),
         (status = 409, description = "Finding is not blocked", body = newton_types::ApiError),
         (status = 500, description = "Internal error", body = newton_types::ApiError)

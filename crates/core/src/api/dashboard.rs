@@ -25,7 +25,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
     path = "/products",
     tag = "dashboard",
     responses(
-        (status = 200, description = "Product list", body = [newton_backend::ProductItem]),
+        (status = 200, description = "Product list", body = [newton_types::ProductItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -41,7 +41,7 @@ pub(crate) async fn list_products(State(state): State<Arc<AppState>>) -> Respons
     path = "/components",
     tag = "dashboard",
     responses(
-        (status = 200, description = "Component list", body = [newton_backend::ComponentItem]),
+        (status = 200, description = "Component list", body = [newton_types::ComponentItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -57,7 +57,7 @@ pub(crate) async fn list_components(State(state): State<Arc<AppState>>) -> Respo
     path = "/pending-approvals",
     tag = "dashboard",
     responses(
-        (status = 200, description = "Pending approval list", body = [newton_backend::PendingApprovalItem]),
+        (status = 200, description = "Pending approval list", body = [newton_types::PendingApprovalItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -73,7 +73,7 @@ pub(crate) async fn list_pending_approvals(State(state): State<Arc<AppState>>) -
     path = "/regressions",
     tag = "dashboard",
     responses(
-        (status = 200, description = "Regression list", body = [newton_backend::RegressionItem]),
+        (status = 200, description = "Regression list", body = [newton_types::RegressionItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -95,7 +95,7 @@ pub(crate) struct RecentActionsQuery {
     tag = "dashboard",
     params(("limit" = Option<u32>, Query, description = "Maximum number of recent actions")),
     responses(
-        (status = 200, description = "Recent action list", body = [newton_backend::RecentActionItem]),
+        (status = 200, description = "Recent action list", body = [newton_types::RecentActionItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]

@@ -9,7 +9,7 @@ use crate::workflow::operator::{ExecutionContext, Operator};
 use crate::workflow::operators::assessment;
 use async_trait::async_trait;
 use chrono::Utc;
-use newton_backend::BackendStore;
+use newton_types::BackendStore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

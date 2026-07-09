@@ -15,14 +15,14 @@ pub const BROADCAST_CAPACITY: usize = 1024;
 pub struct AppState {
     pub operators: Arc<Vec<OperatorDescriptor>>,
     pub events_tx: broadcast::Sender<BroadcastEvent>,
-    pub backend: Arc<dyn newton_backend::BackendStore>,
+    pub backend: Arc<dyn newton_types::BackendStore>,
     pub workflow_files: Option<Arc<dyn WorkflowFileStore>>,
 }
 
 impl AppState {
     pub fn new(
         operators: Vec<OperatorDescriptor>,
-        backend: Arc<dyn newton_backend::BackendStore>,
+        backend: Arc<dyn newton_types::BackendStore>,
     ) -> Self {
         let (events_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         AppState {

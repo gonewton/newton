@@ -3,8 +3,8 @@ use super::rows::*;
 use crate::err_conflict;
 use crate::err_not_found;
 use crate::err_validation;
-use crate::models::*;
 use newton_types::ApiError;
+use newton_types::*;
 use uuid::Uuid;
 
 const ALLOWED_AGG_FNS: &[&str] = &["latest", "avg", "p50", "p90"];

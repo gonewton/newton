@@ -18,7 +18,6 @@ path = "src/bin/generate-openapi.rs"
 
 [dependencies]
 newton-types = { path = "../types" }
-newton-backend = { path = "../backend" }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 aikit-sdk = { workspace = true }
@@ -71,6 +70,11 @@ flate2 = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+# Test-only: the concrete BackendStore impl for spinning up in-memory stores
+# in unit/integration tests. Production code depends only on
+# newton-types::BackendStore (ADR-0015: newton-core must not depend on
+# newton-backend/sqlx).
+newton-backend = { path = "../backend" }
 assert_cmd = { workspace = true }
 insta = { workspace = true }
 serial_test = { workspace = true }

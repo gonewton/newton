@@ -9,3 +9,4 @@ serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
 utoipa = { version = "5.4", features = ["chrono", "uuid"] }
+async-trait = "0.1"

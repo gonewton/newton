@@ -32,8 +32,8 @@ use super::rows::*;
 use crate::err_conflict;
 use crate::err_internal;
 use crate::err_not_found;
-use crate::models::*;
 use newton_types::ApiError;
+use newton_types::*;
 use uuid::Uuid;
 
 impl super::SqliteBackendStore {

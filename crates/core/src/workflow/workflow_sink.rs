@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use newton_backend::BackendStore;
+use newton_types::BackendStore;
 
 /// Trait for receiving workflow lifecycle events.
 pub trait WorkflowSink: Send + Sync + Debug {

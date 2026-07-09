@@ -2,7 +2,7 @@
 
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
-use newton_backend::{BackendStore, CreateEvalRunBody, CreateGradeInlineBody};
+use newton_types::{BackendStore, CreateEvalRunBody, CreateGradeInlineBody};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;

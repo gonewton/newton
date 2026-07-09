@@ -8,11 +8,8 @@ mod plan;
 mod rows;
 mod workflow_runtime;
 
-use crate::err_internal;
-use crate::models::*;
-use crate::BackendStore;
 use chrono::{DateTime, Utc};
-use newton_types::ApiError;
+use newton_types::*;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use std::str::FromStr;
@@ -968,7 +965,7 @@ mod fk_tests {
 #[cfg(test)]
 mod finding_store_tests {
     use super::*;
-    use crate::models::CreateFindingBody;
+    use newton_types::CreateFindingBody;
 
     fn make_finding(id: &str) -> CreateFindingBody {
         CreateFindingBody {

@@ -41,7 +41,7 @@ pub struct BuiltinOperatorDeps {
     /// GitRunner for GhOperator branch_push. Defaults to TokioGitRunner when None.
     pub git_runner: Option<Arc<dyn gh::GitRunner>>,
     /// BackendStore for grading operators (GraderCommandOperator, ReconcileOperator, etc.).
-    pub backend_store: Option<Arc<dyn newton_backend::BackendStore>>,
+    pub backend_store: Option<Arc<dyn newton_types::BackendStore>>,
 }
 
 /// Register built-in operators into the supplied builder.

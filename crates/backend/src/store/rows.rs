@@ -1,4 +1,4 @@
-use crate::models::*;
+use newton_types::*;
 
 use sqlx::FromRow;
 

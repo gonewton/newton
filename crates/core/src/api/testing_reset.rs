@@ -29,7 +29,7 @@ pub(crate) async fn reset_testing(State(state): State<Arc<AppState>>) -> Respons
     if std::env::var(NEWTON_ENABLE_TESTING_RESET).as_deref() != Ok("1") {
         return (
             StatusCode::FORBIDDEN,
-            Json(newton_backend::err_testing_reset_disabled(&format!(
+            Json(newton_types::err_testing_reset_disabled(&format!(
                 "Testing reset is disabled; set {NEWTON_ENABLE_TESTING_RESET}=1 to enable this endpoint"
             ))),
         )

@@ -7,8 +7,8 @@ use axum::{
     routing::get,
     Router,
 };
-use newton_backend::{CreateChangeRequestBody, PatchChangeRequestBody};
 use newton_types::ApiError;
+use newton_types::{CreateChangeRequestBody, PatchChangeRequestBody};
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -38,7 +38,7 @@ pub(crate) struct ChangeRequestQuery {
         ("status" = Option<String>, Query, description = "Optional change request status filter"),
     ),
     responses(
-        (status = 200, description = "Change request list", body = [newton_backend::ChangeRequestItem]),
+        (status = 200, description = "Change request list", body = [newton_types::ChangeRequestItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -55,7 +55,7 @@ pub(crate) async fn list_change_requests(
     tag = "change-requests",
     request_body = CreateChangeRequestBody,
     responses(
-        (status = 201, description = "Created change request", body = newton_backend::ChangeRequestItem),
+        (status = 201, description = "Created change request", body = newton_types::ChangeRequestItem),
         (status = 422, description = "Validation error", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -73,7 +73,7 @@ pub(crate) async fn create_change_request(
     tag = "change-requests",
     params(("id" = String, Path, description = "Change request id")),
     responses(
-        (status = 200, description = "Change request detail", body = newton_backend::ChangeRequestItem),
+        (status = 200, description = "Change request detail", body = newton_types::ChangeRequestItem),
         (status = 404, description = "Change request not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -92,7 +92,7 @@ pub(crate) async fn get_change_request(
     params(("id" = String, Path, description = "Change request id")),
     request_body = PatchChangeRequestBody,
     responses(
-        (status = 200, description = "Updated change request", body = newton_backend::ChangeRequestItem),
+        (status = 200, description = "Updated change request", body = newton_types::ChangeRequestItem),
         (status = 404, description = "Change request not found", body = ApiError),
         (status = 422, description = "Validation error", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
