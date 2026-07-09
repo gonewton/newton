@@ -126,23 +126,34 @@ pub fn register_builtins_with_deps(
             redact_keys,
         ));
 
+    // Descriptor/execution split (ADR-0014): the four optimization-loop
+    // operators are always part of the described vocabulary — regardless of
+    // whether a BackendStore is available in this context — so
+    // `newton schema export`, the composed workflow schema, and DSL codegen
+    // never lose them. Only the executable half below is store-gated.
+    builder
+        .register_descriptor(grader_command::GraderCommandOperator::descriptor())
+        .register_descriptor(reconcile::ReconcileOperator::descriptor())
+        .register_descriptor(change_request_op::ChangeRequestOperator::descriptor())
+        .register_descriptor(grader_agent::GraderAgentOperator::descriptor());
+
     if let Some(store) = deps.backend_store {
         let grading_engine = AikitEngineManager::new(workspace.clone())
             .expect("AikitEngineManager::new should not fail");
         builder
-            .register(grader_command::GraderCommandOperator::new(
+            .register_executable_only(grader_command::GraderCommandOperator::new(
                 workspace.clone(),
                 store.clone(),
             ))
-            .register(reconcile::ReconcileOperator::new(
+            .register_executable_only(reconcile::ReconcileOperator::new(
                 workspace.clone(),
                 store.clone(),
             ))
-            .register(change_request_op::ChangeRequestOperator::new(
+            .register_executable_only(change_request_op::ChangeRequestOperator::new(
                 workspace.clone(),
                 store.clone(),
             ))
-            .register(grader_agent::GraderAgentOperator::new(
+            .register_executable_only(grader_agent::GraderAgentOperator::new(
                 workspace,
                 store,
                 grading_engine,

@@ -596,6 +596,775 @@
           "if": {
             "properties": {
               "operator": {
+                "const": "AgentOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "engine": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "engine_command": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": [
+                          "array",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "env": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "$expr": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "$expr"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "default": null,
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "loop": {
+                    "anyOf": [
+                      {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "max_iterations": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "format": "uint32",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "model": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "prompt": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "prompt_file": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "require_signal": {
+                    "anyOf": [
+                      {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "signals": {
+                    "anyOf": [
+                      {
+                        "default": null
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "stream_stdout": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "timeout_seconds": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "working_dir": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "title": "AgentParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "AssertCompletedOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "require": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "require"
+                ],
+                "title": "AssertCompletedParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "ChangeRequestOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "engine": {
+                    "anyOf": [
+                      {
+                        "default": "claude",
+                        "description": "Engine for LLM synthesis (default: \"claude\").",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "max_findings": {
+                    "anyOf": [
+                      {
+                        "default": 10,
+                        "description": "Maximum number of findings to include (default: 10).",
+                        "format": "uint",
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "min_severity": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "description": "Minimum severity to include (critical, high, medium, low).",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "model": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "description": "Model for LLM synthesis (optional).",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "scope": {
+                    "anyOf": [
+                      {
+                        "description": "Scope kind: product | component | repo | module.",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "scope_id": {
+                    "anyOf": [
+                      {
+                        "description": "Scope entity ID to read findings for.",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "synthesis_timeout_seconds": {
+                    "anyOf": [
+                      {
+                        "default": 60,
+                        "description": "Timeout for LLM synthesis in seconds (default: 60).",
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "scope",
+                  "scope_id"
+                ],
+                "title": "ChangeRequestParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "CommandOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "additionalProperties": false,
+                "properties": {
+                  "capture_stderr": {
+                    "anyOf": [
+                      {
+                        "default": true,
+                        "type": "boolean"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "capture_stdout": {
+                    "anyOf": [
+                      {
+                        "default": true,
+                        "type": "boolean"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "cmd": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "cwd": {
+                    "anyOf": [
+                      {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "env": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "$expr": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "$expr"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "shell": {
+                    "anyOf": [
+                      {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "write_stderr": {
+                    "anyOf": [
+                      {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "write_stdout": {
+                    "anyOf": [
+                      {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "cmd"
+                ],
+                "title": "CommandParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
                 "const": "GhOperator"
               }
             }
@@ -1088,6 +1857,443 @@
           "if": {
             "properties": {
               "operator": {
+                "const": "GraderAgentOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "engine": {
+                    "anyOf": [
+                      {
+                        "default": "claude",
+                        "description": "Engine to use (default: \"claude\").",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "grader": {
+                    "anyOf": [
+                      {
+                        "description": "Grader identifier (e.g. \"docs-quality-grader\").",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "model": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "description": "Model to use (optional, uses aikit default if not set).",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "rubric": {
+                    "anyOf": [
+                      {
+                        "description": "Grading rubric (plain text or markdown describing dimensions and scoring criteria).",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "scope": {
+                    "anyOf": [
+                      {
+                        "description": "Scope kind (e.g. \"repo\", \"component\").",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "scope_id": {
+                    "anyOf": [
+                      {
+                        "description": "Scope entity ID.",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "timeout_seconds": {
+                    "anyOf": [
+                      {
+                        "default": 120,
+                        "description": "Timeout in seconds (default: 120).",
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "grader",
+                  "scope",
+                  "scope_id",
+                  "rubric"
+                ],
+                "title": "GraderAgentParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "GraderCommandOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "cmd": {
+                    "anyOf": [
+                      {
+                        "description": "Shell command to run (passed to shell -c cmd).",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "cwd": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "description": "Optional working directory (relative to workspace root).",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "env": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "$expr": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "$expr"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "default": null,
+                        "description": "Additional environment variables.",
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "grader": {
+                    "anyOf": [
+                      {
+                        "description": "Grader identifier (e.g. \"test-coverage-grader\").",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "scope": {
+                    "anyOf": [
+                      {
+                        "description": "Scope kind (e.g. \"repo\", \"component\").",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "scope_id": {
+                    "anyOf": [
+                      {
+                        "description": "Scope entity ID.",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "shell": {
+                    "anyOf": [
+                      {
+                        "default": "bash",
+                        "description": "Shell to use (default: \"bash\").",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "state": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "$expr": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "$expr"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "default": null,
+                        "description": "State variables injected as NEWTON_STATE_<KEY> env vars.",
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "timeout_seconds": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "description": "Timeout in seconds.",
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "cmd",
+                  "grader",
+                  "scope",
+                  "scope_id"
+                ],
+                "title": "GraderCommandParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
                 "const": "HumanApprovalOperator"
               }
             }
@@ -1178,50 +2384,6 @@
           "if": {
             "properties": {
               "operator": {
-                "const": "barrier"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "params": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "description": "Parameters for the barrier operator that waits for multiple tasks to complete.",
-                "properties": {
-                  "expected": {
-                    "anyOf": [
-                      {
-                        "default": [],
-                        "items": {
-                          "type": "string"
-                        },
-                        "type": "array"
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  }
-                },
-                "title": "BarrierParams",
-                "type": "object"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "operator": {
                 "const": "HumanDecisionOperator"
               }
             }
@@ -1238,7 +2400,7 @@
           "if": {
             "properties": {
               "operator": {
-                "const": "CommandOperator"
+                "const": "NoOpOperator"
               }
             }
           },
@@ -1246,13 +2408,76 @@
             "properties": {
               "params": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "additionalProperties": false,
+                "title": "NoOpParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "ReadControlFileOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "properties": {
-                  "capture_stderr": {
+                  "path": {
                     "anyOf": [
                       {
-                        "default": true,
-                        "type": "boolean"
+                        "default": null,
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                },
+                "title": "ReadControlFileParams",
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "ReconcileOperator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "adjudication_timeout_seconds": {
+                    "anyOf": [
+                      {
+                        "default": 60,
+                        "description": "Timeout for LLM adjudication in seconds (default: 60).",
+                        "format": "uint64",
+                        "minimum": 0,
+                        "type": "integer"
                       },
                       {
                         "additionalProperties": false,
@@ -1268,11 +2493,10 @@
                       }
                     ]
                   },
-                  "capture_stdout": {
+                  "assessment": {
                     "anyOf": [
                       {
-                        "default": true,
-                        "type": "boolean"
+                        "description": "Assessment JSON passed inline (caller resolves from task output)."
                       },
                       {
                         "additionalProperties": false,
@@ -1288,9 +2512,11 @@
                       }
                     ]
                   },
-                  "cmd": {
+                  "engine": {
                     "anyOf": [
                       {
+                        "default": "claude",
+                        "description": "Engine to use for LLM adjudication (default: \"claude\").",
                         "type": "string"
                       },
                       {
@@ -1307,9 +2533,32 @@
                       }
                     ]
                   },
-                  "cwd": {
+                  "grader": {
                     "anyOf": [
                       {
+                        "default": "unknown",
+                        "description": "Grader name (used as source when creating/matching findings).",
+                        "type": "string"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "$expr": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "$expr"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "model": {
+                    "anyOf": [
+                      {
+                        "default": null,
+                        "description": "Model for LLM adjudication (optional).",
                         "type": [
                           "string",
                           "null"
@@ -1329,32 +2578,11 @@
                       }
                     ]
                   },
-                  "env": {
+                  "scope": {
                     "anyOf": [
                       {
-                        "additionalProperties": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "additionalProperties": false,
-                              "properties": {
-                                "$expr": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "$expr"
-                              ],
-                              "type": "object"
-                            }
-                          ]
-                        },
-                        "type": [
-                          "object",
-                          "null"
-                        ]
+                        "description": "Scope kind: product | component | repo | module.",
+                        "type": "string"
                       },
                       {
                         "additionalProperties": false,
@@ -1370,55 +2598,11 @@
                       }
                     ]
                   },
-                  "shell": {
+                  "scope_id": {
                     "anyOf": [
                       {
-                        "default": false,
-                        "type": "boolean"
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "write_stderr": {
-                    "anyOf": [
-                      {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "write_stdout": {
-                    "anyOf": [
-                      {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "description": "Scope entity ID to reconcile findings for.",
+                        "type": "string"
                       },
                       {
                         "additionalProperties": false,
@@ -1436,54 +2620,11 @@
                   }
                 },
                 "required": [
-                  "cmd"
+                  "scope",
+                  "scope_id",
+                  "assessment"
                 ],
-                "title": "CommandParams",
-                "type": "object"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "operator": {
-                "const": "AssertCompletedOperator"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "params": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "properties": {
-                  "require": {
-                    "anyOf": [
-                      {
-                        "items": {
-                          "type": "string"
-                        },
-                        "type": "array"
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "require"
-                ],
-                "title": "AssertCompletedParams",
+                "title": "ReconcileParams",
                 "type": "object"
               }
             }
@@ -1524,341 +2665,6 @@
                   "patch"
                 ],
                 "title": "SetContextParams",
-                "type": "object"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "operator": {
-                "const": "AgentOperator"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "params": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "properties": {
-                  "engine": {
-                    "anyOf": [
-                      {
-                        "default": null,
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "engine_command": {
-                    "anyOf": [
-                      {
-                        "default": null,
-                        "items": {
-                          "type": "string"
-                        },
-                        "type": [
-                          "array",
-                          "null"
-                        ]
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "env": {
-                    "anyOf": [
-                      {
-                        "additionalProperties": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "additionalProperties": false,
-                              "properties": {
-                                "$expr": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "$expr"
-                              ],
-                              "type": "object"
-                            }
-                          ]
-                        },
-                        "default": null,
-                        "type": [
-                          "object",
-                          "null"
-                        ]
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "loop": {
-                    "anyOf": [
-                      {
-                        "default": false,
-                        "type": "boolean"
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "max_iterations": {
-                    "anyOf": [
-                      {
-                        "default": null,
-                        "format": "uint32",
-                        "minimum": 0,
-                        "type": [
-                          "integer",
-                          "null"
-                        ]
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "model": {
-                    "anyOf": [
-                      {
-                        "default": null,
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "prompt": {
-                    "anyOf": [
-                      {
-                        "default": null,
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "prompt_file": {
-                    "anyOf": [
-                      {
-                        "default": null,
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "require_signal": {
-                    "anyOf": [
-                      {
-                        "default": false,
-                        "type": "boolean"
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "signals": {
-                    "anyOf": [
-                      {
-                        "default": null
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "stream_stdout": {
-                    "anyOf": [
-                      {
-                        "default": null,
-                        "type": [
-                          "boolean",
-                          "null"
-                        ]
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "timeout_seconds": {
-                    "anyOf": [
-                      {
-                        "default": null,
-                        "format": "uint64",
-                        "minimum": 0,
-                        "type": [
-                          "integer",
-                          "null"
-                        ]
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  },
-                  "working_dir": {
-                    "anyOf": [
-                      {
-                        "default": null,
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
-                          "$expr": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "$expr"
-                        ],
-                        "type": "object"
-                      }
-                    ]
-                  }
-                },
-                "title": "AgentParams",
                 "type": "object"
               }
             }
@@ -1948,7 +2754,7 @@
           "if": {
             "properties": {
               "operator": {
-                "const": "ReadControlFileOperator"
+                "const": "barrier"
               }
             }
           },
@@ -1956,15 +2762,16 @@
             "properties": {
               "params": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "description": "Parameters for the barrier operator that waits for multiple tasks to complete.",
                 "properties": {
-                  "path": {
+                  "expected": {
                     "anyOf": [
                       {
-                        "default": null,
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "default": [],
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
                       },
                       {
                         "additionalProperties": false,
@@ -1981,25 +2788,7 @@
                     ]
                   }
                 },
-                "title": "ReadControlFileParams",
-                "type": "object"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "operator": {
-                "const": "NoOpOperator"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "params": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "title": "NoOpParams",
+                "title": "BarrierParams",
                 "type": "object"
               }
             }
@@ -2053,6 +2842,24 @@
           ]
         },
         "operator": {
+          "enum": [
+            "AgentOperator",
+            "AssertCompletedOperator",
+            "ChangeRequestOperator",
+            "CommandOperator",
+            "GhOperator",
+            "GitOperator",
+            "GraderAgentOperator",
+            "GraderCommandOperator",
+            "HumanApprovalOperator",
+            "HumanDecisionOperator",
+            "NoOpOperator",
+            "ReadControlFileOperator",
+            "ReconcileOperator",
+            "SetContextOperator",
+            "WorkflowOperator",
+            "barrier"
+          ],
           "type": "string"
         },
         "parallel_group": {

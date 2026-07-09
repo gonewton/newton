@@ -152,16 +152,36 @@ pub async fn run_task(
 }
 
 /// Resolves operator from registry and validates it exists.
+///
+/// Distinguishes two failure modes (ADR-0014): an entirely unknown operator
+/// name (`WFG-OP-001`, e.g. a typo) vs. a *described* operator whose
+/// executable half was never wired because its runtime deps (e.g. a
+/// `BackendStore` for the optimization-loop operators) are absent in this
+/// context (`WFG-OP-002`) — the operator never vanished from the vocabulary,
+/// it just cannot run here.
 fn resolve_operator(
     task: &WorkflowTask,
     registry: &OperatorRegistry,
 ) -> Result<rhai::Shared<dyn crate::workflow::operator::Operator>, AppError> {
     registry.get(&task.operator).ok_or_else(|| {
-        AppError::new(
-            ErrorCategory::ValidationError,
-            format!("operator '{}' is not registered", task.operator),
-        )
-        .with_code("WFG-OP-001")
+        if registry.is_described(&task.operator) {
+            AppError::new(
+                ErrorCategory::ValidationError,
+                format!(
+                    "operator '{}' requires a backend store; run within a command \
+                     that provides one (e.g. `newton workflow run` / `newton optimize` \
+                     with a resolved state directory)",
+                    task.operator
+                ),
+            )
+            .with_code("WFG-OP-002")
+        } else {
+            AppError::new(
+                ErrorCategory::ValidationError,
+                format!("operator '{}' is not registered", task.operator),
+            )
+            .with_code("WFG-OP-001")
+        }
     })
 }
 

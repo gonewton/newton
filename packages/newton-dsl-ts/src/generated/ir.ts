@@ -21,7 +21,23 @@ export type WorkflowTask = {
   include_if?: Condition | null;
   max_iterations?: number | null;
   name?: string | null;
-  operator: string;
+  operator:
+    | "AgentOperator"
+    | "AssertCompletedOperator"
+    | "ChangeRequestOperator"
+    | "CommandOperator"
+    | "GhOperator"
+    | "GitOperator"
+    | "GraderAgentOperator"
+    | "GraderCommandOperator"
+    | "HumanApprovalOperator"
+    | "HumanDecisionOperator"
+    | "NoOpOperator"
+    | "ReadControlFileOperator"
+    | "ReconcileOperator"
+    | "SetContextOperator"
+    | "WorkflowOperator"
+    | "barrier";
   parallel_group?: string | null;
   params?: {
     [k: string]: unknown;

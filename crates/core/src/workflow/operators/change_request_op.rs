@@ -20,10 +20,23 @@ pub struct ChangeRequestOperator {
 }
 
 impl ChangeRequestOperator {
+    pub const NAME: &'static str = "ChangeRequestOperator";
+
     pub fn new(workspace_root: PathBuf, store: Arc<dyn BackendStore>) -> Self {
         Self {
             workspace_root,
             store,
+        }
+    }
+
+    /// Store-independent Descriptor (name + params/output schema). Used to
+    /// describe this operator's vocabulary even when no `BackendStore` is
+    /// wired (e.g. `newton schema export`). See ADR-0014.
+    pub fn descriptor() -> crate::workflow::operator::Descriptor {
+        crate::workflow::operator::Descriptor {
+            name: Self::NAME,
+            params_schema: schemars::schema_for!(ChangeRequestParams),
+            output_schema: schemars::schema_for!(ChangeRequestOutput),
         }
     }
 }
@@ -128,7 +141,7 @@ struct CrSynthesis {
 #[async_trait]
 impl Operator for ChangeRequestOperator {
     fn name(&self) -> &'static str {
-        "ChangeRequestOperator"
+        Self::NAME
     }
 
     fn validate_params(&self, params: &Value) -> Result<(), AppError> {

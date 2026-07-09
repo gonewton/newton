@@ -211,6 +211,10 @@ name = "test_schema_export"
 path = "tests/workflow_graph/test_schema_export.rs"
 
 [[test]]
+name = "test_operator_descriptor_split"
+path = "tests/workflow_graph/test_operator_descriptor_split.rs"
+
+[[test]]
 name = "test_git_operator"
 path = "tests/workflow_graph/test_git_operator.rs"
 

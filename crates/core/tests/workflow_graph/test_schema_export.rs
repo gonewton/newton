@@ -11,6 +11,166 @@ fn build_test_registry() -> OperatorRegistry {
     builder.build()
 }
 
+/// ADR-0014: the full, pinned set of built-in operator names. Descriptors
+/// must include all 16 — including the four optimization-loop operators —
+/// even when `register_builtins` is called with no `BackendStore` (as
+/// `newton schema export` does). If this list needs to change, it must be a
+/// deliberate addition/removal of an operator, not silent drift.
+const EXPECTED_BUILTIN_OPERATOR_NAMES: &[&str] = &[
+    "AgentOperator",
+    "AssertCompletedOperator",
+    "ChangeRequestOperator",
+    "CommandOperator",
+    "GhOperator",
+    "GitOperator",
+    "GraderAgentOperator",
+    "GraderCommandOperator",
+    "HumanApprovalOperator",
+    "HumanDecisionOperator",
+    "NoOpOperator",
+    "ReadControlFileOperator",
+    "ReconcileOperator",
+    "SetContextOperator",
+    "WorkflowOperator",
+    "barrier",
+];
+
+/// P1 (ADR-0014): `register_builtins` with no `BackendStore` must still
+/// describe all 16 operators — including the four optimization-loop
+/// operators (`GraderCommandOperator`, `ReconcileOperator`,
+/// `ChangeRequestOperator`, `GraderAgentOperator`) that previously vanished
+/// from the schema-export registry entirely because they only registered
+/// `if let Some(store) = deps.backend_store`.
+#[test]
+fn descriptor_set_includes_all_sixteen_builtin_operators_without_a_store() {
+    let registry = build_test_registry();
+    let mut names: Vec<String> = registry
+        .descriptors()
+        .into_iter()
+        .map(|d| d.name.to_string())
+        .collect();
+    names.sort();
+
+    let mut expected: Vec<String> = EXPECTED_BUILTIN_OPERATOR_NAMES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    expected.sort();
+
+    assert_eq!(
+        names.len(),
+        16,
+        "expected exactly 16 built-in operator descriptors, got {}: {:?}",
+        names.len(),
+        names
+    );
+    assert_eq!(
+        names, expected,
+        "descriptor set does not match the pinned built-in operator name list"
+    );
+
+    // The four loop operators specifically — the audit's headline finding.
+    for loop_operator in [
+        "GraderCommandOperator",
+        "ReconcileOperator",
+        "ChangeRequestOperator",
+        "GraderAgentOperator",
+    ] {
+        assert!(
+            registry.is_described(loop_operator),
+            "loop operator '{loop_operator}' must be described even without a BackendStore"
+        );
+        assert!(
+            registry.get(loop_operator).is_none(),
+            "loop operator '{loop_operator}' must NOT be executable without a BackendStore"
+        );
+    }
+}
+
+/// S16: the composed schema's `WorkflowTask.operator` property must be
+/// constrained by an `enum` generated from the Descriptor set, covering all
+/// 16 operators (not just the historically-always-registered 12).
+#[test]
+fn composed_schema_constrains_operator_with_enum_of_all_descriptors() {
+    let registry = build_test_registry();
+    let schema = schema_export::composed_workflow_schema(&registry);
+    let value = serde_json::to_value(&schema).expect("schema serializable");
+
+    let task = value
+        .get("$defs")
+        .and_then(|d| d.get("WorkflowTask"))
+        .or_else(|| value.get("definitions").and_then(|d| d.get("WorkflowTask")))
+        .expect("WorkflowTask definition present");
+    let operator_prop = task
+        .get("properties")
+        .and_then(|p| p.get("operator"))
+        .expect("operator property present");
+    let enum_values = operator_prop
+        .get("enum")
+        .and_then(|e| e.as_array())
+        .expect("operator property has an enum");
+
+    let mut enum_names: Vec<String> = enum_values
+        .iter()
+        .map(|v| v.as_str().expect("enum entries are strings").to_string())
+        .collect();
+    enum_names.sort();
+
+    let mut expected: Vec<String> = EXPECTED_BUILTIN_OPERATOR_NAMES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    expected.sort();
+
+    assert_eq!(
+        enum_names, expected,
+        "operator enum does not match the full descriptor set"
+    );
+}
+
+/// S16 payoff: a workflow referencing an operator name that is NOT in the
+/// Descriptor set (e.g. a typo) must fail validation against the composed
+/// schema. Before S16 `operator` was a bare `{"type": "string"}`, so this
+/// would validate — the typo would only surface much later, at execution
+/// time, via the WFG-OP-001 "operator is not registered" error.
+#[test]
+fn typo_operator_name_fails_composed_schema_validation() {
+    let registry = build_test_registry();
+    let composed = schema_export::composed_workflow_schema(&registry);
+    let schema_value = serde_json::to_value(&composed).expect("schema serializable");
+    let validator = jsonschema::JSONSchema::compile(&schema_value).expect("schema compiles");
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture = manifest_dir.join("tests/fixtures/workflows/01_minimal_success.yaml");
+    let yaml_str = std::fs::read_to_string(&fixture).expect("read fixture");
+    let mut instance: serde_json::Value =
+        serde_yaml::from_str(&yaml_str).expect("parse fixture yaml");
+
+    // Sanity check: the unmodified fixture (a real, registered operator name)
+    // validates cleanly.
+    assert!(
+        validator.is_valid(&instance),
+        "unmodified fixture with a valid operator name should validate"
+    );
+
+    // Introduce a typo'd / unregistered operator name.
+    instance["workflow"]["tasks"][0]["operator"] =
+        serde_json::Value::String("NoOpOperatorTypo".to_string());
+
+    let errors: Vec<String> = validator
+        .validate(&instance)
+        .err()
+        .into_iter()
+        .flatten()
+        .map(|e| e.to_string())
+        .collect();
+
+    assert!(
+        !errors.is_empty(),
+        "a workflow referencing an unknown operator name must fail schema validation"
+    );
+}
+
 #[test]
 fn composed_schema_is_valid_json() {
     let registry = build_test_registry();

@@ -1,8 +1,19 @@
 {
   "AgentOperator": {
+    "$defs": {
+      "StopReason": {
+        "description": "Why the agent operator stopped executing the engine.\n\n`signal_matched`: a configured `signals` pattern matched the engine's\noutput (for the command engine this is when the child is killed, which\nis why `exit_code` is `null` in that case). `exited`: the engine process\nran to completion on its own (with or without signals configured).\n\nNo `timeout` variant: both the operator-internal timeout\n(`timeout_seconds`, `WFG-AGENT-005`) and the outer per-task\n`timeout_ms` (`WFG-TIME-002`) return `Err` before any output value is\nconstructed, so a `timeout` stop reason can never actually appear on an\nagent operator output today. Adding an enum value that no code path can\nproduce would be exactly the kind of fabricated contract this change is\nmeant to eliminate.",
+        "enum": [
+          "signal_matched",
+          "exited"
+        ],
+        "type": "string"
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "properties": {
       "exit_code": {
+        "description": "`null` when the child was killed after a signal match (it has no\nexit code); numeric on a genuine process exit.",
         "format": "int32",
         "type": [
           "integer",
@@ -20,8 +31,14 @@
           "string",
           "null"
         ]
+      },
+      "stop_reason": {
+        "$ref": "#/$defs/StopReason"
       }
     },
+    "required": [
+      "stop_reason"
+    ],
     "title": "AgentSchemaOutput",
     "type": "object"
   },
@@ -36,6 +53,25 @@
       "all_succeeded"
     ],
     "title": "AssertCompletedOutput",
+    "type": "object"
+  },
+  "ChangeRequestOperator": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "change_request_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "decision": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "decision"
+    ],
+    "title": "ChangeRequestOutput",
     "type": "object"
   },
   "CommandOperator": {
@@ -74,6 +110,54 @@
     "type": "object"
   },
   "GitOperator": {
+    "type": "object"
+  },
+  "GraderAgentOperator": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "assessment": true,
+      "counts": true,
+      "overall_score": {
+        "format": "double",
+        "type": "number"
+      },
+      "score_by_dimension": true,
+      "verdict": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "overall_score",
+      "verdict",
+      "score_by_dimension",
+      "counts",
+      "assessment"
+    ],
+    "title": "GraderAgentOutput",
+    "type": "object"
+  },
+  "GraderCommandOperator": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "assessment": true,
+      "counts": true,
+      "overall_score": {
+        "format": "double",
+        "type": "number"
+      },
+      "score_by_dimension": true,
+      "verdict": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "overall_score",
+      "verdict",
+      "score_by_dimension",
+      "counts",
+      "assessment"
+    ],
+    "title": "GraderCommandOutput",
     "type": "object"
   },
   "HumanApprovalOperator": {
@@ -120,6 +204,39 @@
     "type": "object"
   },
   "ReadControlFileOperator": {},
+  "ReconcileOperator": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "created": {
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "refreshed": {
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "reopened": {
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "resolved": {
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "created",
+      "refreshed",
+      "reopened",
+      "resolved"
+    ],
+    "title": "ReconcileOutput",
+    "type": "object"
+  },
   "SetContextOperator": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "properties": {
