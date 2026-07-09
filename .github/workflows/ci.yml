@@ -49,6 +49,11 @@ jobs:
        - name: Validate AsyncAPI realtime contract
          run: npx -y @asyncapi/cli@3 validate openapi/newton-realtime.asyncapi.yaml
 
+       - name: Verify workflow-schema parity contract
+         run: |
+           ./scripts/generate-workflow-schema.sh
+           git diff --exit-code packages/workflow-schema/workflow.schema.json packages/workflow-schema/output_schemas.json
+
        - name: Run clippy
          run: cargo clippy --all-targets --all-features -- -D warnings
 
