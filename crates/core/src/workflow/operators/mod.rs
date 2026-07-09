@@ -26,6 +26,13 @@ use crate::workflow::state::GraphSettings;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Shared cap on inline-captured stdout/stderr bytes (`command` and `agent`
+/// operators both apply this to the `stdout`/`stderr` fields they place in
+/// task output). Exposed so callers that print captured output (e.g.
+/// `workflow run --verbose`) can tell whether a stream was cut off at
+/// capture time.
+pub(crate) const OUTPUT_CAPTURE_LIMIT_BYTES: usize = 1_048_576;
+
 #[derive(Default)]
 pub struct BuiltinOperatorDeps {
     /// Lazy provider that resolves to an `Interviewer` on first human prompt.

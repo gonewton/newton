@@ -3,6 +3,7 @@
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
+use crate::workflow::operators::OUTPUT_CAPTURE_LIMIT_BYTES;
 use crate::workflow::subprocess::run_guarded;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -16,8 +17,6 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::process::Command;
 use tracing;
-
-const OUTPUT_CAPTURE_LIMIT_BYTES: usize = 1_048_576;
 
 pub struct CommandOperator {
     workspace_root: PathBuf,

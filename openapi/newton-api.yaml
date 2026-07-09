@@ -4222,8 +4222,12 @@ components:
     WorkflowUpdateBody:
       type: object
       description: |-
-        Flexible update body: supports both legacy WorkflowDefinition format
-        and new status/ended_at update format.
+        Update body for a workflow instance.
+
+        `definition` is accepted only so `update_workflow` can reject it
+        explicitly with `422`: instance definitions are historical snapshots, not
+        editable state, so authoring happens through `/workflow-files` instead.
+        It is never persisted.
       properties:
         definition: {}
         ended_at:

@@ -261,10 +261,7 @@ async fn test_update_workflow_success() {
 
     let app = newton_core::api::api_v1_router(state);
 
-    let update = WorkflowDefinition {
-        workflow_id: "new-workflow".to_string(),
-        definition: json!({"test": "value"}),
-    };
+    let update = json!({"workflow_id": "new-workflow"});
 
     let request = Request::builder()
         .method(Method::PUT)
@@ -283,6 +280,62 @@ async fn test_update_workflow_success() {
     let workflow: WorkflowInstance = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(workflow.workflow_id, "new-workflow");
+}
+
+#[tokio::test]
+async fn test_update_workflow_definition_rejected() {
+    // PUT /workflows/{id} must not silently discard `definition`: instance
+    // definitions are historical snapshots, and authoring lives in
+    // /workflow-files. Sending `definition` is a 422, not a 200-and-drop.
+    let state = create_test_state().await;
+
+    let instance_id = Uuid::new_v4().to_string();
+    let instance = WorkflowInstance {
+        instance_id: instance_id.clone(),
+        workflow_id: "old-workflow".to_string(),
+        status: WorkflowStatus::Running,
+        nodes: vec![],
+        started_at: chrono::Utc::now(),
+        ended_at: None,
+        definition: None,
+        linked_plan_id: None,
+    };
+
+    insert_test_instance(&state, &instance).await;
+
+    let backend = state.backend.clone();
+    let app = newton_core::api::api_v1_router(state);
+
+    let update = WorkflowDefinition {
+        workflow_id: "new-workflow".to_string(),
+        definition: json!({"test": "value"}),
+    };
+
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri(format!("/workflows/{}", instance_id))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&update).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let error: ApiError = serde_json::from_slice(&body).unwrap();
+
+    assert!(
+        error.message.contains("/workflow-files"),
+        "expected error message to point callers at /workflow-files, got: {}",
+        error.message
+    );
+
+    // The instance itself must be untouched.
+    let stored = backend.get_workflow_instance(&instance_id).await.unwrap();
+    assert_eq!(stored.workflow_id, "old-workflow");
 }
 
 #[tokio::test]

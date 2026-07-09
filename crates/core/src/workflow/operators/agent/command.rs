@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncBufReadExt;
 use tokio::process::Command;
 
-pub(super) const OUTPUT_CAPTURE_LIMIT_BYTES: usize = 1_048_576;
+pub(super) use crate::workflow::operators::OUTPUT_CAPTURE_LIMIT_BYTES;
 const CMD_LOG_ARG_MAX_LEN: usize = 200;
 
 // `ProcessGroupKillGuard` used below (armed right after spawn in

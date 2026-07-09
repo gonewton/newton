@@ -57,6 +57,40 @@ async fn execute_run_command(args: &RunArgs) -> anyhow::Result<()> {
         document.triggers = Some(workflow_schema::WorkflowTrigger::manual(payload));
     }
 
+    if let Some(input_file) = &args.input_file {
+        if !input_file.is_file() {
+            let message = format!("WFG-IO-006: input file not found: {}", input_file.display());
+            let err = AppError::new(ErrorCategory::ValidationError, message.clone())
+                .with_code("WFG-IO-006");
+            let envelope = CompletionEnvelope::internal_error(CompletionError {
+                code: Some("WFG-IO-006".to_string()),
+                category: ErrorCategory::ValidationError.to_string(),
+                message,
+                error_payload: None,
+            });
+            return emit_or_return(emit_json, envelope, err, 1);
+        }
+        let input_file_value = Value::String(input_file.display().to_string());
+        match document.triggers.as_mut() {
+            Some(trigger) => match trigger.payload.as_object_mut() {
+                Some(map) => {
+                    map.insert("input_file".to_string(), input_file_value);
+                }
+                None => {
+                    let mut map = serde_json::Map::new();
+                    map.insert("input_file".to_string(), input_file_value);
+                    trigger.payload = Value::Object(map);
+                }
+            },
+            None => {
+                let mut map = serde_json::Map::new();
+                map.insert("input_file".to_string(), input_file_value);
+                document.triggers =
+                    Some(workflow_schema::WorkflowTrigger::manual(Value::Object(map)));
+            }
+        }
+    }
+
     {
         let settings = &document.workflow.settings;
         let empty_payload = serde_json::json!({});
@@ -97,13 +131,19 @@ async fn execute_run_command(args: &RunArgs) -> anyhow::Result<()> {
     let io_settings = document.workflow.settings.io_settings.clone();
     let io_block = document.workflow.settings.io.clone();
 
-    let exec_setup = super::shared_execution::build_execution_setup(
+    let mut exec_setup = super::shared_execution::build_execution_setup(
         state_dir.clone(),
         args.parallel_limit,
         args.timeout_seconds,
         args.server.as_deref(),
     )
     .await?;
+    // `--verbose` (S15/P5b): print each task's captured stdout/stderr to the
+    // terminal as it completes. The runtime already does this whenever
+    // `ExecutionOverrides.verbose` is set (see `process_frontier` in
+    // executor/runtime.rs); `build_execution_setup` doesn't know about CLI
+    // flags, so thread it through here.
+    exec_setup.overrides.verbose = args.verbose;
 
     let settings = document.workflow.settings.clone();
     let ailoop_ctx =

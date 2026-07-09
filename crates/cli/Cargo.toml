@@ -254,3 +254,7 @@ path = "tests/integration/mcp_data_malformed_call_no_exit.rs"
 [[test]]
 name = "exit_codes_preserved"
 path = "tests/integration/exit_codes_preserved.rs"
+
+[[test]]
+name = "test_run_input_file_verbose"
+path = "tests/integration/test_run_input_file_verbose.rs"
