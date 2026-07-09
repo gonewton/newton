@@ -786,3 +786,75 @@ async fn ac27_resume_old_checkpoint_without_io_snapshot_succeeds() {
         result.err()
     );
 }
+
+// ─── PR-3 (spec 074, B1 + S1): completion envelope persist failure fails the run ──
+
+/// If the completion envelope's path is occupied by a directory, the shared
+/// atomic-write helper's rename must fail, and that failure must propagate
+/// as a run error instead of being silently swallowed behind
+/// `let _ = fs::write(...)`. Per the PRD's acceptance criteria: "an
+/// unpersistable completion fails the run".
+#[tokio::test]
+async fn completion_envelope_persist_failure_fails_the_run() {
+    let workspace = tempdir().expect("workspace");
+
+    let workflow_yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: only
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    io:
+      result_map:
+        status: ok
+  tasks:
+    - id: only
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+    let workflow_file = write_workflow(workflow_yaml);
+
+    let document = schema::load_workflow(workflow_file.path()).expect("parse workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let (execution_id, handle) = executor::spawn_workflow_execution(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry,
+        workspace.path().to_path_buf(),
+        default_overrides(),
+    )
+    .expect("spawn workflow execution");
+
+    // `spawn_workflow_execution` builds the runtime (and its execution_id)
+    // synchronously before handing `run()` to `tokio::spawn`; with the
+    // current-thread runtime `#[tokio::test]` uses, the spawned task cannot
+    // make any progress until this test task hits an `.await`. So we can
+    // deterministically pre-create "completion.json" as a directory in the
+    // execution's state dir before the run ever starts. The runtime's own
+    // checkpoint.json/execution.json writes use different filenames and
+    // succeed normally; only the final rename onto "completion.json"
+    // collides with the pre-existing directory entry and fails — isolating
+    // the completion-envelope write specifically.
+    let exec_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(execution_id.to_string());
+    fs::create_dir_all(exec_dir.join("completion.json")).expect("pre-create collision directory");
+
+    let result = handle.await.expect("spawned run task should not panic");
+
+    assert!(
+        result.is_err(),
+        "run() must fail when the completion envelope cannot be persisted, got Ok"
+    );
+}

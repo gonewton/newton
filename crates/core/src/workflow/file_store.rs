@@ -133,33 +133,18 @@ fn system_time_to_datetime(t: SystemTime) -> DateTime<Utc> {
     DateTime::from_timestamp(duration.as_secs() as i64, duration.subsec_nanos()).unwrap_or_default()
 }
 
+/// Durably persists `data` to `path` via the shared
+/// [`crate::fs_util::atomic_write`] helper (write-temp, fsync, rename, fsync
+/// parent dir), mapping any I/O failure into this module's [`AppError`]
+/// shape so callers keep the diagnostics they had before the write was
+/// consolidated into the shared helper.
 fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            AppError::new(
-                ErrorCategory::IoError,
-                format!("failed to create directory {}: {e}", parent.display()),
-            )
-        })?;
-    }
-    let tmp_path = path.with_extension("tmp");
-    fs::write(&tmp_path, data).map_err(|e| {
+    crate::fs_util::atomic_write(path, data).map_err(|e| {
         AppError::new(
             ErrorCategory::IoError,
-            format!("failed to write {}: {e}", tmp_path.display()),
+            format!("failed to atomically write {}: {e}", path.display()),
         )
-    })?;
-    fs::rename(&tmp_path, path).map_err(|e| {
-        AppError::new(
-            ErrorCategory::IoError,
-            format!(
-                "failed to rename {} -> {}: {e}",
-                tmp_path.display(),
-                path.display()
-            ),
-        )
-    })?;
-    Ok(())
+    })
 }
 
 impl WorkflowFileStore for FsWorkflowFileStore {

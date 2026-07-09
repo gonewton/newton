@@ -46,34 +46,18 @@ impl WorkflowStatePaths {
     }
 }
 
+/// Durably persists `data` to `path` via the shared
+/// [`crate::fs_util::atomic_write`] helper (write-temp, fsync, rename, fsync
+/// parent dir), mapping any I/O failure into this module's [`AppError`]
+/// shape so callers keep the diagnostics they had before the write was
+/// consolidated into the shared helper.
 pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            AppError::new(
-                crate::core::types::ErrorCategory::IoError,
-                format!("failed to create directory {}: {}", parent.display(), err),
-            )
-        })?;
-    }
-    let tmp_path = path.with_extension("tmp");
-    fs::write(&tmp_path, data).map_err(|err| {
+    crate::fs_util::atomic_write(path, data).map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::IoError,
-            format!("failed to write {}: {}", tmp_path.display(), err),
+            format!("failed to atomically write {}: {}", path.display(), err),
         )
-    })?;
-    fs::rename(&tmp_path, path).map_err(|err| {
-        AppError::new(
-            crate::core::types::ErrorCategory::IoError,
-            format!(
-                "failed to rename {} -> {}: {}",
-                tmp_path.display(),
-                path.display(),
-                err
-            ),
-        )
-    })?;
-    Ok(())
+    })
 }
 
 pub fn save_execution(

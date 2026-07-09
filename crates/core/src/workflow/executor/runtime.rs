@@ -1,6 +1,5 @@
 #![allow(clippy::result_large_err)]
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -410,9 +409,25 @@ impl WorkflowRuntime {
                         error_payload: None,
                     },
                 );
-                if let Ok(json) = serde_json::to_string_pretty(&failure_envelope) {
-                    let _ = fs::write(&completion_path, json);
-                }
+                let json = serde_json::to_string_pretty(&failure_envelope).map_err(|err| {
+                    AppError::new(
+                        ErrorCategory::SerializationError,
+                        format!("failed to serialize failure completion envelope: {err}"),
+                    )
+                    .with_context(format!("original run failure: {e}"))
+                })?;
+                crate::fs_util::atomic_write(&completion_path, json.as_bytes()).map_err(|err| {
+                    AppError::new(
+                        ErrorCategory::IoError,
+                        format!(
+                            "failed to persist failure completion envelope {}: {}",
+                            completion_path.display(),
+                            err
+                        ),
+                    )
+                    .with_code("WFG-COMPLETION-001")
+                    .with_context(format!("original run failure: {e}"))
+                })?;
             }
             return Err(e);
         }
@@ -495,9 +510,26 @@ impl WorkflowRuntime {
                 self.workflow_execution.execution_id,
                 result.clone(),
             );
-            if let Ok(json) = serde_json::to_string_pretty(&envelope) {
-                let _ = fs::write(&completion_path, json);
-            }
+            let json = serde_json::to_string_pretty(&envelope).map_err(|err| {
+                AppError::new(
+                    ErrorCategory::SerializationError,
+                    format!("failed to serialize success completion envelope: {err}"),
+                )
+            })?;
+            // A run whose result cannot be durably persisted must not be
+            // reported as succeeded: "succeeded" only ever means the result
+            // is actually on disk (spec 074, PR-3 / S1).
+            crate::fs_util::atomic_write(&completion_path, json.as_bytes()).map_err(|err| {
+                AppError::new(
+                    ErrorCategory::IoError,
+                    format!(
+                        "failed to persist success completion envelope {}: {}",
+                        completion_path.display(),
+                        err
+                    ),
+                )
+                .with_code("WFG-COMPLETION-001")
+            })?;
         }
 
         Ok(ExecutionSummary {
