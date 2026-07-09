@@ -25,6 +25,16 @@ use uuid::Uuid;
 const HEARTBEAT_PING_INTERVAL: Duration = Duration::from_secs(30);
 const WELCOME_FRAME: &str = r#"{"type":"welcome"}"#;
 
+/// Builds the JSON payload sent to a stream consumer when the shared broadcast
+/// channel overflowed and this consumer missed `skipped` events. Same shape is
+/// used for both WS text frames and SSE `data:` payloads: `{"type":"lagged","skipped":<n>}`.
+/// The client should treat this as a signal to re-fetch a snapshot before
+/// resuming incremental updates (it is a per-connection condition, not a wire
+/// event from the engine, so it deliberately is not a `BroadcastEvent` variant).
+fn lagged_frame_json(skipped: u64) -> String {
+    serde_json::json!({"type": "lagged", "skipped": skipped}).to_string()
+}
+
 #[derive(Debug, Deserialize, Clone)]
 /// Optional query-string filters applied to workflow event streams.
 ///
@@ -150,13 +160,24 @@ async fn handle_workflow_socket(
         }
     }
 
-    while let Ok(event) = rx.recv().await {
-        if should_send_event(&event, &instance_id, &filters) {
-            if let Ok(json) = serde_json::to_string(&event) {
-                if socket.send(Message::Text(json.into())).await.is_err() {
+    loop {
+        match rx.recv().await {
+            Ok(event) => {
+                if should_send_event(&event, &instance_id, &filters) {
+                    if let Ok(json) = serde_json::to_string(&event) {
+                        if socket.send(Message::Text(json.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                let frame = lagged_frame_json(n);
+                if socket.send(Message::Text(frame.into())).await.is_err() {
                     break;
                 }
             }
+            Err(broadcast::error::RecvError::Closed) => break,
         }
     }
 }
@@ -237,22 +258,33 @@ async fn handle_logs_socket(
     }
 
     // Forward live broadcast events
-    while let Ok(event) = rx.recv().await {
-        if should_send_event(&event, &instance_id, &filters) {
-            if let BroadcastEvent::LogMessage {
-                instance_id: ref evt_inst,
-                node_id: ref evt_node,
-                ..
-            } = event
-            {
-                if evt_inst == &instance_id && evt_node == &node_id {
-                    if let Ok(json) = serde_json::to_string(&event) {
-                        if socket.send(Message::Text(json.into())).await.is_err() {
-                            break;
+    loop {
+        match rx.recv().await {
+            Ok(event) => {
+                if should_send_event(&event, &instance_id, &filters) {
+                    if let BroadcastEvent::LogMessage {
+                        instance_id: ref evt_inst,
+                        node_id: ref evt_node,
+                        ..
+                    } = event
+                    {
+                        if evt_inst == &instance_id && evt_node == &node_id {
+                            if let Ok(json) = serde_json::to_string(&event) {
+                                if socket.send(Message::Text(json.into())).await.is_err() {
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
             }
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                let frame = lagged_frame_json(n);
+                if socket.send(Message::Text(frame.into())).await.is_err() {
+                    break;
+                }
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
         }
     }
 }
@@ -315,12 +347,22 @@ async fn workflow_sse(
             yield Ok::<_, Infallible>(sse_event);
         }
         let mut rx = rx;
-        while let Ok(event) = rx.recv().await {
-            if should_send_event(&event, &id_clone, &filters_clone) {
-                if let Ok(json) = serde_json::to_string(&event) {
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    if should_send_event(&event, &id_clone, &filters_clone) {
+                        if let Ok(json) = serde_json::to_string(&event) {
+                            let sse_event = axum::response::sse::Event::default().data(json);
+                            yield Ok::<_, Infallible>(sse_event);
+                        }
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    let json = lagged_frame_json(n);
                     let sse_event = axum::response::sse::Event::default().data(json);
                     yield Ok::<_, Infallible>(sse_event);
                 }
+                Err(broadcast::error::RecvError::Closed) => break,
             }
         }
     };
