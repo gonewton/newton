@@ -2517,6 +2517,7 @@ dependencies = [
  "indexmap",
  "insta",
  "jsonschema 0.18.3",
+ "libc",
  "newton-backend",
  "newton-types",
  "opentelemetry",

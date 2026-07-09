@@ -23,6 +23,87 @@ use tokio::process::Command;
 pub(super) const OUTPUT_CAPTURE_LIMIT_BYTES: usize = 1_048_576;
 const CMD_LOG_ARG_MAX_LEN: usize = 200;
 
+/// Group-wide kill guard for a spawned engine child, owned by the
+/// child-execution future (i.e. a plain local in `execute_single`'s async
+/// call chain, never detached via `tokio::spawn`).
+///
+/// Newton spawns engine children with `process_group(0)` (unix), making the
+/// child the leader of its own new process group. Grandchildren the child
+/// spawns (e.g. a background `sleep &`) inherit that group. `kill_on_drop`
+/// alone only reaps the *direct* child on drop — grandchildren are orphaned.
+/// This guard closes that gap: on `Drop`, while still armed, it sends
+/// `SIGKILL` to the whole process group via `killpg`, so it fires:
+///
+/// - when the operator's own `stream_and_process_output` timeout
+///   (`timeout_seconds`) returns early with an error (the guard, still
+///   armed, drops at the end of `execute_single`'s early return), and
+/// - when the *outer* per-task `timeout_ms` fires in
+///   `task_execution::execute_with_timeout`, which drops the whole operator
+///   future — including this guard's stack frame — without ever calling
+///   `Child::kill`.
+///
+/// Both paths converge on the same `Drop` impl, so the mechanism is
+/// cancellation-safe by construction: it does not depend on any code path
+/// explicitly running to completion.
+///
+/// Call [`ProcessGroupKillGuard::disarm`] only after `Child::wait()` has
+/// returned successfully (a "clean wait") — at that point the direct child
+/// is confirmed reaped and killing the group is no longer this guard's job.
+///
+/// Non-unix: `process_group`/`killpg` have no portable equivalent, so this
+/// is a documented no-op there; `kill_on_drop(true)` (set unconditionally in
+/// [`build_command`]) still reaps the direct child, but grandchildren can
+/// leak on non-unix platforms.
+struct ProcessGroupKillGuard {
+    #[cfg(unix)]
+    pgid: libc::pid_t,
+    #[cfg(unix)]
+    armed: bool,
+}
+
+impl ProcessGroupKillGuard {
+    /// `pid` is the freshly spawned child's pid. Because the child is
+    /// spawned with `process_group(0)`, it is its own process group leader,
+    /// so `pgid == pid`.
+    #[cfg(unix)]
+    fn new(pid: u32) -> Self {
+        Self {
+            pgid: pid as libc::pid_t,
+            armed: true,
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn new(_pid: u32) -> Self {
+        Self {}
+    }
+
+    /// Disarm after a clean wait/exit so `Drop` becomes a no-op. Must not be
+    /// called before the direct child is confirmed reaped.
+    fn disarm(&mut self) {
+        #[cfg(unix)]
+        {
+            self.armed = false;
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ProcessGroupKillGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            // SAFETY: plain FFI call with a pgid/signal pair, no pointers
+            // involved. If the group is already gone (process exited and was
+            // reaped, e.g. via the belt-and-braces `kill_on_drop`) `killpg`
+            // just returns ESRCH; cleanup here is intentionally best-effort
+            // and errors are not actionable in a `Drop` impl.
+            unsafe {
+                libc::killpg(self.pgid, libc::SIGKILL);
+            }
+        }
+    }
+}
+
 /// Result from a single engine execution.
 pub(super) struct SingleExecResult {
     pub(super) signal: Option<String>,
@@ -88,6 +169,7 @@ async fn spawn_engine_process(
         tokio::process::Child,
         tokio::process::ChildStdout,
         tokio::task::JoinHandle<()>,
+        ProcessGroupKillGuard,
     ),
     AppError,
 > {
@@ -125,6 +207,12 @@ async fn spawn_engine_process(
         .with_code("WFG-AGENT-002")
     })?;
 
+    // Armed immediately after spawn, before any await point that could be
+    // cancelled by the outer per-task timeout. See `ProcessGroupKillGuard`
+    // docs for why this must be created here rather than deferred.
+    let kill_guard =
+        ProcessGroupKillGuard::new(child.id().expect("freshly spawned child must have a pid"));
+
     let stdout = child.stdout.take().expect("stdout must be piped");
     let stderr = child.stderr.take().expect("stderr must be piped");
 
@@ -139,7 +227,7 @@ async fn spawn_engine_process(
         }
     });
 
-    Ok((child, stdout, stderr_task))
+    Ok((child, stdout, stderr_task, kill_guard))
 }
 
 /// Stream and process stdout from the engine process.
@@ -248,13 +336,20 @@ async fn wait_for_process_completion(
 pub(super) async fn execute_single(params: &ExecParams<'_>) -> Result<SingleExecResult, AppError> {
     check_timeout_before_execution(params)?;
 
-    let (mut child, stdout, stderr_task) = spawn_engine_process(params).await?;
+    let (mut child, stdout, stderr_task, mut kill_guard) = spawn_engine_process(params).await?;
     let mut stdout_file = super::artifacts::open_stdout_artifact_file(params.paths.stdout_path)?;
 
+    // If either of the two calls below returns early (internal
+    // `timeout_seconds` expiry, or this whole future getting dropped because
+    // the outer per-task `timeout_ms` fired), `kill_guard` is still armed
+    // and its `Drop` sends SIGKILL to the process group.
     let streaming_result =
         stream_and_process_output(stdout, &mut stdout_file, &mut child, params).await?;
 
     let exit_code = wait_for_process_completion(child, stderr_task).await?;
+    // Clean wait: the direct child is confirmed reaped. Disarm so the guard's
+    // Drop at the end of this scope is a no-op.
+    kill_guard.disarm();
 
     Ok(SingleExecResult {
         signal: streaming_result.signal,
@@ -328,6 +423,17 @@ fn build_command(
     cmd.stderr(Stdio::piped());
     cmd.stdin(Stdio::null());
 
+    // Belt-and-braces: reap the direct child if the `Child` handle itself is
+    // dropped without an explicit kill/wait. This alone does NOT reach
+    // grandchildren — that's `ProcessGroupKillGuard`'s job.
+    cmd.kill_on_drop(true);
+    // Make the child the leader of its own process group so grandchildren it
+    // spawns (e.g. `sleep 300 &`) share a group we can kill as a unit via
+    // `killpg`. Non-unix: no portable equivalent; grandchildren gap is
+    // documented on `ProcessGroupKillGuard`.
+    #[cfg(unix)]
+    cmd.process_group(0);
+
     for (k, v) in &invocation.env {
         cmd.env(k, v);
     }
@@ -348,6 +454,9 @@ mod tests {
     use serde_json::json;
     use serde_json::Value;
     use std::collections::HashMap;
+    #[cfg(unix)]
+    use std::path::Path;
+    use std::time::{Duration, Instant};
     use tempfile::TempDir;
 
     fn make_ctx(workspace: &TempDir) -> ExecutionContext {
@@ -679,5 +788,273 @@ fi"#,
         assert!(err.context.contains_key("stdout_artifact"));
         assert!(err.context.contains_key("engine"));
         assert!(err.context.contains_key("model"));
+    }
+
+    // ── B7: process-tree cleanup on timeout ──────────────────────────────
+    //
+    // Fixture: a shell script that backgrounds a `sleep 300` grandchild
+    // (writing its pid to a file so the test can find it), then loops
+    // forever appending a byte to a "heartbeat" file — the direct child's
+    // portable "still alive" signal. The script never exits on its own; each
+    // scenario below relies entirely on the kill-guard mechanism under test
+    // to end it.
+    //
+    // Two convergent kill paths are exercised separately, per the spec:
+    //   (a) the outer per-task `timeout_ms`, which drops the operator future
+    //       without ever calling `Child::kill` (`task_execution.rs:247`);
+    //   (b) the operator-internal `timeout_seconds`, which does call
+    //       `Child::kill` on the direct child only (`command.rs:215`).
+    // Both must leave the direct child AND the grandchild dead.
+
+    #[cfg(unix)]
+    fn grandchild_leak_script(heartbeat: &Path, grandchild_pid_file: &Path) -> String {
+        format!(
+            r#"( sleep 300 & echo $! > "{grandchild_pid}" )
+while true; do printf x >> "{heartbeat}"; sleep 0.02; done"#,
+            grandchild_pid = grandchild_pid_file.display(),
+            heartbeat = heartbeat.display(),
+        )
+    }
+
+    /// Polls `path`'s size until it stops growing for a full `quiet` window
+    /// (bounded by `max_wait`). This is the direct-child-dead check: it uses
+    /// only filesystem polling, no OS process APIs, so it is portable to any
+    /// platform even though the fixture script above is unix-only.
+    #[cfg(unix)]
+    async fn wait_for_heartbeat_to_stop(path: &Path, quiet: Duration, max_wait: Duration) -> bool {
+        let poll = Duration::from_millis(20);
+        let deadline = Instant::now() + max_wait;
+        let mut last_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let mut quiet_since = Instant::now();
+        loop {
+            tokio::time::sleep(poll).await;
+            let size = std::fs::metadata(path)
+                .map(|m| m.len())
+                .unwrap_or(last_size);
+            if size != last_size {
+                last_size = size;
+                quiet_since = Instant::now();
+            } else if quiet_since.elapsed() >= quiet {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+        }
+    }
+
+    /// Polls for `path` to exist and be non-empty, bounded by `max_wait`.
+    #[cfg(unix)]
+    async fn wait_for_file_nonempty(path: &Path, max_wait: Duration) -> bool {
+        let poll = Duration::from_millis(20);
+        let deadline = Instant::now() + max_wait;
+        loop {
+            if std::fs::metadata(path)
+                .map(|m| m.len() > 0)
+                .unwrap_or(false)
+            {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(poll).await;
+        }
+    }
+
+    #[cfg(unix)]
+    fn read_pid_file(path: &Path) -> libc::pid_t {
+        std::fs::read_to_string(path)
+            .expect("read pid file")
+            .trim()
+            .parse()
+            .expect("pid file contains a valid pid")
+    }
+
+    /// Grandchild-dead assertion: unix-only, per spec, since it relies on
+    /// `kill(pid, 0)` (a pure liveness probe — no signal is actually
+    /// delivered) to determine whether the process-group kill reached the
+    /// grandchild too.
+    #[cfg(unix)]
+    async fn wait_for_pid_death(pid: libc::pid_t, max_wait: Duration) -> bool {
+        let poll = Duration::from_millis(20);
+        let deadline = Instant::now() + max_wait;
+        loop {
+            // SAFETY: signal 0 touches no memory; it only probes whether the
+            // pid exists and is signalable by us.
+            let alive = unsafe { libc::kill(pid, 0) == 0 };
+            if !alive {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(poll).await;
+        }
+    }
+
+    /// Scenario (b): a small operator-internal `timeout_seconds` triggers the
+    /// existing direct-child `Child::kill` (command.rs:215-221) AND, via the
+    /// kill guard converging on the same `Drop`, a `killpg` that reaches the
+    /// grandchild too.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn execute_agent_timeout_seconds_kills_process_group() {
+        let tmp = TempDir::new().unwrap();
+        let heartbeat = tmp.path().join("heartbeat");
+        let grandchild_pid_file = tmp.path().join("grandchild.pid");
+        let script = grandchild_leak_script(&heartbeat, &grandchild_pid_file);
+
+        let settings = WorkflowSettings::default();
+        let op = AgentOperator::with_default_registry(tmp.path().to_path_buf(), settings);
+        let ctx = make_ctx(&tmp);
+        let params = json!({
+            "engine": "command",
+            "engine_command": ["sh", "-c", script],
+            "timeout_seconds": 1,
+        });
+
+        let err = op.execute(params, ctx).await.unwrap_err();
+        assert_eq!(err.code, "WFG-AGENT-005");
+
+        assert!(
+            wait_for_file_nonempty(&grandchild_pid_file, Duration::from_secs(2)).await,
+            "grandchild pid file was never written"
+        );
+        let grandchild_pid = read_pid_file(&grandchild_pid_file);
+
+        assert!(
+            wait_for_heartbeat_to_stop(
+                &heartbeat,
+                Duration::from_millis(200),
+                Duration::from_secs(3)
+            )
+            .await,
+            "direct child kept writing to heartbeat after internal timeout; not killed"
+        );
+        assert!(
+            wait_for_pid_death(grandchild_pid, Duration::from_secs(3)).await,
+            "grandchild process survived the process-group kill (internal timeout path)"
+        );
+    }
+
+    /// Fast-success companion to the timeout scenarios: proves that arming
+    /// (and disarming) the kill guard on a normal completion has zero effect
+    /// on the operator's success behavior — a regression here would mean
+    /// dropping the guard after a clean wait still kills something.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn execute_fast_success_unaffected_by_kill_guard() {
+        let tmp = TempDir::new().unwrap();
+        let settings = WorkflowSettings::default();
+        let op = AgentOperator::with_default_registry(tmp.path().to_path_buf(), settings);
+        let ctx = make_ctx(&tmp);
+        let params = json!({
+            "engine": "command",
+            "engine_command": ["sh", "-c", "echo ok"],
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+        assert_eq!(result["signal"], json!("exited"));
+        assert_eq!(result["exit_code"], json!(0));
+    }
+
+    /// Scenario (a): a small task-level `timeout_ms` makes
+    /// `task_execution::execute_with_timeout` drop the whole operator future
+    /// without ever calling `Child::kill` — the outer future-drop path. The
+    /// kill guard living inside that dropped future's stack must still reach
+    /// the process group.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn task_level_timeout_ms_kills_process_group_via_future_drop() {
+        use crate::workflow::executor::ExecutionOverrides;
+        use crate::workflow::expression::ExpressionEngine;
+        use crate::workflow::operators::register_builtins;
+        use crate::workflow::schema::WorkflowTask;
+        use crate::workflow::task_execution::run_task;
+        use std::sync::Arc;
+
+        let tmp = TempDir::new().unwrap();
+        let heartbeat = tmp.path().join("heartbeat");
+        let grandchild_pid_file = tmp.path().join("grandchild.pid");
+        let script = grandchild_leak_script(&heartbeat, &grandchild_pid_file);
+
+        // Default max_time_seconds (3600) is far above timeout_ms below, so
+        // the operator's own internal timeout cannot be the thing that fires
+        // first — only the outer task-level timeout can.
+        let settings = WorkflowSettings::default();
+        let mut builder = OperatorRegistry::builder();
+        register_builtins(&mut builder, tmp.path().to_path_buf(), settings);
+        let registry = builder.build();
+
+        let task: WorkflowTask = serde_json::from_value(json!({
+            "id": "leaky",
+            "operator": "AgentOperator",
+            "params": {
+                "engine": "command",
+                "engine_command": ["sh", "-c", script],
+            },
+            "name": null,
+            "classes": [],
+            "timeout_ms": 200,
+            "retry": null,
+            "max_iterations": null,
+            "parallel_group": null,
+            "transitions": [],
+            "goal_gate": false,
+            "terminal": null
+        }))
+        .expect("construct WorkflowTask");
+
+        let outcome = run_task(
+            task,
+            registry,
+            Arc::new(ExpressionEngine::default()),
+            tmp.path().to_path_buf(),
+            StateView::new(json!({}), json!({}), json!({})),
+            "test-exec-b7".to_string(),
+            1,
+            Arc::new(Vec::new()),
+            GraphHandle::new(HashMap::new()),
+            tmp.path().join("workflow.yaml"),
+            0,
+            ExecutionOverrides {
+                parallel_limit: None,
+                max_time_seconds: None,
+                checkpoint_base_path: None,
+                artifact_base_path: None,
+                max_nesting_depth: None,
+                verbose: false,
+                sink: None,
+                pre_seed_nodes: true,
+            },
+        )
+        .await
+        .expect("run_task itself must not error");
+
+        assert!(
+            outcome.failed,
+            "expected timed-out task to be marked failed"
+        );
+        assert_eq!(outcome.record.error_code.as_deref(), Some("WFG-TIME-002"));
+
+        assert!(
+            wait_for_file_nonempty(&grandchild_pid_file, Duration::from_secs(2)).await,
+            "grandchild pid file was never written"
+        );
+        let grandchild_pid = read_pid_file(&grandchild_pid_file);
+
+        assert!(
+            wait_for_heartbeat_to_stop(
+                &heartbeat,
+                Duration::from_millis(200),
+                Duration::from_secs(3)
+            )
+            .await,
+            "direct child kept writing to heartbeat after outer timeout dropped the future"
+        );
+        assert!(
+            wait_for_pid_death(grandchild_pid, Duration::from_secs(3)).await,
+            "grandchild process survived the process-group kill (future-drop path)"
+        );
     }
 }
