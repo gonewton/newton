@@ -858,3 +858,186 @@ workflow:
         "run() must fail when the completion envelope cannot be persisted, got Ok"
     );
 }
+
+/// Sibling to `completion_envelope_persist_failure_fails_the_run`, covering
+/// the FAILURE side of the same PR-3 hardening: when a task fails (with
+/// `continue_on_error: false`) AND `io.result_map` is configured, the
+/// runtime must also durably persist a *failure* completion envelope before
+/// returning the run's error — this is the "happy write inside the failure
+/// branch" path (`runtime.rs`, the `if self.graph_settings.io.result_map.is_some()`
+/// block reached from the `fail_workflow` arm), which no prior test reached
+/// because no existing test combined "task fails" with "result_map set".
+#[tokio::test]
+async fn failing_task_with_result_map_persists_failure_completion_envelope() {
+    let workspace = tempdir().expect("workspace");
+
+    // `continue_on_error: true` (and the default `success_requires_no_task_failures:
+    // true`) matter here: a task failure under `continue_on_error: false` is
+    // detected and returned mid-loop, inside `process_frontier`, which never
+    // reaches this function's own end-of-run finalization code (the block
+    // under test). Only a failure detected by `compute_final_status` *after*
+    // the loop otherwise completes — as when the failing task's own
+    // transition routes around it and a later task reaches a `terminal:
+    // success` node — reaches the finalization `if let Some(err) = maybe_err`
+    // branch this test targets. Mirrors the shape of the
+    // `14_error_fallback.yaml` CLI fixture, minus its
+    // `success_requires_no_task_failures: false` override (we want the
+    // overall run to still fail).
+    let workflow_yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: fail_cmd
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: true
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    command_operator:
+      allow_shell: true
+    io:
+      result_map:
+        status: failed
+  tasks:
+    - id: fail_cmd
+      operator: CommandOperator
+      params:
+        cmd: "false"
+        shell: true
+      transitions:
+        - to: fallback
+          when: { $expr: 'tasks.fail_cmd.status == "failed"' }
+    - id: fallback
+      operator: NoOpOperator
+      terminal: success
+"#;
+    let workflow_file = write_workflow(workflow_yaml);
+
+    let document = schema::load_workflow(workflow_file.path()).expect("parse workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let (execution_id, handle) = executor::spawn_workflow_execution(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry,
+        workspace.path().to_path_buf(),
+        default_overrides(),
+    )
+    .expect("spawn workflow execution");
+
+    let result = handle.await.expect("spawned run task should not panic");
+    assert!(
+        result.is_err(),
+        "run() must fail when the task fails, got Ok"
+    );
+
+    let completion_path = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(execution_id.to_string())
+        .join("completion.json");
+    assert!(
+        completion_path.exists(),
+        "a failure completion envelope must be persisted even though the run failed"
+    );
+    let envelope = read_json(&completion_path);
+    assert_eq!(
+        envelope["status"], "failure",
+        "envelope must record status=failure; envelope={envelope}"
+    );
+    assert!(
+        envelope["error"].is_object(),
+        "envelope must carry the original run error; envelope={envelope}"
+    );
+}
+
+/// The other half of PR-3's failure-branch hardening: when the failure
+/// completion envelope itself cannot be durably persisted (its path is
+/// occupied by a directory, mirroring
+/// `completion_envelope_persist_failure_fails_the_run`'s technique), that
+/// persistence error must surface (`WFG-COMPLETION-001`) instead of being
+/// swallowed — the run still fails, but for the *right* reason, and the
+/// persistence failure is not silently dropped on the floor.
+#[tokio::test]
+async fn failing_task_with_result_map_surfaces_failure_envelope_persist_error() {
+    let workspace = tempdir().expect("workspace");
+
+    // `continue_on_error: true` (and the default `success_requires_no_task_failures:
+    // true`) matter here: a task failure under `continue_on_error: false` is
+    // detected and returned mid-loop, inside `process_frontier`, which never
+    // reaches this function's own end-of-run finalization code (the block
+    // under test). Only a failure detected by `compute_final_status` *after*
+    // the loop otherwise completes — as when the failing task's own
+    // transition routes around it and a later task reaches a `terminal:
+    // success` node — reaches the finalization `if let Some(err) = maybe_err`
+    // branch this test targets. Mirrors the shape of the
+    // `14_error_fallback.yaml` CLI fixture, minus its
+    // `success_requires_no_task_failures: false` override (we want the
+    // overall run to still fail).
+    let workflow_yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: fail_cmd
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: true
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    command_operator:
+      allow_shell: true
+    io:
+      result_map:
+        status: failed
+  tasks:
+    - id: fail_cmd
+      operator: CommandOperator
+      params:
+        cmd: "false"
+        shell: true
+      transitions:
+        - to: fallback
+          when: { $expr: 'tasks.fail_cmd.status == "failed"' }
+    - id: fallback
+      operator: NoOpOperator
+      terminal: success
+"#;
+    let workflow_file = write_workflow(workflow_yaml);
+
+    let document = schema::load_workflow(workflow_file.path()).expect("parse workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let (execution_id, handle) = executor::spawn_workflow_execution(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry,
+        workspace.path().to_path_buf(),
+        default_overrides(),
+    )
+    .expect("spawn workflow execution");
+
+    // Same current-thread-runtime trick as `completion_envelope_persist_failure_fails_the_run`:
+    // pre-create "completion.json" as a directory before the spawned task can
+    // make progress, so its final rename collides and fails.
+    let exec_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(execution_id.to_string());
+    fs::create_dir_all(exec_dir.join("completion.json")).expect("pre-create collision directory");
+
+    let result = handle.await.expect("spawned run task should not panic");
+    let err = result.expect_err("run() must fail; the task itself also failed");
+    assert_eq!(
+        err.code, "WFG-COMPLETION-001",
+        "a failure envelope persist error must surface as WFG-COMPLETION-001, not the original \
+         task failure; got {err:?}"
+    );
+}

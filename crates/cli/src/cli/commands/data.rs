@@ -653,3 +653,295 @@ async fn dispatch_data(
         (v, r) => Err(format!("unsupported combination: {v} {r}")),
     }
 }
+
+/// Direct (in-process) unit tests for `data()`'s `CliExit` error-return paths
+/// (spec 074, PR-1). These call `data()` itself rather than spawning a
+/// subprocess so they are reliably attributed by coverage tooling — mirrors
+/// `mcp_data_malformed_call_no_exit.rs`'s in-process dispatch seam, one level
+/// closer to the handler.
+#[cfg(test)]
+mod cli_exit_path_tests {
+    use super::*;
+    use crate::cli::args::DataVerb;
+    use tempfile::TempDir;
+
+    /// A workspace whose `.newton/state/` directory already exists, so
+    /// `SqliteBackendStore::new` (which opens with `mode=rwc` but does not
+    /// create missing *directories*, only the db file itself) can open
+    /// `backend.sqlite` and run migrations. Mirrors
+    /// `mcp_data_malformed_call_no_exit.rs::setup_workspace_with_db`.
+    fn setup_workspace() -> TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join(".newton/state")).expect("create state dir");
+        dir
+    }
+
+    fn base_args(ws: &TempDir, verb: DataVerb, resource: &str) -> DataArgs {
+        DataArgs {
+            verb,
+            resource: resource.to_string(),
+            id: None,
+            file: None,
+            body: None,
+            json: false,
+            dry_run: false,
+            workspace: Some(ws.path().to_path_buf()),
+            state_dir: None,
+            run_id: None,
+            kpi_id: None,
+            scope: None,
+            scope_id: None,
+            source: None,
+            limit: None,
+        }
+    }
+
+    /// Downcasts the `anyhow::Error` returned by `data()` to the `CliExit`
+    /// every one of its error-return paths constructs.
+    fn expect_cli_exit(err: anyhow::Error) -> CliExit {
+        err.downcast::<CliExit>()
+            .unwrap_or_else(|e| panic!("expected a CliExit, got: {e}"))
+    }
+
+    async fn seed_eval_run(ws: &TempDir, run_id: &str) {
+        let state_dir = crate::cli::workspace_paths::resolve_state_dir(ws.path(), None);
+        let workspace_paths = WorkspacePaths::with_state_dir(ws.path().to_path_buf(), state_dir);
+        let db_url = workspace_paths.backend_sqlite_url();
+        let store = newton_backend::SqliteBackendStore::new(&db_url)
+            .await
+            .expect("open store to seed eval-run");
+        // create_eval_run validates its scope FK, so a real Product must
+        // exist for scope="product" to be accepted.
+        let product = store
+            .create_product(newton_backend::CreateProductBody {
+                name: "seed-product".to_string(),
+            })
+            .await
+            .expect("seed product for eval-run scope FK");
+        store
+            .create_eval_run(newton_backend::CreateEvalRunBody {
+                id: run_id.to_string(),
+                source: "test".to_string(),
+                scope: "product".to_string(),
+                scope_id: product.id,
+                score: None,
+                verdict: None,
+                summary: None,
+                evaluated_at: None,
+                grades: None,
+                raw_assessment: None,
+            })
+            .await
+            .expect("seed eval-run");
+    }
+
+    #[tokio::test]
+    async fn data_001_file_and_body_are_mutually_exclusive() {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Post, "product");
+        args.file = Some(ws.path().join("body.json"));
+        args.body = Some("{}".to_string());
+
+        let err = data(args).await.expect_err("must fail");
+        let exit = expect_cli_exit(err);
+        assert_eq!(exit.code, 1);
+        assert!(exit.message.contains("DATA-001"), "{}", exit.message);
+    }
+
+    #[tokio::test]
+    async fn store_open_failure_surfaces_as_cli_exit() {
+        // No `.newton/state` dir created, and an explicit --state-dir that
+        // does not exist either — SqliteBackendStore::new does not create
+        // missing parent directories, only the db file itself, so opening it
+        // must fail.
+        let ws = tempfile::tempdir().expect("tempdir");
+        let mut args = base_args(&ws, DataVerb::Get, "products");
+        args.state_dir = Some(ws.path().join("does-not-exist").join("nested"));
+
+        let err = data(args).await.expect_err("store open must fail");
+        let exit = expect_cli_exit(err);
+        assert_eq!(exit.code, 1);
+        assert!(
+            exit.message.contains("Failed to open backend store"),
+            "{}",
+            exit.message
+        );
+    }
+
+    #[tokio::test]
+    async fn data_004_invalid_json_in_file() {
+        let ws = setup_workspace();
+        let file_path = ws.path().join("bad.json");
+        std::fs::write(&file_path, b"{not valid json").expect("write bad json");
+        let mut args = base_args(&ws, DataVerb::Post, "product");
+        args.file = Some(file_path);
+
+        let err = data(args).await.expect_err("must fail");
+        let exit = expect_cli_exit(err);
+        assert!(exit.message.contains("DATA-004"), "{}", exit.message);
+    }
+
+    #[tokio::test]
+    async fn data_006_run_id_rejected_for_unsupported_resource() {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Get, "products");
+        args.run_id = Some("run-1".to_string());
+
+        let err = data(args).await.expect_err("must fail");
+        let exit = expect_cli_exit(err);
+        assert!(exit.message.contains("DATA-006"), "{}", exit.message);
+    }
+
+    #[tokio::test]
+    async fn data_008_scope_rejected_for_unsupported_resource() {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Get, "products");
+        args.scope = Some("product".to_string());
+
+        let err = data(args).await.expect_err("must fail");
+        let exit = expect_cli_exit(err);
+        assert!(exit.message.contains("DATA-008"), "{}", exit.message);
+    }
+
+    #[tokio::test]
+    async fn data_005_missing_body_for_post() {
+        let ws = setup_workspace();
+        let args = base_args(&ws, DataVerb::Post, "product");
+
+        let err = data(args).await.expect_err("must fail");
+        let exit = expect_cli_exit(err);
+        assert!(exit.message.contains("DATA-005"), "{}", exit.message);
+    }
+
+    #[tokio::test]
+    async fn dry_run_component_rejects_missing_product_fk() {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Post, "component");
+        args.dry_run = true;
+        args.body = Some(serde_json::json!({"productId": "ghost-product"}).to_string());
+
+        let err = data(args).await.expect_err("dry-run FK check must fail");
+        let exit = expect_cli_exit(err);
+        assert!(
+            exit.message.contains("FK validation failed") && exit.message.contains("ghost-product"),
+            "{}",
+            exit.message
+        );
+    }
+
+    #[tokio::test]
+    async fn dry_run_repo_rejects_missing_component_fk() {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Post, "repo");
+        args.dry_run = true;
+        args.body = Some(serde_json::json!({"componentId": "ghost-component"}).to_string());
+
+        let err = data(args).await.expect_err("dry-run FK check must fail");
+        let exit = expect_cli_exit(err);
+        assert!(
+            exit.message.contains("FK validation failed")
+                && exit.message.contains("ghost-component"),
+            "{}",
+            exit.message
+        );
+    }
+
+    #[tokio::test]
+    async fn dry_run_module_rejects_missing_repo_fk() {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Post, "module");
+        args.dry_run = true;
+        args.body = Some(serde_json::json!({"repoId": "ghost-repo"}).to_string());
+
+        let err = data(args).await.expect_err("dry-run FK check must fail");
+        let exit = expect_cli_exit(err);
+        assert!(
+            exit.message.contains("FK validation failed") && exit.message.contains("ghost-repo"),
+            "{}",
+            exit.message
+        );
+    }
+
+    #[tokio::test]
+    async fn dry_run_eval_run_requires_scope_and_scope_id() {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Post, "eval-run");
+        args.dry_run = true;
+        args.body = Some(serde_json::json!({"source": "dk-review"}).to_string());
+
+        let err = data(args).await.expect_err("dry-run FK check must fail");
+        let exit = expect_cli_exit(err);
+        assert!(
+            exit.message.contains("scope and scopeId are required"),
+            "{}",
+            exit.message
+        );
+    }
+
+    #[tokio::test]
+    async fn dry_run_eval_run_rejects_missing_scope_target() {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Post, "eval-run");
+        args.dry_run = true;
+        args.body =
+            Some(serde_json::json!({"scope": "product", "scopeId": "ghost-product"}).to_string());
+
+        let err = data(args).await.expect_err("dry-run FK check must fail");
+        let exit = expect_cli_exit(err);
+        assert!(
+            exit.message.contains("FK validation failed") && exit.message.contains("ghost-product"),
+            "{}",
+            exit.message
+        );
+    }
+
+    #[tokio::test]
+    async fn dry_run_grade_requires_run_id() {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Post, "grade");
+        args.dry_run = true;
+        args.body = Some(serde_json::json!({"dimension": "tests"}).to_string());
+
+        let err = data(args).await.expect_err("dry-run FK check must fail");
+        let exit = expect_cli_exit(err);
+        assert!(
+            exit.message.contains("runId is required"),
+            "{}",
+            exit.message
+        );
+    }
+
+    #[tokio::test]
+    async fn dry_run_grade_rejects_missing_run_id_fk() {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Post, "grade");
+        args.dry_run = true;
+        args.body = Some(serde_json::json!({"runId": "ghost-run"}).to_string());
+
+        let err = data(args).await.expect_err("dry-run FK check must fail");
+        let exit = expect_cli_exit(err);
+        assert!(
+            exit.message.contains("FK validation failed") && exit.message.contains("ghost-run"),
+            "{}",
+            exit.message
+        );
+    }
+
+    #[tokio::test]
+    async fn dry_run_grade_rejects_missing_kpi_id_fk() {
+        let ws = setup_workspace();
+        seed_eval_run(&ws, "real-run-1").await;
+        let mut args = base_args(&ws, DataVerb::Post, "grade");
+        args.dry_run = true;
+        args.body =
+            Some(serde_json::json!({"runId": "real-run-1", "kpiId": "ghost-kpi"}).to_string());
+
+        let err = data(args).await.expect_err("dry-run FK check must fail");
+        let exit = expect_cli_exit(err);
+        assert!(
+            exit.message.contains("FK validation failed") && exit.message.contains("ghost-kpi"),
+            "{}",
+            exit.message
+        );
+    }
+}

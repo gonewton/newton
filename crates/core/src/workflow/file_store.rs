@@ -439,4 +439,36 @@ mod tests {
         let records = store.list().unwrap();
         assert!(records.is_empty());
     }
+
+    /// Mirrors `crate::fs_util::tests::unwritable_directory_returns_err`:
+    /// this module's `atomic_write` wraps the shared helper's `io::Error`
+    /// into this module's own `AppError` shape (spec 074, PR-3 / B1 + S1) —
+    /// exercise that mapping directly rather than only via the higher-level
+    /// workflow-file-persistence callers.
+    #[test]
+    #[cfg(unix)]
+    fn atomic_write_unwritable_directory_returns_app_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("flow.yaml");
+
+        let mut perms = std::fs::metadata(dir.path()).unwrap().permissions();
+        perms.set_mode(0o500); // r-x: no write permission.
+        std::fs::set_permissions(dir.path(), perms).unwrap();
+
+        let result = atomic_write(&target, b"payload");
+
+        let mut restore = std::fs::metadata(dir.path()).unwrap().permissions();
+        restore.set_mode(0o700);
+        std::fs::set_permissions(dir.path(), restore).unwrap();
+
+        let err = result.expect_err("writing into a read-only directory must fail");
+        assert_eq!(err.category, ErrorCategory::IoError);
+        assert!(
+            err.message.contains("failed to atomically write"),
+            "err={}",
+            err.message
+        );
+    }
 }

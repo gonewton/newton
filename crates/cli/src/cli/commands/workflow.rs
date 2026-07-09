@@ -347,3 +347,127 @@ pub async fn resume(args: ResumeArgs) -> StdResult<(), AppError> {
     );
     Ok(())
 }
+
+/// In-process (no subprocess) coverage of `emit_or_return`'s two branches
+/// (spec 074, PR-1 / B3): non-`--emit-completion-json` invocations return a
+/// plain `Err`, not a `CliExit`; `--emit-completion-json` on an actual
+/// workflow-execution failure returns a `CliExit` with exit code 2. Calls
+/// `workflow_run` directly rather than spawning `newton` — mirrors the seam
+/// `mcp_data_malformed_call_no_exit.rs` and `data.rs`'s own in-crate tests
+/// use for the same "handler no longer calls `std::process::exit`" family of
+/// coverage. `test_e2e_io_contract.rs` (assert_cmd, subprocess) already pins
+/// the `--emit-completion-json` exit codes end-to-end; these are the
+/// same-crate complement for the `emit_json == false` branch that no
+/// existing `--emit-completion-json`-named test exercises.
+#[cfg(test)]
+mod emit_or_return_tests {
+    use super::*;
+
+    const MAX_INPUT_BYTES_YAML: &str = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: start
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 1
+    max_workflow_iterations: 5
+    io_settings:
+      max_input_bytes: 1
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+
+    const FAILING_TASK_YAML: &str = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: fail
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 1
+    max_workflow_iterations: 5
+    command_operator:
+      allow_shell: true
+  tasks:
+    - id: fail
+      operator: CommandOperator
+      params:
+        cmd: "false"
+        shell: true
+      terminal: success
+"#;
+
+    fn base_run_args(workflow: std::path::PathBuf, workspace: std::path::PathBuf) -> RunArgs {
+        RunArgs {
+            workflow,
+            input_file: None,
+            workspace: Some(workspace),
+            trigger: vec![],
+            context: vec![],
+            parameters_json: None,
+            emit_completion_json: false,
+            parallel_limit: None,
+            timeout_seconds: None,
+            verbose: false,
+            server: None,
+            state_dir: None,
+        }
+    }
+
+    /// Line 40 (`Err(err.into())`): without `--emit-completion-json`, a
+    /// `max_input_bytes` violation must surface as a plain error, NOT a
+    /// `CliExit` — only a direct-CLI-with-the-flag invocation gets the
+    /// stdout-envelope-then-CliExit treatment.
+    #[tokio::test]
+    async fn without_emit_json_max_input_bytes_violation_is_a_plain_error() {
+        let ws = tempfile::tempdir().expect("tempdir");
+        let wf_path = ws.path().join("wf.yaml");
+        std::fs::write(&wf_path, MAX_INPUT_BYTES_YAML).expect("write workflow");
+        let params_file = ws.path().join("params.json");
+        std::fs::write(&params_file, r#"{"repo":"my-repo"}"#).expect("write params");
+
+        let mut args = base_run_args(wf_path, ws.path().to_path_buf());
+        args.parameters_json = Some(params_file);
+        args.emit_completion_json = false;
+
+        let err = workflow_run(args)
+            .await
+            .expect_err("payload exceeding max_input_bytes must fail");
+        assert!(
+            err.downcast_ref::<CliExit>().is_none(),
+            "emit_json=false must not produce a CliExit; got: {err:?}"
+        );
+        assert!(err.to_string().contains("max_input_bytes"), "err={err}");
+    }
+
+    /// Line 211 (`return Err(CliExit::new(exit_code, ...))`): with
+    /// `--emit-completion-json`, an actual workflow execution failure
+    /// (WFG-EXEC-001, a task failing with `continue_on_error: false`) must
+    /// surface as a `CliExit` with exit code 2 (the `is_workflow_failure`
+    /// branch), after printing the JSON envelope to stdout.
+    #[tokio::test]
+    async fn emit_json_workflow_execution_failure_returns_cli_exit_code_2() {
+        let ws = tempfile::tempdir().expect("tempdir");
+        let wf_path = ws.path().join("wf.yaml");
+        std::fs::write(&wf_path, FAILING_TASK_YAML).expect("write workflow");
+
+        let mut args = base_run_args(wf_path, ws.path().to_path_buf());
+        args.emit_completion_json = true;
+
+        let err = workflow_run(args)
+            .await
+            .expect_err("a failing task must fail the run");
+        let exit = err
+            .downcast::<CliExit>()
+            .unwrap_or_else(|e| panic!("expected a CliExit, got: {e}"));
+        assert_eq!(exit.code, 2, "WFG-EXEC-001 is a workflow failure (exit 2)");
+    }
+}

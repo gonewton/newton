@@ -151,6 +151,12 @@ async fn handle_workflow_socket(
     filters: StreamFilters,
 ) {
     let mut rx = state.events_tx.subscribe();
+    // Not used again below: drop the AppState/Sender reference this task
+    // holds so the receive loop's `RecvError::Closed` arm is actually
+    // reachable once every *other* reference (router, other connections)
+    // also drops, instead of this task itself being the last one keeping
+    // the shared broadcast channel open forever.
+    drop(state);
 
     if let Ok(json) = serde_json::to_string(&BroadcastEvent::WorkflowInstanceUpdated {
         instance_id: instance_id.clone(),
@@ -256,6 +262,13 @@ async fn handle_logs_socket(
             }
         }
     }
+
+    // Not used again below: drop the AppState/Sender reference this task
+    // holds so the receive loop's `RecvError::Closed` arm is actually
+    // reachable once every *other* reference (router, other connections)
+    // also drops, instead of this task itself being the last one keeping
+    // the shared broadcast channel open forever.
+    drop(state);
 
     // Forward live broadcast events
     loop {

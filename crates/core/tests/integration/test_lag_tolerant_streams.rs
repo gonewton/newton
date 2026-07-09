@@ -275,6 +275,167 @@ async fn test_workflow_sse_delivers_lagged_frame_then_resumes() {
     );
 }
 
+/// Spec 074 PR-5's companion to the lagged-frame tests above: the *other*
+/// non-happy-path branch of the same `match rx.recv().await` — `Err(RecvError::Closed)`,
+/// reached when every `broadcast::Sender<BroadcastEvent>` clone (there is
+/// exactly one, embedded once in the single `AppState` the router is built
+/// from — `AppState::new` never clones it, and `Arc<AppState>` clones taken
+/// by axum's `State` extractor are pointer refcounts, not `Sender` clones)
+/// has been dropped. Aborting the `axum::serve` accept-loop task, letting
+/// the per-connection HTTP task exit after handing the raw IO off to the
+/// upgraded WS task, leaves the *WS handler task itself* as the only
+/// remaining owner of the shared `AppState`/`Sender` — this test's existence
+/// (rather than a hang) is itself evidence that this is enough to close the
+/// channel out from under it.
+#[tokio::test]
+async fn test_workflow_ws_ends_cleanly_when_broadcast_channel_closes() {
+    let backend = make_backend().await;
+    let instance_id = Uuid::new_v4().to_string();
+    insert_instance(&backend, &instance_id).await;
+
+    let state = make_state(Arc::clone(&backend));
+    let app = newton_core::api::api_v1_router(state);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app.into_make_service()).await;
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let ws_url = format!("ws://127.0.0.1:{port}/stream/workflow/{instance_id}/ws");
+    let (mut ws_stream, _) = tokio_tungstenite::connect_async(&ws_url)
+        .await
+        .expect("WebSocket connect");
+
+    let snapshot = ws_stream.next().await.unwrap().unwrap();
+    let snapshot: serde_json::Value =
+        serde_json::from_str(snapshot.into_text().unwrap().as_str()).unwrap();
+    assert_eq!(snapshot["type"], "workflowInstanceUpdated");
+
+    // Nothing else in this test holds a Sender or AppState clone (unlike the
+    // lagged-frame tests above, which deliberately keep `events_tx` alive to
+    // flood it). Killing the accept loop is the last push needed to drop the
+    // router's own state reference.
+    server.abort();
+
+    let result = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match ws_stream.next().await {
+                None => return,
+                Some(Ok(WsMessage::Close(_))) => return,
+                Some(Ok(_)) => continue,
+                Some(Err(_)) => return,
+            }
+        }
+    })
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "timed out waiting for the WS stream to end after the broadcast channel closed"
+    );
+}
+
+/// Best-effort coverage of the *send-failure* sibling of the Closed branch
+/// (`if socket.send(...).await.is_err() { break; }` inside the `Ok(event)`
+/// arm): abruptly drop the client's TCP connection (no WS close handshake)
+/// so the next server-side write to it fails, then publish a live event.
+/// This is inherently racy (there is no direct hook to observe which arm the
+/// server took), so this test only asserts the server keeps functioning
+/// normally for a fresh connection afterward — it does not itself assert the
+/// send-failure branch was hit.
+#[tokio::test]
+async fn test_workflow_ws_server_survives_client_disconnect_mid_broadcast() {
+    let backend = make_backend().await;
+    let instance_id = Uuid::new_v4().to_string();
+    insert_instance(&backend, &instance_id).await;
+
+    let state = make_state(Arc::clone(&backend));
+    let events_tx = state.events_tx.clone();
+    let app = newton_core::api::api_v1_router(state);
+    let port = spawn_router(app).await;
+
+    let ws_url = format!("ws://127.0.0.1:{port}/stream/workflow/{instance_id}/ws");
+    let (mut ws_stream, _) = tokio_tungstenite::connect_async(&ws_url)
+        .await
+        .expect("WebSocket connect");
+    let snapshot = ws_stream.next().await.unwrap().unwrap();
+    let snapshot: serde_json::Value =
+        serde_json::from_str(snapshot.into_text().unwrap().as_str()).unwrap();
+    assert_eq!(snapshot["type"], "workflowInstanceUpdated");
+
+    // Abrupt drop: no WS close handshake, just the underlying TCP stream
+    // going away, so a subsequent server-side write observes a broken pipe.
+    drop(ws_stream);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let _ = events_tx.send(BroadcastEvent::NodeStateChanged {
+        instance_id: instance_id.clone(),
+        node_id: "marker-node".to_string(),
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // The server must still be healthy: a fresh connection works normally.
+    let (mut ws_stream2, _) = tokio_tungstenite::connect_async(&ws_url)
+        .await
+        .expect("second WebSocket connect should still succeed");
+    let snapshot2 = tokio::time::timeout(Duration::from_secs(5), ws_stream2.next())
+        .await
+        .expect("no timeout")
+        .unwrap()
+        .unwrap();
+    let snapshot2: serde_json::Value =
+        serde_json::from_str(snapshot2.into_text().unwrap().as_str()).unwrap();
+    assert_eq!(snapshot2["type"], "workflowInstanceUpdated");
+}
+
+/// Same contract as above for `/stream/logs/{id}/{node_id}/ws`
+/// (`handle_logs_socket`'s identical `Err(RecvError::Closed) => break` arm).
+#[tokio::test]
+async fn test_logs_ws_ends_cleanly_when_broadcast_channel_closes() {
+    let backend = make_backend().await;
+    let instance_id = Uuid::new_v4().to_string();
+    let node_id = "closed-branch-task";
+    insert_instance(&backend, &instance_id).await;
+
+    let state = make_state(Arc::clone(&backend));
+    let app = newton_core::api::api_v1_router(state);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app.into_make_service()).await;
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let ws_url = format!("ws://127.0.0.1:{port}/stream/logs/{instance_id}/{node_id}/ws");
+    let (mut ws_stream, _) = tokio_tungstenite::connect_async(&ws_url)
+        .await
+        .expect("WebSocket connect");
+
+    let connect_frame = ws_stream.next().await.unwrap().unwrap();
+    let connect_frame: serde_json::Value =
+        serde_json::from_str(connect_frame.into_text().unwrap().as_str()).unwrap();
+    assert_eq!(connect_frame["type"], "logMessage");
+
+    server.abort();
+
+    let result = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match ws_stream.next().await {
+                None => return,
+                Some(Ok(WsMessage::Close(_))) => return,
+                Some(Ok(_)) => continue,
+                Some(Err(_)) => return,
+            }
+        }
+    })
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "timed out waiting for the WS stream to end after the broadcast channel closed"
+    );
+}
+
 /// Reads from an in-flight SSE response until a complete `data: <json>\n\n`
 /// event block is found, decodes its payload, and returns it. Skips non-data
 /// blocks (e.g. the ": keepalive" comment frame).

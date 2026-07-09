@@ -278,3 +278,41 @@ fn internal_serialization_error(target: &str, err: serde_json::Error) -> AppErro
         format!("failed to serialize {target}: {err}"),
     )
 }
+
+#[cfg(test)]
+mod atomic_write_tests {
+    use super::*;
+
+    /// Mirrors `crate::fs_util::tests::unwritable_directory_returns_err`:
+    /// this module's `atomic_write` wraps the shared helper's `io::Error`
+    /// into this module's own `AppError` shape (spec 074, PR-3 / B1 + S1) —
+    /// exercise that mapping directly rather than only via the higher-level
+    /// artifact-persistence callers.
+    #[test]
+    #[cfg(unix)]
+    fn unwritable_directory_returns_app_error() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("artifact.json");
+
+        let mut perms = fs::metadata(dir.path()).unwrap().permissions();
+        perms.set_mode(0o500); // r-x: no write permission.
+        fs::set_permissions(dir.path(), perms).unwrap();
+
+        let result = atomic_write(&target, b"payload");
+
+        let mut restore = fs::metadata(dir.path()).unwrap().permissions();
+        restore.set_mode(0o700);
+        fs::set_permissions(dir.path(), restore).unwrap();
+
+        let err = result.expect_err("writing into a read-only directory must fail");
+        assert_eq!(err.category, ErrorCategory::IoError);
+        assert!(
+            err.message.contains("failed to atomically write"),
+            "err={}",
+            err.message
+        );
+    }
+}
