@@ -6,9 +6,14 @@ use axum::{
     routing::post,
     Router,
 };
-use newton_types::ApiError;
 use serde_json::json;
 use std::sync::Arc;
+
+/// Environment variable that must be set to `1` for `POST /testing/reset` to be
+/// reachable. Deliberately not documented in the OpenAPI surface (see
+/// `crates/core/src/api/openapi.rs`): this endpoint wipes the entire backend
+/// store and is intended only for test harnesses that explicitly opt in.
+const NEWTON_ENABLE_TESTING_RESET: &str = "NEWTON_ENABLE_TESTING_RESET";
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
@@ -16,23 +21,17 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-#[utoipa::path(
-    post,
-    path = "/testing/reset",
-    tag = "testing",
-    responses(
-        (status = 200, description = "Reset result", body = serde_json::Value),
-        (status = 403, description = "Forbidden in production", body = ApiError),
-        (status = 500, description = "Internal error", body = ApiError)
-    )
-)]
+/// Wipes the entire backend store. Gated behind `NEWTON_ENABLE_TESTING_RESET=1`
+/// (absent or any other value ⇒ 403) and deliberately excluded from the
+/// generated OpenAPI document — this is a test-harness-only maintenance
+/// endpoint, not part of the public API surface.
 pub(crate) async fn reset_testing(State(state): State<Arc<AppState>>) -> Response {
-    if std::env::var("NEWTON_ENV").as_deref() == Ok("production") {
+    if std::env::var(NEWTON_ENABLE_TESTING_RESET).as_deref() != Ok("1") {
         return (
             StatusCode::FORBIDDEN,
-            Json(newton_backend::err_forbidden_in_prod(
-                "Testing reset is not available in production",
-            )),
+            Json(newton_backend::err_testing_reset_disabled(&format!(
+                "Testing reset is disabled; set {NEWTON_ENABLE_TESTING_RESET}=1 to enable this endpoint"
+            ))),
         )
             .into_response();
     }

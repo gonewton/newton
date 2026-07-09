@@ -486,6 +486,27 @@ mod retry_classification_tests {
         assert!(is_retryable(&e));
     }
 
+    /// Pins retryability for ReconcileOperator's adjudication-failure code
+    /// (spec 074 PR-4 / B2 — "Reconciliation fails closed"). Today this passes
+    /// only because unknown codes default to retryable (see
+    /// `unknown_codes_default_to_retryable` above); it is deliberately its own
+    /// test — not folded into that one — so that when tranche-2's S14 flips the
+    /// unknown-code default to non-retryable, `WFG-RECONCILE-ADJ-001` must be
+    /// added to an explicit "transient" allow-list rather than silently
+    /// regressing to non-retryable. A transient LLM adjudication outage must
+    /// keep retrying with backoff, per CONTEXT.md's "Fuzziness is not failure
+    /// tolerance" — it must NOT be treated as hard-non-retryable the way
+    /// `ValidationError` is.
+    #[test]
+    fn reconcile_adjudication_failure_is_retryable() {
+        let e = err(
+            ErrorCategory::ToolExecutionError,
+            "WFG-RECONCILE-ADJ-001",
+            "adjudication failed",
+        );
+        assert!(is_retryable(&e));
+    }
+
     #[tokio::test(start_paused = true)]
     async fn backoff_clamped_to_max() {
         let mut state = RetryState {

@@ -67,6 +67,9 @@ jsonschema = { workspace = true }
 schemars = { workspace = true }
 flate2 = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 [dev-dependencies]
 assert_cmd = { workspace = true }
 insta = { workspace = true }
@@ -186,6 +189,10 @@ path = "tests/integration/test_catalog_crud.rs"
 [[test]]
 name = "test_persistence_parity"
 path = "tests/integration/test_persistence_parity.rs"
+
+[[test]]
+name = "test_lag_tolerant_streams"
+path = "tests/integration/test_lag_tolerant_streams.rs"
 
 [[test]]
 name = "test_magic_tools"

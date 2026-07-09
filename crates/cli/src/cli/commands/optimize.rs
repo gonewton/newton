@@ -5,7 +5,7 @@ use newton_core::core::plan_queue_config::PlanQueueConfig;
 use newton_core::workflow::{schema as workflow_schema, transform as workflow_transform};
 use serde_json::json;
 use std::{
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -153,10 +153,17 @@ async fn execute_workflow_for_plan(
         newton_core::integrations::ailoop::init_context_for_command_name(&workspace, "optimize")
             .ok()
             .flatten();
-    let registry = super::build_operator_registry(workspace.clone(), &settings, ailoop_ctx).await;
-
-    let previous_state_dir = env::var_os("NEWTON_STATE_DIR");
-    env::set_var("NEWTON_STATE_DIR", &task_layout.state_dir);
+    // Pass the resolved state root explicitly (the same one `build_execution_setup`
+    // above just wired into the executor's DbSink) instead of mutating the
+    // process-global NEWTON_STATE_DIR env var — that workaround let concurrent
+    // executions race each other's state resolution.
+    let registry = super::build_operator_registry(
+        workspace.clone(),
+        &task_layout.state_dir,
+        &settings,
+        ailoop_ctx,
+    )
+    .await;
 
     let result = newton_core::workflow::executor::execute_workflow(
         document,
@@ -166,12 +173,6 @@ async fn execute_workflow_for_plan(
         exec_setup.overrides,
     )
     .await;
-
-    if let Some(previous) = previous_state_dir {
-        env::set_var("NEWTON_STATE_DIR", previous);
-    } else {
-        env::remove_var("NEWTON_STATE_DIR");
-    }
 
     result
         .map(|_| ())

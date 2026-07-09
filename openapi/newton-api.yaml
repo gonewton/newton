@@ -2143,29 +2143,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-  /testing/reset:
-    post:
-      tags:
-      - testing
-      operationId: reset_testing
-      responses:
-        '200':
-          description: Reset result
-          content:
-            application/json:
-              schema: {}
-        '403':
-          description: Forbidden in production
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '500':
-          description: Internal error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
   /workflow-files:
     get:
       tags:
@@ -4273,8 +4250,6 @@ tags:
   description: Key-value persistence endpoints
 - name: catalog
   description: Catalog entity CRUD endpoints
-- name: testing
-  description: Test-only maintenance endpoints
 - name: workflow-files
   description: Workflow definition file CRUD endpoints
 - name: optimize

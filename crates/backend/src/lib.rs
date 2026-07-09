@@ -35,9 +35,11 @@ pub fn err_validation(message: &str) -> ApiError {
     }
 }
 
-pub fn err_forbidden_in_prod(message: &str) -> ApiError {
+/// 403 `ApiError` body for the disabled testing-reset endpoint
+/// (code `ERR_TESTING_RESET_DISABLED`).
+pub fn err_testing_reset_disabled(message: &str) -> ApiError {
     ApiError {
-        code: "ERR_FORBIDDEN_IN_PROD".to_string(),
+        code: "ERR_TESTING_RESET_DISABLED".to_string(),
         category: "authorization".to_string(),
         message: message.to_string(),
         details: None,

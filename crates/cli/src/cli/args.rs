@@ -37,6 +37,10 @@ pub enum RunsCommand {
         /// Emit machine-readable JSON
         #[arg(long)]
         json: bool,
+        /// Override the state root directory where checkpoints/executions are
+        /// stored. Defaults to auto-resolved from workspace root.
+        #[arg(long, value_name = "PATH")]
+        state_dir: Option<PathBuf>,
     },
     #[command(
         about = "Replay task-by-task execution detail for a specific run",
@@ -57,6 +61,10 @@ pub enum RunsCommand {
         /// Emit machine-readable JSON
         #[arg(long)]
         json: bool,
+        /// Override the state root directory where checkpoints/executions are
+        /// stored. Defaults to auto-resolved from workspace root.
+        #[arg(long, value_name = "PATH")]
+        state_dir: Option<PathBuf>,
     },
 }
 
@@ -443,6 +451,10 @@ pub struct DataArgs {
     pub json: bool,
     pub dry_run: bool,
     pub workspace: Option<PathBuf>,
+    /// Override the state root directory where backend.sqlite is stored.
+    /// Defaults to auto-resolved from workspace root (flag > NEWTON_STATE_DIR
+    /// > newton.toml [workflow].state_dir > workspace default).
+    pub state_dir: Option<PathBuf>,
     /// Optional filter: restrict grade listings to a single evaluation run.
     pub run_id: Option<String>,
     /// Optional filter: restrict grade listings to a single KPI.

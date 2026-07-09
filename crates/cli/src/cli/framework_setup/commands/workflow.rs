@@ -407,6 +407,7 @@ pub(crate) fn workflow_command() -> Command {
                                         workspace: get_opt_path(&args, "workspace"),
                                         last,
                                         json: get_bool(&args, "json"),
+                                        state_dir: get_opt_path(&args, "state-dir"),
                                     },
                                 };
                                 commands::log(dto).map_err(anyhow::Error::from)
@@ -433,6 +434,7 @@ pub(crate) fn workflow_command() -> Command {
                                         task: get_opt_str(&args, "task"),
                                         verbose: get_bool(&args, "verbose"),
                                         json: get_bool(&args, "json"),
+                                        state_dir: get_opt_path(&args, "state-dir"),
                                     },
                                 };
                                 commands::log(dto).map_err(anyhow::Error::from)
@@ -453,7 +455,7 @@ pub(crate) fn workflow_command() -> Command {
                             }
                         }
                         let run_args = RunArgs::from_arg_value_map(&map);
-                        commands::workflow_run(run_args).await.map_err(anyhow::Error::from)
+                        commands::workflow_run(run_args).await
                     }
                     "import" => {
                         let import_args = ImportArgs {

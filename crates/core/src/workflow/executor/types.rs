@@ -21,6 +21,12 @@ pub struct ExecutionOverrides {
     pub verbose: bool,
     pub sink: Option<Arc<dyn WorkflowSink>>,
     pub pre_seed_nodes: bool,
+    /// Resolved state root, injected as `NEWTON_STATE_DIR` into operator
+    /// subprocess environments so child `newton` invocations (e.g. `newton
+    /// data get/post` shelled out from workflow YAML) resolve the same state
+    /// root as the in-process executor (spec 074 decision 2: one state
+    /// root).
+    pub state_dir: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]

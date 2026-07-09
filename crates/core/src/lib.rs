@@ -1,6 +1,7 @@
 //! Newton core library.
 pub mod api;
 pub mod core;
+pub mod fs_util;
 pub mod integrations;
 pub mod logging;
 pub mod utils;

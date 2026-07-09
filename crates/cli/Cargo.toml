@@ -236,9 +236,21 @@ name = "test_data_post_grade_local_store"
 path = "tests/integration/test_data_post_grade_local_store.rs"
 
 [[test]]
+name = "test_state_dir_one_root"
+path = "tests/integration/test_state_dir_one_root.rs"
+
+[[test]]
 name = "test_chat_error_codes"
 path = "tests/integration/test_chat_error_codes.rs"
 
 [[test]]
 name = "test_chat_tool_filtering"
 path = "tests/integration/test_chat_tool_filtering.rs"
+
+[[test]]
+name = "mcp_data_malformed_call_no_exit"
+path = "tests/integration/mcp_data_malformed_call_no_exit.rs"
+
+[[test]]
+name = "exit_codes_preserved"
+path = "tests/integration/exit_codes_preserved.rs"

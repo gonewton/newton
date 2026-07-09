@@ -197,6 +197,15 @@ re-matched), never relying on exact per-Finding bookkeeping. Mis-matches degrade
 Request), not *correctness* — the loop does not declare victory while a problem is
 still detectable.
 
+**Fuzziness is not failure tolerance.** The best-effort stance covers
+*mis-matches* between Observations and Findings — it does not cover a
+Reconciliation that runs *without* its semantic-matching half. If adjudication
+itself fails (the LLM matcher errors), the Reconciliation **fails as a task**
+(normal retry applies; a persistent failure fails the cycle) rather than
+proceeding fingerprint-only — because a sweep without semantic matching would
+mass-resolve open Findings (including `blocked` ones, which only a human may
+clear) and could end a run falsely `converged`.
+
 ### Plan
 A unit of queued work a project's optimization loop consumes — the spec for one
 Step. This is the canonical noun; "work item", "task", and "batch item" are

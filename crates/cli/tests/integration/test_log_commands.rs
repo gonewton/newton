@@ -119,6 +119,7 @@ fn log_list_last_zero_returns_log003() {
             workspace: Some(workspace.clone()),
             last: Some(0),
             json: false,
+            state_dir: None,
         },
     };
     let result = commands::log(args);
@@ -141,6 +142,7 @@ fn log_show_nonexistent_returns_log001() {
             task: None,
             verbose: false,
             json: false,
+            state_dir: None,
         },
     };
     let result = commands::log(args);
@@ -174,6 +176,7 @@ fn log_show_task_filter_no_match_returns_log002() {
             task: Some("nonexistent".to_string()),
             verbose: false,
             json: false,
+            state_dir: None,
         },
     };
     let result = commands::log(args);
@@ -206,6 +209,7 @@ fn log_list_two_executions_text_mode() {
             workspace: Some(workspace.clone()),
             last: None,
             json: false,
+            state_dir: None,
         },
     };
     // Just verify it succeeds (output goes to stdout).
@@ -237,6 +241,7 @@ fn log_list_with_last_limits_output() {
             workspace: Some(workspace.clone()),
             last: Some(2),
             json: false,
+            state_dir: None,
         },
     };
     assert!(commands::log(args).is_ok());
@@ -261,6 +266,7 @@ fn log_list_json_has_required_keys() {
             workspace: Some(workspace.clone()),
             last: None,
             json: true,
+            state_dir: None,
         },
     };
     assert!(commands::log(args).is_ok());
@@ -296,6 +302,7 @@ fn log_show_success_run_shows_task_sections() {
             task: None,
             verbose: false,
             json: false,
+            state_dir: None,
         },
     };
     assert!(commands::log(args).is_ok());
@@ -330,6 +337,7 @@ fn log_show_task_filter_succeeds() {
             task: Some("fetch_data".to_string()),
             verbose: false,
             json: false,
+            state_dir: None,
         },
     };
     assert!(commands::log(args).is_ok());
@@ -362,6 +370,7 @@ fn log_show_json_no_task_filter_key() {
             task: None,
             verbose: false,
             json: true,
+            state_dir: None,
         },
     };
     assert!(commands::log(args).is_ok());
@@ -392,6 +401,7 @@ fn log_show_json_with_task_filter() {
             task: Some("task_a".to_string()),
             verbose: false,
             json: true,
+            state_dir: None,
         },
     };
     assert!(commands::log(args).is_ok());
@@ -428,6 +438,7 @@ fn log_show_json_two_run_seqs_for_same_task_id() {
             task: Some("retry_task".to_string()),
             verbose: false,
             json: true,
+            state_dir: None,
         },
     };
     assert!(commands::log(args).is_ok());
@@ -452,6 +463,7 @@ fn log_show_without_checkpoint_shows_fallback_notice() {
             task: None,
             verbose: false,
             json: false,
+            state_dir: None,
         },
     };
     assert!(commands::log(args).is_ok());
@@ -875,6 +887,7 @@ fn log_list_last_zero_via_internal_api() {
             workspace: Some(workspace.clone()),
             last: Some(0),
             json: false,
+            state_dir: None,
         },
     };
     let result = commands::log(args);

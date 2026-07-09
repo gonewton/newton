@@ -175,6 +175,7 @@ async fn execute_yaml_with_gh_runner(
             verbose: false,
             sink: None,
             pre_seed_nodes: true,
+            state_dir: None,
         },
     )
     .await
@@ -778,6 +779,7 @@ fn build_ctx(workspace: &TempDir) -> ExecutionContext {
             verbose: false,
             sink: None,
             pre_seed_nodes: true,
+            state_dir: None,
         },
         operator_registry: OperatorRegistry::new(),
     }
@@ -1208,6 +1210,7 @@ fn pr_approve_ctx(workspace: &TempDir) -> ExecutionContext {
             verbose: false,
             sink: None,
             pre_seed_nodes: true,
+            state_dir: None,
         },
         operator_registry: OperatorRegistry::new(),
     }
@@ -1816,6 +1819,7 @@ async fn pr_create_exponential_backoff_and_single_approval() {
             verbose: false,
             sink: None,
             pre_seed_nodes: true,
+            state_dir: None,
         },
         operator_registry: registry,
     };
@@ -1924,6 +1928,7 @@ fn make_exec_ctx(workspace: &std::path::Path) -> ExecutionContext {
             verbose: false,
             sink: None,
             pre_seed_nodes: true,
+            state_dir: None,
         },
         operator_registry: registry,
     }
@@ -2438,6 +2443,7 @@ async fn branch_push_fixture_runs_to_success() {
             verbose: false,
             sink: None,
             pre_seed_nodes: true,
+            state_dir: None,
         },
     )
     .await

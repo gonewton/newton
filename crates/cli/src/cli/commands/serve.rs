@@ -38,6 +38,106 @@ fn validate_ailoop_path(p: &str) -> StdResult<(), AppError> {
     Ok(())
 }
 
+/// True when `host` resolves to a loopback interface (127.0.0.0/8, `::1`) or
+/// the `localhost` hostname. `--host` defaults to `127.0.0.1`; passing
+/// anything else is the operator's explicit opt-in to wider exposure (see
+/// spec 074 PR-6 / B5 — no separate `--allow-remote`-style flag is added).
+fn is_loopback_host(host: &str) -> bool {
+    let trimmed = host.trim_start_matches('[').trim_end_matches(']');
+    if trimmed.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    trimmed
+        .parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
+/// Checks whether `host` is a non-loopback bind target and, if so, emits the
+/// `unauthenticated_exposure` warning event. Returns `true` when the bind is
+/// non-loopback (the caller uses this to also print the louder startup-banner
+/// warning). Extracted from `serve()`'s body so the check/warn decision is
+/// unit-testable without starting a real HTTP listener (spec 074 PR-6 / B5).
+fn check_non_loopback_bind(host: &str, port: u16) -> bool {
+    let non_loopback_bind = !is_loopback_host(host);
+    if non_loopback_bind {
+        tracing::warn!(
+            event = "unauthenticated_exposure",
+            host = %host,
+            port = port,
+            "newton serve is binding a non-loopback host; the Newton HTTP API is UNAUTHENTICATED and will be reachable from other hosts on this interface"
+        );
+    }
+    non_loopback_bind
+}
+
+/// Builds the human-readable startup banner lines. Newton's `info!` startup
+/// logs are silenced in the serve (Server) console context, and
+/// cli-framework's `serve()` prints nothing, so without this `newton serve`
+/// looks like it hangs with no output. Pure so the banner text — including
+/// the non-loopback exposure warning block — can be unit tested without
+/// starting a real HTTP listener.
+#[allow(clippy::too_many_arguments)]
+fn startup_banner_lines(
+    host: &str,
+    port: u16,
+    web_ui_mode: &str,
+    with_mcp: bool,
+    with_embedded_ailoop: bool,
+    ailoop_base_path: &str,
+    non_loopback_bind: bool,
+) -> Vec<String> {
+    // 0.0.0.0 / :: aren't browsable; point the user at a loopback address.
+    let browse_host = match host {
+        "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
+        h => h,
+    };
+    let base = format!("http://{browse_host}:{port}");
+    let mut lines = Vec::new();
+    lines.push(String::new());
+    lines.push(format!("  Newton serving on {base}"));
+    if web_ui_mode != "disabled" {
+        lines.push(format!("    Web UI     {base}/"));
+    }
+    lines.push(format!("    REST API   {base}/api/v1/"));
+    lines.push(format!("    Health     {base}/healthz"));
+    lines.push(format!("    API docs   {base}/api/docs"));
+    if with_mcp {
+        lines.push(format!("    MCP        {base}/mcp"));
+    }
+    if with_embedded_ailoop {
+        lines.push(format!("    ailoop     {base}{ailoop_base_path}"));
+    }
+    if web_ui_mode == "disabled" {
+        lines.push("    (web UI disabled via --no-web)".to_string());
+    }
+    if non_loopback_bind {
+        lines.push(String::new());
+        lines.push(
+            "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!".to_string(),
+        );
+        lines.push(format!(
+            "  !! WARNING: bound to non-loopback host \"{}\" — the Newton API is    !!",
+            host
+        ));
+        lines.push(
+            "  !! UNAUTHENTICATED and exposed to any host that can reach this    !!".to_string(),
+        );
+        lines.push(
+            "  !! interface. --host is your explicit opt-in; real authentication  !!".to_string(),
+        );
+        lines.push(
+            "  !! is not yet implemented (deferred to a future spec).             !!".to_string(),
+        );
+        lines.push(
+            "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!".to_string(),
+        );
+    }
+    lines.push("  Press Ctrl+C to stop.".to_string());
+    lines.push(String::new());
+    lines
+}
+
 fn ensure_no_ailoop_path_collision(ailoop_path: &str) -> StdResult<(), AppError> {
     for prefix in NEWTON_REST_ROUTE_PREFIXES {
         if ailoop_path == *prefix
@@ -81,8 +181,23 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
 
     info!("Starting Newton API server on {}: {}", args.host, args.port);
 
+    let non_loopback_bind = check_non_loopback_bind(&args.host, args.port);
+
+    let workspace_paths = WorkspacePaths::from_cwd().map_err(|e| {
+        AppError::new(
+            ErrorCategory::IoError,
+            format!("failed to resolve workspace paths: {e}"),
+        )
+    })?;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| workspace_paths.workspace_root.clone());
+    // Resolve once, up front, so both the operator registry's grading-operator
+    // store and the AppState backend below open the SAME database — the split
+    // brain this hardening pass closes.
+    let state_dir = resolve_state_dir(&cwd, args.state_dir.as_deref());
+
     let serve_settings: workflow_schema::WorkflowSettings = Default::default();
-    let registry = super::build_operator_registry(PathBuf::from("."), &serve_settings, None).await;
+    let registry =
+        super::build_operator_registry(PathBuf::from("."), &state_dir, &serve_settings, None).await;
 
     let operator_names = registry.operator_names();
     let operator_descriptors: Vec<newton_types::OperatorDescriptor> = operator_names
@@ -94,14 +209,6 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         })
         .collect();
 
-    let workspace_paths = WorkspacePaths::from_cwd().map_err(|e| {
-        AppError::new(
-            ErrorCategory::IoError,
-            format!("failed to resolve workspace paths: {e}"),
-        )
-    })?;
-    let cwd = std::env::current_dir().unwrap_or_else(|_| workspace_paths.workspace_root.clone());
-    let state_dir = resolve_state_dir(&cwd, args.state_dir.as_deref());
     if state_dir.exists() && !state_dir.is_dir() {
         return Err(AppError::new(
             ErrorCategory::ValidationError,
@@ -272,35 +379,18 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         );
     }
 
-    // Human-readable startup banner. Newton's `info!` startup logs are silenced
-    // in the serve (Server) console context, and cli-framework's `serve()` prints
-    // nothing, so without this `newton serve` looks like it hangs with no output.
-    {
-        // 0.0.0.0 / :: aren't browsable; point the user at a loopback address.
-        let browse_host = match args.host.as_str() {
-            "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
-            h => h,
-        };
-        let base = format!("http://{browse_host}:{}", args.port);
-        eprintln!();
-        eprintln!("  Newton serving on {base}");
-        if web_ui_mode != "disabled" {
-            eprintln!("    Web UI     {base}/");
-        }
-        eprintln!("    REST API   {base}/api/v1/");
-        eprintln!("    Health     {base}/healthz");
-        eprintln!("    API docs   {base}/api/docs");
-        if args.with_mcp {
-            eprintln!("    MCP        {base}/mcp");
-        }
-        if args.with_embedded_ailoop {
-            eprintln!("    ailoop     {base}{}", args.ailoop_base_path);
-        }
-        if web_ui_mode == "disabled" {
-            eprintln!("    (web UI disabled via --no-web)");
-        }
-        eprintln!("  Press Ctrl+C to stop.");
-        eprintln!();
+    // Human-readable startup banner (see `startup_banner_lines` doc comment
+    // for why this exists).
+    for line in startup_banner_lines(
+        &args.host,
+        args.port,
+        web_ui_mode,
+        args.with_mcp,
+        args.with_embedded_ailoop,
+        &args.ailoop_base_path,
+        non_loopback_bind,
+    ) {
+        eprintln!("{line}");
     }
 
     server
@@ -420,5 +510,169 @@ mod serve_ailoop_validation_tests {
                 "expected collision for prefix {prefix}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod is_loopback_host_tests {
+    use super::*;
+
+    #[test]
+    fn ipv4_loopback_is_loopback() {
+        assert!(is_loopback_host("127.0.0.1"));
+        assert!(is_loopback_host("127.0.0.5"));
+    }
+
+    #[test]
+    fn ipv4_non_loopback_is_not_loopback() {
+        assert!(!is_loopback_host("0.0.0.0"));
+        assert!(!is_loopback_host("203.0.113.5"));
+        assert!(!is_loopback_host("10.0.0.1"));
+    }
+
+    #[test]
+    fn ipv6_loopback_is_loopback() {
+        assert!(is_loopback_host("::1"));
+    }
+
+    #[test]
+    fn bracketed_ipv6_loopback_is_loopback() {
+        assert!(is_loopback_host("[::1]"));
+    }
+
+    #[test]
+    fn ipv6_non_loopback_is_not_loopback() {
+        assert!(!is_loopback_host("::"));
+        assert!(!is_loopback_host("2001:db8::1"));
+        assert!(!is_loopback_host("[2001:db8::1]"));
+    }
+
+    #[test]
+    fn localhost_hostname_is_loopback_case_insensitive() {
+        assert!(is_loopback_host("localhost"));
+        assert!(is_loopback_host("LOCALHOST"));
+        assert!(is_loopback_host("LocalHost"));
+    }
+
+    #[test]
+    fn arbitrary_hostname_is_not_loopback() {
+        assert!(!is_loopback_host("example.com"));
+        assert!(!is_loopback_host("my-host"));
+    }
+
+    #[test]
+    fn empty_host_is_not_loopback() {
+        assert!(!is_loopback_host(""));
+    }
+}
+
+#[cfg(test)]
+mod non_loopback_warn_tests {
+    use super::*;
+
+    #[test]
+    fn loopback_host_does_not_warn() {
+        assert!(!check_non_loopback_bind("127.0.0.1", 3000));
+        assert!(!check_non_loopback_bind("localhost", 3000));
+    }
+
+    #[test]
+    fn non_loopback_host_warns_and_returns_true() {
+        assert!(check_non_loopback_bind("0.0.0.0", 3000));
+        assert!(check_non_loopback_bind("203.0.113.5", 8080));
+    }
+}
+
+#[cfg(test)]
+mod startup_banner_tests {
+    use super::*;
+
+    #[test]
+    fn loopback_bind_has_no_warning_banner() {
+        let lines = startup_banner_lines(
+            "127.0.0.1",
+            3000,
+            "embedded",
+            false,
+            false,
+            "/ailoop",
+            false,
+        );
+        let joined = lines.join("\n");
+        assert!(joined.contains("Newton serving on http://127.0.0.1:3000"));
+        assert!(joined.contains("Web UI     http://127.0.0.1:3000/"));
+        assert!(!joined.contains("WARNING"));
+    }
+
+    #[test]
+    fn non_loopback_bind_includes_warning_banner() {
+        let lines =
+            startup_banner_lines("0.0.0.0", 3000, "embedded", false, false, "/ailoop", true);
+        let joined = lines.join("\n");
+        assert!(
+            joined.contains("WARNING: bound to non-loopback host \"0.0.0.0\""),
+            "{joined}"
+        );
+        assert!(joined.contains("UNAUTHENTICATED and exposed"));
+    }
+
+    #[test]
+    fn unspecified_bind_addresses_map_to_browsable_loopback() {
+        let lines =
+            startup_banner_lines("0.0.0.0", 3000, "embedded", false, false, "/ailoop", false);
+        assert!(lines.iter().any(|l| l.contains("http://127.0.0.1:3000")));
+
+        let lines = startup_banner_lines("::", 3000, "embedded", false, false, "/ailoop", false);
+        assert!(lines.iter().any(|l| l.contains("http://127.0.0.1:3000")));
+
+        let lines = startup_banner_lines("[::]", 3000, "embedded", false, false, "/ailoop", false);
+        assert!(lines.iter().any(|l| l.contains("http://127.0.0.1:3000")));
+    }
+
+    #[test]
+    fn disabled_web_ui_mode_omits_web_ui_line_and_notes_disabled() {
+        let lines = startup_banner_lines(
+            "127.0.0.1",
+            3000,
+            "disabled",
+            false,
+            false,
+            "/ailoop",
+            false,
+        );
+        let joined = lines.join("\n");
+        assert!(!joined.contains("Web UI"));
+        assert!(joined.contains("(web UI disabled via --no-web)"));
+    }
+
+    #[test]
+    fn mcp_enabled_adds_mcp_line() {
+        let lines =
+            startup_banner_lines("127.0.0.1", 3000, "embedded", true, false, "/ailoop", false);
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("MCP        http://127.0.0.1:3000/mcp")));
+    }
+
+    #[test]
+    fn ailoop_enabled_adds_ailoop_line_with_base_path() {
+        let lines = startup_banner_lines("127.0.0.1", 3000, "embedded", false, true, "/hil", false);
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("ailoop     http://127.0.0.1:3000/hil")));
+    }
+
+    #[test]
+    fn always_ends_with_press_ctrl_c() {
+        let lines = startup_banner_lines(
+            "127.0.0.1",
+            3000,
+            "embedded",
+            false,
+            false,
+            "/ailoop",
+            false,
+        );
+        assert!(lines.iter().any(|l| l.contains("Press Ctrl+C to stop.")));
     }
 }

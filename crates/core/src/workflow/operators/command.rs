@@ -95,7 +95,7 @@ impl Operator for CommandOperator {
         schemars::schema_for!(CommandOutput)
     }
 
-    async fn execute(&self, params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {
+    async fn execute(&self, params: Value, ctx: ExecutionContext) -> Result<Value, AppError> {
         let parsed: CommandParams = serde_json::from_value(params.clone()).map_err(|e| {
             AppError::new(
                 ErrorCategory::ValidationError,
@@ -116,13 +116,34 @@ impl Operator for CommandOperator {
             "executing command"
         );
 
+        // Start from the resolved state root (if any) so child `newton`
+        // invocations shelled out by this command resolve the same state
+        // root as the in-process executor (spec 074 decision 2). Explicit
+        // `env` set in the workflow YAML always wins, so overlay it second.
+        let env = match (&ctx.execution_overrides.state_dir, &parsed.env) {
+            (None, None) => None,
+            (state_dir, explicit) => {
+                let mut merged = HashMap::new();
+                if let Some(state_dir) = state_dir {
+                    merged.insert(
+                        "NEWTON_STATE_DIR".to_string(),
+                        state_dir.display().to_string(),
+                    );
+                }
+                if let Some(explicit) = explicit {
+                    merged.extend(explicit.clone());
+                }
+                Some(merged)
+            }
+        };
+
         let start = Instant::now();
         let output = self
             .runner
             .run(&CommandExecutionRequest {
                 cmd: parsed.cmd.clone(),
                 cwd: resolved_cwd,
-                env: parsed.env.clone(),
+                env,
                 capture_stdout: parsed.capture_stdout,
                 capture_stderr: parsed.capture_stderr,
                 shell: parsed.shell,
@@ -320,4 +341,85 @@ pub struct CommandOutput {
 fn limit_bytes(bytes: &[u8]) -> String {
     let limit = OUTPUT_CAPTURE_LIMIT_BYTES.min(bytes.len());
     String::from_utf8_lossy(&bytes[..limit]).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workflow::executor::GraphHandle;
+    use crate::workflow::operator::{OperatorRegistry, StateView};
+    use serde_json::json;
+    use tempfile::TempDir;
+
+    fn make_ctx(state_dir: Option<PathBuf>, workspace: &TempDir) -> ExecutionContext {
+        ExecutionContext {
+            workspace_path: workspace.path().to_path_buf(),
+            execution_id: "test-exec-cmd-001".to_string(),
+            task_id: "cmd".to_string(),
+            iteration: 1,
+            state_view: StateView::new(json!({}), json!({}), json!({})),
+            graph: GraphHandle::new(HashMap::new()),
+            workflow_file: workspace.path().join("workflow.yaml"),
+            nesting_depth: 0,
+            execution_overrides: crate::workflow::executor::ExecutionOverrides {
+                parallel_limit: None,
+                max_time_seconds: None,
+                checkpoint_base_path: None,
+                artifact_base_path: None,
+                max_nesting_depth: None,
+                verbose: false,
+                sink: None,
+                pre_seed_nodes: true,
+                state_dir,
+            },
+            operator_registry: OperatorRegistry::new(),
+        }
+    }
+
+    // ── Fix 2: NEWTON_STATE_DIR propagation to CommandOperator subprocesses ──
+
+    #[tokio::test]
+    async fn execute_injects_newton_state_dir_from_overrides() {
+        let workspace = TempDir::new().unwrap();
+        let state_dir = TempDir::new().unwrap();
+        let op = CommandOperator::new(workspace.path().to_path_buf());
+        let ctx = make_ctx(Some(state_dir.path().to_path_buf()), &workspace);
+        let params = json!({
+            "cmd": "printf '%s' \"$NEWTON_STATE_DIR\"",
+            "shell": true,
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+        assert_eq!(
+            result["stdout"],
+            json!(state_dir.path().display().to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_explicit_env_wins_over_newton_state_dir_override() {
+        let workspace = TempDir::new().unwrap();
+        let state_dir = TempDir::new().unwrap();
+        let op = CommandOperator::new(workspace.path().to_path_buf());
+        let ctx = make_ctx(Some(state_dir.path().to_path_buf()), &workspace);
+        let params = json!({
+            "cmd": "printf '%s' \"$NEWTON_STATE_DIR\"",
+            "shell": true,
+            "env": { "NEWTON_STATE_DIR": "/explicit" }
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+        assert_eq!(result["stdout"], json!("/explicit"));
+    }
+
+    #[tokio::test]
+    async fn execute_no_overrides_state_dir_leaves_var_absent() {
+        let workspace = TempDir::new().unwrap();
+        let op = CommandOperator::new(workspace.path().to_path_buf());
+        let ctx = make_ctx(None, &workspace);
+        let params = json!({
+            "cmd": "printf '%s' \"${NEWTON_STATE_DIR:-unset}\"",
+            "shell": true,
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+        assert_eq!(result["stdout"], json!("unset"));
+    }
 }

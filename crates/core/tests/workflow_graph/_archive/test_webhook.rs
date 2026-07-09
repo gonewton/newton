@@ -121,6 +121,7 @@ async fn spawn_webhook_server(
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
     let (addr_tx, addr_rx) = oneshot::channel();
     let handle = tokio::spawn(async move {
@@ -185,6 +186,7 @@ async fn manual_trigger_payload_available() -> Result<()> {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
     let summary = executor::execute_workflow(
         document,

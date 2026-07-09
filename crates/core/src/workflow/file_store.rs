@@ -133,33 +133,18 @@ fn system_time_to_datetime(t: SystemTime) -> DateTime<Utc> {
     DateTime::from_timestamp(duration.as_secs() as i64, duration.subsec_nanos()).unwrap_or_default()
 }
 
+/// Durably persists `data` to `path` via the shared
+/// [`crate::fs_util::atomic_write`] helper (write-temp, fsync, rename, fsync
+/// parent dir), mapping any I/O failure into this module's [`AppError`]
+/// shape so callers keep the diagnostics they had before the write was
+/// consolidated into the shared helper.
 fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            AppError::new(
-                ErrorCategory::IoError,
-                format!("failed to create directory {}: {e}", parent.display()),
-            )
-        })?;
-    }
-    let tmp_path = path.with_extension("tmp");
-    fs::write(&tmp_path, data).map_err(|e| {
+    crate::fs_util::atomic_write(path, data).map_err(|e| {
         AppError::new(
             ErrorCategory::IoError,
-            format!("failed to write {}: {e}", tmp_path.display()),
+            format!("failed to atomically write {}: {e}", path.display()),
         )
-    })?;
-    fs::rename(&tmp_path, path).map_err(|e| {
-        AppError::new(
-            ErrorCategory::IoError,
-            format!(
-                "failed to rename {} -> {}: {e}",
-                tmp_path.display(),
-                path.display()
-            ),
-        )
-    })?;
-    Ok(())
+    })
 }
 
 impl WorkflowFileStore for FsWorkflowFileStore {
@@ -453,5 +438,37 @@ mod tests {
         let store = FsWorkflowFileStore::new(subdir);
         let records = store.list().unwrap();
         assert!(records.is_empty());
+    }
+
+    /// Mirrors `crate::fs_util::tests::unwritable_directory_returns_err`:
+    /// this module's `atomic_write` wraps the shared helper's `io::Error`
+    /// into this module's own `AppError` shape (spec 074, PR-3 / B1 + S1) —
+    /// exercise that mapping directly rather than only via the higher-level
+    /// workflow-file-persistence callers.
+    #[test]
+    #[cfg(unix)]
+    fn atomic_write_unwritable_directory_returns_app_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("flow.yaml");
+
+        let mut perms = std::fs::metadata(dir.path()).unwrap().permissions();
+        perms.set_mode(0o500); // r-x: no write permission.
+        std::fs::set_permissions(dir.path(), perms).unwrap();
+
+        let result = atomic_write(&target, b"payload");
+
+        let mut restore = std::fs::metadata(dir.path()).unwrap().permissions();
+        restore.set_mode(0o700);
+        std::fs::set_permissions(dir.path(), restore).unwrap();
+
+        let err = result.expect_err("writing into a read-only directory must fail");
+        assert_eq!(err.category, ErrorCategory::IoError);
+        assert!(
+            err.message.contains("failed to atomically write"),
+            "err={}",
+            err.message
+        );
     }
 }

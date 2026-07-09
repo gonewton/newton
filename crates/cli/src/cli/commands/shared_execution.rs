@@ -95,6 +95,7 @@ pub async fn build_execution_setup(
         artifact_base_path: Some(artifacts),
         sink,
         pre_seed_nodes: true,
+        state_dir: Some(state_dir.clone()),
         ..Default::default()
     };
 

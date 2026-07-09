@@ -270,3 +270,80 @@ fn serve_prints_startup_banner_with_urls() {
         "REST API URL missing from banner; stderr=\n{stderr}"
     );
 }
+
+#[test]
+fn default_serve_binds_loopback_without_exposure_warning() {
+    use std::io::Read;
+    // Default `--host` (127.0.0.1) must NOT print the unauthenticated-exposure
+    // warning; only an explicit non-loopback `--host` is the opt-in for that.
+    let port = pick_free_port();
+    let dir = tempdir().unwrap();
+    let errpath = dir.path().join("stderr.log");
+    let errfile = std::fs::File::create(&errpath).unwrap();
+    let bin = assert_cmd::cargo::cargo_bin("newton");
+    let mut child = Command::new(bin)
+        .current_dir(dir.path())
+        .args(["serve", "--host", "127.0.0.1", "--port", &port.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(errfile))
+        .spawn()
+        .expect("spawn newton serve");
+
+    let ready = wait_ready(port);
+    std::thread::sleep(Duration::from_millis(250));
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(ready, "server did not become ready");
+
+    let mut stderr = String::new();
+    std::fs::File::open(&errpath)
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+
+    assert!(
+        !stderr.contains("UNAUTHENTICATED"),
+        "default loopback bind must not print the unauthenticated-exposure warning; stderr=\n{stderr}"
+    );
+}
+
+#[test]
+fn non_loopback_host_prints_unauthenticated_exposure_warning() {
+    use std::io::Read;
+    // `--host` itself is the explicit opt-in to non-loopback exposure (spec 074
+    // PR-6 / B5) — no separate flag. Binding non-loopback must print a loud
+    // stderr warning that the API is unauthenticated.
+    let port = pick_free_port();
+    let dir = tempdir().unwrap();
+    let errpath = dir.path().join("stderr.log");
+    let errfile = std::fs::File::create(&errpath).unwrap();
+    let bin = assert_cmd::cargo::cargo_bin("newton");
+    let mut child = Command::new(bin)
+        .current_dir(dir.path())
+        .args(["serve", "--host", "0.0.0.0", "--port", &port.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(errfile))
+        .spawn()
+        .expect("spawn newton serve");
+
+    let ready = wait_ready(port);
+    // The warning banner is printed just before the listener binds; give it a
+    // beat to flush, matching `serve_prints_startup_banner_with_urls`.
+    std::thread::sleep(Duration::from_millis(250));
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(ready, "server did not become ready");
+
+    let mut stderr = String::new();
+    std::fs::File::open(&errpath)
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+
+    // Keep this assertion to a stable substring so banner rewording doesn't
+    // break the test.
+    assert!(
+        stderr.contains("UNAUTHENTICATED"),
+        "non-loopback --host must print an unauthenticated-exposure warning; stderr=\n{stderr}"
+    );
+}

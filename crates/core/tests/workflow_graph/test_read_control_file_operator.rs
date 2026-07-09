@@ -26,6 +26,7 @@ fn execution_context(workspace: std::path::PathBuf) -> ExecutionContext {
             verbose: false,
             sink: None,
             pre_seed_nodes: true,
+            state_dir: None,
         },
         operator_registry: OperatorRegistry::new(),
     }
@@ -55,6 +56,7 @@ fn execution_context_with_triggers(
             verbose: false,
             sink: None,
             pre_seed_nodes: true,
+            state_dir: None,
         },
         operator_registry: OperatorRegistry::new(),
     }

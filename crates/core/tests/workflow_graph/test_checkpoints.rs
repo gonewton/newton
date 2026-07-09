@@ -109,6 +109,7 @@ async fn resume_skips_completed_tasks() {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     let summary = executor::execute_workflow(
@@ -208,6 +209,7 @@ async fn resume_hash_mismatch_blocks_resume() {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     let summary = executor::execute_workflow(
@@ -253,6 +255,7 @@ async fn checkpoint_records_goal_gate_group() {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     let summary = executor::execute_workflow(
@@ -296,6 +299,7 @@ async fn checkpoints_list_output_format_and_sort_order() {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     // Run workflow twice to create multiple checkpoints
@@ -386,6 +390,7 @@ workflow:
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     let summary = executor::execute_workflow(
@@ -539,6 +544,7 @@ workflow:
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     let summary = executor::execute_workflow(
@@ -640,6 +646,7 @@ workflow:
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     let summary = executor::execute_workflow(
@@ -766,6 +773,7 @@ workflow:
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     let result = executor::execute_workflow(
@@ -840,6 +848,7 @@ async fn test_workflow_definition_snapshot_written() {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     let summary = executor::execute_workflow(
@@ -877,6 +886,7 @@ async fn test_workflow_definition_snapshot_hash_matches_execution() {
         verbose: false,
         sink: None,
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     let summary = executor::execute_workflow(
@@ -939,6 +949,7 @@ async fn test_workflow_instance_definition_non_null_for_cli_run() {
         verbose: false,
         sink: Some(Arc::new(notifier)),
         pre_seed_nodes: true,
+        state_dir: None,
     };
 
     executor::execute_workflow(

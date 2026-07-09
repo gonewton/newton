@@ -126,7 +126,11 @@ impl super::SqliteBackendStore {
         let now = Self::now_iso();
         let evaluated_at = body.evaluated_at.clone().unwrap_or_else(|| now.clone());
 
-        let mut tx = self.pool.begin().await.map_err(tx_err)?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(tx_err)?;
 
         let table = scope_table(&body.scope).ok_or_else(|| {
             err_validation("scope must be one of: product, component, repo, module")
@@ -321,7 +325,11 @@ impl super::SqliteBackendStore {
             .as_ref()
             .map(|m| serde_json::to_string(m).unwrap_or_default());
 
-        let mut tx = self.pool.begin().await.map_err(tx_err)?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(tx_err)?;
 
         let run_exists: bool =
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM EvalRun WHERE id = ?")

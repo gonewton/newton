@@ -423,7 +423,11 @@ impl super::SqliteBackendStore {
     }
 
     pub(super) async fn approve_plan_db(&self, id: &str) -> Result<ApprovedPlan, ApiError> {
-        let mut tx = self.pool.begin().await.map_err(tx_err)?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(tx_err)?;
 
         let plan: Option<PlanRow> =
             sqlx::query_as::<_, PlanRow>(&format!("{PLAN_SELECT} WHERE p.id = ?"))
@@ -466,7 +470,11 @@ impl super::SqliteBackendStore {
     }
 
     pub(super) async fn reject_plan_db(&self, id: &str) -> Result<PlanItem, ApiError> {
-        let mut tx = self.pool.begin().await.map_err(tx_err)?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(tx_err)?;
 
         let plan: Option<PlanRow> =
             sqlx::query_as::<_, PlanRow>(&format!("{PLAN_SELECT} WHERE p.id = ?"))
@@ -636,7 +644,11 @@ impl super::SqliteBackendStore {
             "Persistence",
         ];
 
-        let mut tx = self.pool.begin().await.map_err(tx_err)?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(tx_err)?;
 
         for table in &tables {
             tx.execute(sqlx::query(&format!("DELETE FROM {table}")))

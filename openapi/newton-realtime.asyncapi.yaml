@@ -14,13 +14,16 @@ x-connection-lifecycle:
   workflow_ws:
     snapshot_on_connect: workflowInstanceUpdated
     close_codes: [1000, 1001]
+    lag_handling: 'on broadcast Lagged(n), emits lagged then continues (never closes)'
   workflow_sse:
     snapshot_on_connect: workflowInstanceUpdated
     keepalive_text: keepalive
     keepalive_interval_seconds: 10
+    lag_handling: 'on broadcast Lagged(n), emits lagged then continues (never closes)'
   logs_ws:
     connect_confirmation: 'logMessage "Connected to <task_name>"'
     close_codes: [1000, 1001]
+    lag_handling: 'on broadcast Lagged(n), emits lagged then continues (never closes)'
 
 channels:
   heartbeat:
@@ -84,6 +87,8 @@ channels:
         $ref: '#/components/messages/PlanUpdate'
       executionUpdate:
         $ref: '#/components/messages/ExecutionUpdate'
+      lagged:
+        $ref: '#/components/messages/Lagged'
 
   logsWs:
     address: /api/v1/stream/logs/{instanceId}/{nodeId}/ws
@@ -114,6 +119,8 @@ channels:
         $ref: '#/components/messages/LogMessage'
       logMessage:
         $ref: '#/components/messages/LogMessage'
+      lagged:
+        $ref: '#/components/messages/Lagged'
 
   workflowInstanceSse:
     address: /api/v1/stream/workflow/{instanceId}/sse
@@ -150,6 +157,8 @@ channels:
         $ref: '#/components/messages/PlanUpdate'
       executionUpdate:
         $ref: '#/components/messages/ExecutionUpdate'
+      lagged:
+        $ref: '#/components/messages/Lagged'
 
 components:
   messages:
@@ -212,6 +221,19 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ExecutionUpdatePayload'
+
+    Lagged:
+      name: Lagged
+      title: Lagged
+      description: |
+        Sent when this consumer's broadcast subscription overflowed the shared
+        1024-slot channel and `skipped` events were dropped before they could
+        be delivered. The stream is NOT closed: the client should re-fetch a
+        state snapshot and then keep consuming subsequent live events on the
+        same connection.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/LaggedPayload'
 
   schemas:
     WelcomePayload:
@@ -328,3 +350,19 @@ components:
         plan_id: null
         status: running
         created_at: "2026-01-01T00:00:00Z"
+
+    LaggedPayload:
+      type: object
+      required: [type, skipped]
+      properties:
+        type:
+          type: string
+          enum: [lagged]
+        skipped:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Number of broadcast events dropped before this consumer could receive them.
+      example:
+        type: lagged
+        skipped: 42

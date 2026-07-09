@@ -46,34 +46,18 @@ impl WorkflowStatePaths {
     }
 }
 
+/// Durably persists `data` to `path` via the shared
+/// [`crate::fs_util::atomic_write`] helper (write-temp, fsync, rename, fsync
+/// parent dir), mapping any I/O failure into this module's [`AppError`]
+/// shape so callers keep the diagnostics they had before the write was
+/// consolidated into the shared helper.
 pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            AppError::new(
-                crate::core::types::ErrorCategory::IoError,
-                format!("failed to create directory {}: {}", parent.display(), err),
-            )
-        })?;
-    }
-    let tmp_path = path.with_extension("tmp");
-    fs::write(&tmp_path, data).map_err(|err| {
+    crate::fs_util::atomic_write(path, data).map_err(|err| {
         AppError::new(
             crate::core::types::ErrorCategory::IoError,
-            format!("failed to write {}: {}", tmp_path.display(), err),
+            format!("failed to atomically write {}: {}", path.display(), err),
         )
-    })?;
-    fs::rename(&tmp_path, path).map_err(|err| {
-        AppError::new(
-            crate::core::types::ErrorCategory::IoError,
-            format!(
-                "failed to rename {} -> {}: {}",
-                tmp_path.display(),
-                path.display(),
-                err
-            ),
-        )
-    })?;
-    Ok(())
+    })
 }
 
 pub fn save_execution(
@@ -368,4 +352,42 @@ pub fn collect_live_artifact_paths_from_base(
         }
     }
     Ok(live)
+}
+
+#[cfg(test)]
+mod atomic_write_tests {
+    use super::*;
+
+    /// Mirrors `crate::fs_util::tests::unwritable_directory_returns_err`:
+    /// this module's `atomic_write` wraps the shared helper's `io::Error`
+    /// into this module's own `AppError` shape (spec 074, PR-3 / B1 + S1) —
+    /// exercise that mapping directly rather than only via the higher-level
+    /// checkpoint-persistence callers.
+    #[test]
+    #[cfg(unix)]
+    fn unwritable_directory_returns_app_error() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("checkpoint.json");
+
+        let mut perms = fs::metadata(dir.path()).unwrap().permissions();
+        perms.set_mode(0o500); // r-x: no write permission.
+        fs::set_permissions(dir.path(), perms).unwrap();
+
+        let result = atomic_write(&target, b"payload");
+
+        let mut restore = fs::metadata(dir.path()).unwrap().permissions();
+        restore.set_mode(0o700);
+        fs::set_permissions(dir.path(), restore).unwrap();
+
+        let err = result.expect_err("writing into a read-only directory must fail");
+        assert_eq!(err.category, crate::core::types::ErrorCategory::IoError);
+        assert!(
+            err.message.contains("failed to atomically write"),
+            "err={}",
+            err.message
+        );
+    }
 }

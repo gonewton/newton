@@ -81,6 +81,26 @@ impl WorkspacePaths {
         self.workflows_dir.exists()
     }
 
+    /// Build paths from an explicit workspace root AND an explicit, already
+    /// resolved state root (the output of [`resolve_state_dir`]).
+    ///
+    /// This is the seam that keeps `workflow run`/`serve` (which already go
+    /// through `resolve_state_dir`) and secondary consumers — grading
+    /// operators, `data`, `runs` — reading and writing the *same* state tree
+    /// when `--state-dir` / `NEWTON_STATE_DIR` / `newton.toml` relocates it.
+    /// Only the state-bearing fields (`workflows_state_dir`, `backend_sqlite`,
+    /// `artifacts_dir`) are overridden; `configs_dir`, `monitor_conf`,
+    /// `plan_dir`, and `workflows_dir` stay anchored to `root` because they
+    /// are workspace configuration, not state.
+    pub fn with_state_dir(root: PathBuf, state_root: PathBuf) -> Self {
+        let mut paths = Self::new(root);
+        let state_root = make_absolute(state_root);
+        paths.backend_sqlite = state_backend_sqlite(&state_root);
+        paths.artifacts_dir = state_root.join("artifacts");
+        paths.workflows_state_dir = state_root;
+        paths
+    }
+
     /// Build paths from the process current working directory.
     /// Returns `Err` only if `current_dir()` fails (e.g. CWD was deleted).
     pub fn from_cwd() -> Result<Self> {
@@ -365,6 +385,42 @@ mod tests {
         assert!(url.starts_with("sqlite:"));
         assert!(url.ends_with("?mode=rwc"));
         assert!(url.contains("backend.sqlite"));
+    }
+
+    #[test]
+    fn test_with_state_dir_overrides_state_fields_only() {
+        let root = PathBuf::from("/tmp/test-newton-workspace-with-state-dir");
+        let state_root = PathBuf::from("/tmp/test-newton-state-override");
+        let paths = WorkspacePaths::with_state_dir(root.clone(), state_root.clone());
+
+        // State-bearing fields follow the override.
+        assert_eq!(paths.workflows_state_dir, state_root);
+        assert_eq!(paths.backend_sqlite, state_root.join("backend.sqlite"));
+        assert_eq!(paths.artifacts_dir, state_root.join("artifacts"));
+        assert!(paths
+            .backend_sqlite_url()
+            .contains("test-newton-state-override"));
+
+        // Non-state fields stay anchored to the workspace root.
+        let expected_root = make_absolute(root);
+        assert_eq!(paths.workspace_root, expected_root);
+        assert_eq!(paths.dot_newton, expected_root.join(".newton"));
+        assert_eq!(
+            paths.configs_dir,
+            expected_root.join(".newton").join("configs")
+        );
+        assert_eq!(
+            paths.monitor_conf,
+            expected_root
+                .join(".newton")
+                .join("configs")
+                .join("monitor.conf")
+        );
+        assert_eq!(paths.plan_dir, expected_root.join(".newton").join("plan"));
+        assert_eq!(
+            paths.workflows_dir,
+            expected_root.join(".newton").join("workflows")
+        );
     }
 
     #[test]
