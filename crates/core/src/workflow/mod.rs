@@ -18,6 +18,7 @@ pub mod schema;
 pub mod schema_export;
 pub mod server_notifier;
 pub mod state;
+pub mod subprocess;
 pub mod task_execution;
 pub mod transform;
 pub mod value_resolve;

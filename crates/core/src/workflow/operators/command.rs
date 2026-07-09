@@ -3,6 +3,7 @@
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
+use crate::workflow::subprocess::run_guarded;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Number, Value};
@@ -289,7 +290,10 @@ impl CommandRunner for TokioCommandRunner {
             command.envs(env_map);
         }
 
-        let output = command.output().await.map_err(|err| {
+        // See `workflow::subprocess::run_guarded`: group-wide kill guard so
+        // an outer task timeout dropping this future can't orphan a
+        // grandchild the shelled-out command spawns.
+        let output = run_guarded(command).await.map_err(|err| {
             AppError::new(
                 ErrorCategory::ToolExecutionError,
                 format!("failed to execute command: {err}"),

@@ -11,6 +11,7 @@ use crate::workflow::expression::{EvaluationContext, ExpressionEngine};
 use crate::workflow::operators::engine::{
     extract_text_from_stream_json, EngineInvocation, OutputFormat,
 };
+use crate::workflow::subprocess::{prepare_command_for_group_kill, ProcessGroupKillGuard};
 use indexmap::IndexMap;
 use regex::Regex;
 use std::collections::HashMap;
@@ -23,86 +24,16 @@ use tokio::process::Command;
 pub(super) const OUTPUT_CAPTURE_LIMIT_BYTES: usize = 1_048_576;
 const CMD_LOG_ARG_MAX_LEN: usize = 200;
 
-/// Group-wide kill guard for a spawned engine child, owned by the
-/// child-execution future (i.e. a plain local in `execute_single`'s async
-/// call chain, never detached via `tokio::spawn`).
-///
-/// Newton spawns engine children with `process_group(0)` (unix), making the
-/// child the leader of its own new process group. Grandchildren the child
-/// spawns (e.g. a background `sleep &`) inherit that group. `kill_on_drop`
-/// alone only reaps the *direct* child on drop — grandchildren are orphaned.
-/// This guard closes that gap: on `Drop`, while still armed, it sends
-/// `SIGKILL` to the whole process group via `killpg`, so it fires:
-///
-/// - when the operator's own `stream_and_process_output` timeout
-///   (`timeout_seconds`) returns early with an error (the guard, still
-///   armed, drops at the end of `execute_single`'s early return), and
-/// - when the *outer* per-task `timeout_ms` fires in
-///   `task_execution::execute_with_timeout`, which drops the whole operator
-///   future — including this guard's stack frame — without ever calling
-///   `Child::kill`.
-///
-/// Both paths converge on the same `Drop` impl, so the mechanism is
-/// cancellation-safe by construction: it does not depend on any code path
-/// explicitly running to completion.
-///
-/// Call [`ProcessGroupKillGuard::disarm`] only after `Child::wait()` has
-/// returned successfully (a "clean wait") — at that point the direct child
-/// is confirmed reaped and killing the group is no longer this guard's job.
-///
-/// Non-unix: `process_group`/`killpg` have no portable equivalent, so this
-/// is a documented no-op there; `kill_on_drop(true)` (set unconditionally in
-/// [`build_command`]) still reaps the direct child, but grandchildren can
-/// leak on non-unix platforms.
-struct ProcessGroupKillGuard {
-    #[cfg(unix)]
-    pgid: libc::pid_t,
-    #[cfg(unix)]
-    armed: bool,
-}
-
-impl ProcessGroupKillGuard {
-    /// `pid` is the freshly spawned child's pid. Because the child is
-    /// spawned with `process_group(0)`, it is its own process group leader,
-    /// so `pgid == pid`.
-    #[cfg(unix)]
-    fn new(pid: u32) -> Self {
-        Self {
-            pgid: pid as libc::pid_t,
-            armed: true,
-        }
-    }
-
-    #[cfg(not(unix))]
-    fn new(_pid: u32) -> Self {
-        Self {}
-    }
-
-    /// Disarm after a clean wait/exit so `Drop` becomes a no-op. Must not be
-    /// called before the direct child is confirmed reaped.
-    fn disarm(&mut self) {
-        #[cfg(unix)]
-        {
-            self.armed = false;
-        }
-    }
-}
-
-#[cfg(unix)]
-impl Drop for ProcessGroupKillGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            // SAFETY: plain FFI call with a pgid/signal pair, no pointers
-            // involved. If the group is already gone (process exited and was
-            // reaped, e.g. via the belt-and-braces `kill_on_drop`) `killpg`
-            // just returns ESRCH; cleanup here is intentionally best-effort
-            // and errors are not actionable in a `Drop` impl.
-            unsafe {
-                libc::killpg(self.pgid, libc::SIGKILL);
-            }
-        }
-    }
-}
+// `ProcessGroupKillGuard` used below (armed right after spawn in
+// `spawn_engine_process`, disarmed right after a clean wait in
+// `wait_for_process_completion`) now lives in `workflow::subprocess`, shared
+// with `GitOperator`, `GhOperator`, and `CommandOperator`'s
+// `run_guarded`-based runners. The agent operator keeps its own bespoke
+// streaming flow (it must observe stdout line-by-line for signal matching
+// while the child is still running, which `run_guarded`'s
+// spawn-then-`wait_with_output` shape can't do) but reuses the same guard
+// type and disarm-ordering discipline documented on
+// `subprocess::ProcessGroupKillGuard`.
 
 /// Result from a single engine execution.
 pub(super) struct SingleExecResult {
@@ -462,15 +393,14 @@ fn build_command(
     cmd.stdin(Stdio::null());
 
     // Belt-and-braces: reap the direct child if the `Child` handle itself is
-    // dropped without an explicit kill/wait. This alone does NOT reach
-    // grandchildren — that's `ProcessGroupKillGuard`'s job.
-    cmd.kill_on_drop(true);
-    // Make the child the leader of its own process group so grandchildren it
-    // spawns (e.g. `sleep 300 &`) share a group we can kill as a unit via
-    // `killpg`. Non-unix: no portable equivalent; grandchildren gap is
-    // documented on `ProcessGroupKillGuard`.
-    #[cfg(unix)]
-    cmd.process_group(0);
+    // dropped without an explicit kill/wait (`kill_on_drop(true)`) and make
+    // it the leader of its own process group so grandchildren it spawns
+    // (e.g. `sleep 300 &`) share a group we can kill as a unit via `killpg`.
+    // `kill_on_drop` alone does NOT reach grandchildren — that's
+    // `ProcessGroupKillGuard`'s job. Non-unix: no portable equivalent of
+    // `process_group`; grandchildren gap is documented on
+    // `subprocess::ProcessGroupKillGuard`.
+    prepare_command_for_group_kill(&mut cmd);
 
     for (k, v) in &invocation.env {
         cmd.env(k, v);

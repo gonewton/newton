@@ -1,5 +1,6 @@
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
+use crate::workflow::subprocess::run_guarded;
 use async_trait::async_trait;
 use std::process::Stdio;
 use tokio::process::Command;
@@ -49,7 +50,10 @@ async fn run_subcommand(
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
 
-    let output = cmd.output().await.map_err(|e| {
+    // See `workflow::subprocess::run_guarded`: group-wide kill guard so an
+    // outer task timeout dropping this future can't orphan a grandchild
+    // `gh`/`git` spawns.
+    let output = run_guarded(cmd).await.map_err(|e| {
         AppError::new(
             ErrorCategory::ToolExecutionError,
             format!("failed to execute {binary}: {e}"),
