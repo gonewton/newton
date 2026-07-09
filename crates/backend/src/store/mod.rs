@@ -13,9 +13,10 @@ use crate::models::*;
 use crate::BackendStore;
 use chrono::{DateTime, Utc};
 use newton_types::ApiError;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use std::str::FromStr;
+use std::time::Duration;
 
 #[derive(Clone)]
 pub struct SqliteBackendStore {
@@ -24,10 +25,20 @@ pub struct SqliteBackendStore {
 
 impl SqliteBackendStore {
     pub async fn new(database_url: &str) -> Result<Self, ApiError> {
+        // Newton opens SEVERAL independent connection pools onto the SAME
+        // backend.sqlite (executor DbSink, grading-operator store, `data`,
+        // `serve` — one state root, many callers). Without WAL + a busy
+        // timeout, SQLite's default rollback-journal locking makes a second
+        // pool's writer fail immediately with "database is locked" the
+        // instant it races a writer from another pool, instead of waiting.
+        // WAL allows one writer concurrently with readers from other
+        // connections, and the busy timeout absorbs writer-vs-writer races.
         let options = SqliteConnectOptions::from_str(database_url)
             .map_err(|e| err_internal(&format!("invalid database URL: {e}")))?
             .create_if_missing(true)
-            .foreign_keys(true);
+            .foreign_keys(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .busy_timeout(Duration::from_secs(10));
 
         let pool = SqlitePoolOptions::new()
             .max_connections(5)

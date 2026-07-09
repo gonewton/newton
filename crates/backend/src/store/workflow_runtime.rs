@@ -306,7 +306,11 @@ impl super::SqliteBackendStore {
         node_id: &str,
         line: &newton_types::LogLine,
     ) -> Result<(), ApiError> {
-        let mut tx = self.pool.begin().await.map_err(tx_err)?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(tx_err)?;
 
         sqlx::query(
             "INSERT INTO WorkflowLog (instanceId, nodeId, seq, ts, level, message)
