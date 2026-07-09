@@ -7,7 +7,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use newton_types::{ApiError, BroadcastEvent, HilAction, HilEvent, HilStatus};
+use newton_types::{ApiError, BroadcastEvent, HilAction, HilEvent, HilEventType, HilStatus};
 use std::sync::Arc;
 
 /// Routes for the human-in-the-loop (HIL) API resource.
@@ -78,7 +78,8 @@ pub(crate) async fn list_hil_events(
     responses(
         (status = 200, description = "Resolved HIL event", body = HilEvent),
         (status = 404, description = "HIL event not found", body = ApiError),
-        (status = 422, description = "Validation error", body = ApiError)
+        (status = 409, description = "HIL event is not pending (already resolved, timed out, or cancelled)", body = ApiError),
+        (status = 422, description = "response_type is invalid for the event's kind, or a required field (e.g. answer) is missing", body = ApiError)
     )
 )]
 pub(crate) async fn submit_hil_action(
@@ -117,12 +118,44 @@ pub(crate) async fn submit_hil_action(
             .into_response();
     }
 
-    let new_status = match apply_hil_action_status(&action) {
+    // NEWTON audit B15: an event can only be resolved once. Check the
+    // event's current status *before* doing any further validation so a
+    // stale/duplicate submission gets a 409 regardless of what response_type
+    // it carries. `update_hil_event_status` (see newton-types::BackendStore)
+    // is a blind `UPDATE ... WHERE eventId = ?` with no `WHERE status =
+    // 'pending'` guard — there is no compare-and-swap primitive to route
+    // through here. This check-then-set has a narrow but real TOCTOU window:
+    // two concurrent submissions for the same pending event can both read
+    // Pending here and both proceed to the update below (last write wins,
+    // both requests observe 200). Closing that residual race requires either
+    // extending `BackendStore::update_hil_event_status` to a conditional
+    // `update_hil_event_status_if_pending` (touches newton-types + the
+    // sqlite backend impl) or a per-event mutex in `AppState` — out of scope
+    // for this handler-only fix.
+    if hil_event.status != HilStatus::Pending {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiError {
+                code: "ERR_CONFLICT".to_string(),
+                category: "resource".to_string(),
+                message: format!(
+                    "HIL event is not pending (current status: {:?}); it has already been resolved",
+                    hil_event.status
+                ),
+                details: None,
+            }),
+        )
+            .into_response();
+    }
+
+    let new_status = match apply_hil_action_status(&hil_event.event_type, &action) {
         Ok(s) => s,
         Err((status, error)) => return (status, Json(error)).into_response(),
     };
 
-    // Persist updated status first, then broadcast
+    // Persist updated status first, then broadcast. Narrowest possible
+    // window between the pending-check above and this write: no further
+    // async/IO work happens in between.
     let updated = match state
         .backend
         .update_hil_event_status(&event_id, new_status)
@@ -145,24 +178,57 @@ pub(crate) fn apply_hil_action(
     hil_event: &mut HilEvent,
     action: &HilAction,
 ) -> Result<(), (StatusCode, ApiError)> {
-    hil_event.status = apply_hil_action_status(action)?;
+    hil_event.status = apply_hil_action_status(&hil_event.event_type, action)?;
     Ok(())
 }
 
-fn apply_hil_action_status(action: &HilAction) -> Result<HilStatus, (StatusCode, ApiError)> {
-    match action.response_type.as_str() {
-        "text" | "authorization_approved" | "authorization_denied" | "timeout" | "cancelled" => {}
-        _ => {
-            return Err((
-                StatusCode::UNPROCESSABLE_ENTITY,
-                ApiError {
-                    code: "ERR_VALIDATION".to_string(),
-                    category: "validation".to_string(),
-                    message: "Invalid response type for HIL event kind".to_string(),
-                    details: None,
-                },
-            ))
-        }
+/// The `response_type` values accepted for a given HIL event kind.
+///
+/// Enforced mapping (derived from `newton_types::{HilEvent, HilEventType,
+/// HilStatus}` and the ailoop-core `MessageContent`/`ResponseType` vocabulary
+/// used by `crate::workflow::human::ailoop`):
+///
+/// - `HilEventType::Question` (ailoop `Decision` requests): `"text"` (the
+///   chosen answer/option), plus the two terminal responses that can close
+///   out *any* pending event without an answer: `"timeout"`, `"cancelled"`.
+///   `"authorization_approved"`/`"authorization_denied"` are rejected —
+///   ailoop's own decision-handling code treats those `ResponseType`
+///   variants as "unavailable" for a decision.
+/// - `HilEventType::Authorization` (ailoop `Authorization` requests):
+///   `"authorization_approved"`, `"authorization_denied"`, plus the same
+///   two terminal responses `"timeout"`, `"cancelled"`. `"text"` is
+///   rejected — ailoop's authorization-handling code treats `Text` as
+///   "unavailable" for an authorization.
+fn allowed_response_types(kind: &HilEventType) -> &'static [&'static str] {
+    match kind {
+        HilEventType::Question => &["text", "timeout", "cancelled"],
+        HilEventType::Authorization => &[
+            "authorization_approved",
+            "authorization_denied",
+            "timeout",
+            "cancelled",
+        ],
+    }
+}
+
+fn apply_hil_action_status(
+    event_type: &HilEventType,
+    action: &HilAction,
+) -> Result<HilStatus, (StatusCode, ApiError)> {
+    let allowed = allowed_response_types(event_type);
+    if !allowed.contains(&action.response_type.as_str()) {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError {
+                code: "ERR_VALIDATION".to_string(),
+                category: "validation".to_string(),
+                message: format!(
+                    "response_type '{}' is not valid for a {event_type:?} HIL event; allowed values: {allowed:?}",
+                    action.response_type
+                ),
+                details: None,
+            },
+        ));
     }
 
     if action.response_type == "text" && action.answer.is_none() {

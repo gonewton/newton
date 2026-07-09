@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+#[derive(Debug)]
 pub struct WorkflowFileRecord {
     pub name: String,
     pub content: String,
@@ -18,8 +19,12 @@ pub struct WorkflowFileRecord {
 
 #[derive(Debug)]
 pub enum WriteOutcome {
-    Created,
-    Updated,
+    /// Carries the persisted record — as read back from disk right after the
+    /// write, in the same `write()` call — so API handlers echo the store's
+    /// actual `content_hash`/`modified_at` instead of recomputing/guessing
+    /// them (spec 074, B16).
+    Created(WorkflowFileRecord),
+    Updated(WorkflowFileRecord),
 }
 
 pub trait WorkflowFileStore: Send + Sync {
@@ -290,10 +295,34 @@ impl WorkflowFileStore for FsWorkflowFileStore {
             }
         }
         atomic_write(&path, content.as_bytes())?;
+
+        // Read back what was actually persisted (one extra `stat`, no extra
+        // file read — the bytes are already in hand) so the caller echoes
+        // the store's own numbers rather than the request's, per spec 074
+        // B16. `content_hash` is deterministic over `content`'s bytes, but
+        // `modified_at` must come from the filesystem: `Utc::now()` at the
+        // handler layer can disagree with the mtime a subsequent GET
+        // reports (clock vs. filesystem-timestamp granularity/skew).
+        let metadata = fs::metadata(&path).map_err(|e| {
+            AppError::new(
+                ErrorCategory::IoError,
+                format!("failed to stat {}: {e}", path.display()),
+            )
+        })?;
+        let record = WorkflowFileRecord {
+            name: name.to_string(),
+            content: content.to_string(),
+            content_hash: compute_sha256_hex(content.as_bytes()),
+            size_bytes: metadata.len(),
+            modified_at: metadata
+                .modified()
+                .map(system_time_to_datetime)
+                .unwrap_or_default(),
+        };
         if existed {
-            Ok(WriteOutcome::Updated)
+            Ok(WriteOutcome::Updated(record))
         } else {
-            Ok(WriteOutcome::Created)
+            Ok(WriteOutcome::Created(record))
         }
     }
 

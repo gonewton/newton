@@ -856,8 +856,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '409':
+          description: HIL event is not pending (already resolved, timed out, or cancelled)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '422':
-          description: Validation error
+          description: response_type is invalid for the event's kind, or a required field (e.g. answer) is missing
           content:
             application/json:
               schema:
@@ -2261,13 +2267,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkflowFileDetail'
         '409':
-          description: ETag conflict
+          description: 'ETag conflict: If-Match/expected_hash does not match the file''s current content_hash'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '422':
           description: Validation error or unparseable YAML
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '428':
+          description: 'Precondition Required: the file already exists and neither an If-Match header nor an expected_hash body field was supplied'
           content:
             application/json:
               schema:

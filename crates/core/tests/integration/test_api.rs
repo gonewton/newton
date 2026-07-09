@@ -448,6 +448,13 @@ async fn test_submit_hil_action_not_found() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+/// Spec 074 B15: an already-resolved HIL event MUST reject a second
+/// submission with `409 Conflict` instead of silently re-resolving it. This
+/// test previously asserted `200 OK` for this exact scenario — that was
+/// documenting a bug (no idempotency guard on the status transition), not
+/// intended behavior. The `200` assertion is now the "before" fixture for
+/// what the audit (finding B15) called out; the `409` assertion below is
+/// the fix under test.
 #[tokio::test]
 async fn test_submit_hil_action_already_resolved() {
     let state = create_test_state().await;
@@ -490,7 +497,204 @@ async fn test_submit_hil_action_already_resolved() {
 
     let response = app.oneshot(request).await.unwrap();
 
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+/// Spec 074 B15: the same non-pending guard applies to `TimedOut` and
+/// `Cancelled` events, not just `Resolved` ones.
+#[tokio::test]
+async fn test_submit_hil_action_timed_out_event_conflicts() {
+    let state = create_test_state().await;
+
+    let instance_id = Uuid::new_v4().to_string();
+    let event_id = Uuid::new_v4().to_string();
+
+    let event = HilEvent {
+        event_id: event_id.clone(),
+        instance_id: instance_id.clone(),
+        node_id: Some("task-1".to_string()),
+        channel: "test-channel".to_string(),
+        event_type: HilEventType::Question,
+        question: "What should we do?".to_string(),
+        choices: vec!["Option A".to_string(), "Option B".to_string()],
+        timeout_seconds: Some(300),
+        correlation_id: None,
+        status: HilStatus::TimedOut,
+        timestamp: chrono::Utc::now(),
+    };
+
+    insert_test_hil_event(&state, &event).await;
+
+    let app = newton_core::api::api_v1_router(state);
+
+    let action = HilAction {
+        answer: Some("Option A".to_string()),
+        response_type: "text".to_string(),
+    };
+
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri(format!(
+            "/hil/workflows/{}/{}/action",
+            instance_id, event_id
+        ))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&action).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+/// Spec 074 B15: a `Question` event can only be resolved with `text` (plus
+/// the universal terminal responses); `authorization_approved` is on the
+/// flat allow-list but semantically wrong for a question, and must now be
+/// rejected with `422` even though it passes the old string-only check.
+#[tokio::test]
+async fn test_submit_hil_action_authorization_response_rejected_for_question_kind() {
+    let state = create_test_state().await;
+
+    let instance_id = Uuid::new_v4().to_string();
+    let event_id = Uuid::new_v4().to_string();
+
+    let event = HilEvent {
+        event_id: event_id.clone(),
+        instance_id: instance_id.clone(),
+        node_id: Some("task-1".to_string()),
+        channel: "test-channel".to_string(),
+        event_type: HilEventType::Question,
+        question: "What should we do?".to_string(),
+        choices: vec!["Option A".to_string(), "Option B".to_string()],
+        timeout_seconds: Some(300),
+        correlation_id: None,
+        status: HilStatus::Pending,
+        timestamp: chrono::Utc::now(),
+    };
+
+    insert_test_hil_event(&state, &event).await;
+
+    let app = newton_core::api::api_v1_router(state);
+
+    let action = HilAction {
+        answer: None,
+        response_type: "authorization_approved".to_string(),
+    };
+
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri(format!(
+            "/hil/workflows/{}/{}/action",
+            instance_id, event_id
+        ))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&action).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+/// Spec 074 B15: mirror of the previous test in the other direction — a
+/// `text` response is on the flat allow-list but semantically wrong for an
+/// `Authorization` event.
+#[tokio::test]
+async fn test_submit_hil_action_text_response_rejected_for_authorization_kind() {
+    let state = create_test_state().await;
+
+    let instance_id = Uuid::new_v4().to_string();
+    let event_id = Uuid::new_v4().to_string();
+
+    let event = HilEvent {
+        event_id: event_id.clone(),
+        instance_id: instance_id.clone(),
+        node_id: Some("task-1".to_string()),
+        channel: "test-channel".to_string(),
+        event_type: HilEventType::Authorization,
+        question: "Approve this action?".to_string(),
+        choices: vec![],
+        timeout_seconds: Some(300),
+        correlation_id: None,
+        status: HilStatus::Pending,
+        timestamp: chrono::Utc::now(),
+    };
+
+    insert_test_hil_event(&state, &event).await;
+
+    let app = newton_core::api::api_v1_router(state);
+
+    let action = HilAction {
+        answer: Some("some free text".to_string()),
+        response_type: "text".to_string(),
+    };
+
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri(format!(
+            "/hil/workflows/{}/{}/action",
+            instance_id, event_id
+        ))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&action).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+/// Spec 074 B15: the correct flow for an `Authorization` event
+/// (`authorization_approved`) still succeeds under the new kind check.
+#[tokio::test]
+async fn test_submit_hil_action_authorization_success() {
+    let state = create_test_state().await;
+
+    let instance_id = Uuid::new_v4().to_string();
+    let event_id = Uuid::new_v4().to_string();
+
+    let event = HilEvent {
+        event_id: event_id.clone(),
+        instance_id: instance_id.clone(),
+        node_id: Some("task-1".to_string()),
+        channel: "test-channel".to_string(),
+        event_type: HilEventType::Authorization,
+        question: "Approve this action?".to_string(),
+        choices: vec![],
+        timeout_seconds: Some(300),
+        correlation_id: None,
+        status: HilStatus::Pending,
+        timestamp: chrono::Utc::now(),
+    };
+
+    insert_test_hil_event(&state, &event).await;
+
+    let app = newton_core::api::api_v1_router(state);
+
+    let action = HilAction {
+        answer: None,
+        response_type: "authorization_approved".to_string(),
+    };
+
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri(format!(
+            "/hil/workflows/{}/{}/action",
+            instance_id, event_id
+        ))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&action).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
     assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let updated: HilEvent = serde_json::from_slice(&body).unwrap();
+    assert_eq!(updated.status, HilStatus::Resolved);
 }
 
 #[tokio::test]
@@ -1184,6 +1388,21 @@ workflow:
         command: echo hello
 "#;
 
+// A second, distinct-content valid workflow document — used to exercise
+// overwriting an existing workflow file (B16/B17 tests) without colliding
+// with VALID_WORKFLOW_YAML's content_hash.
+const UPDATED_WORKFLOW_YAML: &str = r#"version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    max_workflow_iterations: 10
+  tasks:
+    - id: step1
+      operator: command
+      params:
+        command: echo updated
+"#;
+
 // Parseable as WorkflowDocument but will fail semantic validation / lint
 const INVALID_SEMANTIC_WORKFLOW_YAML: &str = r#"version: "2.0"
 mode: workflow_graph
@@ -1564,4 +1783,149 @@ async fn test_workflow_files_lenient_save_invalid_semantic() {
         !validate_ok || !lint_empty,
         "expected diagnostics to reflect invalid workflow"
     );
+}
+
+/// Spec 074 B17 / settled decision 8: overwriting an *existing* workflow
+/// file without an `If-Match` header or `expected_hash` body field must be
+/// rejected with `428 Precondition Required`, and the file on disk must be
+/// left unchanged (the second PUT's content never gets written).
+#[tokio::test]
+async fn test_workflow_files_put_existing_without_precondition_428() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::api_v1_router(state);
+
+    // Create the file first (unconditional create is allowed).
+    let create_body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
+    let create_req = Request::builder()
+        .method(Method::PUT)
+        .uri("/workflow-files/needs-precondition")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&create_body).unwrap()))
+        .unwrap();
+    let create_resp = app.clone().oneshot(create_req).await.unwrap();
+    assert_eq!(create_resp.status(), StatusCode::CREATED);
+
+    // Overwrite attempt with neither If-Match nor expected_hash.
+    let overwrite_body = serde_json::json!({
+        "content": UPDATED_WORKFLOW_YAML,
+        "expected_hash": null
+    });
+    let overwrite_req = Request::builder()
+        .method(Method::PUT)
+        .uri("/workflow-files/needs-precondition")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&overwrite_body).unwrap()))
+        .unwrap();
+    let overwrite_resp = app.clone().oneshot(overwrite_req).await.unwrap();
+    assert_eq!(overwrite_resp.status(), StatusCode::PRECONDITION_REQUIRED);
+
+    let resp_body = axum::body::to_bytes(overwrite_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+    let message = err["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("If-Match") && message.contains("expected_hash"),
+        "428 body should name both mechanisms, got: {message}"
+    );
+
+    // File must be unchanged (still the original content).
+    let get_req = Request::builder()
+        .uri("/workflow-files/needs-precondition")
+        .body(Body::empty())
+        .unwrap();
+    let get_resp = app.oneshot(get_req).await.unwrap();
+    assert_eq!(get_resp.status(), StatusCode::OK);
+    let get_body = axum::body::to_bytes(get_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let detail: serde_json::Value = serde_json::from_slice(&get_body).unwrap();
+    assert_eq!(detail["content"], VALID_WORKFLOW_YAML);
+}
+
+/// Spec 074 B16 + B17: a PUT on an existing file with the correct
+/// `If-Match` succeeds (200) and the response's `content_hash`/`modified_at`
+/// match a subsequent GET byte-for-byte — proving the write response
+/// echoes what the store actually persisted rather than recomputing a hash
+/// from the request bytes or stamping `Utc::now()`.
+#[tokio::test]
+async fn test_workflow_files_put_existing_with_correct_if_match_matches_subsequent_get() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::api_v1_router(state);
+
+    // Create.
+    let create_body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
+    let create_req = Request::builder()
+        .method(Method::PUT)
+        .uri("/workflow-files/round-trip")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&create_body).unwrap()))
+        .unwrap();
+    let create_resp = app.clone().oneshot(create_req).await.unwrap();
+    assert_eq!(create_resp.status(), StatusCode::CREATED);
+    let create_resp_body = axum::body::to_bytes(create_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let created: serde_json::Value = serde_json::from_slice(&create_resp_body).unwrap();
+    let current_hash = created["content_hash"].as_str().unwrap().to_string();
+
+    // Overwrite with the correct If-Match header carrying the current hash.
+    let new_content = UPDATED_WORKFLOW_YAML;
+    let update_body = serde_json::json!({ "content": new_content, "expected_hash": null });
+    let update_req = Request::builder()
+        .method(Method::PUT)
+        .uri("/workflow-files/round-trip")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::IF_MATCH, format!("\"{current_hash}\""))
+        .body(Body::from(serde_json::to_vec(&update_body).unwrap()))
+        .unwrap();
+    let update_resp = app.clone().oneshot(update_req).await.unwrap();
+    assert_eq!(update_resp.status(), StatusCode::OK);
+    let update_resp_body = axum::body::to_bytes(update_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let put_detail: serde_json::Value = serde_json::from_slice(&update_resp_body).unwrap();
+
+    // Subsequent GET must report the identical content_hash and modified_at
+    // that the PUT response claimed.
+    let get_req = Request::builder()
+        .uri("/workflow-files/round-trip")
+        .body(Body::empty())
+        .unwrap();
+    let get_resp = app.oneshot(get_req).await.unwrap();
+    assert_eq!(get_resp.status(), StatusCode::OK);
+    let get_body = axum::body::to_bytes(get_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let get_detail: serde_json::Value = serde_json::from_slice(&get_body).unwrap();
+
+    assert_eq!(put_detail["content_hash"], get_detail["content_hash"]);
+    assert_eq!(put_detail["modified_at"], get_detail["modified_at"]);
+    assert_ne!(
+        put_detail["content_hash"], current_hash,
+        "content_hash must change since the content changed"
+    );
+    assert_eq!(get_detail["content"], new_content);
+}
+
+/// Spec 074 B17: unconditional PUT of a brand-new file (no If-Match, no
+/// expected_hash) must still succeed as a create — only *existing*-file
+/// overwrites require a precondition.
+#[tokio::test]
+async fn test_workflow_files_put_new_file_without_precondition_creates() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::api_v1_router(state);
+
+    let body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri("/workflow-files/brand-new")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
 }
