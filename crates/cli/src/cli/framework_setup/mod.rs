@@ -359,6 +359,7 @@ impl DataArgs {
                 .unwrap_or(false);
         let dry_run = get_bool(map, "dry-run");
         let workspace = get_opt_path(map, "workspace");
+        let state_dir = get_opt_path(map, "state-dir");
         let run_id = get_opt_str(map, "run-id");
         let kpi_id = get_opt_str(map, "kpi-id");
         let scope = get_opt_str(map, "scope");
@@ -388,6 +389,7 @@ impl DataArgs {
             json,
             dry_run,
             workspace,
+            state_dir,
             run_id,
             kpi_id,
             scope,

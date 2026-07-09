@@ -81,8 +81,21 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
 
     info!("Starting Newton API server on {}: {}", args.host, args.port);
 
+    let workspace_paths = WorkspacePaths::from_cwd().map_err(|e| {
+        AppError::new(
+            ErrorCategory::IoError,
+            format!("failed to resolve workspace paths: {e}"),
+        )
+    })?;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| workspace_paths.workspace_root.clone());
+    // Resolve once, up front, so both the operator registry's grading-operator
+    // store and the AppState backend below open the SAME database — the split
+    // brain this hardening pass closes.
+    let state_dir = resolve_state_dir(&cwd, args.state_dir.as_deref());
+
     let serve_settings: workflow_schema::WorkflowSettings = Default::default();
-    let registry = super::build_operator_registry(PathBuf::from("."), &serve_settings, None).await;
+    let registry =
+        super::build_operator_registry(PathBuf::from("."), &state_dir, &serve_settings, None).await;
 
     let operator_names = registry.operator_names();
     let operator_descriptors: Vec<newton_types::OperatorDescriptor> = operator_names
@@ -94,14 +107,6 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         })
         .collect();
 
-    let workspace_paths = WorkspacePaths::from_cwd().map_err(|e| {
-        AppError::new(
-            ErrorCategory::IoError,
-            format!("failed to resolve workspace paths: {e}"),
-        )
-    })?;
-    let cwd = std::env::current_dir().unwrap_or_else(|_| workspace_paths.workspace_root.clone());
-    let state_dir = resolve_state_dir(&cwd, args.state_dir.as_deref());
     if state_dir.exists() && !state_dir.is_dir() {
         return Err(AppError::new(
             ErrorCategory::ValidationError,

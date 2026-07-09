@@ -1,4 +1,5 @@
 use crate::cli::args::{RunsArgs, RunsCommand};
+use crate::cli::workspace_paths::{resolve_state_dir, state_checkpoints_dir};
 use humantime::parse_duration;
 use newton_core::core::error::AppError;
 use newton_core::core::types::ErrorCategory;
@@ -85,14 +86,16 @@ pub fn log(args: RunsArgs) -> StdResult<(), AppError> {
             workspace,
             last,
             json,
-        } => log_list(workspace, last, json),
+            state_dir,
+        } => log_list(workspace, last, json, state_dir),
         RunsCommand::Show {
             run_id,
             workspace,
             task,
             verbose,
             json,
-        } => log_show(run_id, workspace, task, verbose, json),
+            state_dir,
+        } => log_show(run_id, workspace, task, verbose, json, state_dir),
     }
 }
 
@@ -100,6 +103,7 @@ fn log_list(
     workspace: Option<PathBuf>,
     last: Option<usize>,
     emit_json: bool,
+    state_dir: Option<PathBuf>,
 ) -> StdResult<(), AppError> {
     if let Some(n) = last {
         if n == 0 {
@@ -112,7 +116,8 @@ fn log_list(
     }
 
     let workspace = super::resolve_workflow_workspace(workspace)?;
-    let base = WorkflowStatePaths::workspace_root(&workspace);
+    let state_dir = resolve_state_dir(&workspace, state_dir.as_deref());
+    let base = state_checkpoints_dir(&state_dir);
 
     let mut entries: Vec<(WorkflowExecution, Option<usize>)> = Vec::new();
 
@@ -244,9 +249,11 @@ fn log_show(
     task_filter: Option<String>,
     verbose: bool,
     emit_json: bool,
+    state_dir: Option<PathBuf>,
 ) -> StdResult<(), AppError> {
     let workspace = super::resolve_workflow_workspace(workspace)?;
-    let paths = WorkflowStatePaths::new(&workspace, &execution_id);
+    let state_dir = resolve_state_dir(&workspace, state_dir.as_deref());
+    let paths = WorkflowStatePaths::from_base(&state_checkpoints_dir(&state_dir), &execution_id);
 
     if !paths.execution_file.exists() {
         return Err(AppError::new(

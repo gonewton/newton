@@ -236,6 +236,10 @@ name = "test_data_post_grade_local_store"
 path = "tests/integration/test_data_post_grade_local_store.rs"
 
 [[test]]
+name = "test_state_dir_one_root"
+path = "tests/integration/test_state_dir_one_root.rs"
+
+[[test]]
 name = "test_chat_error_codes"
 path = "tests/integration/test_chat_error_codes.rs"
 

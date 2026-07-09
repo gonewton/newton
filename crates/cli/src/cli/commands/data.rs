@@ -17,7 +17,9 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
         Some(ref p) => p.clone(),
         None => std::env::current_dir()?,
     };
-    let workspace_paths = WorkspacePaths::new(workspace);
+    let state_dir =
+        crate::cli::workspace_paths::resolve_state_dir(&workspace, args.state_dir.as_deref());
+    let workspace_paths = WorkspacePaths::with_state_dir(workspace, state_dir);
     let db_url = workspace_paths.backend_sqlite_url();
     let store = match newton_backend::SqliteBackendStore::new(&db_url).await {
         Ok(s) => s,

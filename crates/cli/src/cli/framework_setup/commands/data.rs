@@ -106,6 +106,15 @@ pub(crate) fn data_verb_command(verb: DataVerb) -> Command {
             help: "Workspace root containing .newton/state/backend.sqlite",
             ..Default::default()
         },
+        ArgSpec {
+            name: "state-dir",
+            kind: ArgKind::Option,
+            long: Some("state-dir"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            help: "Override the state root directory where checkpoints, artifacts, and backend.sqlite are stored. Defaults to auto-resolved from workspace root.",
+            ..Default::default()
+        },
     ];
 
     if matches!(verb, DataVerb::Get) {

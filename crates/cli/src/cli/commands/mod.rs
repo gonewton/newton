@@ -52,6 +52,7 @@ fn resolve_workflow_workspace(path: Option<PathBuf>) -> StdResult<PathBuf, AppEr
 
 async fn build_operator_registry(
     workspace: PathBuf,
+    state_dir: &Path,
     settings: &workflow_schema::WorkflowSettings,
     ailoop_ctx: Option<newton_core::integrations::ailoop::AiloopContext>,
 ) -> OperatorRegistry {
@@ -60,12 +61,15 @@ async fn build_operator_registry(
         ailoop_ctx,
         Duration::from_secs(settings.human.default_timeout_seconds),
     );
-    // Wire the workspace backend store so the grading operators
+    // Wire the resolved-state-root backend store so the grading operators
     // (GraderCommandOperator, ReconcileOperator, ChangeRequestOperator,
     // GraderAgentOperator) register — they are only available when a store is
     // present. Without this, `optimize` / `workflow run` cannot run grading.yaml
-    // (operator 'GraderCommandOperator' is not registered).
-    let backend_store = open_workspace_store(&workspace).await;
+    // (operator 'GraderCommandOperator' is not registered). `state_dir` MUST be
+    // the same resolved root the executor's DbSink writes to (one state root —
+    // see WorkspacePaths::with_state_dir), never re-derived from `workspace`
+    // alone, or grading operators split-brain against the executor's store.
+    let backend_store = open_state_store(&workspace, state_dir).await;
     workflow_operators::register_builtins_with_deps(
         &mut builder,
         workspace,
@@ -79,13 +83,17 @@ async fn build_operator_registry(
     builder.build()
 }
 
-/// Open the workspace SQLite backend store when it exists, so grading operators
-/// can be registered. Returns None (with a warning) if absent or unopenable —
-/// non-grading workflows still run.
-async fn open_workspace_store(
+/// Open the resolved-state-root SQLite backend store when it exists, so
+/// grading operators can be registered. Returns None (with a warning) if
+/// absent or unopenable — non-grading workflows still run.
+async fn open_state_store(
     workspace: &Path,
+    state_dir: &Path,
 ) -> Option<std::sync::Arc<dyn newton_backend::BackendStore>> {
-    let paths = crate::cli::workspace_paths::WorkspacePaths::new(workspace.to_path_buf());
+    let paths = crate::cli::workspace_paths::WorkspacePaths::with_state_dir(
+        workspace.to_path_buf(),
+        state_dir.to_path_buf(),
+    );
     if !paths.backend_sqlite_exists() {
         return None;
     }
