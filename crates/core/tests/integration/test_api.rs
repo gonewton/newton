@@ -2150,6 +2150,55 @@ async fn test_patch_finding_broadcasts_finding_update() {
 }
 
 #[tokio::test]
+async fn test_unblock_finding_broadcasts_finding_update() {
+    let state = create_test_state().await;
+    let create_body = serde_json::json!({
+        "id": "finding-broadcast-3",
+        "source": "test",
+        "origin": "system",
+        "dimension": "quality",
+        "fingerprint": "finding-broadcast-3",
+        "title": "test finding",
+        "whyItMatters": "proves FindingUpdate broadcasts on unblock",
+        "recommendedAction": "n/a",
+        "severity": "low",
+        "risk": "low",
+    });
+    state
+        .backend
+        .create_finding(serde_json::from_value(create_body).unwrap())
+        .await
+        .expect("create_finding");
+    state
+        .backend
+        .patch_finding(
+            "finding-broadcast-3",
+            serde_json::from_value(serde_json::json!({ "status": "blocked" })).unwrap(),
+        )
+        .await
+        .expect("patch_finding to blocked");
+
+    let mut rx = state.events_tx.subscribe();
+    let app = newton_core::api::api_v1_router(state, false);
+
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/findings/finding-broadcast-3/unblock")
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let event = rx.try_recv().expect("FindingUpdate should be sent");
+    match event {
+        BroadcastEvent::FindingUpdate { finding_id } => {
+            assert_eq!(finding_id, "finding-broadcast-3");
+        }
+        other => panic!("expected FindingUpdate, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn test_create_change_request_broadcasts_change_request_update() {
     let state = create_test_state().await;
     let mut rx = state.events_tx.subscribe();
