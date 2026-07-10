@@ -25,6 +25,12 @@ use uuid::Uuid;
 
 const WELCOME_FRAME: &str = r#"{"type":"welcome"}"#;
 
+/// Default number of historical log lines replayed on a fresh logs WS
+/// connection (no `since_seq` given). Spec 074 B18: a full replay of
+/// potentially unbounded history is not an acceptable default; callers that
+/// need everything since a known point should pass `since_seq` instead.
+const DEFAULT_LOG_TAIL: i64 = 500;
+
 /// Builds the JSON payload sent to a stream consumer when the shared broadcast
 /// channel overflowed and this consumer missed `skipped` events. Same shape is
 /// used for both WS text frames and SSE `data:` payloads: `{"type":"lagged","skipped":<n>}`.
@@ -46,6 +52,10 @@ pub struct StreamFilters {
     pub node_id: Option<String>,
     /// Filter by event type (e.g. `logMessage`, `nodeStateChanged`).
     pub event_type: Option<String>,
+    /// Logs WS only (spec 074 B18): resume replay from lines with `seq >
+    /// since_seq` instead of the default tail-500. Ignored by every other
+    /// stream endpoint.
+    pub since_seq: Option<i64>,
 }
 
 /// Routes for streaming endpoints (WebSocket + SSE).
@@ -264,6 +274,9 @@ async fn handle_logs_socket(
         instance_id: instance_id.clone(),
         node_id: node_id.clone(),
         message: format!("Connected to {task_name}"),
+        // Synthetic, never persisted: 0 is a documented sentinel, not a real
+        // seq (real seqs start at 1).
+        seq: 0,
     };
     if let Ok(json) = serde_json::to_string(&connect_line) {
         if socket.send(Message::Text(json.into())).await.is_err() {
@@ -271,17 +284,31 @@ async fn handle_logs_socket(
         }
     }
 
-    // Replay historical log lines (seq > 0 returns all)
-    if let Ok(historical) = state
-        .backend
-        .list_log_lines(&instance_id, &node_id, 0)
-        .await
-    {
+    // Replay historical log lines (spec 074 B18): `since_seq` resumes from
+    // that point (everything after it); with no `since_seq`, default to the
+    // last DEFAULT_LOG_TAIL lines rather than a full, potentially unbounded
+    // replay.
+    let historical = match filters.since_seq {
+        Some(since_seq) => {
+            state
+                .backend
+                .list_log_lines(&instance_id, &node_id, since_seq)
+                .await
+        }
+        None => {
+            state
+                .backend
+                .list_log_lines_tail(&instance_id, &node_id, DEFAULT_LOG_TAIL)
+                .await
+        }
+    };
+    if let Ok(historical) = historical {
         for line in historical {
             let event = BroadcastEvent::LogMessage {
                 instance_id: line.instance_id.clone(),
                 node_id: line.node_id.clone(),
                 message: line.message.clone(),
+                seq: line.seq,
             };
             if let Ok(json) = serde_json::to_string(&event) {
                 if socket.send(Message::Text(json.into())).await.is_err() {
@@ -544,6 +571,7 @@ mod tests {
             instance_id: None,
             node_id: None,
             event_type: None,
+            since_seq: None,
         }
     }
 

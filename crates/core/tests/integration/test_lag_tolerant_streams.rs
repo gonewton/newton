@@ -176,12 +176,14 @@ async fn test_logs_ws_delivers_lagged_frame_then_resumes() {
             instance_id: "flood-noise-instance".to_string(),
             node_id: "flood-noise-node".to_string(),
             message: "noise".to_string(),
+            seq: 0,
         });
     }
     let _ = events_tx.send(BroadcastEvent::LogMessage {
         instance_id: instance_id.clone(),
         node_id: node_id.to_string(),
         message: "marker-line".to_string(),
+        seq: 0,
     });
 
     let result = tokio::time::timeout(Duration::from_secs(5), async {

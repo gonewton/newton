@@ -92,6 +92,11 @@ pub struct LogLine {
     pub level: String,
     pub message: String,
     pub timestamp: DateTime<Utc>,
+    /// Monotonic sequence number, unique per (instance_id, node_id), assigned
+    /// by `BackendStore::append_log_line` (`MAX(seq)+1`, starting at 1).
+    /// Clients reconnecting to the logs WS pass the highest `seq` they've
+    /// seen as `since_seq` to resume without a full replay (spec 074 B18).
+    pub seq: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -116,6 +121,12 @@ pub enum BroadcastEvent {
         instance_id: String,
         node_id: String,
         message: String,
+        /// The log line's persisted `seq` (spec 074 B18), or `0` for
+        /// synthetic, non-persisted lines (e.g. the "Connected to <task>"
+        /// frame sent on logs WS connect). Lets a client track the latest
+        /// seq it has seen across the live-forwarding portion of a logs WS
+        /// connection, to pass as `since_seq` on a future reconnect.
+        seq: i64,
     },
     #[serde(rename = "hilEvent")]
     HilEvent {

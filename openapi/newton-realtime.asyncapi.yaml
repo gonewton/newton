@@ -21,9 +21,11 @@ x-connection-lifecycle:
     keepalive_interval_seconds: 10
     lag_handling: 'on broadcast Lagged(n), emits lagged then continues (never closes)'
   logs_ws:
-    connect_confirmation: 'logMessage "Connected to <task_name>"'
+    connect_confirmation: 'logMessage "Connected to <task_name>" (seq: 0, sentinel — not persisted)'
     close_codes: [1000, 1001]
     lag_handling: 'on broadcast Lagged(n), emits lagged then continues (never closes)'
+    replay_default: 'no since_seq query param: last 500 lines (tail), not full history (spec 074 B18)'
+    replay_resumption: 'since_seq=N query param: all persisted lines with seq > N, ascending'
 
 channels:
   heartbeat:
@@ -110,10 +112,17 @@ channels:
     address: /api/v1/stream/logs/{instanceId}/{nodeId}/ws
     description: |
       Per-instance, per-node log WebSocket. Emits a synthetic
-      `logMessage "Connected to <task_name>"` frame immediately on connect.
-      Task name is resolved from `WorkflowInstance.definition["tasks"][nodeId]["name"]`,
+      `logMessage "Connected to <task_name>"` frame immediately on connect
+      (with `seq: 0`, a sentinel — it is not a persisted line). Task name is
+      resolved from `WorkflowInstance.definition["tasks"][nodeId]["name"]`,
       falling back to `nodeId` when unavailable. Forwards only `LogMessage`
       events matching the given instance and node.
+
+      Historical replay (spec 074 B18): with no `since_seq` query param, the
+      default replay is the last 500 lines (`seq` ascending), not the full
+      history. Pass `since_seq=<N>` (the highest `seq` already seen, e.g. from
+      a prior connection) to instead replay every persisted line with
+      `seq > N`, for lossless resumption after a reconnect.
     parameters:
       instanceId:
         description: UUID of the workflow instance.
@@ -130,6 +139,15 @@ channels:
               type: string
             event_type:
               type: string
+            since_seq:
+              type: integer
+              format: int64
+              description: |
+                Resume replay from log lines with `seq` greater than this
+                value, instead of the default last-500-lines tail. Pass the
+                highest `seq` observed on a prior connection to this same
+                (instanceId, nodeId) pair to resume without gaps or
+                re-delivery.
     messages:
       connectConfirmation:
         $ref: '#/components/messages/LogMessage'
@@ -349,7 +367,7 @@ components:
 
     LogMessagePayload:
       type: object
-      required: [type, instance_id, node_id, message]
+      required: [type, instance_id, node_id, message, seq]
       properties:
         type:
           type: string
@@ -361,11 +379,22 @@ components:
           type: string
         message:
           type: string
+        seq:
+          type: integer
+          format: int64
+          description: |
+            The log line's persisted sequence number (spec 074 B18), unique
+            and monotonic per (instance_id, node_id), starting at 1. `0` is a
+            documented sentinel for synthetic, non-persisted lines (e.g. the
+            "Connected to <task_name>" frame sent on logs WS connect) — it is
+            never a real persisted seq. Track the highest `seq` seen to pass
+            as `since_seq` on a future reconnect.
       example:
         type: logMessage
         instance_id: 550e8400-e29b-41d4-a716-446655440000
         node_id: build-task
         message: Connected to build-task
+        seq: 0
 
     HilEventPayload:
       type: object

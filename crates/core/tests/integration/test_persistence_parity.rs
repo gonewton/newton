@@ -152,6 +152,9 @@ async fn test_log_replay_after_restart() {
             level: "info".to_string(),
             message: format!("log-line-{i}"),
             timestamp: chrono::Utc::now(),
+            // append_log_line assigns the real seq; this placeholder is
+            // never read on the write path.
+            seq: 0,
         };
         backend
             .append_log_line(&instance_id, node_id, &line)

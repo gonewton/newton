@@ -439,7 +439,6 @@ pub(super) struct HilEventRow {
 
 #[derive(Debug, FromRow)]
 pub(super) struct WorkflowLogRow {
-    #[allow(dead_code)]
     pub seq: i64,
     #[sqlx(rename = "instanceId")]
     pub instance_id: String,
