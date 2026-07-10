@@ -631,10 +631,22 @@ async fn test_approve_plan_emits_canonical_execution_update() {
     // Drain the channel and verify both broadcast events are well-formed.
     let mut got_plan_update = false;
     let mut got_execution_update = false;
+    let mut plan_update_instance_id: Option<String> = None;
+    let mut execution_update_instance_id: Option<String> = None;
     while let Ok(ev) = rx.try_recv() {
         match ev {
-            newton_types::BroadcastEvent::PlanUpdate { plan_id } => {
+            newton_types::BroadcastEvent::PlanUpdate {
+                plan_id,
+                instance_id,
+            } => {
                 assert_eq!(plan_id, "plan-1");
+                // spec 074 B13: an approved plan is linked to the freshly
+                // created execution, so instance_id must be populated.
+                assert!(
+                    instance_id.is_some(),
+                    "PlanUpdate.instance_id must be populated once approval links an execution"
+                );
+                plan_update_instance_id = instance_id;
                 got_plan_update = true;
             }
             newton_types::BroadcastEvent::ExecutionUpdate {
@@ -642,6 +654,7 @@ async fn test_approve_plan_emits_canonical_execution_update() {
                 plan_id,
                 status,
                 created_at,
+                instance_id,
             } => {
                 assert!(
                     !execution_id.is_empty(),
@@ -653,6 +666,11 @@ async fn test_approve_plan_emits_canonical_execution_update() {
                 assert_eq!(plan_id.as_deref(), Some("plan-1"));
                 assert_eq!(status, "running");
                 assert!(!created_at.is_empty());
+                // spec 074 B13: every Execution carries its owning
+                // instance_id (falls back to its own id until a real
+                // workflow instance attaches).
+                assert!(!instance_id.is_empty());
+                execution_update_instance_id = Some(instance_id);
                 got_execution_update = true;
             }
             _ => {}
@@ -663,4 +681,39 @@ async fn test_approve_plan_emits_canonical_execution_update() {
         got_execution_update,
         "expected ExecutionUpdate broadcast with valid execution_id"
     );
+    // The two events describe the same newly-created execution/instance, so
+    // their instance_id must agree (this is what makes a workflow-A-scoped
+    // stream see both, and a workflow-B-scoped stream see neither).
+    assert_eq!(plan_update_instance_id, execution_update_instance_id);
+}
+
+#[tokio::test]
+async fn test_reject_plan_emits_plan_update_with_no_instance() {
+    let state = create_parity_test_state().await;
+    let mut rx = state.events_tx.subscribe();
+    let app = newton_core::api::api_v1_router(state);
+
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/plans/plan-1/reject")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let mut got_plan_update = false;
+    while let Ok(ev) = rx.try_recv() {
+        if let newton_types::BroadcastEvent::PlanUpdate {
+            plan_id,
+            instance_id,
+        } = ev
+        {
+            assert_eq!(plan_id, "plan-1");
+            // spec 074 B13: rejection never links a running execution, so
+            // instance_id must be None (and scoped streams drop it).
+            assert_eq!(instance_id, None);
+            got_plan_update = true;
+        }
+    }
+    assert!(got_plan_update, "expected PlanUpdate broadcast on reject");
 }

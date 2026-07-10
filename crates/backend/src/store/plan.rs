@@ -464,6 +464,11 @@ impl super::SqliteBackendStore {
         let plan_item = self.fetch_plan_item(id).await?;
         Ok(ApprovedPlan {
             plan: plan_item,
+            // No workflow instance is attached to the just-inserted
+            // ExecutionRecord yet (its instanceId column is NULL), so this
+            // falls back to the execution's own id — same convention as
+            // `list_executions_db`'s `ExecutionItem::instance_id` mapping.
+            instance_id: exec_id.clone(),
             execution_id: exec_id,
             created_at: now,
         })

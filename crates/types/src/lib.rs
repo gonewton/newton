@@ -123,13 +123,30 @@ pub enum BroadcastEvent {
         event_id: String,
     },
     #[serde(rename = "plan_update")]
-    PlanUpdate { plan_id: String },
+    PlanUpdate {
+        plan_id: String,
+        /// Owning workflow instance id, when this plan is currently linked to
+        /// one (e.g. immediately after approval, which creates the
+        /// `ExecutionRecord` that becomes the plan's running instance).
+        /// `None` when no instance is linked (e.g. still awaiting approval,
+        /// or rejected without ever having run) — instance-scoped streams
+        /// treat `None` as "not addressable to any instance" and drop the
+        /// event rather than guessing (see `should_send_event`).
+        instance_id: Option<String>,
+    },
     #[serde(rename = "execution_update")]
     ExecutionUpdate {
         execution_id: String,
         plan_id: Option<String>,
         status: String,
         created_at: String,
+        /// Owning workflow instance id. Every Execution has one: until a real
+        /// workflow instance attaches to the `ExecutionRecord`, this falls
+        /// back to the execution's own id, mirroring
+        /// `ExecutionItem::instance_id`'s existing NULL-fallback convention
+        /// (see `list_executions_db`) so scoped streams can filter on it
+        /// unconditionally.
+        instance_id: String,
     },
     /// Emitted after a Finding is created, patched, or unblocked. Id-only,
     /// same shape as `PlanUpdate`/`ExecutionUpdate`: clients re-fetch the

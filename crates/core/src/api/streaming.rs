@@ -450,16 +450,132 @@ fn should_send_event(event: &BroadcastEvent, instance_id: &str, filters: &Stream
             instance_id: ref evt_id,
             ..
         } => evt_id == instance_id,
-        // Not workflow-instance-scoped, same treatment as PlanUpdate/ExecutionUpdate:
-        // these are domain-object mutation events (Finding/ChangeRequest/Catalog/
-        // OptimizeRun), not tied to a workflow instance id, so `instance_id`
-        // filtering (handled above via `filters.instance_id`) doesn't apply to them
-        // and they pass through unconditionally here.
-        BroadcastEvent::PlanUpdate { .. }
-        | BroadcastEvent::ExecutionUpdate { .. }
-        | BroadcastEvent::FindingUpdate { .. }
+        // Plan/Execution events genuinely have an owning workflow instance
+        // once a plan is approved and executed (spec 074 B13): scope them
+        // like WorkflowInstanceUpdated/NodeStateChanged/HilEvent above so a
+        // workflow-A-scoped stream never sees workflow-B's plan/execution
+        // events.
+        BroadcastEvent::PlanUpdate {
+            instance_id: ref evt_id,
+            ..
+        } => {
+            // `None` means the plan has no linked execution/instance (still
+            // awaiting approval, or rejected without ever running). There is
+            // no instance to match against, so drop it from every
+            // instance-scoped stream rather than guessing which one wants it.
+            matches!(evt_id, Some(id) if id == instance_id)
+        }
+        BroadcastEvent::ExecutionUpdate {
+            instance_id: ref evt_id,
+            ..
+        } => evt_id == instance_id,
+        // Not workflow-instance-scoped: these are domain-object mutation
+        // events (Finding/ChangeRequest/Catalog/OptimizeRun), not tied to a
+        // workflow instance id, so `instance_id` filtering (handled above via
+        // `filters.instance_id`) doesn't apply to them and they pass through
+        // unconditionally here.
+        BroadcastEvent::FindingUpdate { .. }
         | BroadcastEvent::ChangeRequestUpdate { .. }
         | BroadcastEvent::CatalogUpdate { .. }
         | BroadcastEvent::OptimizeRunUpdate { .. } => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn no_filters() -> StreamFilters {
+        StreamFilters {
+            instance_id: None,
+            node_id: None,
+            event_type: None,
+        }
+    }
+
+    /// Literal T3 acceptance gate (spec 074 B13): a workflow-A-scoped stream
+    /// receives no workflow-B plan events.
+    #[test]
+    fn plan_update_is_scoped_to_its_owning_instance() {
+        let filters = no_filters();
+        let event = BroadcastEvent::PlanUpdate {
+            plan_id: "plan-b".to_string(),
+            instance_id: Some("instance-b".to_string()),
+        };
+
+        assert!(
+            !should_send_event(&event, "instance-a", &filters),
+            "a workflow-A-scoped stream must not receive a PlanUpdate owned by instance B"
+        );
+        assert!(
+            should_send_event(&event, "instance-b", &filters),
+            "a workflow-B-scoped stream must receive a PlanUpdate owned by instance B"
+        );
+    }
+
+    /// Same acceptance gate, for ExecutionUpdate.
+    #[test]
+    fn execution_update_is_scoped_to_its_owning_instance() {
+        let filters = no_filters();
+        let event = BroadcastEvent::ExecutionUpdate {
+            execution_id: "exec-b".to_string(),
+            plan_id: Some("plan-b".to_string()),
+            status: "running".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            instance_id: "instance-b".to_string(),
+        };
+
+        assert!(
+            !should_send_event(&event, "instance-a", &filters),
+            "a workflow-A-scoped stream must not receive an ExecutionUpdate owned by instance B"
+        );
+        assert!(
+            should_send_event(&event, "instance-b", &filters),
+            "a workflow-B-scoped stream must receive an ExecutionUpdate owned by instance B"
+        );
+    }
+
+    /// A PlanUpdate with no linked instance (still awaiting approval, or
+    /// rejected without ever running) has nothing to match against, so every
+    /// instance-scoped stream must drop it rather than guess.
+    #[test]
+    fn plan_update_with_no_instance_is_dropped_from_every_scoped_stream() {
+        let filters = no_filters();
+        let event = BroadcastEvent::PlanUpdate {
+            plan_id: "plan-a".to_string(),
+            instance_id: None,
+        };
+
+        assert!(!should_send_event(&event, "instance-a", &filters));
+        assert!(!should_send_event(&event, "instance-b", &filters));
+    }
+
+    /// Domain-object mutation events with no instance concept at all
+    /// (Finding/ChangeRequest/Catalog/OptimizeRun) must remain unconditional
+    /// pass-through, unaffected by B13's Plan/Execution scoping change.
+    #[test]
+    fn non_instance_scoped_events_remain_unconditional_pass_through() {
+        let filters = no_filters();
+        let events = [
+            BroadcastEvent::FindingUpdate {
+                finding_id: "finding-1".to_string(),
+            },
+            BroadcastEvent::ChangeRequestUpdate {
+                change_request_id: "cr-1".to_string(),
+            },
+            BroadcastEvent::CatalogUpdate {
+                resource: "product".to_string(),
+                id: "product-1".to_string(),
+            },
+            BroadcastEvent::OptimizeRunUpdate {
+                run_id: "run-1".to_string(),
+                cycle: None,
+            },
+        ];
+
+        for event in &events {
+            assert!(should_send_event(event, "instance-a", &filters));
+            assert!(should_send_event(event, "instance-b", &filters));
+        }
     }
 }
