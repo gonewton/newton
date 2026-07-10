@@ -410,3 +410,63 @@ async fn git_commit_empty_message_after_cleanup_strip_is_hard_err() {
         "only the fixture's initial commit should exist, got: {log_text}"
     );
 }
+
+/// `stage` with a real glob `exclude` pattern (spec 074 P11) actually
+/// excludes matching staged files end-to-end: `git add -A` stages
+/// everything, then the exclude pass unstages the ones matching `build/*`,
+/// leaving unrelated files staged. This is the behavior the old hand-rolled
+/// `glob_matches` silently failed to provide for anything but `*.ext`/
+/// `name.*` patterns.
+#[tokio::test]
+async fn git_stage_with_glob_exclude_unstages_matching_files() {
+    use newton_core::workflow::operators::git::GitOperator;
+
+    let repo = init_repo();
+    std::fs::create_dir_all(repo.path().join("build")).unwrap();
+    std::fs::write(repo.path().join("build").join("output.bin"), "bin\n").unwrap();
+    std::fs::write(repo.path().join("kept.txt"), "keep me\n").unwrap();
+
+    let op = GitOperator::new();
+    let ctx = make_git_ctx(&repo);
+    let params = serde_json::json!({ "operation": "stage", "exclude": ["build/*"] });
+    let result = op.execute(params, ctx).await.expect("stage must succeed");
+    assert_eq!(result["has_staged"], Value::Bool(true));
+
+    let staged = std::process::Command::new("git")
+        .args(["diff", "--cached", "--name-only"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    let staged_text = String::from_utf8_lossy(&staged.stdout);
+    assert!(
+        staged_text.lines().any(|l| l == "kept.txt"),
+        "kept.txt should remain staged, got: {staged_text}"
+    );
+    assert!(
+        !staged_text.lines().any(|l| l.starts_with("build/")),
+        "build/* must be unstaged by the exclude pattern, got: {staged_text}"
+    );
+}
+
+/// An invalid glob `exclude` pattern is a hard `Err` (`GIT-STAGE-001`), not a
+/// silent no-op or a panic — the workflow author gets a clear, actionable
+/// failure instead of excludes quietly not applying.
+#[tokio::test]
+async fn git_stage_with_invalid_glob_pattern_is_hard_err() {
+    use newton_core::workflow::operators::git::GitOperator;
+
+    let repo = init_repo();
+    std::fs::write(repo.path().join("a.txt"), "hello\n").unwrap();
+    run_git_sync(repo.path(), &["add", "a.txt"]);
+
+    let op = GitOperator::new();
+    let ctx = make_git_ctx(&repo);
+    // Unterminated character class: not a valid glob.
+    let params = serde_json::json!({ "operation": "stage", "exclude": ["[invalid"] });
+    let err = op
+        .execute(params, ctx)
+        .await
+        .expect_err("invalid glob pattern must be a hard Err");
+
+    assert_eq!(err.code, "GIT-STAGE-001");
+}
