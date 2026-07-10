@@ -258,3 +258,7 @@ path = "tests/integration/exit_codes_preserved.rs"
 [[test]]
 name = "test_run_input_file_verbose"
 path = "tests/integration/test_run_input_file_verbose.rs"
+
+[[test]]
+name = "doctor_workspace_resolution"
+path = "tests/integration/doctor_workspace_resolution.rs"

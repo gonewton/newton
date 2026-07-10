@@ -345,9 +345,37 @@ pub async fn resume_workflow(
         .with_code("WFG-CKPT-001"));
     }
 
+    // A workflow whose definition declares an `io` block (input/output
+    // schemas, result_map, error_schema) but whose checkpoint's io_snapshot
+    // is null/absent is a corrupted-or-stale checkpoint: resuming it would
+    // silently skip the io-contract comparison below instead of enforcing
+    // it (spec 074, B10). Note this is deliberately narrower than "any empty
+    // snapshot" — an *explicit* `{}` io_snapshot (a workflow whose io block
+    // was genuinely empty at checkpoint time) still falls through to the
+    // ordinary mismatch check below, which already reports a precise
+    // WFG-CKPT-001 "io block has changed" error for that case.
+    let workflow_has_io = !document.workflow.settings.io.is_empty();
+    let snapshot_is_null_or_absent =
+        matches!(&checkpoint_data.io_snapshot, None | Some(Value::Null));
+    if workflow_has_io && snapshot_is_null_or_absent {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            "checkpoint has no io_snapshot but the workflow definition declares an io block \
+             (input_schema/output_schema/result_map/error_schema); resuming would silently \
+             skip validating that contract. The checkpoint may predate the io block or be \
+             corrupted — start a fresh execution instead of resuming.",
+        )
+        .with_code("WFG-CKPT-003"));
+    }
+
     if let Some(io_snapshot) = &checkpoint_data.io_snapshot {
-        let current_io =
-            serde_json::to_value(&document.workflow.settings.io).unwrap_or(Value::Null);
+        let current_io = serde_json::to_value(&document.workflow.settings.io).map_err(|e| {
+            AppError::new(
+                ErrorCategory::SerializationError,
+                format!("failed to serialize workflow io settings for checkpoint comparison: {e}"),
+            )
+            .with_code("WFG-CKPT-001")
+        })?;
         if io_snapshot != &current_io && !allow_workflow_change {
             return Err(AppError::new(
                 ErrorCategory::ValidationError,

@@ -154,8 +154,17 @@ pub fn validate_error_schema(schema: &Value, error_payload: &Value) -> Result<()
 
 /// Validate that the serialized trigger payload does not exceed max_input_bytes.
 /// Returns WFG-IO-001 on violation.
+///
+/// `payload` is a `serde_json::Value`, which cannot fail to serialize back to
+/// a string: its public constructors reject non-finite floats, and its map
+/// keys are always valid UTF-8 strings. This is documented as an explicit
+/// invariant (`.expect`) rather than defensively swallowed via
+/// `unwrap_or_default()`, which previously made a payload that somehow
+/// failed to serialize pass this size guard vacuously (0 bytes) instead of
+/// surfacing as a validation error (spec 074, B11).
 pub fn validate_input_size(payload: &Value, max_bytes: usize) -> Result<(), AppError> {
-    let serialized = serde_json::to_string(payload).unwrap_or_default();
+    let serialized = serde_json::to_string(payload)
+        .expect("serde_json::Value serialization is infallible (finite numbers, UTF-8 keys)");
     if serialized.len() > max_bytes {
         return Err(AppError::new(
             ErrorCategory::ValidationError,
@@ -172,8 +181,13 @@ pub fn validate_input_size(payload: &Value, max_bytes: usize) -> Result<(), AppE
 
 /// Validate that the serialized result does not exceed max_output_bytes.
 /// Returns WFG-IO-003 on violation.
+///
+/// See [`validate_input_size`] for why `.expect` (not `unwrap_or_default`) is
+/// correct here: a `serde_json::Value` cannot fail to serialize (spec 074,
+/// B11).
 pub fn validate_output_size(result: &Value, max_bytes: usize) -> Result<(), AppError> {
-    let serialized = serde_json::to_string(result).unwrap_or_default();
+    let serialized = serde_json::to_string(result)
+        .expect("serde_json::Value serialization is infallible (finite numbers, UTF-8 keys)");
     if serialized.len() > max_bytes {
         return Err(AppError::new(
             ErrorCategory::ValidationError,

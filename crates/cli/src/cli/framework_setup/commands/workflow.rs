@@ -16,7 +16,7 @@ use crate::cli::commands;
 use crate::cli::framework_setup::error_codes;
 use crate::cli::framework_setup::help_text::WORKFLOW_LONG_ABOUT;
 use crate::cli::framework_setup::{
-    get_bool, get_opt_path, get_opt_str, parse_kvp_from_map, parse_output_format, FromArgValueMap,
+    get_bool, get_opt_path, get_opt_str, parse_kvp_from_map, parse_output_format,
 };
 
 pub(crate) fn workflow_command() -> Command {
@@ -317,7 +317,7 @@ pub(crate) fn workflow_command() -> Command {
                         .map_err(anyhow::Error::from)
                     }
                     "resume" => {
-                        let dto = ResumeArgs::from_arg_value_map(&args);
+                        let dto = ResumeArgs::try_from_arg_value_map(&args)?;
                         commands::resume(dto).await.map_err(anyhow::Error::from)
                     }
                     "checkpoint" => {
@@ -454,7 +454,7 @@ pub(crate) fn workflow_command() -> Command {
                                 map.insert("workflow".to_string(), p);
                             }
                         }
-                        let run_args = RunArgs::from_arg_value_map(&map);
+                        let run_args = RunArgs::try_from_arg_value_map(&map)?;
                         commands::workflow_run(run_args).await
                     }
                     "import" => {

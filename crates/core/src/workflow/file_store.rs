@@ -249,6 +249,14 @@ impl WorkflowFileStore for FsWorkflowFileStore {
         content: &str,
         if_match: Option<&str>,
     ) -> Result<WriteOutcome, AppError> {
+        // `validate_slug` is the sole traversal defense for this write path:
+        // it rejects `/`, `\`, and any `..` occurrence in `name` *before*
+        // any joining happens, so `self.workflows_dir.join(format!("{name}.yaml"))`
+        // below can only ever produce a direct child of `workflows_dir`.
+        // (Previously there was also a post-join check comparing
+        // `canonical_dir.join(name)` against `canonical_dir` — that was
+        // tautologically true by construction and provided no real
+        // protection; spec 074, B12.)
         validate_slug(name)?;
         // Ensure dir exists before path resolution
         fs::create_dir_all(&self.workflows_dir).map_err(|e| {
@@ -258,21 +266,6 @@ impl WorkflowFileStore for FsWorkflowFileStore {
             )
         })?;
         let path = self.workflows_dir.join(format!("{name}.yaml"));
-        // Traversal check after dir creation
-        let canonical_dir = fs::canonicalize(&self.workflows_dir).map_err(|e| {
-            AppError::new(
-                ErrorCategory::IoError,
-                format!("failed to canonicalize workflows dir: {e}"),
-            )
-        })?;
-        // For traversal check we compare based on the expected path
-        let target = canonical_dir.join(format!("{name}.yaml"));
-        if !target.starts_with(&canonical_dir) {
-            return Err(
-                AppError::new(ErrorCategory::ValidationError, "path traversal detected")
-                    .with_code("ERR_VALIDATION"),
-            );
-        }
 
         let existed = path.exists();
         // Optimistic concurrency check
@@ -419,6 +412,62 @@ mod tests {
         assert!(store.write("../../etc/passwd", "bad", None).is_err());
         assert!(store.read("../../etc/passwd").is_err());
         assert!(store.delete("../../etc/passwd").is_err());
+    }
+
+    /// Spec 074, B12: the write-path traversal check
+    /// (`target.starts_with(&canonical_dir)` on a `canonical_dir.join(...)`
+    /// path) was tautologically true and has been deleted; `validate_slug`
+    /// is now the sole, pre-join defense. These pin the specific traversal
+    /// shapes called out by the fix — `../evil`, `a/b`, and absolute paths —
+    /// on the write path directly (not just `resolve_and_check_path`'s
+    /// read/delete path, already covered by `test_traversal_rejection`).
+    #[test]
+    fn test_write_rejects_dotdot_prefixed_name() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        let err = store.write("../evil", "bad", None).unwrap_err();
+        assert_eq!(err.code.as_str(), "ERR_VALIDATION");
+    }
+
+    #[test]
+    fn test_write_rejects_nested_slash_name() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        let err = store.write("a/b", "bad", None).unwrap_err();
+        assert_eq!(err.code.as_str(), "ERR_VALIDATION");
+    }
+
+    #[test]
+    fn test_write_rejects_absolute_unix_path_name() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        let err = store.write("/etc/passwd", "bad", None).unwrap_err();
+        assert_eq!(err.code.as_str(), "ERR_VALIDATION");
+    }
+
+    #[test]
+    fn test_write_rejects_absolute_windows_style_path_name() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        let err = store
+            .write("C:\\Windows\\System32\\evil", "bad", None)
+            .unwrap_err();
+        assert_eq!(err.code.as_str(), "ERR_VALIDATION");
+    }
+
+    /// After rejecting a traversal-shaped write, the store must not have
+    /// written anything outside `workflows_dir` — verifies the deleted dead
+    /// check wasn't silently load-bearing.
+    #[test]
+    fn test_write_traversal_rejection_leaves_no_file_outside_store() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        assert!(store.write("../evil", "bad", None).is_err());
+        let escaped = dir.path().parent().unwrap().join("evil.yaml");
+        assert!(
+            !escaped.exists(),
+            "traversal write must not create a file outside workflows_dir"
+        );
     }
 
     #[test]

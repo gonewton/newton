@@ -578,6 +578,34 @@ async fn run_and_make_partial_io_checkpoint(
     summary.execution_id
 }
 
+/// Spec 074, B10 (checkpoint-creation side): a checkpoint of a workflow that
+/// declares an `io` block must persist a non-null `io_snapshot`. Before the
+/// fix, `serde_json::to_value(&io).unwrap_or(Value::Null)` would silently
+/// coerce any serialization failure to `Null`; asserting the positive case
+/// here (non-null for a real io block) pins the invariant the checkpoint
+/// side is now supposed to uphold via `?` instead of swallowing.
+#[tokio::test]
+async fn checkpoint_of_io_bearing_workflow_persists_non_null_io_snapshot() {
+    let workspace = tempdir().expect("workspace");
+    let workflow_file = write_workflow(IO_SNAPSHOT_WORKFLOW);
+    let execution_id = run_and_make_partial_io_checkpoint(&workflow_file, &workspace).await;
+
+    let state_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(execution_id.to_string());
+    let ckpt_val = read_json(&state_dir.join("checkpoint.json"));
+    let io_snapshot = &ckpt_val["io_snapshot"];
+    assert!(
+        !io_snapshot.is_null(),
+        "io_snapshot must be non-null for a workflow whose io block is non-empty; \
+         checkpoint={ckpt_val}"
+    );
+    assert_eq!(io_snapshot["result_map"]["status"], json!("ok"));
+}
+
 /// AC 24: resuming a run whose io_snapshot matches the current workflow's io
 /// block succeeds without error.
 #[tokio::test]
@@ -749,12 +777,48 @@ workflow:
     );
 }
 
-/// AC 27: resuming a checkpoint written before this spec (no io_snapshot field)
-/// succeeds (backward-compatible).
+/// AC 27 (superseded by spec 074, B10 — see below): this repo prefers
+/// breaking backward compatibility over silently-wrong behavior (NEWTON-0030).
+/// A checkpoint written before the io_snapshot field existed (or one where
+/// it's simply absent/null) for a workflow that *does* declare an io block
+/// used to resume silently, skipping the io-contract comparison entirely.
+/// That is now a hard resume failure instead: see
+/// `resume_old_checkpoint_without_io_snapshot_fails_when_workflow_has_io`
+/// below.
+///
+/// AC 27': resuming a checkpoint with a null/absent io_snapshot succeeds
+/// when the *current* workflow has no io block either — nothing was ever
+/// silently dropped in that case, so this remains backward-compatible.
 #[tokio::test]
-async fn ac27_resume_old_checkpoint_without_io_snapshot_succeeds() {
+async fn ac27_resume_old_checkpoint_without_io_snapshot_succeeds_when_workflow_has_no_io() {
     let workspace = tempdir().expect("workspace");
-    let workflow_file = write_workflow(IO_SNAPSHOT_WORKFLOW);
+    let no_io_yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: first
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+  tasks:
+    - id: first
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: second
+    - id: second
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: done
+    - id: done
+      operator: NoOpOperator
+      params: {}
+"#;
+    let workflow_file = write_workflow(no_io_yaml);
     let execution_id = run_and_make_partial_io_checkpoint(&workflow_file, &workspace).await;
 
     // Remove io_snapshot from checkpoint.json to simulate an old-format checkpoint.
@@ -783,9 +847,89 @@ async fn ac27_resume_old_checkpoint_without_io_snapshot_succeeds() {
     .await;
     assert!(
         result.is_ok(),
-        "resume of old checkpoint without io_snapshot should succeed (backward-compat); err={:?}",
+        "resume of an old checkpoint without io_snapshot should succeed when the workflow has \
+         no io block to lose; err={:?}",
         result.err()
     );
+}
+
+/// Spec 074, B10: a checkpoint with a null/absent io_snapshot for a workflow
+/// that *does* declare an io block must fail resume with a clear,
+/// dedicated error (WFG-CKPT-003) instead of silently resuming as if the io
+/// contract had never existed. Deliberately breaks the old AC 27
+/// "backward-compatible" guarantee for this case (NEWTON-0030: prefer
+/// breaking to silent data loss).
+#[tokio::test]
+async fn resume_old_checkpoint_without_io_snapshot_fails_when_workflow_has_io() {
+    let workspace = tempdir().expect("workspace");
+    let workflow_file = write_workflow(IO_SNAPSHOT_WORKFLOW);
+    let execution_id = run_and_make_partial_io_checkpoint(&workflow_file, &workspace).await;
+
+    // Remove io_snapshot from checkpoint.json to simulate an old-format checkpoint.
+    let state_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(execution_id.to_string());
+    let mut ckpt_val = read_json(&state_dir.join("checkpoint.json"));
+    if let Some(map) = ckpt_val.as_object_mut() {
+        map.remove("io_snapshot");
+    }
+    write_json(&state_dir.join("checkpoint.json"), &ckpt_val);
+
+    let document = schema::load_workflow(workflow_file.path()).expect("parse");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let err = executor::resume_workflow(
+        registry,
+        workspace.path().to_path_buf(),
+        execution_id,
+        false,
+    )
+    .await
+    .expect_err("resume of a checkpoint missing io_snapshot must fail when the workflow has io");
+    assert_eq!(
+        err.code, "WFG-CKPT-003",
+        "expected WFG-CKPT-003 for a null/absent io_snapshot against an io-bearing workflow; \
+         got {err:?}"
+    );
+}
+
+/// Same as above but for an explicit `null` io_snapshot (rather than an
+/// absent key), covering the other half of "null/absent" from spec 074, B10.
+#[tokio::test]
+async fn resume_checkpoint_with_null_io_snapshot_fails_when_workflow_has_io() {
+    let workspace = tempdir().expect("workspace");
+    let workflow_file = write_workflow(IO_SNAPSHOT_WORKFLOW);
+    let execution_id = run_and_make_partial_io_checkpoint(&workflow_file, &workspace).await;
+
+    let state_dir = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(execution_id.to_string());
+    let mut ckpt_val = read_json(&state_dir.join("checkpoint.json"));
+    ckpt_val["io_snapshot"] = Value::Null;
+    write_json(&state_dir.join("checkpoint.json"), &ckpt_val);
+
+    let document = schema::load_workflow(workflow_file.path()).expect("parse");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+
+    let err = executor::resume_workflow(
+        registry,
+        workspace.path().to_path_buf(),
+        execution_id,
+        false,
+    )
+    .await
+    .expect_err(
+        "resume of a checkpoint with a null io_snapshot must fail when the workflow has io",
+    );
+    assert_eq!(err.code, "WFG-CKPT-003", "got {err:?}");
 }
 
 // ─── PR-3 (spec 074, B1 + S1): completion envelope persist failure fails the run ──

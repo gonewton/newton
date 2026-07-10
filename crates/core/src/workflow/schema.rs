@@ -96,7 +96,7 @@ pub struct IoBlock {
 }
 
 impl IoBlock {
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.input_schema.is_none()
             && self.output_schema.is_none()
             && self.result_map.is_none()
