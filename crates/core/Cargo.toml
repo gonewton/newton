@@ -199,6 +199,10 @@ name = "test_lag_tolerant_streams"
 path = "tests/integration/test_lag_tolerant_streams.rs"
 
 [[test]]
+name = "test_workflow_logs_ws_select"
+path = "tests/integration/test_workflow_logs_ws_select.rs"
+
+[[test]]
 name = "test_magic_tools"
 path = "tests/integration/test_magic_tools.rs"
 

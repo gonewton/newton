@@ -14,6 +14,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use futures::{SinkExt, StreamExt};
 use newton_types::{ApiError, BroadcastEvent};
 use serde::Deserialize;
 use std::convert::Infallible;
@@ -22,7 +23,6 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
-const HEARTBEAT_PING_INTERVAL: Duration = Duration::from_secs(30);
 const WELCOME_FRAME: &str = r#"{"type":"welcome"}"#;
 
 /// Builds the JSON payload sent to a stream consumer when the shared broadcast
@@ -84,7 +84,7 @@ async fn handle_heartbeat_socket(mut socket: WebSocket, state: Arc<AppState>) {
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(_) => break,
             },
-            _ = tokio::time::sleep(HEARTBEAT_PING_INTERVAL) => {
+            _ = tokio::time::sleep(state.ws_ping_interval) => {
                 if socket.send(Message::Ping(vec![].into())).await.is_err() {
                     break;
                 }
@@ -151,6 +151,7 @@ async fn handle_workflow_socket(
     filters: StreamFilters,
 ) {
     let mut rx = state.events_tx.subscribe();
+    let ping_interval = state.ws_ping_interval;
     // Not used again below: drop the AppState/Sender reference this task
     // holds so the receive loop's `RecvError::Closed` arm is actually
     // reachable once every *other* reference (router, other connections)
@@ -166,24 +167,50 @@ async fn handle_workflow_socket(
         }
     }
 
+    // Split so the loop below can `select!` over reading the client's half
+    // of the socket (to notice a client-initiated Close promptly, and to
+    // drain the socket so OS receive-buffer backpressure never stalls it)
+    // at the same time as the broadcast receiver and the ping tick (spec
+    // 074 B14).
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+
     loop {
-        match rx.recv().await {
-            Ok(event) => {
-                if should_send_event(&event, &instance_id, &filters) {
-                    if let Ok(json) = serde_json::to_string(&event) {
-                        if socket.send(Message::Text(json.into())).await.is_err() {
-                            break;
+        tokio::select! {
+            ws_msg = ws_receiver.next() => match ws_msg {
+                // Client closed the connection: stop pushing to it.
+                Some(Ok(Message::Close(_))) => break,
+                // Clients don't send meaningful data on this read-only
+                // stream, but the socket must still be drained (Pong,
+                // stray Text/Binary, etc.) or backpressure could stall it.
+                Some(Ok(_)) => continue,
+                // Socket error reading from the client.
+                Some(Err(_)) => break,
+                // Stream ended: connection dropped.
+                None => break,
+            },
+            recv_result = rx.recv() => match recv_result {
+                Ok(event) => {
+                    if should_send_event(&event, &instance_id, &filters) {
+                        if let Ok(json) = serde_json::to_string(&event) {
+                            if ws_sender.send(Message::Text(json.into())).await.is_err() {
+                                break;
+                            }
                         }
                     }
                 }
-            }
-            Err(broadcast::error::RecvError::Lagged(n)) => {
-                let frame = lagged_frame_json(n);
-                if socket.send(Message::Text(frame.into())).await.is_err() {
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    let frame = lagged_frame_json(n);
+                    if ws_sender.send(Message::Text(frame.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            _ = tokio::time::sleep(ping_interval) => {
+                if ws_sender.send(Message::Ping(vec![].into())).await.is_err() {
                     break;
                 }
             }
-            Err(broadcast::error::RecvError::Closed) => break,
         }
     }
 }
@@ -230,6 +257,7 @@ async fn handle_logs_socket(
 ) {
     // Subscribe first to avoid missing events during historical replay
     let mut rx = state.events_tx.subscribe();
+    let ping_interval = state.ws_ping_interval;
 
     let task_name = resolve_task_name(&state, &instance_id, &node_id).await;
     let connect_line = BroadcastEvent::LogMessage {
@@ -270,34 +298,60 @@ async fn handle_logs_socket(
     // the shared broadcast channel open forever.
     drop(state);
 
+    // Split so the loop below can `select!` over reading the client's half
+    // of the socket (to notice a client-initiated Close promptly, and to
+    // drain the socket so OS receive-buffer backpressure never stalls it)
+    // at the same time as the broadcast receiver and the ping tick (spec
+    // 074 B14).
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+
     // Forward live broadcast events
     loop {
-        match rx.recv().await {
-            Ok(event) => {
-                if should_send_event(&event, &instance_id, &filters) {
-                    if let BroadcastEvent::LogMessage {
-                        instance_id: ref evt_inst,
-                        node_id: ref evt_node,
-                        ..
-                    } = event
-                    {
-                        if evt_inst == &instance_id && evt_node == &node_id {
-                            if let Ok(json) = serde_json::to_string(&event) {
-                                if socket.send(Message::Text(json.into())).await.is_err() {
-                                    break;
+        tokio::select! {
+            ws_msg = ws_receiver.next() => match ws_msg {
+                // Client closed the connection: stop pushing to it.
+                Some(Ok(Message::Close(_))) => break,
+                // Clients don't send meaningful data on this read-only
+                // stream, but the socket must still be drained (Pong,
+                // stray Text/Binary, etc.) or backpressure could stall it.
+                Some(Ok(_)) => continue,
+                // Socket error reading from the client.
+                Some(Err(_)) => break,
+                // Stream ended: connection dropped.
+                None => break,
+            },
+            recv_result = rx.recv() => match recv_result {
+                Ok(event) => {
+                    if should_send_event(&event, &instance_id, &filters) {
+                        if let BroadcastEvent::LogMessage {
+                            instance_id: ref evt_inst,
+                            node_id: ref evt_node,
+                            ..
+                        } = event
+                        {
+                            if evt_inst == &instance_id && evt_node == &node_id {
+                                if let Ok(json) = serde_json::to_string(&event) {
+                                    if ws_sender.send(Message::Text(json.into())).await.is_err() {
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            Err(broadcast::error::RecvError::Lagged(n)) => {
-                let frame = lagged_frame_json(n);
-                if socket.send(Message::Text(frame.into())).await.is_err() {
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    let frame = lagged_frame_json(n);
+                    if ws_sender.send(Message::Text(frame.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            _ = tokio::time::sleep(ping_interval) => {
+                if ws_sender.send(Message::Ping(vec![].into())).await.is_err() {
                     break;
                 }
             }
-            Err(broadcast::error::RecvError::Closed) => break,
         }
     }
 }
