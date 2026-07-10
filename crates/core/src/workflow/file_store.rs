@@ -37,6 +37,13 @@ pub trait WorkflowFileStore: Send + Sync {
         if_match: Option<&str>,
     ) -> Result<WriteOutcome, AppError>;
     fn delete(&self, name: &str) -> Result<(), AppError>;
+    /// Fix 6 (B17): cheap existence probe — `validate_slug` plus an fs
+    /// `metadata()` stat, no content read and no SHA-256 hash computation.
+    /// Callers that only need to know whether a name is taken (e.g. the
+    /// `PUT` handler's no-precondition 428 check) should use this instead of
+    /// `read()`, which pays for a full file read plus a hash it then
+    /// discards.
+    fn exists(&self, name: &str) -> Result<bool, AppError>;
 }
 
 pub struct FsWorkflowFileStore {
@@ -285,6 +292,20 @@ impl WorkflowFileStore for FsWorkflowFileStore {
                     )
                     .with_code("ERR_CONFLICT"));
                 }
+            } else {
+                // Fix 5: `if_match` names a hash for a file state that no
+                // longer exists — the file was deleted (or never existed)
+                // since the caller last observed that hash. A precondition
+                // referencing a vanished file state can never be satisfied,
+                // so CAS must fail the same way a hash mismatch does,
+                // rather than falling through to silently (re)create the
+                // file as if this were an unconditional PUT.
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    "ETag mismatch: file does not exist (If-Match precondition cannot be \
+                     satisfied against a deleted or never-created file)",
+                )
+                .with_code("ERR_CONFLICT"));
             }
         }
         atomic_write(&path, content.as_bytes())?;
@@ -317,6 +338,11 @@ impl WorkflowFileStore for FsWorkflowFileStore {
         } else {
             Ok(WriteOutcome::Created(record))
         }
+    }
+
+    fn exists(&self, name: &str) -> Result<bool, AppError> {
+        let path = resolve_and_check_path(&self.workflows_dir, name)?;
+        Ok(fs::metadata(&path).is_ok())
     }
 
     fn delete(&self, name: &str) -> Result<(), AppError> {
@@ -479,6 +505,47 @@ mod tests {
             .write("flow", "content2", Some("wrong-hash"))
             .unwrap_err();
         assert_eq!(err.code.as_str(), "ERR_CONFLICT");
+    }
+
+    /// Fix 5: `if_match: Some(_)` against a file that does not exist must
+    /// fail CAS with the same conflict shape as a hash mismatch, not fall
+    /// through to an unconditional create. Exercises the store layer
+    /// directly (the API-level regression pin — GET/DELETE/PUT over HTTP —
+    /// lives in `test_api::test_workflow_files_if_match_put_after_delete_conflicts_not_recreated`).
+    #[test]
+    fn test_if_match_against_nonexistent_file_conflicts_and_does_not_create() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        let err = store
+            .write("never-existed", "content", Some("some-hash"))
+            .unwrap_err();
+        assert_eq!(err.code.as_str(), "ERR_CONFLICT");
+        assert!(
+            store.read("never-existed").is_err(),
+            "conditional write against a nonexistent file must not create it"
+        );
+    }
+
+    /// Same as above but for a file that existed and was deleted — proves
+    /// the veto applies to "deleted since caller last observed it", not
+    /// just "literally never existed".
+    #[test]
+    fn test_if_match_against_deleted_file_conflicts_and_does_not_recreate() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        store.write("flow", "content1", None).unwrap();
+        let record = store.read("flow").unwrap();
+        let old_hash = record.content_hash;
+        store.delete("flow").unwrap();
+
+        let err = store
+            .write("flow", "content2", Some(&old_hash))
+            .unwrap_err();
+        assert_eq!(err.code.as_str(), "ERR_CONFLICT");
+        assert!(
+            store.read("flow").is_err(),
+            "conditional write against a deleted file must not resurrect it"
+        );
     }
 
     #[test]

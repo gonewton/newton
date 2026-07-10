@@ -88,12 +88,30 @@ pub trait Operator: Send + Sync + 'static {
 /// runtime deps are absent in the calling context.
 #[derive(Debug, Clone)]
 pub struct Descriptor {
+    /// Operator name as it appears in workflow YAML `operator:` fields (and
+    /// in the composed schema's `operator` enum). Matches [`Operator::name`]
+    /// for the same operator.
     pub name: &'static str,
+    /// JSON Schema for the operator's `params` object. Matches
+    /// [`Operator::params_schema`] for the same operator — operators should
+    /// derive both from one `schema_for!` call (e.g. via
+    /// `Self::descriptor().params_schema` in the trait impl) so the two can
+    /// never drift apart.
     pub params_schema: Schema,
+    /// JSON Schema for the value the operator's `execute` resolves to.
+    /// Matches [`Operator::output_schema`] for the same operator, for the
+    /// same reason as `params_schema` above.
     pub output_schema: Schema,
 }
 
 impl Descriptor {
+    /// Builds a Descriptor by calling `name()`/`params_schema()`/
+    /// `output_schema()` on an already-constructed operator instance. Used
+    /// by [`OperatorRegistryBuilder::register`] for operators with no gated
+    /// runtime deps, where an executable instance is always available to
+    /// derive the Descriptor from — see `register_descriptor` /
+    /// `register_executable_only` for operators that need the two paths
+    /// split (ADR-0014).
     pub fn from_operator<T: Operator>(operator: &T) -> Self {
         Self {
             name: operator.name(),

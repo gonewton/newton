@@ -169,11 +169,11 @@ impl Operator for GraderAgentOperator {
     }
 
     fn params_schema(&self) -> schemars::Schema {
-        schemars::schema_for!(GraderAgentParams)
+        Self::descriptor().params_schema
     }
 
     fn output_schema(&self) -> schemars::Schema {
-        schemars::schema_for!(GraderAgentOutput)
+        Self::descriptor().output_schema
     }
 
     async fn execute(&self, params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {

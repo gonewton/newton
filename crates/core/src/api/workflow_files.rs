@@ -328,15 +328,19 @@ pub(crate) async fn put_workflow_file(
     // brand-new file stays allowed, so only check existence (and only pay
     // for the extra read) when the caller didn't supply either mechanism.
     if if_match.is_none() {
-        match store.read(&name) {
-            Ok(_) => {
+        // Fix 6 (B17): a cheap existence probe — `exists()` is a
+        // `validate_slug` + fs `metadata()` stat, not a full read + SHA-256
+        // hash of the (possibly large) file content that's about to be
+        // discarded either way.
+        match store.exists(&name) {
+            Ok(true) => {
                 return err_precondition_required(
                     "workflow file already exists; overwriting it requires either an \
                      If-Match header or an expected_hash body field carrying the \
                      file's current content_hash (fetch it via GET first)",
                 )
             }
-            Err(e) if e.code == "ERR_NOT_FOUND" => {
+            Ok(false) => {
                 // No existing file: unconditional create is fine.
             }
             Err(e) => return map_store_error(&e),

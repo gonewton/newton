@@ -805,27 +805,41 @@ async fn test_scenario_14_error_fallback() {
 // Scenario 15: Retry & Backoff
 // -----------------------------------------------------------------------------
 //
-// spec 074 / S14 flip: the retry loop no longer retries an error unless it is
-// positively classified transient (see task_execution::is_retryable). A plain
-// `CommandOperator` non-zero exit code (`WFG-CMD-001`) is a side-effecting-operator
-// failure and is now non-retryable by default — see
-// `test_unclassified_command_error_is_not_retried` below for that contract.
-// This scenario is retargeted to exercise the retry/backoff *mechanism* through a
-// positively-transient error class instead: `WFG-GH-004` with a recognized
-// network-ish message (see `is_retryable`'s TRANSIENT_PATTERNS).
+// spec 074 S14 (corrected 2026-07-10, see task_execution::is_retryable doc
+// comment): retry is opt-in per task (`prepare_retry_state` defaults
+// `max_attempts` to 1 absent an explicit `retry:` block), so `is_retryable`
+// is a permanent-error veto over that opt-in, not a transience allow-list.
+// A plain `CommandOperator` non-zero exit code (`WFG-CMD-001`, unclassified)
+// is therefore retryable once the task declares `retry:` — this is the
+// original WFG-CMD-001-style flaky-command shape (exit 1, exit 1, then
+// success), proving the engine honors the author's explicit retry config.
+//
+// (The `test_unclassified_command_error_is_not_retried` test that used to
+// live here — asserting a WFG-CMD-001 exit-code failure was NOT retried
+// despite an explicit `retry:` block — was deleted: its premise (unclassified
+// codes default to non-retryable) was the S14 error this correction fixes.
+// `is_retryable`'s veto is now scoped to positively-permanent errors
+// (`ValidationError` + known-permanent gh codes); a scenario-level
+// integration test asserting a *vetoed* retry would need a `ValidationError`
+// from `CommandOperator`, but `validate_params` runs before the retry loop is
+// ever entered, so there's no natural scenario-level failure to hang that
+// test on. The veto is covered at the unit level instead:
+// `task_execution::retry_classification_tests::validation_errors_are_not_retryable`.)
 #[tokio::test]
 async fn test_scenario_15_retry_backoff() {
     let mut plans = HashMap::new();
     plans.insert(
         "flaky".to_string(),
         VecDeque::from(vec![
-            MockCommandStep::Error {
-                code: "WFG-GH-004",
-                message: "dial tcp: connection failed (attempt 1)",
+            MockCommandStep::Success {
+                stdout: "",
+                stderr: "fail 1",
+                exit_code: 1,
             },
-            MockCommandStep::Error {
-                code: "WFG-GH-004",
-                message: "connection reset by peer (attempt 2)",
+            MockCommandStep::Success {
+                stdout: "",
+                stderr: "fail 2",
+                exit_code: 1,
             },
             MockCommandStep::Success {
                 stdout: "success",
@@ -850,48 +864,6 @@ async fn test_scenario_15_retry_backoff() {
     assert_eq!(summary.completed_tasks["retry_task"].run_seq, 1);
     // All 3 configured attempts (max_attempts: 3) were actually executed.
     assert_eq!(harness.cmd_runner.call_count("flaky"), 3);
-}
-
-/// spec 074 / S14: an unclassified (or explicitly permanent) error must be
-/// attempted exactly once — the retry budget (`max_attempts: 3` in
-/// `15_retry_backoff.yaml`) is never spent on it. Uses the fixture's default
-/// `CommandOperator` exit-code failure path (`WFG-CMD-001`, unclassified), which
-/// pre-S14 silently retried via the old `_ => true` default.
-#[tokio::test]
-async fn test_unclassified_command_error_is_not_retried() {
-    let mut plans = HashMap::new();
-    plans.insert(
-        "flaky".to_string(),
-        VecDeque::from(vec![
-            MockCommandStep::Success {
-                stdout: "",
-                stderr: "permanent failure",
-                exit_code: 1,
-            },
-            // If the engine incorrectly retried, this second queued step would be
-            // consumed and the task would succeed — proving the assertions below
-            // (status Failed, call_count 1) actually exercise non-retry behavior
-            // rather than passing vacuously.
-            MockCommandStep::Success {
-                stdout: "should never run",
-                stderr: "",
-                exit_code: 0,
-            },
-        ]),
-    );
-
-    let harness = WorkflowTestHarness::new(plans, FakeInterviewer::new());
-    // `retry_task` is the fixture's only (terminal) task with no fallback path, so
-    // a task failure fails the whole workflow (compute_final_status: WFG-EXEC-001) —
-    // same shape as `test_scenario_16_task_timeout` below.
-    let err = harness
-        .run_fixture("15_retry_backoff.yaml", None)
-        .await
-        .expect_err("unclassified command failure must fail the workflow, not retry to success");
-    assert_eq!(err.code, "WFG-EXEC-001");
-    // Exactly one attempt — the second queued (success) step was never consumed,
-    // proving the engine did not retry WFG-CMD-001 despite max_attempts: 3.
-    assert_eq!(harness.cmd_runner.call_count("flaky"), 1);
 }
 
 // -----------------------------------------------------------------------------

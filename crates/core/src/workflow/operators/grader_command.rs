@@ -118,11 +118,11 @@ impl Operator for GraderCommandOperator {
     }
 
     fn params_schema(&self) -> schemars::Schema {
-        schemars::schema_for!(GraderCommandParams)
+        Self::descriptor().params_schema
     }
 
     fn output_schema(&self) -> schemars::Schema {
-        schemars::schema_for!(GraderCommandOutput)
+        Self::descriptor().output_schema
     }
 
     async fn execute(&self, params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {

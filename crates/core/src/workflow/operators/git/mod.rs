@@ -298,6 +298,31 @@ async fn execute_commit(message: &str, allow_empty: bool, cwd: &Path) -> Result<
         return Ok(json!({ "committed": true, "skipped": false, "precommit_failed": false }));
     }
 
+    // git's own two well-known non-hook exit-1 causes (see the doc comment
+    // above) — checked BEFORE the hook-presence classification below so an
+    // installed hook doesn't cause either of these to be misclassified as
+    // `precommit_failed`.
+    let combined_output = format!("{}\n{}", result.stdout, result.stderr).to_lowercase();
+
+    if combined_output.contains("nothing to commit") {
+        // TOCTOU: the up-front `diff --cached --quiet` check raced with
+        // something unstaging the change before `git commit` actually ran.
+        // Same shape as the up-front clean-tree skip path above.
+        return Ok(json!({ "committed": false, "skipped": true, "precommit_failed": false }));
+    }
+
+    if combined_output.contains("aborting commit due to empty commit message") {
+        return Err(AppError::new(
+            ErrorCategory::ToolExecutionError,
+            format!(
+                "git commit aborted: empty commit message after cleanup (exit {}): {}",
+                result.exit_code,
+                result.stderr.trim()
+            ),
+        )
+        .with_code("WFG-GIT-003"));
+    }
+
     // Positive-signature classification only (spec 074 / B8): exit code 1
     // AND an actual hook installed. Any other nonzero exit — including
     // exit code 1 with no hook present — is a hard `Err`, never silently

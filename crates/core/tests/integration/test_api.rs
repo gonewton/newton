@@ -1753,6 +1753,83 @@ async fn test_workflow_files_if_match_conflict() {
     assert_eq!(conflict_resp.status(), StatusCode::CONFLICT);
 }
 
+/// Fix 5: a conditional PUT (`If-Match`/`expected_hash` set) against a file
+/// that no longer exists must fail CAS with 409, not silently fall through
+/// to an unconditional create. Sequence: PUT (create) -> GET (capture hash)
+/// -> DELETE -> PUT again with the pre-delete hash as `expected_hash`. The
+/// caller's precondition names a file state that's gone; there is no file
+/// state left for it to match, so the write must be rejected exactly like a
+/// hash mismatch would be, and the file must NOT be resurrected.
+#[tokio::test]
+async fn test_workflow_files_if_match_put_after_delete_conflicts_not_recreated() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::api_v1_router(state);
+
+    // Create
+    let body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
+    let create_req = Request::builder()
+        .method(Method::PUT)
+        .uri("/workflow-files/deleted-then-put")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let create_resp = app.clone().oneshot(create_req).await.unwrap();
+    assert_eq!(create_resp.status(), StatusCode::CREATED);
+
+    // GET to capture the current hash
+    let get_req = Request::builder()
+        .uri("/workflow-files/deleted-then-put")
+        .body(Body::empty())
+        .unwrap();
+    let get_resp = app.clone().oneshot(get_req).await.unwrap();
+    assert_eq!(get_resp.status(), StatusCode::OK);
+    let get_body = axum::body::to_bytes(get_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let detail: serde_json::Value = serde_json::from_slice(&get_body).unwrap();
+    let old_hash = detail["content_hash"].as_str().unwrap().to_string();
+
+    // Delete
+    let del_req = Request::builder()
+        .method(Method::DELETE)
+        .uri("/workflow-files/deleted-then-put")
+        .body(Body::empty())
+        .unwrap();
+    let del_resp = app.clone().oneshot(del_req).await.unwrap();
+    assert_eq!(del_resp.status(), StatusCode::NO_CONTENT);
+
+    // Conditional PUT with the pre-delete hash: must 409, not 201.
+    let body2 = serde_json::json!({
+        "content": VALID_WORKFLOW_YAML,
+        "expected_hash": old_hash,
+    });
+    let put_req = Request::builder()
+        .method(Method::PUT)
+        .uri("/workflow-files/deleted-then-put")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body2).unwrap()))
+        .unwrap();
+    let put_resp = app.clone().oneshot(put_req).await.unwrap();
+    assert_eq!(
+        put_resp.status(),
+        StatusCode::CONFLICT,
+        "conditional PUT against a deleted file must 409, not silently recreate it"
+    );
+
+    // The file must still not exist.
+    let get_req2 = Request::builder()
+        .uri("/workflow-files/deleted-then-put")
+        .body(Body::empty())
+        .unwrap();
+    let get_resp2 = app.oneshot(get_req2).await.unwrap();
+    assert_eq!(
+        get_resp2.status(),
+        StatusCode::NOT_FOUND,
+        "file must not have been recreated by the rejected conditional PUT"
+    );
+}
+
 #[tokio::test]
 async fn test_workflow_files_validate_invalid_semantic() {
     let dir = tempfile::tempdir().unwrap();

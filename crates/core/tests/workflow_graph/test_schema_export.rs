@@ -11,6 +11,36 @@ fn build_test_registry() -> OperatorRegistry {
     builder.build()
 }
 
+/// Same as `build_test_registry`, but with an in-memory `SqliteBackendStore`
+/// wired so the four optimization-loop operators (`GraderCommandOperator`,
+/// `ReconcileOperator`, `ChangeRequestOperator`, `GraderAgentOperator`) are
+/// registered as *executable* instances too (via `register_executable_only`),
+/// not just Descriptors. Needed by the Fix 3 parity test below, which
+/// compares each executable operator's live `params_schema()`/
+/// `output_schema()` against its registered Descriptor — a comparison that's
+/// vacuous for the four loop operators without a store, since they'd have no
+/// executable instance to call `params_schema()` on at all.
+async fn build_test_registry_with_store() -> OperatorRegistry {
+    let store = newton_backend::SqliteBackendStore::new_in_memory()
+        .await
+        .expect("in-memory sqlite store");
+    let store_arc: std::sync::Arc<dyn newton_types::BackendStore> = std::sync::Arc::new(store);
+
+    let workspace = std::path::PathBuf::from(".");
+    let mut builder = OperatorRegistry::builder();
+    let settings: GraphSettings = schema::WorkflowSettings::default();
+    operators::register_builtins_with_deps(
+        &mut builder,
+        workspace,
+        settings,
+        operators::BuiltinOperatorDeps {
+            backend_store: Some(store_arc),
+            ..Default::default()
+        },
+    );
+    builder.build()
+}
+
 /// ADR-0014: the full, pinned set of built-in operator names. Descriptors
 /// must include all 16 — including the four optimization-loop operators —
 /// even when `register_builtins` is called with no `BackendStore` (as
@@ -190,6 +220,61 @@ fn every_operator_params_schema_accepts_its_own_name() {
             v.is_object(),
             "params_schema for {} is not an object",
             op.name()
+        );
+    }
+}
+
+/// Fix 3: the four loop operators (`GraderCommandOperator`, `ReconcileOperator`,
+/// `ChangeRequestOperator`, `GraderAgentOperator`) each used to call
+/// `schema_for!` twice — once in their static `descriptor()` and again,
+/// independently, in the `Operator::params_schema()`/`output_schema()` trait
+/// methods — so the two could silently drift apart. They now delegate the
+/// trait methods to `Self::descriptor()`, making the Descriptor the single
+/// source of truth. This test pins that for *every* executable operator in
+/// the registry (all 16, using a store-backed registry so the four loop
+/// operators are executable here too — see `build_test_registry_with_store`):
+/// the live `Operator::params_schema()`/`output_schema()` must serialize
+/// identically to the schema carried by the operator's own registered
+/// Descriptor.
+#[tokio::test]
+async fn every_operator_schema_matches_its_registered_descriptor() {
+    let registry = build_test_registry_with_store().await;
+    let descriptors = registry.descriptors();
+
+    let operators = registry.list_operators();
+    assert_eq!(
+        operators.len(),
+        16,
+        "expected all 16 built-in operators to be executable with a store wired; got {}: {:?}",
+        operators.len(),
+        operators.iter().map(|o| o.name()).collect::<Vec<_>>()
+    );
+
+    for op in &operators {
+        let name = op.name();
+        let descriptor = descriptors
+            .iter()
+            .find(|d| d.name == name)
+            .unwrap_or_else(|| panic!("operator '{name}' has no matching registered descriptor"));
+
+        let runtime_params =
+            serde_json::to_value(op.params_schema()).expect("params_schema serializable");
+        let descriptor_params = serde_json::to_value(&descriptor.params_schema)
+            .expect("descriptor params_schema serializable");
+        assert_eq!(
+            runtime_params, descriptor_params,
+            "operator '{name}': Operator::params_schema() diverges from its registered \
+             Descriptor's params_schema"
+        );
+
+        let runtime_output =
+            serde_json::to_value(op.output_schema()).expect("output_schema serializable");
+        let descriptor_output = serde_json::to_value(&descriptor.output_schema)
+            .expect("descriptor output_schema serializable");
+        assert_eq!(
+            runtime_output, descriptor_output,
+            "operator '{name}': Operator::output_schema() diverges from its registered \
+             Descriptor's output_schema"
         );
     }
 }

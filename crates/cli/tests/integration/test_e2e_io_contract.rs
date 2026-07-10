@@ -296,6 +296,49 @@ fn wfg_io_001_emitted_when_payload_exceeds_max_input_bytes() {
     );
 }
 
+/// Fix 1 regression pin: a `CommandOperator` task with `capture_stdout: false`
+/// echoes noise on the child's stdout. Before the fix, `run_guarded` honored
+/// `Stdio::inherit()` for that stream, so the child's stdout landed directly
+/// on newton's own fd1 — corrupting the `--emit-completion-json` envelope
+/// with the child's raw output ahead of (or interleaved with) the JSON.
+/// After the fix (`run_guarded` always pipes stdout, matching
+/// `Command::output()`'s forced-pipe contract), the child's stdout is
+/// captured by the child process, not inherited, so newton's own stdout
+/// must be exactly one clean JSON envelope.
+#[test]
+fn emit_completion_json_stays_clean_json_with_capture_stdout_false_noise() {
+    let ws = TempWorkspace::new();
+    let wf = fixture_path("workflows/capture_stdout_false_noise.yaml");
+
+    let out = newton()
+        .args([
+            "workflow",
+            "run",
+            &wf.to_string_lossy(),
+            "--workspace",
+            &ws.path().to_string_lossy(),
+            "--emit-completion-json",
+        ])
+        .output()
+        .expect("newton run should execute");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "exit code should be 0 on success; stdout={stdout}, stderr={stderr}"
+    );
+    assert!(
+        !stdout.contains("THIS_IS_UNCAPTURED_CHILD_NOISE_ON_STDOUT"),
+        "child's stdout must not leak onto newton's own stdout when \
+         capture_stdout:false; stdout={stdout}"
+    );
+    let envelope: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+        panic!("stdout must parse as a single clean JSON envelope: {e}; stdout={stdout}")
+    });
+    assert_eq!(envelope["status"], "success", "status must be 'success'");
+}
+
 /// AC 20: WFG-IO-003 is emitted when the serialized result exceeds max_output_bytes.
 /// The fixture has max_output_bytes: 1 and a result_map with a non-trivial result.
 #[test]

@@ -14,7 +14,7 @@
 //! its own bespoke streaming flow but reuses [`ProcessGroupKillGuard`]
 //! directly (see `workflow::operators::agent::command`).
 
-use std::process::Output;
+use std::process::{Output, Stdio};
 use tokio::process::Command;
 
 /// Configure `cmd` for group-wide cleanup: `kill_on_drop(true)` always,
@@ -115,17 +115,26 @@ impl Drop for ProcessGroupKillGuard {
     }
 }
 
-/// Spawn `cmd` (already built with args/cwd/env/stdio set by the caller)
-/// with group-wide kill protection, wait for it to complete, and return the
-/// captured [`Output`] — a cancellation-safe, process-group-aware analogue
-/// of `tokio::process::Command::output()` (equivalently,
-/// `child.wait_with_output()`).
+/// Spawn `cmd` (already built with args/cwd/env set by the caller — see
+/// below for stdio) with group-wide kill protection, wait for it to
+/// complete, and return the captured [`Output`] — a cancellation-safe,
+/// process-group-aware analogue of `tokio::process::Command::output()`
+/// (equivalently, `child.wait_with_output()`).
 ///
 /// `kill_on_drop(true)` and (unix) `process_group(0)` are applied here via
 /// [`prepare_command_for_group_kill`]; callers must not set those
-/// themselves. Stdio capture semantics match `Command::output()`: a
-/// stream not explicitly `Stdio::piped()` is simply not captured (empty
-/// `Vec` in the returned `Output`).
+/// themselves. **Stdio**: this function mirrors `Command::output()`'s
+/// forced-pipe semantics exactly — it unconditionally overrides `cmd`'s
+/// stdout and stderr to `Stdio::piped()` and stdin to `Stdio::null()`
+/// before spawning, discarding whatever the caller configured. This is not
+/// a stylistic choice: `Command::output()` does the same override
+/// internally, and callers of this function were written against that
+/// contract (e.g. `TokioCommandRunner` always gets both streams back
+/// regardless of its `capture_stdout`/`capture_stderr` params). A caller
+/// that set `Stdio::inherit()` expecting it to survive would silently leak
+/// the child's stdout/stderr onto this process's own fds instead — so
+/// don't bother setting stdio before calling this; it's always
+/// overridden.
 ///
 /// If the returned future is dropped before completion (e.g. an outer
 /// per-task timeout), `kill_on_drop` reaps the direct child and, on unix,
@@ -137,6 +146,14 @@ impl Drop for ProcessGroupKillGuard {
 /// there is no further await after that point in this function, so the
 /// disarm is the last thing that happens before returning.
 pub(crate) async fn run_guarded(mut cmd: Command) -> std::io::Result<Output> {
+    // Mirror `Command::output()`'s forced-pipe semantics: stdout/stderr are
+    // always captured and stdin is always null, regardless of anything the
+    // caller set. See the doc comment above for why this must be
+    // unconditional.
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    cmd.stdin(Stdio::null());
+
     prepare_command_for_group_kill(&mut cmd);
     let child = cmd.spawn()?;
 

@@ -1,0 +1,25 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "Fix 1: capture_stdout:false must not leak child stdout onto newton's fd1"
+workflow:
+  settings:
+    entry_task: "noisy_task"
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 1
+    max_workflow_iterations: 5
+    command_operator:
+      allow_shell: true
+    io:
+      result_map:
+        status: ok
+  tasks:
+    - id: "noisy_task"
+      operator: "CommandOperator"
+      params:
+        cmd: "echo THIS_IS_UNCAPTURED_CHILD_NOISE_ON_STDOUT"
+        shell: true
+        capture_stdout: false
+      terminal: success

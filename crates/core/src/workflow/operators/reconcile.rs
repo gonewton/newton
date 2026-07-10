@@ -249,11 +249,11 @@ impl Operator for ReconcileOperator {
     }
 
     fn params_schema(&self) -> schemars::Schema {
-        schemars::schema_for!(ReconcileParams)
+        Self::descriptor().params_schema
     }
 
     fn output_schema(&self) -> schemars::Schema {
-        schemars::schema_for!(ReconcileOutput)
+        Self::descriptor().output_schema
     }
 
     async fn execute(&self, params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {

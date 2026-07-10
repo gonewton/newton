@@ -26,36 +26,52 @@ pub const RESOLVED_PARAMS_SNAPSHOT_LIMIT_BYTES: usize = 65_536;
 /// Cap on a single backoff sleep, before jitter. Mirrors `gh.rs::MAX_RETRY_DELAY_MS`.
 pub(crate) const MAX_TASK_BACKOFF_MS: u64 = 300_000;
 
-/// Returns true if an `AppError` represents a transient failure that should be retried.
+/// Returns true if an `AppError` represents a failure the engine retry loop is
+/// permitted to retry.
 ///
-/// Used by the engine retry loop to short-circuit on non-transient errors.
+/// Used by the engine retry loop to short-circuit on non-retryable errors —
+/// but note `prepare_retry_state` (below) already defaults `max_attempts` to
+/// `1` for any task without an explicit `retry:` block, so this function is
+/// only ever consulted for tasks whose author *positively opted in* to
+/// retries. That opt-in is itself the transience claim; this function is a
+/// **permanent-error veto** over it, not a transience allow-list. It returns
+/// `false` only for errors that are positively known to be permanent —
+/// retrying them cannot succeed and would just double-apply
+/// side-effecting work (`git push`, agent runs, gh mutations) — and `true`
+/// for everything else, honoring the author's explicit retry configuration.
 ///
-/// Contract (spec 074 decision 7 / S14 — flipped from the old "unknown codes default
-/// to retryable" behavior): retry is opt-in. An error is retried only if it is
-/// *positively* classified as transient below; every other code, including unknown
-/// ones, is treated as non-retryable. Blind retries of side-effecting operators
-/// (`git push`, agent runs, gh mutations) double-apply work on a permanent failure,
-/// which is worse than failing fast — ADR-0012 already routes persistent failures to
-/// quarantine, so failing fast just gets there sooner and without side effects.
+/// (Implementation note 2026-07-10: an earlier version of this function
+/// inverted the default — unknown codes were treated as non-retryable —
+/// on the premise that retry was implicitly on for every task. That premise
+/// was wrong: retry is opt-in per task, so the flip silently killed every
+/// explicit `retry:` block on an unclassified error code. See spec
+/// `074-audit-remediation.md` S14 for the corrected decision record.)
 ///
-/// Classification, in order:
-/// 1. `ValidationError` category → always non-retryable (bad input/config; retrying
+/// Veto classification, in order:
+/// 1. `ValidationError` category → always vetoed (bad input/config; retrying
 ///    without a state change can't succeed).
-/// 2. `WFG-GH-*` codes → unchanged from pre-tranche-2 behavior (see match arms below).
-/// 3. `WFG-RECONCILE-ADJ-001` → always retryable. Per CONTEXT.md's "fuzziness is not
-///    failure tolerance" (decision 1 / B2), a transient LLM adjudication outage keeps
-///    retrying with backoff; only exhausting `max_attempts` fails the reconcile task
-///    (and therefore the cycle) closed. Pinned by
+/// 2. `WFG-GH-*` codes → unchanged from pre-tranche-2 behavior (see match arms below);
+///    several are vetoed outright, `WFG-GH-004` is vetoed unless its message matches a
+///    known-transient pattern.
+/// 3. `WFG-RECONCILE-ADJ-001` → explicitly NOT vetoed (kept as an explicit truth,
+///    documenting intent rather than relying on the general default). Per
+///    CONTEXT.md's "fuzziness is not failure tolerance" (decision 1 / B2), a
+///    transient LLM adjudication outage keeps retrying with backoff; only
+///    exhausting `max_attempts` fails the reconcile task (and therefore the
+///    cycle) closed. Pinned by
 ///    `retry_classification_tests::reconcile_adjudication_failure_is_retryable`.
-/// 4. `TimeoutError` category → always retryable: the operation didn't fail
+/// 4. `TimeoutError` category → explicitly NOT vetoed (redundant with the
+///    default now, kept as an explicit truth): the operation didn't fail
 ///    semantically, it ran out of time budget (network stall, slow subprocess, human
 ///    response window). Covers `WFG-TIME-001/002`, `WFG-AGENT-005`,
 ///    `WFG-HUMAN-103/105`, etc. without needing to enumerate every timeout code.
-/// 5. `ResourceError` category → always retryable: today this is exclusively
+/// 5. `ResourceError` category → explicitly NOT vetoed (redundant with the
+///    default now, kept as an explicit truth): today this is exclusively
 ///    `WFG-AGENT-008` (agent SDK quota-exceeded) — the "rate-limit" case decision 7
 ///    calls out by name; the provider is asking the caller to back off, not
 ///    rejecting the request outright.
-/// 6. Everything else → non-retryable by default.
+/// 6. Everything else → NOT vetoed (retryable), because the task's explicit
+///    `retry:` configuration is the author's positive transience claim.
 pub(crate) fn is_retryable(err: &AppError) -> bool {
     if matches!(err.category, ErrorCategory::ValidationError) {
         return false;
@@ -92,7 +108,8 @@ pub(crate) fn is_retryable(err: &AppError) -> bool {
         return true;
     }
 
-    false
+    // Not positively vetoed: honor the task's explicit `retry:` opt-in.
+    true
 }
 
 /// Executes a single workflow task with retry logic, timeout handling, and context patching.
@@ -542,15 +559,20 @@ mod retry_classification_tests {
         assert!(!is_retryable(&e));
     }
 
-    /// Flipped by spec 074 decision 7 / S14: the old default was `true` (see git
-    /// history for `unknown_codes_default_to_retryable`, renamed/inverted here).
-    /// Retry is now opt-in — an unclassified error of a side-effecting operator
-    /// (e.g. a novel `WFG-CMD-*`/`WFG-GIT-*` failure) must fail fast rather than
-    /// silently re-executing.
+    /// Implementation note 2026-07-10 (spec 074 S14 correction): unknown codes
+    /// ARE retryable — explicit `retry:` config on a task is the author's
+    /// positive classification of transience, and `is_retryable` is only a
+    /// permanent-error veto over that opt-in (see the doc comment on
+    /// `is_retryable`). An earlier version of this test asserted the
+    /// opposite, on the mistaken premise that retry was implicitly on for
+    /// every task; `prepare_retry_state` defaults `max_attempts` to `1`
+    /// absent an explicit `retry:` block, so that premise was wrong and the
+    /// flip would have silently killed every explicit retry config on an
+    /// unclassified error code.
     #[test]
-    fn unknown_codes_default_to_non_retryable() {
+    fn unknown_codes_default_to_retryable() {
         let e = err(ErrorCategory::ToolExecutionError, "SOME-OTHER-CODE", "x");
-        assert!(!is_retryable(&e));
+        assert!(is_retryable(&e));
     }
 
     /// TimeoutError category is retryable regardless of code — decision 7 names
@@ -586,16 +608,16 @@ mod retry_classification_tests {
     }
 
     /// Pins retryability for ReconcileOperator's adjudication-failure code
-    /// (spec 074 PR-4 / B2 — "Reconciliation fails closed"). Today this passes
-    /// only because unknown codes default to retryable (see
-    /// `unknown_codes_default_to_retryable` above); it is deliberately its own
-    /// test — not folded into that one — so that when tranche-2's S14 flips the
-    /// unknown-code default to non-retryable, `WFG-RECONCILE-ADJ-001` must be
-    /// added to an explicit "transient" allow-list rather than silently
-    /// regressing to non-retryable. A transient LLM adjudication outage must
-    /// keep retrying with backoff, per CONTEXT.md's "Fuzziness is not failure
-    /// tolerance" — it must NOT be treated as hard-non-retryable the way
-    /// `ValidationError` is.
+    /// (spec 074 PR-4 / B2 — "Reconciliation fails closed"). This now passes
+    /// both because unknown codes default to retryable (see
+    /// `unknown_codes_default_to_retryable` above) AND because of the
+    /// explicit `WFG-RECONCILE-ADJ-001` arm in `is_retryable`; it is
+    /// deliberately kept as its own test — not folded into that one — so the
+    /// explicit arm's presence is independently pinned: a transient LLM
+    /// adjudication outage must keep retrying with backoff, per
+    /// CONTEXT.md's "Fuzziness is not failure tolerance" — it must NOT be
+    /// treated as hard-non-retryable the way `ValidationError` is,
+    /// regardless of how the *default* for unclassified codes is set.
     #[test]
     fn reconcile_adjudication_failure_is_retryable() {
         let e = err(
