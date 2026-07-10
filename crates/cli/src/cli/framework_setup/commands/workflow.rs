@@ -16,7 +16,7 @@ use crate::cli::commands;
 use crate::cli::framework_setup::error_codes;
 use crate::cli::framework_setup::help_text::WORKFLOW_LONG_ABOUT;
 use crate::cli::framework_setup::{
-    get_bool, get_opt_path, get_opt_str, parse_kvp_from_map, parse_output_format, FromArgValueMap,
+    get_bool, get_opt_path, get_opt_str, parse_kvp_from_map, parse_output_format,
 };
 
 pub(crate) fn workflow_command() -> Command {
@@ -35,6 +35,7 @@ pub(crate) fn workflow_command() -> Command {
                 "newton workflow preview workflow.yaml --trigger env=prod --format prose",
                 "newton workflow graph workflow.yaml --output graph.dot",
                 "newton workflow resume --run-id 12345678-1234-1234-1234-123456789abc",
+                "newton workflow resume --run-id 12345678-1234-1234-1234-123456789abc --verbose --emit-completion-json",
                 "newton workflow runs list --workspace ./workspace",
                 "newton workflow runs show --run-id <RUN_ID> --task my-task --verbose",
                 "newton workflow checkpoint list --workspace ./workspace --json",
@@ -317,8 +318,8 @@ pub(crate) fn workflow_command() -> Command {
                         .map_err(anyhow::Error::from)
                     }
                     "resume" => {
-                        let dto = ResumeArgs::from_arg_value_map(&args);
-                        commands::resume(dto).await.map_err(anyhow::Error::from)
+                        let dto = ResumeArgs::try_from_arg_value_map(&args)?;
+                        commands::resume(dto).await
                     }
                     "checkpoint" => {
                         let subcmd2 = get_opt_str(&args, "subcommand2")
@@ -454,7 +455,7 @@ pub(crate) fn workflow_command() -> Command {
                                 map.insert("workflow".to_string(), p);
                             }
                         }
-                        let run_args = RunArgs::from_arg_value_map(&map);
+                        let run_args = RunArgs::try_from_arg_value_map(&map)?;
                         commands::workflow_run(run_args).await
                     }
                     "import" => {

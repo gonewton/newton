@@ -116,13 +116,9 @@ pub async fn workflow_import(args: ImportArgs) -> StdResult<(), AppError> {
             }
         };
 
-        use newton_core::workflow::state::WorkflowExecutionStatus;
-        let status = match execution.status {
-            WorkflowExecutionStatus::Running => newton_types::WorkflowStatus::Running,
-            WorkflowExecutionStatus::Completed => newton_types::WorkflowStatus::Succeeded,
-            WorkflowExecutionStatus::Failed => newton_types::WorkflowStatus::Failed,
-            WorkflowExecutionStatus::Cancelled => newton_types::WorkflowStatus::Cancelled,
-        };
+        // S11: single conversion point, `From<WorkflowExecutionStatus> for
+        // WorkflowStatus` (crates/core/src/workflow/state.rs).
+        let status: newton_types::WorkflowStatus = execution.status.into();
 
         let instance = newton_types::WorkflowInstance {
             instance_id: instance_id_str.clone(),

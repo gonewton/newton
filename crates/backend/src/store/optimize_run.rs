@@ -2,8 +2,8 @@ use super::helpers::query_err;
 use super::rows::{OptimizeCycleRow, OptimizeRunRow};
 use crate::err_internal;
 use crate::err_not_found;
-use crate::models::*;
 use newton_types::ApiError;
+use newton_types::*;
 
 const RUN_SELECT: &str =
     "SELECT id, projectId as project_id, scope, scopeId as scope_id, status, cycle, \

@@ -7,7 +7,7 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
 use async_trait::async_trait;
-use newton_backend::{BackendStore, CreateChangeRequestBody};
+use newton_types::{BackendStore, CreateChangeRequestBody};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -20,10 +20,23 @@ pub struct ChangeRequestOperator {
 }
 
 impl ChangeRequestOperator {
+    pub const NAME: &'static str = "ChangeRequestOperator";
+
     pub fn new(workspace_root: PathBuf, store: Arc<dyn BackendStore>) -> Self {
         Self {
             workspace_root,
             store,
+        }
+    }
+
+    /// Store-independent Descriptor (name + params/output schema). Used to
+    /// describe this operator's vocabulary even when no `BackendStore` is
+    /// wired (e.g. `newton schema export`). See ADR-0014.
+    pub fn descriptor() -> crate::workflow::operator::Descriptor {
+        crate::workflow::operator::Descriptor {
+            name: Self::NAME,
+            params_schema: schemars::schema_for!(ChangeRequestParams),
+            output_schema: schemars::schema_for!(ChangeRequestOutput),
         }
     }
 }
@@ -128,7 +141,7 @@ struct CrSynthesis {
 #[async_trait]
 impl Operator for ChangeRequestOperator {
     fn name(&self) -> &'static str {
-        "ChangeRequestOperator"
+        Self::NAME
     }
 
     fn validate_params(&self, params: &Value) -> Result<(), AppError> {
@@ -150,11 +163,11 @@ impl Operator for ChangeRequestOperator {
     }
 
     fn params_schema(&self) -> schemars::Schema {
-        schemars::schema_for!(ChangeRequestParams)
+        Self::descriptor().params_schema
     }
 
     fn output_schema(&self) -> schemars::Schema {
-        schemars::schema_for!(ChangeRequestOutput)
+        Self::descriptor().output_schema
     }
 
     async fn execute(&self, params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {
@@ -188,7 +201,7 @@ impl Operator for ChangeRequestOperator {
                 .with_code("CR-010")
             })?;
 
-        let mut open: Vec<&newton_backend::FindingItem> = all_findings
+        let mut open: Vec<&newton_types::FindingItem> = all_findings
             .iter()
             .filter(|f| is_open_status(&f.status))
             .collect();
@@ -199,7 +212,7 @@ impl Operator for ChangeRequestOperator {
 
         open.sort_by_key(|f| severity_rank(&f.severity));
 
-        let selected: Vec<&newton_backend::FindingItem> =
+        let selected: Vec<&newton_types::FindingItem> =
             open.into_iter().take(max_findings).collect();
 
         if selected.is_empty() {

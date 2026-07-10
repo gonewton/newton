@@ -78,14 +78,19 @@ pub mod doctor {
             detail: crate::VERSION.to_string(),
         });
 
+        // Resolve the workspace exactly once — explicit `--workspace`, else
+        // CWD if it looks like a Newton workspace (has `.newton/`) — and pass
+        // that single resolution to every probe below. Previously only the
+        // workspace probe applied the CWD fallback while the config/ailoop
+        // probes read `args.workspace` directly, so running `newton doctor`
+        // from inside a valid workspace (no `--workspace` flag) reported
+        // `SKIP config` / `SKIP ailoop` even though `monitor.conf` existed
+        // right there (spec 074, B20).
+        let resolved_workspace = resolve_workspace(args.workspace.as_deref());
+
         // Workspace probe
-        let ws_candidate = args.workspace.clone().or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .filter(|cwd| cwd.join(".newton").is_dir())
-        });
-        match ws_candidate {
-            Some(ws) => match probe_workspace_writable(&ws) {
+        match &resolved_workspace {
+            Some(ws) => match probe_workspace_writable(ws) {
                 Ok(()) => report.probes.push(Probe {
                     name: "workspace".into(),
                     status: ProbeStatus::Ok,
@@ -105,8 +110,7 @@ pub mod doctor {
         }
 
         // Config probe
-        let monitor_conf = args
-            .workspace
+        let monitor_conf = resolved_workspace
             .as_ref()
             .map(|w| w.join(".newton/configs/monitor.conf"));
         let monitor_conf_text = match &monitor_conf {
@@ -162,6 +166,22 @@ pub mod doctor {
         report.probes.push(probe_logging());
 
         Ok(report)
+    }
+
+    /// Resolve the workspace `doctor` should probe: the explicit
+    /// `--workspace` path if given, else the current working directory if it
+    /// contains a `.newton/` directory, else `None` (no workspace context —
+    /// callers must render the corresponding probes as `SKIP`, not `FAIL`).
+    ///
+    /// Every probe in [`run`] MUST use this single resolution instead of
+    /// re-deriving its own fallback, so probes agree on what workspace they
+    /// are diagnosing (spec 074, B20).
+    fn resolve_workspace(explicit: Option<&Path>) -> Option<PathBuf> {
+        explicit.map(PathBuf::from).or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .filter(|cwd| cwd.join(".newton").is_dir())
+        })
     }
 
     fn probe_workspace_writable(ws: &Path) -> std::io::Result<()> {
@@ -251,6 +271,28 @@ pub mod doctor {
             }
         }
         None
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        // Deliberately does NOT exercise the CWD-fallback branch: this test
+        // binary runs many unit tests concurrently, so mutating the shared
+        // process CWD here would race with them. The CWD fallback (B20's
+        // actual bug) is covered end-to-end by
+        // `tests/integration/doctor_workspace_resolution.rs`, which spawns a
+        // fresh child process via `assert_cmd`'s `Command::current_dir`
+        // instead of touching this process's CWD.
+        #[test]
+        fn resolve_workspace_prefers_explicit_over_cwd() {
+            let explicit = PathBuf::from("/some/explicit/workspace");
+            assert_eq!(
+                resolve_workspace(Some(&explicit)),
+                Some(explicit),
+                "an explicit --workspace path must win regardless of CWD"
+            );
+        }
     }
 }
 

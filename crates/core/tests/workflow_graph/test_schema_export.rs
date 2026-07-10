@@ -11,6 +11,196 @@ fn build_test_registry() -> OperatorRegistry {
     builder.build()
 }
 
+/// Same as `build_test_registry`, but with an in-memory `SqliteBackendStore`
+/// wired so the four optimization-loop operators (`GraderCommandOperator`,
+/// `ReconcileOperator`, `ChangeRequestOperator`, `GraderAgentOperator`) are
+/// registered as *executable* instances too (via `register_executable_only`),
+/// not just Descriptors. Needed by the Fix 3 parity test below, which
+/// compares each executable operator's live `params_schema()`/
+/// `output_schema()` against its registered Descriptor — a comparison that's
+/// vacuous for the four loop operators without a store, since they'd have no
+/// executable instance to call `params_schema()` on at all.
+async fn build_test_registry_with_store() -> OperatorRegistry {
+    let store = newton_backend::SqliteBackendStore::new_in_memory()
+        .await
+        .expect("in-memory sqlite store");
+    let store_arc: std::sync::Arc<dyn newton_types::BackendStore> = std::sync::Arc::new(store);
+
+    let workspace = std::path::PathBuf::from(".");
+    let mut builder = OperatorRegistry::builder();
+    let settings: GraphSettings = schema::WorkflowSettings::default();
+    operators::register_builtins_with_deps(
+        &mut builder,
+        workspace,
+        settings,
+        operators::BuiltinOperatorDeps {
+            backend_store: Some(store_arc),
+            ..Default::default()
+        },
+    );
+    builder.build()
+}
+
+/// ADR-0014: the full, pinned set of built-in operator names. Descriptors
+/// must include all 16 — including the four optimization-loop operators —
+/// even when `register_builtins` is called with no `BackendStore` (as
+/// `newton schema export` does). If this list needs to change, it must be a
+/// deliberate addition/removal of an operator, not silent drift.
+const EXPECTED_BUILTIN_OPERATOR_NAMES: &[&str] = &[
+    "AgentOperator",
+    "AssertCompletedOperator",
+    "ChangeRequestOperator",
+    "CommandOperator",
+    "GhOperator",
+    "GitOperator",
+    "GraderAgentOperator",
+    "GraderCommandOperator",
+    "HumanApprovalOperator",
+    "HumanDecisionOperator",
+    "NoOpOperator",
+    "ReadControlFileOperator",
+    "ReconcileOperator",
+    "SetContextOperator",
+    "WorkflowOperator",
+    "barrier",
+];
+
+/// P1 (ADR-0014): `register_builtins` with no `BackendStore` must still
+/// describe all 16 operators — including the four optimization-loop
+/// operators (`GraderCommandOperator`, `ReconcileOperator`,
+/// `ChangeRequestOperator`, `GraderAgentOperator`) that previously vanished
+/// from the schema-export registry entirely because they only registered
+/// `if let Some(store) = deps.backend_store`.
+#[test]
+fn descriptor_set_includes_all_sixteen_builtin_operators_without_a_store() {
+    let registry = build_test_registry();
+    let mut names: Vec<String> = registry
+        .descriptors()
+        .into_iter()
+        .map(|d| d.name.to_string())
+        .collect();
+    names.sort();
+
+    let mut expected: Vec<String> = EXPECTED_BUILTIN_OPERATOR_NAMES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    expected.sort();
+
+    assert_eq!(
+        names.len(),
+        16,
+        "expected exactly 16 built-in operator descriptors, got {}: {:?}",
+        names.len(),
+        names
+    );
+    assert_eq!(
+        names, expected,
+        "descriptor set does not match the pinned built-in operator name list"
+    );
+
+    // The four loop operators specifically — the audit's headline finding.
+    for loop_operator in [
+        "GraderCommandOperator",
+        "ReconcileOperator",
+        "ChangeRequestOperator",
+        "GraderAgentOperator",
+    ] {
+        assert!(
+            registry.is_described(loop_operator),
+            "loop operator '{loop_operator}' must be described even without a BackendStore"
+        );
+        assert!(
+            registry.get(loop_operator).is_none(),
+            "loop operator '{loop_operator}' must NOT be executable without a BackendStore"
+        );
+    }
+}
+
+/// S16: the composed schema's `WorkflowTask.operator` property must be
+/// constrained by an `enum` generated from the Descriptor set, covering all
+/// 16 operators (not just the historically-always-registered 12).
+#[test]
+fn composed_schema_constrains_operator_with_enum_of_all_descriptors() {
+    let registry = build_test_registry();
+    let schema = schema_export::composed_workflow_schema(&registry);
+    let value = serde_json::to_value(&schema).expect("schema serializable");
+
+    let task = value
+        .get("$defs")
+        .and_then(|d| d.get("WorkflowTask"))
+        .or_else(|| value.get("definitions").and_then(|d| d.get("WorkflowTask")))
+        .expect("WorkflowTask definition present");
+    let operator_prop = task
+        .get("properties")
+        .and_then(|p| p.get("operator"))
+        .expect("operator property present");
+    let enum_values = operator_prop
+        .get("enum")
+        .and_then(|e| e.as_array())
+        .expect("operator property has an enum");
+
+    let mut enum_names: Vec<String> = enum_values
+        .iter()
+        .map(|v| v.as_str().expect("enum entries are strings").to_string())
+        .collect();
+    enum_names.sort();
+
+    let mut expected: Vec<String> = EXPECTED_BUILTIN_OPERATOR_NAMES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    expected.sort();
+
+    assert_eq!(
+        enum_names, expected,
+        "operator enum does not match the full descriptor set"
+    );
+}
+
+/// S16 payoff: a workflow referencing an operator name that is NOT in the
+/// Descriptor set (e.g. a typo) must fail validation against the composed
+/// schema. Before S16 `operator` was a bare `{"type": "string"}`, so this
+/// would validate — the typo would only surface much later, at execution
+/// time, via the WFG-OP-001 "operator is not registered" error.
+#[test]
+fn typo_operator_name_fails_composed_schema_validation() {
+    let registry = build_test_registry();
+    let composed = schema_export::composed_workflow_schema(&registry);
+    let schema_value = serde_json::to_value(&composed).expect("schema serializable");
+    let validator = jsonschema::JSONSchema::compile(&schema_value).expect("schema compiles");
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture = manifest_dir.join("tests/fixtures/workflows/01_minimal_success.yaml");
+    let yaml_str = std::fs::read_to_string(&fixture).expect("read fixture");
+    let mut instance: serde_json::Value =
+        serde_yaml::from_str(&yaml_str).expect("parse fixture yaml");
+
+    // Sanity check: the unmodified fixture (a real, registered operator name)
+    // validates cleanly.
+    assert!(
+        validator.is_valid(&instance),
+        "unmodified fixture with a valid operator name should validate"
+    );
+
+    // Introduce a typo'd / unregistered operator name.
+    instance["workflow"]["tasks"][0]["operator"] =
+        serde_json::Value::String("NoOpOperatorTypo".to_string());
+
+    let errors: Vec<String> = validator
+        .validate(&instance)
+        .err()
+        .into_iter()
+        .flatten()
+        .map(|e| e.to_string())
+        .collect();
+
+    assert!(
+        !errors.is_empty(),
+        "a workflow referencing an unknown operator name must fail schema validation"
+    );
+}
+
 #[test]
 fn composed_schema_is_valid_json() {
     let registry = build_test_registry();
@@ -30,6 +220,61 @@ fn every_operator_params_schema_accepts_its_own_name() {
             v.is_object(),
             "params_schema for {} is not an object",
             op.name()
+        );
+    }
+}
+
+/// Fix 3: the four loop operators (`GraderCommandOperator`, `ReconcileOperator`,
+/// `ChangeRequestOperator`, `GraderAgentOperator`) each used to call
+/// `schema_for!` twice — once in their static `descriptor()` and again,
+/// independently, in the `Operator::params_schema()`/`output_schema()` trait
+/// methods — so the two could silently drift apart. They now delegate the
+/// trait methods to `Self::descriptor()`, making the Descriptor the single
+/// source of truth. This test pins that for *every* executable operator in
+/// the registry (all 16, using a store-backed registry so the four loop
+/// operators are executable here too — see `build_test_registry_with_store`):
+/// the live `Operator::params_schema()`/`output_schema()` must serialize
+/// identically to the schema carried by the operator's own registered
+/// Descriptor.
+#[tokio::test]
+async fn every_operator_schema_matches_its_registered_descriptor() {
+    let registry = build_test_registry_with_store().await;
+    let descriptors = registry.descriptors();
+
+    let operators = registry.list_operators();
+    assert_eq!(
+        operators.len(),
+        16,
+        "expected all 16 built-in operators to be executable with a store wired; got {}: {:?}",
+        operators.len(),
+        operators.iter().map(|o| o.name()).collect::<Vec<_>>()
+    );
+
+    for op in &operators {
+        let name = op.name();
+        let descriptor = descriptors
+            .iter()
+            .find(|d| d.name == name)
+            .unwrap_or_else(|| panic!("operator '{name}' has no matching registered descriptor"));
+
+        let runtime_params =
+            serde_json::to_value(op.params_schema()).expect("params_schema serializable");
+        let descriptor_params = serde_json::to_value(&descriptor.params_schema)
+            .expect("descriptor params_schema serializable");
+        assert_eq!(
+            runtime_params, descriptor_params,
+            "operator '{name}': Operator::params_schema() diverges from its registered \
+             Descriptor's params_schema"
+        );
+
+        let runtime_output =
+            serde_json::to_value(op.output_schema()).expect("output_schema serializable");
+        let descriptor_output = serde_json::to_value(&descriptor.output_schema)
+            .expect("descriptor output_schema serializable");
+        assert_eq!(
+            runtime_output, descriptor_output,
+            "operator '{name}': Operator::output_schema() diverges from its registered \
+             Descriptor's output_schema"
         );
     }
 }

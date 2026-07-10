@@ -253,6 +253,14 @@ pub struct ResumeArgs {
     /// Override the state root directory where checkpoints, artifacts, and backend.sqlite are stored. Defaults to auto-resolved from workspace root.
     #[arg(long, value_name = "PATH")]
     pub state_dir: Option<PathBuf>,
+
+    /// Write structured completion envelope to stdout as JSON (parity with `run`)
+    #[arg(long = "emit-completion-json")]
+    pub emit_completion_json: bool,
+
+    /// Print task stdout/stderr to terminal after each task completes (parity with `run`)
+    #[arg(short, long)]
+    pub verbose: bool,
 }
 
 #[derive(Args, Clone)]

@@ -803,8 +803,18 @@ impl WorkflowRuntime {
             checkpoint_records,
             runtime_tasks,
         );
+        // Fail the checkpoint outright on serialization failure instead of
+        // silently recording `Null` — a swallowed failure here would make
+        // resume think the workflow has no `io` block and silently drop
+        // `result_map`/schemas (spec 074, B10).
         checkpoint.io_snapshot =
-            Some(serde_json::to_value(&self.graph_settings.io).unwrap_or(Value::Null));
+            Some(serde_json::to_value(&self.graph_settings.io).map_err(|e| {
+                AppError::new(
+                    ErrorCategory::SerializationError,
+                    format!("failed to serialize io settings for checkpoint: {e}"),
+                )
+                .with_code("WFG-CKPT-004")
+            })?);
         checkpoint::save_checkpoint_at(
             &self.checkpoint_root,
             &self.workflow_execution.execution_id,

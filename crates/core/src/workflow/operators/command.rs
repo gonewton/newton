@@ -3,6 +3,8 @@
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
+use crate::workflow::operators::OUTPUT_CAPTURE_LIMIT_BYTES;
+use crate::workflow::subprocess::run_guarded;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Number, Value};
@@ -10,13 +12,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::process::Command;
 use tracing;
-
-const OUTPUT_CAPTURE_LIMIT_BYTES: usize = 1_048_576;
 
 pub struct CommandOperator {
     workspace_root: PathBuf,
@@ -271,25 +270,23 @@ impl CommandRunner for TokioCommandRunner {
             cmd
         };
 
-        if request.capture_stdout {
-            command.stdout(Stdio::piped());
-        } else {
-            command.stdout(Stdio::inherit());
-        }
-        if request.capture_stderr {
-            command.stderr(Stdio::piped());
-        } else {
-            command.stderr(Stdio::inherit());
-        }
-
-        command.stdin(Stdio::null());
-
+        // Stdio is intentionally not configured here: `run_guarded` forces
+        // stdout/stderr to `Stdio::piped()` and stdin to `Stdio::null()`
+        // unconditionally, mirroring `Command::output()`'s contract (see
+        // its doc comment). `capture_stdout`/`capture_stderr` never
+        // controlled stdio wiring in that contract — `Command::output()`
+        // always captures both — so they carry no runtime behavior here;
+        // they remain on `CommandParams`/`CommandExecutionRequest` as
+        // documented (if inert) parts of the operator's public schema.
         command.current_dir(request.cwd.clone());
         if let Some(env_map) = &request.env {
             command.envs(env_map);
         }
 
-        let output = command.output().await.map_err(|err| {
+        // See `workflow::subprocess::run_guarded`: group-wide kill guard so
+        // an outer task timeout dropping this future can't orphan a
+        // grandchild the shelled-out command spawns.
+        let output = run_guarded(command).await.map_err(|err| {
             AppError::new(
                 ErrorCategory::ToolExecutionError,
                 format!("failed to execute command: {err}"),
@@ -421,5 +418,48 @@ mod tests {
         });
         let result = op.execute(params, ctx).await.unwrap();
         assert_eq!(result["stdout"], json!("unset"));
+    }
+
+    // ── Fix 1: run_guarded must mirror Command::output()'s forced-pipe
+    // semantics, so capture_stdout:false does not leak the child's stdout
+    // onto newton's own fd1 nor return an empty `output.stdout` ──
+
+    #[tokio::test]
+    async fn execute_with_capture_stdout_false_still_returns_stdout_content() {
+        let workspace = TempDir::new().unwrap();
+        let op = CommandOperator::new(workspace.path().to_path_buf());
+        let ctx = make_ctx(None, &workspace);
+        let params = json!({
+            "cmd": "echo capture-stdout-false-marker",
+            "shell": true,
+            "capture_stdout": false,
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+        assert_eq!(
+            result["stdout"],
+            json!("capture-stdout-false-marker\n"),
+            "capture_stdout:false must still return the child's stdout in output.stdout \
+             (matches the pre-regression Command::output() contract, which always pipes \
+             both streams); got {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_with_capture_stderr_false_still_returns_stderr_content() {
+        let workspace = TempDir::new().unwrap();
+        let op = CommandOperator::new(workspace.path().to_path_buf());
+        let ctx = make_ctx(None, &workspace);
+        let params = json!({
+            "cmd": "echo capture-stderr-false-marker >&2",
+            "shell": true,
+            "capture_stderr": false,
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+        assert_eq!(
+            result["stderr"],
+            json!("capture-stderr-false-marker\n"),
+            "capture_stderr:false must still return the child's stderr in output.stderr; \
+             got {result}"
+        );
     }
 }

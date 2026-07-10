@@ -6,13 +6,13 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use newton_backend::{
+use newton_types::ApiError;
+use newton_types::{
     CreateComponentBody, CreateEvalRunBody, CreateGradeBody, CreateKpiBody, CreateModuleBody,
     CreateProductBody, CreateRepoBody, DeletedItem, PatchComponentBody, PatchModuleBody,
     PatchModuleDependencyBody, PatchProductBody, PatchRepoBody, PutComponentBody, PutModuleBody,
     PutProductBody, PutRepoBody,
 };
-use newton_types::ApiError;
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -79,7 +79,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
     path = "/kpis",
     tag = "catalog",
     responses(
-        (status = 200, description = "KPI list", body = [newton_backend::KpiItem]),
+        (status = 200, description = "KPI list", body = [newton_types::KpiItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -93,7 +93,7 @@ pub(crate) async fn list_kpis(State(state): State<Arc<AppState>>) -> Response {
     tag = "catalog",
     params(("id" = String, Path, description = "KPI ID")),
     responses(
-        (status = 200, description = "KPI", body = newton_backend::KpiItem),
+        (status = 200, description = "KPI", body = newton_types::KpiItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -111,7 +111,7 @@ pub(crate) async fn get_kpi(
     tag = "catalog",
     request_body = CreateKpiBody,
     responses(
-        (status = 201, description = "Created or upserted KPI", body = newton_backend::KpiItem),
+        (status = 201, description = "Created or upserted KPI", body = newton_types::KpiItem),
         (status = 409, description = "Conflict (name uniqueness violated)", body = ApiError),
         (status = 422, description = "Validation error", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
@@ -141,7 +141,7 @@ pub(crate) struct ListEvalRunsQuery {
     tag = "catalog",
     request_body = CreateEvalRunBody,
     responses(
-        (status = 201, description = "Created EvalRun", body = newton_backend::EvalRunItem),
+        (status = 201, description = "Created EvalRun", body = newton_types::EvalRunItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 409, description = "Conflict", body = ApiError),
         (status = 422, description = "Validation error", body = ApiError),
@@ -166,7 +166,7 @@ pub(crate) async fn create_eval_run(
         ("limit" = Option<u32>, Query, description = "Limit results")
     ),
     responses(
-        (status = 200, description = "EvalRun list", body = [newton_backend::EvalRunItem]),
+        (status = 200, description = "EvalRun list", body = [newton_types::EvalRunItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -188,7 +188,7 @@ pub(crate) async fn list_eval_runs(
     tag = "catalog",
     params(("id" = String, Path, description = "EvalRun ID")),
     responses(
-        (status = 200, description = "EvalRun", body = newton_backend::EvalRunItem),
+        (status = 200, description = "EvalRun", body = newton_types::EvalRunItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -206,7 +206,7 @@ pub(crate) async fn get_eval_run(
     tag = "catalog",
     params(("id" = String, Path, description = "EvalRun ID")),
     responses(
-        (status = 200, description = "Grades for the EvalRun", body = [newton_backend::GradeItem]),
+        (status = 200, description = "Grades for the EvalRun", body = [newton_types::GradeItem]),
         (status = 404, description = "EvalRun not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -229,7 +229,7 @@ pub(crate) async fn list_eval_run_grades(
     tag = "catalog",
     params(("id" = String, Path, description = "Product ID")),
     responses(
-        (status = 200, description = "Product", body = newton_backend::ProductItem),
+        (status = 200, description = "Product", body = newton_types::ProductItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -247,7 +247,7 @@ pub(crate) async fn get_product(
     tag = "catalog",
     request_body = CreateProductBody,
     responses(
-        (status = 201, description = "Created product", body = newton_backend::ProductItem),
+        (status = 201, description = "Created product", body = newton_types::ProductItem),
         (status = 409, description = "Conflict", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -266,7 +266,7 @@ pub(crate) async fn create_product(
     params(("id" = String, Path, description = "Product ID")),
     request_body = PutProductBody,
     responses(
-        (status = 200, description = "Updated product", body = newton_backend::ProductItem),
+        (status = 200, description = "Updated product", body = newton_types::ProductItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 409, description = "Conflict", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
@@ -287,7 +287,7 @@ pub(crate) async fn put_product(
     params(("id" = String, Path, description = "Product ID")),
     request_body = PatchProductBody,
     responses(
-        (status = 200, description = "Patched product", body = newton_backend::ProductItem),
+        (status = 200, description = "Patched product", body = newton_types::ProductItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -333,7 +333,7 @@ pub(crate) async fn delete_product(
     tag = "catalog",
     params(("id" = String, Path, description = "Component ID")),
     responses(
-        (status = 200, description = "Component", body = newton_backend::ComponentItem),
+        (status = 200, description = "Component", body = newton_types::ComponentItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -351,7 +351,7 @@ pub(crate) async fn get_component(
     tag = "catalog",
     request_body = CreateComponentBody,
     responses(
-        (status = 201, description = "Created component", body = newton_backend::ComponentItem),
+        (status = 201, description = "Created component", body = newton_types::ComponentItem),
         (status = 404, description = "Referenced product not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -370,7 +370,7 @@ pub(crate) async fn create_component(
     params(("id" = String, Path, description = "Component ID")),
     request_body = PutComponentBody,
     responses(
-        (status = 200, description = "Updated component", body = newton_backend::ComponentItem),
+        (status = 200, description = "Updated component", body = newton_types::ComponentItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -390,7 +390,7 @@ pub(crate) async fn put_component(
     params(("id" = String, Path, description = "Component ID")),
     request_body = PatchComponentBody,
     responses(
-        (status = 200, description = "Patched component", body = newton_backend::ComponentItem),
+        (status = 200, description = "Patched component", body = newton_types::ComponentItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -436,7 +436,7 @@ pub(crate) async fn delete_component(
     tag = "catalog",
     params(("id" = String, Path, description = "Repo ID")),
     responses(
-        (status = 200, description = "Repo", body = newton_backend::RepoItem),
+        (status = 200, description = "Repo", body = newton_types::RepoItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -454,7 +454,7 @@ pub(crate) async fn get_repo(
     tag = "catalog",
     request_body = CreateRepoBody,
     responses(
-        (status = 201, description = "Created repo", body = newton_backend::RepoItem),
+        (status = 201, description = "Created repo", body = newton_types::RepoItem),
         (status = 404, description = "Referenced component not found", body = ApiError),
         (status = 409, description = "Conflict", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
@@ -474,7 +474,7 @@ pub(crate) async fn create_repo(
     params(("id" = String, Path, description = "Repo ID")),
     request_body = PutRepoBody,
     responses(
-        (status = 200, description = "Updated repo", body = newton_backend::RepoItem),
+        (status = 200, description = "Updated repo", body = newton_types::RepoItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -494,7 +494,7 @@ pub(crate) async fn put_repo(
     params(("id" = String, Path, description = "Repo ID")),
     request_body = PatchRepoBody,
     responses(
-        (status = 200, description = "Patched repo", body = newton_backend::RepoItem),
+        (status = 200, description = "Patched repo", body = newton_types::RepoItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -539,7 +539,7 @@ pub(crate) async fn delete_repo(
     path = "/modules",
     tag = "catalog",
     responses(
-        (status = 200, description = "Module list", body = [newton_backend::ModuleItem]),
+        (status = 200, description = "Module list", body = [newton_types::ModuleItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -553,7 +553,7 @@ pub(crate) async fn list_modules(State(state): State<Arc<AppState>>) -> Response
     tag = "catalog",
     params(("id" = String, Path, description = "Module ID")),
     responses(
-        (status = 200, description = "Module", body = newton_backend::ModuleItem),
+        (status = 200, description = "Module", body = newton_types::ModuleItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -571,7 +571,7 @@ pub(crate) async fn get_module(
     tag = "catalog",
     request_body = CreateModuleBody,
     responses(
-        (status = 201, description = "Created module", body = newton_backend::ModuleItem),
+        (status = 201, description = "Created module", body = newton_types::ModuleItem),
         (status = 404, description = "Referenced repo not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -590,7 +590,7 @@ pub(crate) async fn create_module(
     params(("id" = String, Path, description = "Module ID")),
     request_body = PutModuleBody,
     responses(
-        (status = 200, description = "Updated module", body = newton_backend::ModuleItem),
+        (status = 200, description = "Updated module", body = newton_types::ModuleItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -610,7 +610,7 @@ pub(crate) async fn put_module(
     params(("id" = String, Path, description = "Module ID")),
     request_body = PatchModuleBody,
     responses(
-        (status = 200, description = "Patched module", body = newton_backend::ModuleItem),
+        (status = 200, description = "Patched module", body = newton_types::ModuleItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -656,7 +656,7 @@ pub(crate) async fn delete_module(
     tag = "catalog",
     params(("id" = String, Path, description = "ModuleDependency ID")),
     responses(
-        (status = 200, description = "ModuleDependency", body = newton_backend::ModuleDependencyItem),
+        (status = 200, description = "ModuleDependency", body = newton_types::ModuleDependencyItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -675,7 +675,7 @@ pub(crate) async fn get_module_dependency(
     params(("id" = String, Path, description = "ModuleDependency ID")),
     request_body = PatchModuleDependencyBody,
     responses(
-        (status = 200, description = "Patched module dependency", body = newton_backend::ModuleDependencyItem),
+        (status = 200, description = "Patched module dependency", body = newton_types::ModuleDependencyItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -730,7 +730,7 @@ pub(crate) struct ListGradesQuery {
         ("kpiId" = Option<String>, Query, description = "Filter by KPI id")
     ),
     responses(
-        (status = 200, description = "List of grades", body = [newton_backend::GradeItem]),
+        (status = 200, description = "List of grades", body = [newton_types::GradeItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -747,7 +747,7 @@ pub(crate) async fn list_grades(
     tag = "catalog",
     request_body = CreateGradeBody,
     responses(
-        (status = 201, description = "Created grade", body = newton_backend::GradeItem),
+        (status = 201, description = "Created grade", body = newton_types::GradeItem),
         (status = 404, description = "Not found", body = ApiError),
         (status = 409, description = "Conflict", body = ApiError),
         (status = 422, description = "Validation error", body = ApiError),
@@ -767,7 +767,7 @@ pub(crate) async fn create_grade(
     tag = "catalog",
     params(("id" = String, Path, description = "Grade id")),
     responses(
-        (status = 200, description = "Grade", body = newton_backend::GradeItem),
+        (status = 200, description = "Grade", body = newton_types::GradeItem),
         (status = 404, description = "Not found", body = ApiError)
     )
 )]

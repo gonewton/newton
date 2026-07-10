@@ -44,12 +44,15 @@ pub(crate) struct NodeUpdate {
     operator_type: Option<String>,
 }
 
-/// Flexible update body: supports both legacy WorkflowDefinition format
-/// and new status/ended_at update format.
+/// Update body for a workflow instance.
+///
+/// `definition` is accepted only so `update_workflow` can reject it
+/// explicitly with `422`: instance definitions are historical snapshots, not
+/// editable state, so authoring happens through `/workflow-files` instead.
+/// It is never persisted.
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct WorkflowUpdateBody {
     workflow_id: Option<String>,
-    #[allow(dead_code)]
     definition: Option<serde_json::Value>,
     status: Option<WorkflowStatus>,
     ended_at: Option<DateTime<Utc>>,
@@ -228,6 +231,13 @@ pub(crate) async fn update_workflow(
 ) -> Response {
     if Uuid::parse_str(&id).is_err() {
         return validation_response("Invalid workflow instance ID format");
+    }
+
+    if body.definition.is_some() {
+        return validation_response(
+            "Workflow instance definitions cannot be updated via PUT /workflows/{id}; \
+             author and persist workflow definitions through /workflow-files instead",
+        );
     }
 
     let mut instance = match state.backend.get_workflow_instance(&id).await {

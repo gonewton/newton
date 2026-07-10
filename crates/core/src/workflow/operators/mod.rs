@@ -26,6 +26,13 @@ use crate::workflow::state::GraphSettings;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Shared cap on inline-captured stdout/stderr bytes (`command` and `agent`
+/// operators both apply this to the `stdout`/`stderr` fields they place in
+/// task output). Exposed so callers that print captured output (e.g.
+/// `workflow run --verbose`) can tell whether a stream was cut off at
+/// capture time.
+pub(crate) const OUTPUT_CAPTURE_LIMIT_BYTES: usize = 1_048_576;
+
 #[derive(Default)]
 pub struct BuiltinOperatorDeps {
     /// Lazy provider that resolves to an `Interviewer` on first human prompt.
@@ -41,7 +48,7 @@ pub struct BuiltinOperatorDeps {
     /// GitRunner for GhOperator branch_push. Defaults to TokioGitRunner when None.
     pub git_runner: Option<Arc<dyn gh::GitRunner>>,
     /// BackendStore for grading operators (GraderCommandOperator, ReconcileOperator, etc.).
-    pub backend_store: Option<Arc<dyn newton_backend::BackendStore>>,
+    pub backend_store: Option<Arc<dyn newton_types::BackendStore>>,
 }
 
 /// Register built-in operators into the supplied builder.
@@ -126,23 +133,34 @@ pub fn register_builtins_with_deps(
             redact_keys,
         ));
 
+    // Descriptor/execution split (ADR-0014): the four optimization-loop
+    // operators are always part of the described vocabulary — regardless of
+    // whether a BackendStore is available in this context — so
+    // `newton schema export`, the composed workflow schema, and DSL codegen
+    // never lose them. Only the executable half below is store-gated.
+    builder
+        .register_descriptor(grader_command::GraderCommandOperator::descriptor())
+        .register_descriptor(reconcile::ReconcileOperator::descriptor())
+        .register_descriptor(change_request_op::ChangeRequestOperator::descriptor())
+        .register_descriptor(grader_agent::GraderAgentOperator::descriptor());
+
     if let Some(store) = deps.backend_store {
         let grading_engine = AikitEngineManager::new(workspace.clone())
             .expect("AikitEngineManager::new should not fail");
         builder
-            .register(grader_command::GraderCommandOperator::new(
+            .register_executable_only(grader_command::GraderCommandOperator::new(
                 workspace.clone(),
                 store.clone(),
             ))
-            .register(reconcile::ReconcileOperator::new(
+            .register_executable_only(reconcile::ReconcileOperator::new(
                 workspace.clone(),
                 store.clone(),
             ))
-            .register(change_request_op::ChangeRequestOperator::new(
+            .register_executable_only(change_request_op::ChangeRequestOperator::new(
                 workspace.clone(),
                 store.clone(),
             ))
-            .register(grader_agent::GraderAgentOperator::new(
+            .register_executable_only(grader_agent::GraderAgentOperator::new(
                 workspace,
                 store,
                 grading_engine,

@@ -9,7 +9,7 @@ use crate::workflow::operator::{ExecutionContext, Operator};
 use crate::workflow::operators::assessment;
 use async_trait::async_trait;
 use chrono::Utc;
-use newton_backend::BackendStore;
+use newton_types::BackendStore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -25,10 +25,23 @@ pub struct GraderCommandOperator {
 }
 
 impl GraderCommandOperator {
+    pub const NAME: &'static str = "GraderCommandOperator";
+
     pub fn new(workspace_root: PathBuf, store: Arc<dyn BackendStore>) -> Self {
         Self {
             workspace_root,
             store,
+        }
+    }
+
+    /// Store-independent Descriptor (name + params/output schema). Used to
+    /// describe this operator's vocabulary even when no `BackendStore` is
+    /// wired (e.g. `newton schema export`). See ADR-0014.
+    pub fn descriptor() -> crate::workflow::operator::Descriptor {
+        crate::workflow::operator::Descriptor {
+            name: Self::NAME,
+            params_schema: schemars::schema_for!(GraderCommandParams),
+            output_schema: schemars::schema_for!(GraderCommandOutput),
         }
     }
 }
@@ -76,7 +89,7 @@ pub struct GraderCommandOutput {
 #[async_trait]
 impl Operator for GraderCommandOperator {
     fn name(&self) -> &'static str {
-        "GraderCommandOperator"
+        Self::NAME
     }
 
     fn validate_params(&self, params: &Value) -> Result<(), AppError> {
@@ -105,11 +118,11 @@ impl Operator for GraderCommandOperator {
     }
 
     fn params_schema(&self) -> schemars::Schema {
-        schemars::schema_for!(GraderCommandParams)
+        Self::descriptor().params_schema
     }
 
     fn output_schema(&self) -> schemars::Schema {
-        schemars::schema_for!(GraderCommandOutput)
+        Self::descriptor().output_schema
     }
 
     async fn execute(&self, params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {

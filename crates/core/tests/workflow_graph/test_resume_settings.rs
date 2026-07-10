@@ -170,6 +170,7 @@ workflow:
         workspace.path().to_path_buf(),
         summary.execution_id,
         true,
+        default_overrides(),
     )
     .await
     .expect("resume with allow_workflow_change succeeded");
@@ -298,6 +299,7 @@ workflow:
         workspace.path().to_path_buf(),
         summary.execution_id,
         true,
+        default_overrides(),
     )
     .await
     .expect("resume succeeded");
@@ -392,6 +394,7 @@ workflow:
         workspace.path().to_path_buf(),
         summary.execution_id,
         false,
+        default_overrides(),
     )
     .await
     .expect("resume without allow_workflow_change succeeded");
@@ -490,6 +493,7 @@ workflow:
         workspace.path().to_path_buf(),
         summary.execution_id,
         false,
+        default_overrides(),
     )
     .await
     .expect_err("resume of inconsistent checkpoint must fail");
@@ -584,6 +588,7 @@ workflow:
         workspace.path().to_path_buf(),
         summary.execution_id,
         true, // allow_workflow_change=true — guard still fires
+        default_overrides(),
     )
     .await
     .expect_err("resume of inconsistent checkpoint must fail even with allow_workflow_change");

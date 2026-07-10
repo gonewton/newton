@@ -58,6 +58,16 @@ fn err_conflict(msg: impl Into<String>) -> Response {
     (StatusCode::CONFLICT, Json(e)).into_response()
 }
 
+fn err_precondition_required(msg: impl Into<String>) -> Response {
+    let e = ApiError {
+        code: "ERR_PRECONDITION_REQUIRED".to_string(),
+        category: "PreconditionRequired".to_string(),
+        message: msg.into(),
+        details: None,
+    };
+    (StatusCode::PRECONDITION_REQUIRED, Json(e)).into_response()
+}
+
 fn err_500(msg: impl Into<String>) -> Response {
     let e = ApiError {
         code: "ERR_INTERNAL".to_string(),
@@ -283,8 +293,9 @@ pub(crate) async fn get_workflow_file(
     responses(
         (status = 200, description = "Updated workflow file", body = WorkflowFileDetail),
         (status = 201, description = "Created workflow file", body = WorkflowFileDetail),
-        (status = 409, description = "ETag conflict", body = ApiError),
+        (status = 409, description = "ETag conflict: If-Match/expected_hash does not match the file's current content_hash", body = ApiError),
         (status = 422, description = "Validation error or unparseable YAML", body = ApiError),
+        (status = 428, description = "Precondition Required: the file already exists and neither an If-Match header nor an expected_hash body field was supplied", body = ApiError),
         (status = 503, description = "File store not configured", body = ApiError)
     )
 )]
@@ -311,20 +322,43 @@ pub(crate) async fn put_workflow_file(
         .map(|s| s.trim_matches('"').to_string())
         .or_else(|| body.expected_hash.clone());
 
+    // Spec 074 B17 / settled decision 8: overwriting an *existing* file
+    // without a precondition is a lost-update hazard for concurrent
+    // editors of executable workflow programs. Unconditional CREATE of a
+    // brand-new file stays allowed, so only check existence (and only pay
+    // for the extra read) when the caller didn't supply either mechanism.
+    if if_match.is_none() {
+        // Fix 6 (B17): a cheap existence probe — `exists()` is a
+        // `validate_slug` + fs `metadata()` stat, not a full read + SHA-256
+        // hash of the (possibly large) file content that's about to be
+        // discarded either way.
+        match store.exists(&name) {
+            Ok(true) => {
+                return err_precondition_required(
+                    "workflow file already exists; overwriting it requires either an \
+                     If-Match header or an expected_hash body field carrying the \
+                     file's current content_hash (fetch it via GET first)",
+                )
+            }
+            Ok(false) => {
+                // No existing file: unconditional create is fine.
+            }
+            Err(e) => return map_store_error(&e),
+        }
+    }
+
     match store.write(&name, &body.content, if_match.as_deref()) {
         Ok(outcome) => {
             let diagnostics = run_diagnostics(&body.content);
-            let bytes = body.content.as_bytes();
-            let content_hash = crate::workflow::state::compute_sha256_hex(bytes);
-            let status = match outcome {
-                WriteOutcome::Created => StatusCode::CREATED,
-                WriteOutcome::Updated => StatusCode::OK,
+            let (status, record) = match outcome {
+                WriteOutcome::Created(r) => (StatusCode::CREATED, r),
+                WriteOutcome::Updated(r) => (StatusCode::OK, r),
             };
             let detail = WorkflowFileDetail {
-                name: name.clone(),
+                name: record.name,
                 content: body.content,
-                content_hash,
-                modified_at: Utc::now(),
+                content_hash: record.content_hash,
+                modified_at: record.modified_at,
                 diagnostics,
             };
             (status, Json(detail)).into_response()

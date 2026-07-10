@@ -26,30 +26,30 @@ flowchart TB
     end
 
     subgraph Shared["newton-types"]
-        TYPES[API & domain types]
+        TYPES[BackendStore trait + domain DTOs]
     end
 
     BIN --> FW
     FW --> Core
+    FW --> SQL
     WF --> TYPES
     API --> TYPES
-    API --> SQL
+    SQL --> TYPES
     BATCH --> WF
     INT --> WF
-    WF --> SQL
 ```
 
 ## Crate responsibilities
 
 | Crate | Responsibility | Must not |
 | --- | --- | --- |
-| `newton-types` | Shared DTOs (`WorkflowInstance`, `ApiError`, portfolio types) used by core, backend, and OpenAPI generation | Depend on core or CLI |
-| `newton-backend` | SQLite persistence: workflows runtime, plans, catalog, grades, opportunities | Depend on CLI |
-| `newton-core` | Workflow parse/transform/execute, operators, checkpoints, batch config, HTTP router, ailoop/MCP integrations | Depend on clap or TUI crates |
-| `newton-cli` | Argument parsing, command dispatch, logging bootstrap, MCP serve wiring | Contain business logic that belongs in core |
+| `newton-types` | Shared contract: the `BackendStore` trait plus the domain DTOs it speaks (`WorkflowInstance`, `ApiError`, `FindingItem`, portfolio types, …) used by core, backend, and OpenAPI generation | Depend on core, backend, or CLI |
+| `newton-backend` | Implements `newton_types::BackendStore` over sqlx/SQLite: workflows runtime, plans, catalog, grades, opportunities | Depend on core or CLI |
+| `newton-core` | Workflow parse/transform/execute, operators, checkpoints, batch config, HTTP router, ailoop/MCP integrations — consumes `Arc<dyn newton_types::BackendStore>` | Depend on clap/TUI crates or `newton-backend`/sqlx |
+| `newton-cli` | Argument parsing, command dispatch, logging bootstrap, MCP serve wiring — the only crate that constructs the concrete `SqliteBackendStore` and wires it into core | Contain business logic that belongs in core |
 | `crates/test-utils` | Test fixtures and HTTP helpers for integration tests | Ship in the release binary |
 
-**Dependency rule**: `newton-cli → newton-core → { newton-types, newton-backend }`.
+**Dependency rule**: `newton-core` and `newton-backend` both depend on `newton-types` only — neither depends on the other (ADR-0015). `newton-cli` depends on `newton-core`, `newton-backend`, and `newton-types` to wire the concrete store into the engine. A CI boundary guard rejects `clap`/`ratatui`/`crossterm`/`sqlx` in `newton-core`'s production dependency graph.
 
 ## Workflow execution pipeline
 

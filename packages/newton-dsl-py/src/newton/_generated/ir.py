@@ -204,6 +204,25 @@ class WorkflowMetadata(BaseModel):
     tags: list[str] | None = None
 
 
+class Operator(StrEnum):
+    AgentOperator = 'AgentOperator'
+    AssertCompletedOperator = 'AssertCompletedOperator'
+    ChangeRequestOperator = 'ChangeRequestOperator'
+    CommandOperator = 'CommandOperator'
+    GhOperator = 'GhOperator'
+    GitOperator = 'GitOperator'
+    GraderAgentOperator = 'GraderAgentOperator'
+    GraderCommandOperator = 'GraderCommandOperator'
+    HumanApprovalOperator = 'HumanApprovalOperator'
+    HumanDecisionOperator = 'HumanDecisionOperator'
+    NoOpOperator = 'NoOpOperator'
+    ReadControlFileOperator = 'ReadControlFileOperator'
+    ReconcileOperator = 'ReconcileOperator'
+    SetContextOperator = 'SetContextOperator'
+    WorkflowOperator = 'WorkflowOperator'
+    barrier = 'barrier'
+
+
 class WorkflowTask(BaseModel):
     """
     Task definition consumed by the workflow executor.
@@ -216,7 +235,7 @@ class WorkflowTask(BaseModel):
     include_if: Condition | None = None
     max_iterations: conint(ge=0) | None = None
     name: str | None = None
-    operator: str
+    operator: Operator
     parallel_group: str | None = None
     params: Any | None = {}
     retry: RetryPolicy | None = None

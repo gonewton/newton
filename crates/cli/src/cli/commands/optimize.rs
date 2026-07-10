@@ -224,18 +224,32 @@ fn validate_optimize_workspace(workspace: Option<PathBuf>) -> Result<PathBuf> {
     Ok(workspace_root)
 }
 
+/// Pick the next plan file from `todo_dir`.
+///
+/// Ordering contract: **lexicographic FIFO by filename**. All file entries
+/// (subdirectories are ignored) are collected and sorted by `file_name()`,
+/// and the first one is returned — NOT by mtime, and NOT by whatever order
+/// the OS happens to hand back from `read_dir` (which is arbitrary and can
+/// vary by filesystem/platform). Plan producers that want strict ordering
+/// MUST name files with a sortable prefix, e.g. `001-do-x.md`,
+/// `002-do-y.md` (spec 074, B21).
+///
+/// When the queue is empty: returns `Ok(None)` immediately if `once` is set,
+/// otherwise polls every `sleep_duration` seconds until a file appears.
 async fn fetch_next_plan(
     todo_dir: &Path,
     once: bool,
     sleep_duration: u64,
 ) -> Result<Option<PathBuf>> {
     loop {
-        let mut entries = fs::read_dir(todo_dir)?;
-        if let Some(Ok(entry)) = entries.next() {
-            let path = entry.path();
-            if path.is_file() {
-                return Ok(Some(path));
-            }
+        let mut candidates: Vec<PathBuf> = fs::read_dir(todo_dir)?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file())
+            .collect();
+        candidates.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        if let Some(path) = candidates.into_iter().next() {
+            return Ok(Some(path));
         }
 
         if once {
@@ -243,5 +257,70 @@ async fn fetch_next_plan(
             return Ok(None);
         }
         tokio::time::sleep(Duration::from_secs(sleep_duration)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn fetch_next_plan_picks_lexicographically_first_filename() {
+        let dir = tempfile::tempdir().unwrap();
+        // Written in reverse creation/mtime order: b.md first, then a.md. A
+        // naive "first entry from read_dir" or an mtime-based pick could
+        // return b.md; the FIFO contract requires a.md (lexicographically
+        // first) regardless of creation order.
+        std::fs::write(dir.path().join("b.md"), "plan b").unwrap();
+        std::fs::write(dir.path().join("a.md"), "plan a").unwrap();
+
+        let picked = fetch_next_plan(dir.path(), true, 0)
+            .await
+            .unwrap()
+            .expect("todo dir has files, must return Some");
+
+        assert_eq!(
+            picked.file_name().and_then(|n| n.to_str()),
+            Some("a.md"),
+            "must pick the lexicographically first filename, not mtime/OS order"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_next_plan_numeric_prefix_order() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("002-second.md"), "second").unwrap();
+        std::fs::write(dir.path().join("001-first.md"), "first").unwrap();
+
+        let picked = fetch_next_plan(dir.path(), true, 0)
+            .await
+            .unwrap()
+            .expect("todo dir has files, must return Some");
+
+        assert_eq!(
+            picked.file_name().and_then(|n| n.to_str()),
+            Some("001-first.md")
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_next_plan_ignores_subdirectories() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("a-subdir")).unwrap();
+        std::fs::write(dir.path().join("z.md"), "only file").unwrap();
+
+        let picked = fetch_next_plan(dir.path(), true, 0)
+            .await
+            .unwrap()
+            .expect("todo dir has one file, must return Some");
+
+        assert_eq!(picked.file_name().and_then(|n| n.to_str()), Some("z.md"));
+    }
+
+    #[tokio::test]
+    async fn fetch_next_plan_empty_dir_once_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let picked = fetch_next_plan(dir.path(), true, 0).await.unwrap();
+        assert!(picked.is_none());
     }
 }

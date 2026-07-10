@@ -57,6 +57,40 @@ async fn execute_run_command(args: &RunArgs) -> anyhow::Result<()> {
         document.triggers = Some(workflow_schema::WorkflowTrigger::manual(payload));
     }
 
+    if let Some(input_file) = &args.input_file {
+        if !input_file.is_file() {
+            let message = format!("WFG-IO-006: input file not found: {}", input_file.display());
+            let err = AppError::new(ErrorCategory::ValidationError, message.clone())
+                .with_code("WFG-IO-006");
+            let envelope = CompletionEnvelope::internal_error(CompletionError {
+                code: Some("WFG-IO-006".to_string()),
+                category: ErrorCategory::ValidationError.to_string(),
+                message,
+                error_payload: None,
+            });
+            return emit_or_return(emit_json, envelope, err, 1);
+        }
+        let input_file_value = Value::String(input_file.display().to_string());
+        match document.triggers.as_mut() {
+            Some(trigger) => match trigger.payload.as_object_mut() {
+                Some(map) => {
+                    map.insert("input_file".to_string(), input_file_value);
+                }
+                None => {
+                    let mut map = serde_json::Map::new();
+                    map.insert("input_file".to_string(), input_file_value);
+                    trigger.payload = Value::Object(map);
+                }
+            },
+            None => {
+                let mut map = serde_json::Map::new();
+                map.insert("input_file".to_string(), input_file_value);
+                document.triggers =
+                    Some(workflow_schema::WorkflowTrigger::manual(Value::Object(map)));
+            }
+        }
+    }
+
     {
         let settings = &document.workflow.settings;
         let empty_payload = serde_json::json!({});
@@ -97,13 +131,19 @@ async fn execute_run_command(args: &RunArgs) -> anyhow::Result<()> {
     let io_settings = document.workflow.settings.io_settings.clone();
     let io_block = document.workflow.settings.io.clone();
 
-    let exec_setup = super::shared_execution::build_execution_setup(
+    let mut exec_setup = super::shared_execution::build_execution_setup(
         state_dir.clone(),
         args.parallel_limit,
         args.timeout_seconds,
         args.server.as_deref(),
     )
     .await?;
+    // `--verbose` (S15/P5b): print each task's captured stdout/stderr to the
+    // terminal as it completes. The runtime already does this whenever
+    // `ExecutionOverrides.verbose` is set (see `process_frontier` in
+    // executor/runtime.rs); `build_execution_setup` doesn't know about CLI
+    // flags, so thread it through here.
+    exec_setup.overrides.verbose = args.verbose;
 
     let settings = document.workflow.settings.clone();
     let ailoop_ctx =
@@ -122,6 +162,35 @@ async fn execute_run_command(args: &RunArgs) -> anyhow::Result<()> {
     )
     .await;
 
+    finish_execution(
+        emit_json,
+        &io_block,
+        &io_settings,
+        summary_result,
+        |summary| {
+            format!(
+                "Workflow completed in {} iterations",
+                summary.total_iterations
+            )
+        },
+    )
+}
+
+/// Validates a completed (or failed) execution against the workflow's `io`
+/// contract (output schema + `max_output_bytes`) and prints/returns the
+/// completion envelope.
+///
+/// Shared by `run` and `resume` (spec 074, P6 — resume parity with run):
+/// before this extraction, `resume` skipped all of this — a resumed workflow
+/// that violated its own output schema or `--emit-completion-json` request
+/// was silently accepted, unlike a freshly-run one.
+fn finish_execution(
+    emit_json: bool,
+    io_block: &newton_core::workflow::schema::IoBlock,
+    io_settings: &newton_core::workflow::schema::IoSettings,
+    summary_result: StdResult<newton_core::workflow::executor::ExecutionSummary, AppError>,
+    success_message: impl FnOnce(&newton_core::workflow::executor::ExecutionSummary) -> String,
+) -> anyhow::Result<()> {
     match summary_result {
         Ok(summary) => {
             if let (Some(schema), Some(ref result_val)) = (&io_block.output_schema, &summary.result)
@@ -169,10 +238,7 @@ async fn execute_run_command(args: &RunArgs) -> anyhow::Result<()> {
                 );
                 println!("{}", serde_json::to_string(&envelope).unwrap_or_default());
             } else {
-                println!(
-                    "Workflow completed in {} iterations",
-                    summary.total_iterations
-                );
+                println!("{}", success_message(&summary));
             }
             Ok(())
         }
@@ -326,26 +392,67 @@ pub fn explain(args: ExplainArgs) -> StdResult<(), AppError> {
     Ok(())
 }
 
-pub async fn resume(args: ResumeArgs) -> StdResult<(), AppError> {
+/// Resumes a checkpointed workflow execution through the same shared setup
+/// seam `run` uses (spec 074, P6 — resume parity with run). Before this fix,
+/// resume drifted from run in four ways: (1) the operator registry was built
+/// with `ailoop_ctx = None`, so a resumed grading/HIL workflow got no human
+/// interviewer; (2) it skipped output-schema/`max_output_bytes` validation
+/// entirely; (3) it had no `--emit-completion-json` support; (4)
+/// `resume_workflow` hardcoded `ExecutionOverrides::default()` internally, so
+/// `--state-dir`/`--verbose` never propagated to the resumed run (checkpoint
+/// writes, the backend-store sink, and captured-output printing all silently
+/// used workspace defaults instead of the resolved override root).
+pub async fn resume(args: ResumeArgs) -> anyhow::Result<()> {
+    let emit_json = args.emit_completion_json;
     let workspace = super::resolve_workflow_workspace(args.workspace)?;
     let state_dir = resolve_state_dir(&workspace, args.state_dir.as_deref());
     let execution =
         checkpoint::load_execution_from_base(&state_checkpoints_dir(&state_dir), &args.run_id)?;
     let settings = execution.settings_effective.clone();
+
+    // Load the workflow document purely to read its `io` contract (output
+    // schema / max_output_bytes) for the same post-execution validation `run`
+    // performs below via `finish_execution` — mirrors the load
+    // `execute_run_command` does at the top of this file.
+    let workflow_path = std::path::PathBuf::from(&execution.workflow_file);
+    let document = workflow_schema::load_workflow(&workflow_path)?;
+    let io_settings = document.workflow.settings.io_settings.clone();
+    let io_block = document.workflow.settings.io.clone();
+
+    let mut exec_setup =
+        super::shared_execution::build_execution_setup(state_dir.clone(), None, None, None).await?;
+    // `--verbose` (parity with run's P5b wiring): print each task's captured
+    // stdout/stderr to the terminal as it completes.
+    exec_setup.overrides.verbose = args.verbose;
+
+    let ailoop_ctx =
+        newton_core::integrations::ailoop::init_context_for_command_name(&workspace, "resume")
+            .ok()
+            .flatten();
     let registry =
-        super::build_operator_registry(workspace.clone(), &state_dir, &settings, None).await;
-    let summary = workflow_executor::resume_workflow(
+        super::build_operator_registry(workspace.clone(), &state_dir, &settings, ailoop_ctx).await;
+
+    let summary_result = workflow_executor::resume_workflow(
         registry,
         workspace.clone(),
         args.run_id,
         args.allow_workflow_change,
+        exec_setup.overrides,
     )
-    .await?;
-    println!(
-        "Workflow resumed (execution {}) in {} iterations",
-        summary.execution_id, summary.total_iterations
-    );
-    Ok(())
+    .await;
+
+    finish_execution(
+        emit_json,
+        &io_block,
+        &io_settings,
+        summary_result,
+        |summary| {
+            format!(
+                "Workflow resumed (execution {}) in {} iterations",
+                summary.execution_id, summary.total_iterations
+            )
+        },
+    )
 }
 
 /// In-process (no subprocess) coverage of `emit_or_return`'s two branches

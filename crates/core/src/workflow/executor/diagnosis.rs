@@ -138,18 +138,47 @@ pub(super) fn write_task_failure_diagnosis<W: std::io::Write>(
     Ok(())
 }
 
+/// `--verbose` per-task completion hook (spec 074, P5b): print the task's
+/// captured stdout/stderr to the terminal right after it completes, headed
+/// by a line identifying the task and its outcome so multi-task output stays
+/// readable. If the inline capture hit `OUTPUT_CAPTURE_LIMIT_BYTES` (the cap
+/// `CommandOperator`/`AgentOperator` apply when populating `stdout`/`stderr`)
+/// a truncation marker is printed alongside the artifact pointer so the
+/// human knows to go to the artifact file for the rest.
 pub(super) fn print_task_verbose_output(outcome: &TaskOutcome) {
+    use crate::workflow::operators::OUTPUT_CAPTURE_LIMIT_BYTES;
+
+    println!(
+        "--- task {} completed: {} ---",
+        outcome.task_id,
+        outcome.record.status.as_str()
+    );
+
     let output = &outcome.record.output;
 
     if let Value::Object(output_map) = output {
         if let Some(Value::String(stdout)) = output_map.get("stdout") {
             if !stdout.trim().is_empty() {
                 print!("{stdout}");
+                // Byte length landing on the cap is the signal that
+                // `limit_bytes`/`OUTPUT_CAPTURE_LIMIT_BYTES` cut the stream
+                // off at capture time rather than the process simply
+                // producing exactly that much output.
+                if stdout.len() >= OUTPUT_CAPTURE_LIMIT_BYTES {
+                    println!(
+                        "[stdout truncated at capture: hit {OUTPUT_CAPTURE_LIMIT_BYTES} byte cap]"
+                    );
+                }
             }
         }
         if let Some(Value::String(stderr)) = output_map.get("stderr") {
             if !stderr.trim().is_empty() {
                 eprint!("{stderr}");
+                if stderr.len() >= OUTPUT_CAPTURE_LIMIT_BYTES {
+                    eprintln!(
+                        "[stderr truncated at capture: hit {OUTPUT_CAPTURE_LIMIT_BYTES} byte cap]"
+                    );
+                }
             }
         }
         if let Some(Value::String(artifact_path)) = output_map.get("stdout_artifact") {

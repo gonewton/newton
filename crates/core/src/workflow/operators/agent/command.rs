@@ -11,6 +11,7 @@ use crate::workflow::expression::{EvaluationContext, ExpressionEngine};
 use crate::workflow::operators::engine::{
     extract_text_from_stream_json, EngineInvocation, OutputFormat,
 };
+use crate::workflow::subprocess::{prepare_command_for_group_kill, ProcessGroupKillGuard};
 use indexmap::IndexMap;
 use regex::Regex;
 use std::collections::HashMap;
@@ -20,95 +21,27 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncBufReadExt;
 use tokio::process::Command;
 
-pub(super) const OUTPUT_CAPTURE_LIMIT_BYTES: usize = 1_048_576;
+pub(super) use crate::workflow::operators::OUTPUT_CAPTURE_LIMIT_BYTES;
 const CMD_LOG_ARG_MAX_LEN: usize = 200;
 
-/// Group-wide kill guard for a spawned engine child, owned by the
-/// child-execution future (i.e. a plain local in `execute_single`'s async
-/// call chain, never detached via `tokio::spawn`).
-///
-/// Newton spawns engine children with `process_group(0)` (unix), making the
-/// child the leader of its own new process group. Grandchildren the child
-/// spawns (e.g. a background `sleep &`) inherit that group. `kill_on_drop`
-/// alone only reaps the *direct* child on drop — grandchildren are orphaned.
-/// This guard closes that gap: on `Drop`, while still armed, it sends
-/// `SIGKILL` to the whole process group via `killpg`, so it fires:
-///
-/// - when the operator's own `stream_and_process_output` timeout
-///   (`timeout_seconds`) returns early with an error (the guard, still
-///   armed, drops at the end of `execute_single`'s early return), and
-/// - when the *outer* per-task `timeout_ms` fires in
-///   `task_execution::execute_with_timeout`, which drops the whole operator
-///   future — including this guard's stack frame — without ever calling
-///   `Child::kill`.
-///
-/// Both paths converge on the same `Drop` impl, so the mechanism is
-/// cancellation-safe by construction: it does not depend on any code path
-/// explicitly running to completion.
-///
-/// Call [`ProcessGroupKillGuard::disarm`] only after `Child::wait()` has
-/// returned successfully (a "clean wait") — at that point the direct child
-/// is confirmed reaped and killing the group is no longer this guard's job.
-///
-/// Non-unix: `process_group`/`killpg` have no portable equivalent, so this
-/// is a documented no-op there; `kill_on_drop(true)` (set unconditionally in
-/// [`build_command`]) still reaps the direct child, but grandchildren can
-/// leak on non-unix platforms.
-struct ProcessGroupKillGuard {
-    #[cfg(unix)]
-    pgid: libc::pid_t,
-    #[cfg(unix)]
-    armed: bool,
-}
-
-impl ProcessGroupKillGuard {
-    /// `pid` is the freshly spawned child's pid. Because the child is
-    /// spawned with `process_group(0)`, it is its own process group leader,
-    /// so `pgid == pid`.
-    #[cfg(unix)]
-    fn new(pid: u32) -> Self {
-        Self {
-            pgid: pid as libc::pid_t,
-            armed: true,
-        }
-    }
-
-    #[cfg(not(unix))]
-    fn new(_pid: u32) -> Self {
-        Self {}
-    }
-
-    /// Disarm after a clean wait/exit so `Drop` becomes a no-op. Must not be
-    /// called before the direct child is confirmed reaped.
-    fn disarm(&mut self) {
-        #[cfg(unix)]
-        {
-            self.armed = false;
-        }
-    }
-}
-
-#[cfg(unix)]
-impl Drop for ProcessGroupKillGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            // SAFETY: plain FFI call with a pgid/signal pair, no pointers
-            // involved. If the group is already gone (process exited and was
-            // reaped, e.g. via the belt-and-braces `kill_on_drop`) `killpg`
-            // just returns ESRCH; cleanup here is intentionally best-effort
-            // and errors are not actionable in a `Drop` impl.
-            unsafe {
-                libc::killpg(self.pgid, libc::SIGKILL);
-            }
-        }
-    }
-}
+// `ProcessGroupKillGuard` used below (armed right after spawn in
+// `spawn_engine_process`, disarmed right after a clean wait in
+// `wait_for_process_completion`) now lives in `workflow::subprocess`, shared
+// with `GitOperator`, `GhOperator`, and `CommandOperator`'s
+// `run_guarded`-based runners. The agent operator keeps its own bespoke
+// streaming flow (it must observe stdout line-by-line for signal matching
+// while the child is still running, which `run_guarded`'s
+// spawn-then-`wait_with_output` shape can't do) but reuses the same guard
+// type and disarm-ordering discipline documented on
+// `subprocess::ProcessGroupKillGuard`.
 
 /// Result from a single engine execution.
 pub(super) struct SingleExecResult {
     pub(super) signal: Option<String>,
     pub(super) signal_data: HashMap<String, String>,
-    pub(super) exit_code: i32,
+    /// `None` when the child was killed after a signal match (no exit code
+    /// to report); `Some(_)` on a genuine process exit.
+    pub(super) exit_code: Option<i32>,
 }
 
 /// Bundled paths for an execution run.
@@ -317,6 +250,14 @@ async fn stream_and_process_output(
 
 /// Wait for the process to complete and return the exit code.
 ///
+/// Returns `None` when `exit_status.code()` is `None` — on unix that means
+/// the process was terminated by a signal, which in this codebase happens
+/// exactly when [`stream_and_process_output`] called `child.kill()` after a
+/// configured signal matched. The caller must not paper over that with a
+/// fabricated exit code (e.g. `-1`): a signal-terminated process genuinely
+/// has no exit code, and a workflow gate on `exit_code == 0` must not see a
+/// successful signal-stop as a failure. See spec 074 decision 4 / B9.
+///
 /// Disarms `kill_guard` IMMEDIATELY after a successful `child.wait()` —
 /// before awaiting `stderr_task`. `stderr_task.await` is itself an await
 /// point; if it were reached while the guard was still armed, the *outer*
@@ -339,7 +280,7 @@ async fn wait_for_process_completion(
     mut child: tokio::process::Child,
     stderr_task: tokio::task::JoinHandle<()>,
     kill_guard: &mut ProcessGroupKillGuard,
-) -> Result<i32, AppError> {
+) -> Result<Option<i32>, AppError> {
     let exit_status = child.wait().await.map_err(|err| {
         AppError::new(
             ErrorCategory::IoError,
@@ -353,7 +294,7 @@ async fn wait_for_process_completion(
 
     let _ = stderr_task.await;
 
-    Ok(exit_status.code().unwrap_or(-1))
+    Ok(exit_status.code())
 }
 
 /// Execute a single engine invocation and stream output.
@@ -387,10 +328,10 @@ pub(super) async fn execute_single(params: &ExecParams<'_>) -> Result<SingleExec
 pub(super) async fn execute_loop(
     config: &AgentOperatorConfig,
     params: &ExecParams<'_>,
-) -> Result<(Option<String>, HashMap<String, String>, i32, u32), AppError> {
+) -> Result<(Option<String>, HashMap<String, String>, Option<i32>, u32), AppError> {
     let max_iters = config.max_iterations.unwrap_or(u32::MAX);
     let mut iteration: u32 = 0;
-    let mut last_exit_code: i32;
+    let mut last_exit_code: Option<i32>;
     let mut last_signal: Option<String>;
     let mut last_signal_data: HashMap<String, String>;
 
@@ -417,7 +358,10 @@ pub(super) async fn execute_loop(
             break;
         }
 
-        if result.exit_code != 0 {
+        // `result.exit_code` is only `None` when the child was killed on a
+        // signal match, and that path already broke out above via
+        // `result.signal`, so this comparison never observes `None`.
+        if result.exit_code != Some(0) {
             break;
         }
     }
@@ -449,15 +393,14 @@ fn build_command(
     cmd.stdin(Stdio::null());
 
     // Belt-and-braces: reap the direct child if the `Child` handle itself is
-    // dropped without an explicit kill/wait. This alone does NOT reach
-    // grandchildren — that's `ProcessGroupKillGuard`'s job.
-    cmd.kill_on_drop(true);
-    // Make the child the leader of its own process group so grandchildren it
-    // spawns (e.g. `sleep 300 &`) share a group we can kill as a unit via
-    // `killpg`. Non-unix: no portable equivalent; grandchildren gap is
-    // documented on `ProcessGroupKillGuard`.
-    #[cfg(unix)]
-    cmd.process_group(0);
+    // dropped without an explicit kill/wait (`kill_on_drop(true)`) and make
+    // it the leader of its own process group so grandchildren it spawns
+    // (e.g. `sleep 300 &`) share a group we can kill as a unit via `killpg`.
+    // `kill_on_drop` alone does NOT reach grandchildren — that's
+    // `ProcessGroupKillGuard`'s job. Non-unix: no portable equivalent of
+    // `process_group`; grandchildren gap is documented on
+    // `subprocess::ProcessGroupKillGuard`.
+    prepare_command_for_group_kill(&mut cmd);
 
     for (k, v) in &invocation.env {
         cmd.env(k, v);
@@ -603,6 +546,57 @@ mod tests {
         });
         let result = op.execute(params, ctx).await.unwrap();
         assert_eq!(result["signal"], json!("complete"));
+    }
+
+    // ── B9: honest agent stop contract ───────────────────────────────────
+    //
+    // A configured-signal match kills the child (see
+    // `stream_and_process_output`'s `child.kill().await` on match), so
+    // `exit_status.code()` is `None` — there is no genuine exit code to
+    // report. The operator output must say so explicitly (`stop_reason:
+    // "signal_matched"`, `exit_code: null`) instead of fabricating a
+    // sentinel like `-1` that a `exit_code == 0` gate would misread as
+    // failure.
+
+    #[tokio::test]
+    async fn execute_signal_matched_sets_stop_reason_and_null_exit_code() {
+        let tmp = TempDir::new().unwrap();
+        let settings = WorkflowSettings::default();
+        let op = AgentOperator::with_default_registry(tmp.path().to_path_buf(), settings);
+        let ctx = make_ctx(&tmp);
+        // The script must still be alive when `child.kill()` fires after the
+        // signal match, or the process may have already exited on its own
+        // (racing the kill with a genuine `exit_code: 0`) and this test
+        // would not actually exercise the kill path. `sleep` after the
+        // signal line keeps the process running long enough to be killed.
+        let params = json!({
+            "engine": "command",
+            "engine_command": [
+                "bash", "-c",
+                "echo '<promise>COMPLETE</promise>'; sleep 30"
+            ],
+            "signals": { "complete": "<promise>COMPLETE</promise>" }
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+        assert_eq!(result["signal"], json!("complete"));
+        assert_eq!(result["stop_reason"], json!("signal_matched"));
+        assert_eq!(result["exit_code"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn execute_clean_exit_sets_stop_reason_exited_with_numeric_exit_code() {
+        let tmp = TempDir::new().unwrap();
+        let settings = WorkflowSettings::default();
+        let op = AgentOperator::with_default_registry(tmp.path().to_path_buf(), settings);
+        let ctx = make_ctx(&tmp);
+        let params = json!({
+            "engine": "command",
+            "engine_command": ["bash", "-c", "echo hello"]
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+        assert_eq!(result["signal"], json!("exited"));
+        assert_eq!(result["stop_reason"], json!("exited"));
+        assert_eq!(result["exit_code"], json!(0));
     }
 
     #[tokio::test]

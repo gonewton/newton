@@ -234,15 +234,24 @@ pub fn enumerate_effective_app_tree_commands() -> Vec<(String, Command)> {
 
 // ── FromArgValueMap adapters ─────────────────────────────────────────────────
 
-impl FromArgValueMap for RunArgs {
-    fn from_arg_value_map(map: &HashMap<String, ArgValue>) -> Self {
-        let workflow = require_workflow_path(map, "run").unwrap_or_else(|e| panic!("fw bug: {e}"));
+impl RunArgs {
+    /// Fallible counterpart to the (infallible-by-contract) `FromArgValueMap`
+    /// trait. `workflow`, `trigger`, and `context` are not covered by
+    /// cli-framework's static cardinality validation — `workflow` is
+    /// assembled from a positional promotion at the call site rather than
+    /// being a `Cardinality::Required` arg, and `trigger`/`context` are
+    /// free-form `KEY=VALUE` strings the spec only knows as `String` — so
+    /// malformed user input (missing workflow file, `--trigger foo` with no
+    /// `=`) can genuinely reach this constructor. Return a clean `anyhow`
+    /// error instead of panicking (spec 074, B19).
+    pub(crate) fn try_from_arg_value_map(map: &HashMap<String, ArgValue>) -> anyhow::Result<Self> {
+        let workflow = require_workflow_path(map, "run")?;
         let input_file = get_opt_path(map, "input-file");
         let workspace = get_opt_path(map, "workspace");
         let trigger = parse_kvp_from_map(map, "trigger")
-            .unwrap_or_else(|e| panic!("fw bug: invalid trigger: {e}"));
+            .map_err(|e| anyhow!("{}: invalid --trigger: {e}", error_codes::CLI_MIG_002))?;
         let context = parse_kvp_from_map(map, "context")
-            .unwrap_or_else(|e| panic!("fw bug: invalid context: {e}"));
+            .map_err(|e| anyhow!("{}: invalid --context: {e}", error_codes::CLI_MIG_002))?;
         let parameters_json = get_opt_path(map, "parameters-json");
         let emit_completion_json = get_bool(map, "emit-completion-json");
         let parallel_limit = if let Some(ArgValue::Int(n)) = map.get("parallel-limit") {
@@ -258,7 +267,7 @@ impl FromArgValueMap for RunArgs {
         let verbose = get_bool(map, "verbose");
         let server = get_opt_str(map, "server");
         let state_dir = get_opt_path(map, "state-dir");
-        RunArgs {
+        Ok(RunArgs {
             workflow,
             input_file,
             workspace,
@@ -271,7 +280,7 @@ impl FromArgValueMap for RunArgs {
             verbose,
             server,
             state_dir,
-        }
+        })
     }
 }
 
@@ -286,6 +295,13 @@ impl FromArgValueMap for InitArgs {
 
 impl FromArgValueMap for OptimizeArgs {
     fn from_arg_value_map(map: &HashMap<String, ArgValue>) -> Self {
+        // Unlike RunArgs::workflow / ResumeArgs::run_id, `project-id` genuinely
+        // is `Cardinality::Required` in `optimize_command()`'s spec (see
+        // `commands/optimize.rs`), so cli-framework's `validate_typed_args`
+        // rejects an invocation missing it *before* this constructor ever
+        // runs — this really is the "framework bug" case the trait's own
+        // doc comment describes, not user-controllable input (audited for
+        // spec 074, B19: left as a panic on purpose).
         let project_id = get_opt_str(map, "project-id")
             .unwrap_or_else(|| panic!("fw bug: project-id is required"));
         let poll_interval_seconds = if let Some(ArgValue::Int(n)) = map.get("poll-interval") {
@@ -327,18 +343,30 @@ impl FromArgValueMap for ServeArgs {
     }
 }
 
-impl FromArgValueMap for ResumeArgs {
-    fn from_arg_value_map(map: &HashMap<String, ArgValue>) -> Self {
-        let run_id_str =
-            get_opt_str(map, "run-id").unwrap_or_else(|| panic!("fw bug: --run-id is required"));
+impl ResumeArgs {
+    /// Fallible counterpart to the (infallible-by-contract) `FromArgValueMap`
+    /// trait. `run-id` is `Cardinality::Optional` in the shared `workflow`
+    /// command spec (it is reused by both `resume` and `runs show`), so it
+    /// can genuinely be absent, and its UUID format is never validated by
+    /// the arg spec — mirrors the clean `anyhow!` validation `runs show`
+    /// already does (spec 074, B19).
+    pub(crate) fn try_from_arg_value_map(map: &HashMap<String, ArgValue>) -> anyhow::Result<Self> {
+        let run_id_str = get_opt_str(map, "run-id").ok_or_else(|| {
+            anyhow!(
+                "{}: --run-id is required for `workflow resume`",
+                error_codes::CLI_MIG_002
+            )
+        })?;
         let run_id = Uuid::parse_str(&run_id_str)
-            .unwrap_or_else(|e| panic!("fw bug: invalid run-id UUID: {e}"));
-        ResumeArgs {
+            .map_err(|e| anyhow!("{}: invalid --run-id UUID: {}", error_codes::CLI_MIG_002, e))?;
+        Ok(ResumeArgs {
             run_id,
             workspace: get_opt_path(map, "workspace"),
             allow_workflow_change: get_bool(map, "allow-workflow-change"),
             state_dir: get_opt_path(map, "state-dir"),
-        }
+            emit_completion_json: get_bool(map, "emit-completion-json"),
+            verbose: get_bool(map, "verbose"),
+        })
     }
 }
 

@@ -164,6 +164,7 @@ async fn resume_skips_completed_tasks() {
         workspace.path().to_path_buf(),
         summary.execution_id,
         false,
+        ExecutionOverrides::default(),
     )
     .await
     .expect("resume succeeded");
@@ -233,6 +234,7 @@ async fn resume_hash_mismatch_blocks_resume() {
         workspace.path().to_path_buf(),
         summary.execution_id,
         false,
+        ExecutionOverrides::default(),
     )
     .await
     .expect_err("hash mismatch should fail");
@@ -478,6 +480,7 @@ workflow:
         workspace.path().to_path_buf(),
         summary.execution_id,
         true,
+        ExecutionOverrides::default(),
     )
     .await
     .expect("resume with allow_workflow_change succeeded");
@@ -599,6 +602,7 @@ workflow:
         workspace.path().to_path_buf(),
         summary.execution_id,
         false,
+        ExecutionOverrides::default(),
     )
     .await
     .expect("resume without allow_workflow_change succeeded");
@@ -731,6 +735,7 @@ workflow:
         workspace.path().to_path_buf(),
         summary.execution_id,
         true,
+        ExecutionOverrides::default(),
     )
     .await
     .expect("resume succeeded");

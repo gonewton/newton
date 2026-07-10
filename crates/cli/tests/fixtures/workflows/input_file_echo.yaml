@@ -1,0 +1,22 @@
+version: "2.0"
+mode: "workflow_graph"
+metadata:
+  name: "P5a: echo triggers.payload.input_file"
+workflow:
+  settings:
+    entry_task: "echo_input_file"
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 1
+    max_workflow_iterations: 5
+    command_operator:
+      allow_shell: true
+  tasks:
+    - id: "echo_input_file"
+      operator: "CommandOperator"
+      params:
+        cmd: { $expr: "\"echo -n INPUT_FILE=\" + triggers.input_file" }
+        shell: true
+        write_stdout: "input_file_captured.txt"
+      terminal: success

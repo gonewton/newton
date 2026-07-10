@@ -10,7 +10,11 @@ use std::path::{Path, PathBuf};
 pub(super) struct AgentOutput {
     pub(super) signal: Option<String>,
     pub(super) signal_data: HashMap<String, String>,
-    pub(super) exit_code: i32,
+    /// `None` when the child was killed after a configured signal matched
+    /// (`exit_status.code()` is `None` for a signal-terminated process on
+    /// unix — there is no exit code to report). `Some(_)` when the process
+    /// genuinely exited on its own.
+    pub(super) exit_code: Option<i32>,
     pub(super) final_iteration: u32,
     pub(super) stdout_rel: String,
     pub(super) stderr_abs: PathBuf,
@@ -36,6 +40,19 @@ pub(super) fn build_agent_output(out: AgentOutput) -> Value {
         Value::Null
     };
 
+    // The stop contract: a configured signal firing is a *successful* stop,
+    // distinct from the process simply running to completion. Derived from
+    // whether a signal matched at all (not from `exit_code`), so it is
+    // truthful for both engine paths: the command-engine path kills the
+    // child the moment a signal matches (erasing its exit code), while the
+    // SDK-engine path never kills a process but still "stops on signal" in
+    // the same sense. See ADR/spec 074 decision 4 (B9).
+    let stop_reason = if out.signal.is_some() {
+        "signal_matched"
+    } else {
+        "exited"
+    };
+
     let signal_value = match out.signal {
         Some(ref s) => Value::String(s.clone()),
         None => {
@@ -59,8 +76,15 @@ pub(super) fn build_agent_output(out: AgentOutput) -> Value {
         ),
     );
     map.insert(
+        "stop_reason".to_string(),
+        Value::String(stop_reason.to_string()),
+    );
+    map.insert(
         "exit_code".to_string(),
-        Value::Number(Number::from(out.exit_code)),
+        match out.exit_code {
+            Some(code) => Value::Number(Number::from(code)),
+            None => Value::Null,
+        },
     );
     map.insert("stdout_artifact".to_string(), Value::String(out.stdout_rel));
     map.insert("stderr_artifact".to_string(), stderr_artifact);

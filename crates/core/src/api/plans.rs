@@ -25,7 +25,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
     path = "/plans",
     tag = "plans",
     responses(
-        (status = 200, description = "Plan list", body = [newton_backend::PlanItem]),
+        (status = 200, description = "Plan list", body = [newton_types::PlanItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
@@ -42,7 +42,7 @@ pub(crate) async fn list_plans(State(state): State<Arc<AppState>>) -> Response {
     tag = "plans",
     params(("id" = String, Path, description = "Plan id")),
     responses(
-        (status = 200, description = "Plan detail", body = newton_backend::PlanDetail),
+        (status = 200, description = "Plan detail", body = newton_types::PlanDetail),
         (status = 404, description = "Plan not found", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
     )
@@ -69,7 +69,7 @@ pub(crate) async fn get_plan(
     tag = "plans",
     params(("id" = String, Path, description = "Plan id")),
     responses(
-        (status = 200, description = "Approved plan", body = newton_backend::PlanItem),
+        (status = 200, description = "Approved plan", body = newton_types::PlanItem),
         (status = 404, description = "Plan not found", body = ApiError),
         (status = 409, description = "Plan state conflict", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
@@ -113,7 +113,7 @@ pub(crate) async fn approve_plan(
     tag = "plans",
     params(("id" = String, Path, description = "Plan id")),
     responses(
-        (status = 200, description = "Rejected plan", body = newton_backend::PlanItem),
+        (status = 200, description = "Rejected plan", body = newton_types::PlanItem),
         (status = 404, description = "Plan not found", body = ApiError),
         (status = 409, description = "Plan state conflict", body = ApiError),
         (status = 500, description = "Internal error", body = ApiError)
@@ -155,7 +155,7 @@ pub(crate) struct ExecutionsQuery {
     tag = "executions",
     params(("planId" = Option<String>, Query, description = "Optional plan id filter")),
     responses(
-        (status = 200, description = "Execution list", body = [newton_backend::ExecutionItem]),
+        (status = 200, description = "Execution list", body = [newton_types::ExecutionItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]

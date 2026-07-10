@@ -26,7 +26,7 @@ fn require_nonempty_key(key: &str) -> Result<(), Response> {
     if key.is_empty() {
         Err((
             StatusCode::UNPROCESSABLE_ENTITY,
-            Json(newton_backend::err_validation("Key must not be empty")),
+            Json(newton_types::err_validation("Key must not be empty")),
         )
             .into_response())
     } else {

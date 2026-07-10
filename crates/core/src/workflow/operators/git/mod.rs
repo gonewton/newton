@@ -3,6 +3,7 @@
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
+use crate::workflow::subprocess::run_guarded;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -128,7 +129,11 @@ async fn run_git(args: &[&str], cwd: &Path) -> Result<ShellOutput, AppError> {
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
 
-    let output = cmd.output().await.map_err(|e| {
+    // `run_guarded` spawns `cmd` as the leader of its own process group with
+    // `kill_on_drop(true)` and guards it with `ProcessGroupKillGuard`, so an
+    // outer task timeout dropping this future can't orphan a grandchild git
+    // spawns (e.g. a hook backgrounding work). See `workflow::subprocess`.
+    let output = run_guarded(cmd).await.map_err(|e| {
         AppError::new(
             ErrorCategory::ToolExecutionError,
             format!("failed to spawn git: {e}"),
@@ -221,6 +226,60 @@ fn glob_matches(pattern: &str, s: &str) -> bool {
     s == pattern
 }
 
+/// Positive structural signature for `execute_commit`'s classification: is
+/// there an executable `pre-commit` or `commit-msg` hook actually installed
+/// in this repository? Resolved via `git rev-parse --git-path hooks/<name>`
+/// so a `core.hooksPath` override (relative or absolute) is honored the
+/// same way git itself resolves it.
+///
+/// Spec 074 / B8: `git commit` normalizes ANY pre-commit/commit-msg hook
+/// rejection to exit code 1 — regardless of the hook script's own exit
+/// code — while genuine git-level failures (bad `user.email`/`user.name`,
+/// `index.lock` held, unresolved merge conflicts, bad flags) exit 128
+/// (fatal) or 129 (usage). But exit code 1 alone is not a reliable hook
+/// signal: git also returns 1 for "nothing to commit" (a narrow TOCTOU race
+/// against the earlier `diff --cached --quiet` check) and for "Aborting
+/// commit due to empty commit message" (if `-m`'s message strips to empty
+/// under git's default `--cleanup=strip`). Requiring an actual installed
+/// hook as well closes that gap without resorting to fragile substring
+/// matching on hook output (which can be empty — a hook is free to fail
+/// silently).
+async fn repo_has_commit_hook(cwd: &Path) -> bool {
+    for hook_name in ["pre-commit", "commit-msg"] {
+        let git_path_arg = format!("hooks/{hook_name}");
+        let Ok(path_out) = run_git(&["rev-parse", "--git-path", &git_path_arg], cwd).await else {
+            continue;
+        };
+        if path_out.exit_code != 0 {
+            continue;
+        }
+        let hook_rel = path_out.stdout.trim();
+        if hook_rel.is_empty() {
+            continue;
+        }
+        if is_executable_file(&cwd.join(hook_rel)) {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    // No portable executable-bit check; treat any regular file at the
+    // resolved hook path as a hook, matching git's own non-unix behavior
+    // closely enough for this classifier's purposes.
+    path.is_file()
+}
+
 async fn execute_commit(message: &str, allow_empty: bool, cwd: &Path) -> Result<Value, AppError> {
     let staged = run_git(&["diff", "--cached", "--quiet"], cwd).await?;
     let nothing_staged = staged.exit_code == 0;
@@ -239,10 +298,36 @@ async fn execute_commit(message: &str, allow_empty: bool, cwd: &Path) -> Result<
         return Ok(json!({ "committed": true, "skipped": false, "precommit_failed": false }));
     }
 
-    // Detect pre-commit hook failure: exit code 1 with hook-related output,
-    // or any non-zero exit from git commit.
-    let combined = format!("{}\n{}", result.stdout, result.stderr);
-    if combined.contains("hook") || combined.contains("pre-commit") || result.exit_code == 1 {
+    // git's own two well-known non-hook exit-1 causes (see the doc comment
+    // above) — checked BEFORE the hook-presence classification below so an
+    // installed hook doesn't cause either of these to be misclassified as
+    // `precommit_failed`.
+    let combined_output = format!("{}\n{}", result.stdout, result.stderr).to_lowercase();
+
+    if combined_output.contains("nothing to commit") {
+        // TOCTOU: the up-front `diff --cached --quiet` check raced with
+        // something unstaging the change before `git commit` actually ran.
+        // Same shape as the up-front clean-tree skip path above.
+        return Ok(json!({ "committed": false, "skipped": true, "precommit_failed": false }));
+    }
+
+    if combined_output.contains("aborting commit due to empty commit message") {
+        return Err(AppError::new(
+            ErrorCategory::ToolExecutionError,
+            format!(
+                "git commit aborted: empty commit message after cleanup (exit {}): {}",
+                result.exit_code,
+                result.stderr.trim()
+            ),
+        )
+        .with_code("WFG-GIT-003"));
+    }
+
+    // Positive-signature classification only (spec 074 / B8): exit code 1
+    // AND an actual hook installed. Any other nonzero exit — including
+    // exit code 1 with no hook present — is a hard `Err`, never silently
+    // swallowed as a fabricated pre-commit rejection.
+    if result.exit_code == 1 && repo_has_commit_hook(cwd).await {
         return Ok(json!({ "committed": false, "skipped": false, "precommit_failed": true }));
     }
 

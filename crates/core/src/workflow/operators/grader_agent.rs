@@ -9,7 +9,7 @@ use crate::workflow::operator::{ExecutionContext, Operator};
 use crate::workflow::operators::assessment;
 use async_trait::async_trait;
 use chrono::Utc;
-use newton_backend::BackendStore;
+use newton_types::BackendStore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -22,6 +22,8 @@ pub struct GraderAgentOperator {
 }
 
 impl GraderAgentOperator {
+    pub const NAME: &'static str = "GraderAgentOperator";
+
     pub fn new(
         workspace_root: PathBuf,
         store: Arc<dyn BackendStore>,
@@ -30,6 +32,17 @@ impl GraderAgentOperator {
         Self {
             workspace_root,
             store,
+        }
+    }
+
+    /// Store-independent Descriptor (name + params/output schema). Used to
+    /// describe this operator's vocabulary even when no `BackendStore` is
+    /// wired (e.g. `newton schema export`). See ADR-0014.
+    pub fn descriptor() -> crate::workflow::operator::Descriptor {
+        crate::workflow::operator::Descriptor {
+            name: Self::NAME,
+            params_schema: schemars::schema_for!(GraderAgentParams),
+            output_schema: schemars::schema_for!(GraderAgentOutput),
         }
     }
 }
@@ -127,7 +140,7 @@ Evaluate the scope using the rubric above. Return ONLY a valid JSON Assessment o
 #[async_trait]
 impl Operator for GraderAgentOperator {
     fn name(&self) -> &'static str {
-        "GraderAgentOperator"
+        Self::NAME
     }
 
     fn validate_params(&self, params: &Value) -> Result<(), AppError> {
@@ -156,11 +169,11 @@ impl Operator for GraderAgentOperator {
     }
 
     fn params_schema(&self) -> schemars::Schema {
-        schemars::schema_for!(GraderAgentParams)
+        Self::descriptor().params_schema
     }
 
     fn output_schema(&self) -> schemars::Schema {
-        schemars::schema_for!(GraderAgentOutput)
+        Self::descriptor().output_schema
     }
 
     async fn execute(&self, params: Value, _ctx: ExecutionContext) -> Result<Value, AppError> {

@@ -52,11 +52,35 @@ pub struct AgentParams {
     pub require_signal: bool,
 }
 
+/// Why the agent operator stopped executing the engine.
+///
+/// `signal_matched`: a configured `signals` pattern matched the engine's
+/// output (for the command engine this is when the child is killed, which
+/// is why `exit_code` is `null` in that case). `exited`: the engine process
+/// ran to completion on its own (with or without signals configured).
+///
+/// No `timeout` variant: both the operator-internal timeout
+/// (`timeout_seconds`, `WFG-AGENT-005`) and the outer per-task
+/// `timeout_ms` (`WFG-TIME-002`) return `Err` before any output value is
+/// constructed, so a `timeout` stop reason can never actually appear on an
+/// agent operator output today. Adding an enum value that no code path can
+/// produce would be exactly the kind of fabricated contract this change is
+/// meant to eliminate.
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StopReason {
+    SignalMatched,
+    Exited,
+}
+
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 pub struct AgentSchemaOutput {
     pub signal: Option<String>,
     pub stdout_artifact: Option<String>,
+    /// `null` when the child was killed after a signal match (it has no
+    /// exit code); numeric on a genuine process exit.
     pub exit_code: Option<i32>,
+    pub stop_reason: StopReason,
 }
 
 use self::command::{ExecParams, ExecPaths};

@@ -49,6 +49,11 @@ jobs:
        - name: Validate AsyncAPI realtime contract
          run: npx -y @asyncapi/cli@3 validate openapi/newton-realtime.asyncapi.yaml
 
+       - name: Verify workflow-schema parity contract
+         run: |
+           ./scripts/generate-workflow-schema.sh
+           git diff --exit-code packages/workflow-schema/workflow.schema.json packages/workflow-schema/output_schemas.json
+
        - name: Run clippy
          run: cargo clippy --all-targets --all-features -- -D warnings
 
@@ -66,10 +71,13 @@ jobs:
        - name: Run tests
          run: cargo test --workspace --all-features
 
-       - name: Verify newton-core has no CLI/TUI deps
+       - name: Verify newton-core has no CLI/TUI/storage deps
          run: |
-           if cargo tree -p newton-core --prefix none 2>/dev/null | grep -Eq '^(clap|ratatui|crossterm)( |$)'; then
-             echo "newton-core must not depend on clap/ratatui/crossterm"
+           # -e normal: only production dependency edges. newton-core takes
+           # newton-backend (and therefore sqlx) as a dev-dependency for
+           # tests (ADR-0015); that must not trip this guard.
+           if cargo tree -p newton-core -e normal --prefix none 2>/dev/null | grep -Eq '^(clap|ratatui|crossterm|sqlx)( |$)'; then
+             echo "newton-core must not depend on clap/ratatui/crossterm/sqlx"
              exit 1
            fi
 

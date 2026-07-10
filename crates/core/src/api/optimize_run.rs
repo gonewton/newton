@@ -25,7 +25,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
     path = "/optimize-runs",
     tag = "optimize",
     responses(
-        (status = 200, description = "List of optimize runs", body = [newton_backend::OptimizeRunItem]),
+        (status = 200, description = "List of optimize runs", body = [newton_types::OptimizeRunItem]),
         (status = 500, description = "Internal error", body = newton_types::ApiError)
     )
 )]
@@ -39,7 +39,7 @@ pub(crate) async fn list_optimize_runs(State(state): State<Arc<AppState>>) -> Re
     tag = "optimize",
     params(("id" = String, Path, description = "Optimize run id")),
     responses(
-        (status = 200, description = "Optimize run detail", body = newton_backend::OptimizeRunDetail),
+        (status = 200, description = "Optimize run detail", body = newton_types::OptimizeRunDetail),
         (status = 404, description = "Not found", body = newton_types::ApiError),
         (status = 500, description = "Internal error", body = newton_types::ApiError)
     )
@@ -57,7 +57,7 @@ pub(crate) async fn get_optimize_run(
     tag = "optimize",
     params(("id" = String, Path, description = "Optimize run id")),
     responses(
-        (status = 200, description = "Run detail with cycles", body = newton_backend::OptimizeRunTrajectory),
+        (status = 200, description = "Run detail with cycles", body = newton_types::OptimizeRunTrajectory),
         (status = 404, description = "Not found", body = newton_types::ApiError),
         (status = 500, description = "Internal error", body = newton_types::ApiError)
     )
@@ -75,7 +75,7 @@ pub(crate) async fn get_optimize_run_trajectory(
         Err(e) => return ok_json::<()>(Err(e)),
     };
     ok_json(Ok::<_, newton_types::ApiError>(
-        newton_backend::OptimizeRunTrajectory { detail, cycles },
+        newton_types::OptimizeRunTrajectory { detail, cycles },
     ))
 }
 
@@ -85,7 +85,7 @@ pub(crate) async fn get_optimize_run_trajectory(
     tag = "optimize",
     params(("id" = String, Path, description = "Optimize run id")),
     responses(
-        (status = 200, description = "Cycles for run", body = [newton_backend::OptimizeCycleItem]),
+        (status = 200, description = "Cycles for run", body = [newton_types::OptimizeCycleItem]),
         (status = 500, description = "Internal error", body = newton_types::ApiError)
     )
 )]

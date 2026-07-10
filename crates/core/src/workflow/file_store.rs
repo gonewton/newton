@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+#[derive(Debug)]
 pub struct WorkflowFileRecord {
     pub name: String,
     pub content: String,
@@ -18,8 +19,12 @@ pub struct WorkflowFileRecord {
 
 #[derive(Debug)]
 pub enum WriteOutcome {
-    Created,
-    Updated,
+    /// Carries the persisted record — as read back from disk right after the
+    /// write, in the same `write()` call — so API handlers echo the store's
+    /// actual `content_hash`/`modified_at` instead of recomputing/guessing
+    /// them (spec 074, B16).
+    Created(WorkflowFileRecord),
+    Updated(WorkflowFileRecord),
 }
 
 pub trait WorkflowFileStore: Send + Sync {
@@ -32,6 +37,13 @@ pub trait WorkflowFileStore: Send + Sync {
         if_match: Option<&str>,
     ) -> Result<WriteOutcome, AppError>;
     fn delete(&self, name: &str) -> Result<(), AppError>;
+    /// Fix 6 (B17): cheap existence probe — `validate_slug` plus an fs
+    /// `metadata()` stat, no content read and no SHA-256 hash computation.
+    /// Callers that only need to know whether a name is taken (e.g. the
+    /// `PUT` handler's no-precondition 428 check) should use this instead of
+    /// `read()`, which pays for a full file read plus a hash it then
+    /// discards.
+    fn exists(&self, name: &str) -> Result<bool, AppError>;
 }
 
 pub struct FsWorkflowFileStore {
@@ -244,6 +256,14 @@ impl WorkflowFileStore for FsWorkflowFileStore {
         content: &str,
         if_match: Option<&str>,
     ) -> Result<WriteOutcome, AppError> {
+        // `validate_slug` is the sole traversal defense for this write path:
+        // it rejects `/`, `\`, and any `..` occurrence in `name` *before*
+        // any joining happens, so `self.workflows_dir.join(format!("{name}.yaml"))`
+        // below can only ever produce a direct child of `workflows_dir`.
+        // (Previously there was also a post-join check comparing
+        // `canonical_dir.join(name)` against `canonical_dir` — that was
+        // tautologically true by construction and provided no real
+        // protection; spec 074, B12.)
         validate_slug(name)?;
         // Ensure dir exists before path resolution
         fs::create_dir_all(&self.workflows_dir).map_err(|e| {
@@ -253,21 +273,6 @@ impl WorkflowFileStore for FsWorkflowFileStore {
             )
         })?;
         let path = self.workflows_dir.join(format!("{name}.yaml"));
-        // Traversal check after dir creation
-        let canonical_dir = fs::canonicalize(&self.workflows_dir).map_err(|e| {
-            AppError::new(
-                ErrorCategory::IoError,
-                format!("failed to canonicalize workflows dir: {e}"),
-            )
-        })?;
-        // For traversal check we compare based on the expected path
-        let target = canonical_dir.join(format!("{name}.yaml"));
-        if !target.starts_with(&canonical_dir) {
-            return Err(
-                AppError::new(ErrorCategory::ValidationError, "path traversal detected")
-                    .with_code("ERR_VALIDATION"),
-            );
-        }
 
         let existed = path.exists();
         // Optimistic concurrency check
@@ -287,14 +292,57 @@ impl WorkflowFileStore for FsWorkflowFileStore {
                     )
                     .with_code("ERR_CONFLICT"));
                 }
+            } else {
+                // Fix 5: `if_match` names a hash for a file state that no
+                // longer exists — the file was deleted (or never existed)
+                // since the caller last observed that hash. A precondition
+                // referencing a vanished file state can never be satisfied,
+                // so CAS must fail the same way a hash mismatch does,
+                // rather than falling through to silently (re)create the
+                // file as if this were an unconditional PUT.
+                return Err(AppError::new(
+                    ErrorCategory::ValidationError,
+                    "ETag mismatch: file does not exist (If-Match precondition cannot be \
+                     satisfied against a deleted or never-created file)",
+                )
+                .with_code("ERR_CONFLICT"));
             }
         }
         atomic_write(&path, content.as_bytes())?;
+
+        // Read back what was actually persisted (one extra `stat`, no extra
+        // file read — the bytes are already in hand) so the caller echoes
+        // the store's own numbers rather than the request's, per spec 074
+        // B16. `content_hash` is deterministic over `content`'s bytes, but
+        // `modified_at` must come from the filesystem: `Utc::now()` at the
+        // handler layer can disagree with the mtime a subsequent GET
+        // reports (clock vs. filesystem-timestamp granularity/skew).
+        let metadata = fs::metadata(&path).map_err(|e| {
+            AppError::new(
+                ErrorCategory::IoError,
+                format!("failed to stat {}: {e}", path.display()),
+            )
+        })?;
+        let record = WorkflowFileRecord {
+            name: name.to_string(),
+            content: content.to_string(),
+            content_hash: compute_sha256_hex(content.as_bytes()),
+            size_bytes: metadata.len(),
+            modified_at: metadata
+                .modified()
+                .map(system_time_to_datetime)
+                .unwrap_or_default(),
+        };
         if existed {
-            Ok(WriteOutcome::Updated)
+            Ok(WriteOutcome::Updated(record))
         } else {
-            Ok(WriteOutcome::Created)
+            Ok(WriteOutcome::Created(record))
         }
+    }
+
+    fn exists(&self, name: &str) -> Result<bool, AppError> {
+        let path = resolve_and_check_path(&self.workflows_dir, name)?;
+        Ok(fs::metadata(&path).is_ok())
     }
 
     fn delete(&self, name: &str) -> Result<(), AppError> {
@@ -392,6 +440,62 @@ mod tests {
         assert!(store.delete("../../etc/passwd").is_err());
     }
 
+    /// Spec 074, B12: the write-path traversal check
+    /// (`target.starts_with(&canonical_dir)` on a `canonical_dir.join(...)`
+    /// path) was tautologically true and has been deleted; `validate_slug`
+    /// is now the sole, pre-join defense. These pin the specific traversal
+    /// shapes called out by the fix — `../evil`, `a/b`, and absolute paths —
+    /// on the write path directly (not just `resolve_and_check_path`'s
+    /// read/delete path, already covered by `test_traversal_rejection`).
+    #[test]
+    fn test_write_rejects_dotdot_prefixed_name() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        let err = store.write("../evil", "bad", None).unwrap_err();
+        assert_eq!(err.code.as_str(), "ERR_VALIDATION");
+    }
+
+    #[test]
+    fn test_write_rejects_nested_slash_name() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        let err = store.write("a/b", "bad", None).unwrap_err();
+        assert_eq!(err.code.as_str(), "ERR_VALIDATION");
+    }
+
+    #[test]
+    fn test_write_rejects_absolute_unix_path_name() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        let err = store.write("/etc/passwd", "bad", None).unwrap_err();
+        assert_eq!(err.code.as_str(), "ERR_VALIDATION");
+    }
+
+    #[test]
+    fn test_write_rejects_absolute_windows_style_path_name() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        let err = store
+            .write("C:\\Windows\\System32\\evil", "bad", None)
+            .unwrap_err();
+        assert_eq!(err.code.as_str(), "ERR_VALIDATION");
+    }
+
+    /// After rejecting a traversal-shaped write, the store must not have
+    /// written anything outside `workflows_dir` — verifies the deleted dead
+    /// check wasn't silently load-bearing.
+    #[test]
+    fn test_write_traversal_rejection_leaves_no_file_outside_store() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        assert!(store.write("../evil", "bad", None).is_err());
+        let escaped = dir.path().parent().unwrap().join("evil.yaml");
+        assert!(
+            !escaped.exists(),
+            "traversal write must not create a file outside workflows_dir"
+        );
+    }
+
     #[test]
     fn test_if_match_mismatch_conflict() {
         let dir = tempdir().unwrap();
@@ -401,6 +505,47 @@ mod tests {
             .write("flow", "content2", Some("wrong-hash"))
             .unwrap_err();
         assert_eq!(err.code.as_str(), "ERR_CONFLICT");
+    }
+
+    /// Fix 5: `if_match: Some(_)` against a file that does not exist must
+    /// fail CAS with the same conflict shape as a hash mismatch, not fall
+    /// through to an unconditional create. Exercises the store layer
+    /// directly (the API-level regression pin — GET/DELETE/PUT over HTTP —
+    /// lives in `test_api::test_workflow_files_if_match_put_after_delete_conflicts_not_recreated`).
+    #[test]
+    fn test_if_match_against_nonexistent_file_conflicts_and_does_not_create() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        let err = store
+            .write("never-existed", "content", Some("some-hash"))
+            .unwrap_err();
+        assert_eq!(err.code.as_str(), "ERR_CONFLICT");
+        assert!(
+            store.read("never-existed").is_err(),
+            "conditional write against a nonexistent file must not create it"
+        );
+    }
+
+    /// Same as above but for a file that existed and was deleted — proves
+    /// the veto applies to "deleted since caller last observed it", not
+    /// just "literally never existed".
+    #[test]
+    fn test_if_match_against_deleted_file_conflicts_and_does_not_recreate() {
+        let dir = tempdir().unwrap();
+        let store = make_store(&dir);
+        store.write("flow", "content1", None).unwrap();
+        let record = store.read("flow").unwrap();
+        let old_hash = record.content_hash;
+        store.delete("flow").unwrap();
+
+        let err = store
+            .write("flow", "content2", Some(&old_hash))
+            .unwrap_err();
+        assert_eq!(err.code.as_str(), "ERR_CONFLICT");
+        assert!(
+            store.read("flow").is_err(),
+            "conditional write against a deleted file must not resurrect it"
+        );
     }
 
     #[test]

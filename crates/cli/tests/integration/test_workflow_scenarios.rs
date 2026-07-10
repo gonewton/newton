@@ -90,6 +90,10 @@ pub enum MockCommandStep {
 #[derive(Clone)]
 pub struct MockCommandRunner {
     plans: Arc<Mutex<HashMap<String, VecDeque<MockCommandStep>>>>,
+    /// Per-`cmd` invocation counter. Lets retry tests assert exactly how many
+    /// times the engine actually executed a command (S14: a permanent/unclassified
+    /// error must be attempted exactly once, never retried).
+    calls: Arc<Mutex<HashMap<String, u32>>>,
 }
 
 impl MockCommandRunner {
@@ -97,7 +101,19 @@ impl MockCommandRunner {
     pub fn new(plans: HashMap<String, VecDeque<MockCommandStep>>) -> Self {
         Self {
             plans: Arc::new(Mutex::new(plans)),
+            calls: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Number of times `run()` was invoked for `cmd` so far.
+    #[must_use]
+    pub fn call_count(&self, cmd: &str) -> u32 {
+        self.calls
+            .lock()
+            .expect("lock command calls")
+            .get(cmd.trim())
+            .copied()
+            .unwrap_or(0)
     }
 }
 
@@ -107,6 +123,10 @@ impl CommandRunner for MockCommandRunner {
         &self,
         request: &CommandExecutionRequest,
     ) -> Result<CommandExecutionOutput, AppError> {
+        {
+            let mut calls = self.calls.lock().expect("lock command calls");
+            *calls.entry(request.cmd.trim().to_string()).or_insert(0) += 1;
+        }
         let step = {
             let mut guard = self.plans.lock().expect("lock command plans");
             guard
@@ -784,6 +804,27 @@ async fn test_scenario_14_error_fallback() {
 // -----------------------------------------------------------------------------
 // Scenario 15: Retry & Backoff
 // -----------------------------------------------------------------------------
+//
+// spec 074 S14 (corrected 2026-07-10, see task_execution::is_retryable doc
+// comment): retry is opt-in per task (`prepare_retry_state` defaults
+// `max_attempts` to 1 absent an explicit `retry:` block), so `is_retryable`
+// is a permanent-error veto over that opt-in, not a transience allow-list.
+// A plain `CommandOperator` non-zero exit code (`WFG-CMD-001`, unclassified)
+// is therefore retryable once the task declares `retry:` — this is the
+// original WFG-CMD-001-style flaky-command shape (exit 1, exit 1, then
+// success), proving the engine honors the author's explicit retry config.
+//
+// (The `test_unclassified_command_error_is_not_retried` test that used to
+// live here — asserting a WFG-CMD-001 exit-code failure was NOT retried
+// despite an explicit `retry:` block — was deleted: its premise (unclassified
+// codes default to non-retryable) was the S14 error this correction fixes.
+// `is_retryable`'s veto is now scoped to positively-permanent errors
+// (`ValidationError` + known-permanent gh codes); a scenario-level
+// integration test asserting a *vetoed* retry would need a `ValidationError`
+// from `CommandOperator`, but `validate_params` runs before the retry loop is
+// ever entered, so there's no natural scenario-level failure to hang that
+// test on. The veto is covered at the unit level instead:
+// `task_execution::retry_classification_tests::validation_errors_are_not_retryable`.)
 #[tokio::test]
 async fn test_scenario_15_retry_backoff() {
     let mut plans = HashMap::new();
@@ -821,6 +862,8 @@ async fn test_scenario_15_retry_backoff() {
     );
     // run_seq is 1 because it was only queued once, even if it retried internally
     assert_eq!(summary.completed_tasks["retry_task"].run_seq, 1);
+    // All 3 configured attempts (max_attempts: 3) were actually executed.
+    assert_eq!(harness.cmd_runner.call_count("flaky"), 3);
 }
 
 // -----------------------------------------------------------------------------
@@ -941,6 +984,7 @@ async fn test_scenario_17_checkpoint_resume() {
         harness.temp_dir.path().to_path_buf(),
         execution_id,
         false,
+        ExecutionOverrides::default(),
     )
     .await
     .expect("resume must succeed");
