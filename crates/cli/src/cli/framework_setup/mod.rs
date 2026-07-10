@@ -364,6 +364,8 @@ impl ResumeArgs {
             workspace: get_opt_path(map, "workspace"),
             allow_workflow_change: get_bool(map, "allow-workflow-change"),
             state_dir: get_opt_path(map, "state-dir"),
+            emit_completion_json: get_bool(map, "emit-completion-json"),
+            verbose: get_bool(map, "verbose"),
         })
     }
 }

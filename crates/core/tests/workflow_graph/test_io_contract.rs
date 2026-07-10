@@ -623,6 +623,7 @@ async fn ac24_resume_matching_io_snapshot_succeeds() {
         workspace.path().to_path_buf(),
         execution_id,
         false,
+        default_overrides(),
     )
     .await;
     assert!(
@@ -660,6 +661,7 @@ async fn ac25_resume_mismatched_io_snapshot_fails_with_ckpt_001() {
         workspace.path().to_path_buf(),
         execution_id,
         false,
+        default_overrides(),
     )
     .await
     .expect_err("mismatched io_snapshot should block resume");
@@ -766,10 +768,15 @@ workflow:
     let registry = build_registry(workspace.path().to_path_buf(), settings);
 
     // allow_workflow_change=true: hash check skipped, but payload re-validated against new schema.
-    let err =
-        executor::resume_workflow(registry, workspace.path().to_path_buf(), execution_id, true)
-            .await
-            .expect_err("re-validation of original payload against new schema should fail");
+    let err = executor::resume_workflow(
+        registry,
+        workspace.path().to_path_buf(),
+        execution_id,
+        true,
+        default_overrides(),
+    )
+    .await
+    .expect_err("re-validation of original payload against new schema should fail");
     assert_eq!(
         err.code, "WFG-IO-002",
         "expected WFG-IO-002 when original trigger payload fails new input_schema; got {:?}",
@@ -843,6 +850,7 @@ workflow:
         workspace.path().to_path_buf(),
         execution_id,
         false,
+        default_overrides(),
     )
     .await;
     assert!(
@@ -887,6 +895,7 @@ async fn resume_old_checkpoint_without_io_snapshot_fails_when_workflow_has_io() 
         workspace.path().to_path_buf(),
         execution_id,
         false,
+        default_overrides(),
     )
     .await
     .expect_err("resume of a checkpoint missing io_snapshot must fail when the workflow has io");
@@ -924,6 +933,7 @@ async fn resume_checkpoint_with_null_io_snapshot_fails_when_workflow_has_io() {
         workspace.path().to_path_buf(),
         execution_id,
         false,
+        default_overrides(),
     )
     .await
     .expect_err(

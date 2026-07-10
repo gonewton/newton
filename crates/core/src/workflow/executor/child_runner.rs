@@ -305,14 +305,52 @@ fn tasks_to_graph(tasks: Vec<schema::TaskOrMacro>) -> Result<GraphHandle, AppErr
     Ok(GraphHandle::new(map))
 }
 
+/// Resumes a checkpointed workflow execution.
+///
+/// `overrides` MUST be the same `ExecutionOverrides` the caller would pass to
+/// `execute_workflow`/`build_workflow_runtime` for a fresh run against the same
+/// state root (spec 074, P6 — resume parity with run): `checkpoint_base_path`
+/// and `artifact_base_path` relocate the resumed run's checkpoint/artifact
+/// writes onto the resolved `--state-dir` root instead of silently falling back
+/// to `<workspace>/.newton/state/workflows`; `sink` re-wires the resumed run to
+/// the same `DbSink`/`ServerNotifier` fan-out `run` uses (without it, a resumed
+/// grading workflow's writes never reach the backend store); `verbose` and
+/// `parallel_limit`/`max_time_seconds` propagate the same way they do for `run`.
+/// Pass `ExecutionOverrides::default()` only when the caller genuinely wants the
+/// workspace-default state root and no sink (e.g. most unit tests below).
 pub async fn resume_workflow(
     registry: crate::workflow::operator::OperatorRegistry,
     workspace_root: PathBuf,
     execution_id: Uuid,
     allow_workflow_change: bool,
+    overrides: ExecutionOverrides,
 ) -> Result<ExecutionSummary, AppError> {
-    let execution = checkpoint::load_execution(&workspace_root, &execution_id)?;
-    let checkpoint_data = checkpoint::load_checkpoint(&workspace_root, &execution_id)?;
+    // Same fallback as `build_workflow_runtime`: an explicit
+    // `checkpoint_base_path` (from `--state-dir`) relocates the checkpoint
+    // root; otherwise fall back to the workspace-default tree. This MUST be
+    // resolved before the initial checkpoint load below — a caller-supplied
+    // `--state-dir` override was previously silently ignored here (spec 074,
+    // P6): the checkpoint was always re-read from `<workspace_root>/.newton/
+    // state/workflows`, split-brained against wherever the run actually
+    // checkpointed if `--state-dir` had been used for the original `run`.
+    let checkpoint_root = overrides.checkpoint_base_path.as_ref().map_or_else(
+        || {
+            workspace_root
+                .join(".newton")
+                .join("state")
+                .join("workflows")
+        },
+        |path| {
+            if path.is_absolute() {
+                path.clone()
+            } else {
+                workspace_root.join(path)
+            }
+        },
+    );
+
+    let execution = checkpoint::load_execution_from_base(&checkpoint_root, &execution_id)?;
+    let checkpoint_data = checkpoint::load_checkpoint_from_base(&checkpoint_root, &execution_id)?;
     let workflow_path = PathBuf::from(&execution.workflow_file);
     let document = schema::load_workflow(&workflow_path)?;
     if document.version != execution.workflow_version {
@@ -413,6 +451,17 @@ pub async fn resume_workflow(
         graph_settings.max_workflow_iterations = document.workflow.settings.max_workflow_iterations;
         graph_settings.max_task_iterations = document.workflow.settings.max_task_iterations;
     }
+    // Parity with `build_workflow_runtime` (spec 074, P6): a caller-supplied
+    // override wins over the checkpointed settings, exactly like `run`.
+    if let Some(parallel) = overrides.parallel_limit {
+        graph_settings.parallel_limit = parallel;
+    }
+    if let Some(max_time) = overrides.max_time_seconds {
+        graph_settings.max_time_seconds = max_time;
+    }
+    if let Some(artifact_base_path) = &overrides.artifact_base_path {
+        graph_settings.artifact_storage.base_path = artifact_base_path.clone();
+    }
 
     let config = ExecutionConfig {
         parallel_limit: graph_settings.parallel_limit,
@@ -455,16 +504,13 @@ pub async fn resume_workflow(
     let runtime = WorkflowRuntime {
         workspace_root: workspace_root.clone(),
         workflow_file: workflow_path.clone(),
-        checkpoint_root: workspace_root
-            .join(".newton")
-            .join("state")
-            .join("workflows"),
+        checkpoint_root,
         registry,
         runtime_graph,
         engine,
         graph_settings: graph_settings.clone(),
         config,
-        execution_overrides: ExecutionOverrides::default(),
+        execution_overrides: overrides.clone(),
         artifact_store,
         state,
         ready_queue,
@@ -475,9 +521,9 @@ pub async fn resume_workflow(
         redact_keys: Arc::new(graph_settings.redaction.redact_keys.clone()),
         last_checkpoint: Instant::now(),
         start_time: Instant::now(),
-        verbose: false,
+        verbose: overrides.verbose,
         current_tick_tasks: Vec::new(),
-        sink: None,
+        sink: overrides.sink.clone(),
         workflow_definition_json: None,
         pre_seed_nodes: false,
     };

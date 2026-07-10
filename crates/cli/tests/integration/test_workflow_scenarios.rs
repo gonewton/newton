@@ -90,6 +90,10 @@ pub enum MockCommandStep {
 #[derive(Clone)]
 pub struct MockCommandRunner {
     plans: Arc<Mutex<HashMap<String, VecDeque<MockCommandStep>>>>,
+    /// Per-`cmd` invocation counter. Lets retry tests assert exactly how many
+    /// times the engine actually executed a command (S14: a permanent/unclassified
+    /// error must be attempted exactly once, never retried).
+    calls: Arc<Mutex<HashMap<String, u32>>>,
 }
 
 impl MockCommandRunner {
@@ -97,7 +101,19 @@ impl MockCommandRunner {
     pub fn new(plans: HashMap<String, VecDeque<MockCommandStep>>) -> Self {
         Self {
             plans: Arc::new(Mutex::new(plans)),
+            calls: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Number of times `run()` was invoked for `cmd` so far.
+    #[must_use]
+    pub fn call_count(&self, cmd: &str) -> u32 {
+        self.calls
+            .lock()
+            .expect("lock command calls")
+            .get(cmd.trim())
+            .copied()
+            .unwrap_or(0)
     }
 }
 
@@ -107,6 +123,10 @@ impl CommandRunner for MockCommandRunner {
         &self,
         request: &CommandExecutionRequest,
     ) -> Result<CommandExecutionOutput, AppError> {
+        {
+            let mut calls = self.calls.lock().expect("lock command calls");
+            *calls.entry(request.cmd.trim().to_string()).or_insert(0) += 1;
+        }
         let step = {
             let mut guard = self.plans.lock().expect("lock command plans");
             guard
@@ -784,21 +804,28 @@ async fn test_scenario_14_error_fallback() {
 // -----------------------------------------------------------------------------
 // Scenario 15: Retry & Backoff
 // -----------------------------------------------------------------------------
+//
+// spec 074 / S14 flip: the retry loop no longer retries an error unless it is
+// positively classified transient (see task_execution::is_retryable). A plain
+// `CommandOperator` non-zero exit code (`WFG-CMD-001`) is a side-effecting-operator
+// failure and is now non-retryable by default — see
+// `test_unclassified_command_error_is_not_retried` below for that contract.
+// This scenario is retargeted to exercise the retry/backoff *mechanism* through a
+// positively-transient error class instead: `WFG-GH-004` with a recognized
+// network-ish message (see `is_retryable`'s TRANSIENT_PATTERNS).
 #[tokio::test]
 async fn test_scenario_15_retry_backoff() {
     let mut plans = HashMap::new();
     plans.insert(
         "flaky".to_string(),
         VecDeque::from(vec![
-            MockCommandStep::Success {
-                stdout: "",
-                stderr: "fail 1",
-                exit_code: 1,
+            MockCommandStep::Error {
+                code: "WFG-GH-004",
+                message: "dial tcp: connection failed (attempt 1)",
             },
-            MockCommandStep::Success {
-                stdout: "",
-                stderr: "fail 2",
-                exit_code: 1,
+            MockCommandStep::Error {
+                code: "WFG-GH-004",
+                message: "connection reset by peer (attempt 2)",
             },
             MockCommandStep::Success {
                 stdout: "success",
@@ -821,6 +848,50 @@ async fn test_scenario_15_retry_backoff() {
     );
     // run_seq is 1 because it was only queued once, even if it retried internally
     assert_eq!(summary.completed_tasks["retry_task"].run_seq, 1);
+    // All 3 configured attempts (max_attempts: 3) were actually executed.
+    assert_eq!(harness.cmd_runner.call_count("flaky"), 3);
+}
+
+/// spec 074 / S14: an unclassified (or explicitly permanent) error must be
+/// attempted exactly once — the retry budget (`max_attempts: 3` in
+/// `15_retry_backoff.yaml`) is never spent on it. Uses the fixture's default
+/// `CommandOperator` exit-code failure path (`WFG-CMD-001`, unclassified), which
+/// pre-S14 silently retried via the old `_ => true` default.
+#[tokio::test]
+async fn test_unclassified_command_error_is_not_retried() {
+    let mut plans = HashMap::new();
+    plans.insert(
+        "flaky".to_string(),
+        VecDeque::from(vec![
+            MockCommandStep::Success {
+                stdout: "",
+                stderr: "permanent failure",
+                exit_code: 1,
+            },
+            // If the engine incorrectly retried, this second queued step would be
+            // consumed and the task would succeed — proving the assertions below
+            // (status Failed, call_count 1) actually exercise non-retry behavior
+            // rather than passing vacuously.
+            MockCommandStep::Success {
+                stdout: "should never run",
+                stderr: "",
+                exit_code: 0,
+            },
+        ]),
+    );
+
+    let harness = WorkflowTestHarness::new(plans, FakeInterviewer::new());
+    // `retry_task` is the fixture's only (terminal) task with no fallback path, so
+    // a task failure fails the whole workflow (compute_final_status: WFG-EXEC-001) —
+    // same shape as `test_scenario_16_task_timeout` below.
+    let err = harness
+        .run_fixture("15_retry_backoff.yaml", None)
+        .await
+        .expect_err("unclassified command failure must fail the workflow, not retry to success");
+    assert_eq!(err.code, "WFG-EXEC-001");
+    // Exactly one attempt — the second queued (success) step was never consumed,
+    // proving the engine did not retry WFG-CMD-001 despite max_attempts: 3.
+    assert_eq!(harness.cmd_runner.call_count("flaky"), 1);
 }
 
 // -----------------------------------------------------------------------------
@@ -941,6 +1012,7 @@ async fn test_scenario_17_checkpoint_resume() {
         harness.temp_dir.path().to_path_buf(),
         execution_id,
         false,
+        ExecutionOverrides::default(),
     )
     .await
     .expect("resume must succeed");

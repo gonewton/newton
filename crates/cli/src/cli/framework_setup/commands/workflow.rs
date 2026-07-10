@@ -35,6 +35,7 @@ pub(crate) fn workflow_command() -> Command {
                 "newton workflow preview workflow.yaml --trigger env=prod --format prose",
                 "newton workflow graph workflow.yaml --output graph.dot",
                 "newton workflow resume --run-id 12345678-1234-1234-1234-123456789abc",
+                "newton workflow resume --run-id 12345678-1234-1234-1234-123456789abc --verbose --emit-completion-json",
                 "newton workflow runs list --workspace ./workspace",
                 "newton workflow runs show --run-id <RUN_ID> --task my-task --verbose",
                 "newton workflow checkpoint list --workspace ./workspace --json",
@@ -318,7 +319,7 @@ pub(crate) fn workflow_command() -> Command {
                     }
                     "resume" => {
                         let dto = ResumeArgs::try_from_arg_value_map(&args)?;
-                        commands::resume(dto).await.map_err(anyhow::Error::from)
+                        commands::resume(dto).await
                     }
                     "checkpoint" => {
                         let subcmd2 = get_opt_str(&args, "subcommand2")
