@@ -139,6 +139,16 @@ jobs:
           path: /usr/local/bin
       - run: chmod +x /usr/local/bin/newton
 
+      # tests/roundtrip/conftest.py resolves the binary at
+      # $CARGO_TARGET_DIR/debug/newton (or target/debug/newton by default,
+      # relative to the repo root) — not from PATH — so it needs a copy
+      # there too, independent of the /usr/local/bin install used by the
+      # "Validate emitted YAML" step below.
+      - name: Stage newton binary for DSL roundtrip tests
+        run: |
+          mkdir -p "${{ github.workspace }}/target/debug"
+          cp /usr/local/bin/newton "${{ github.workspace }}/target/debug/newton"
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
@@ -148,6 +158,12 @@ jobs:
         run: uv sync
 
       - name: Run tests
+        env:
+          # Turn roundtrip-suite skips (missing newton binary) into hard
+          # failures in CI (spec 074 P15) — defense in depth even though
+          # the binary should always be present here via the staging step
+          # above.
+          NEWTON_REQUIRE_BINARY: "1"
         run: uv run pytest
 
       - name: Check codegen drift
