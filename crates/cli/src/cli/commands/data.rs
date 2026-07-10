@@ -700,7 +700,7 @@ async fn dispatch_data(
         // through to the generic "unsupported combination" error, each
         // rejection names the resource and points at the correct operation.
         (DataVerb::Delete, "finding" | "findings") => Err(
-            "DATA-009: findings have no DELETE — they are retired via status transitions, \
+            "DATA-010: findings have no DELETE — they are retired via status transitions, \
              not removal. PATCH status to 'rejected' or 'deferred' to close one by hand \
              (`newton data patch finding <id> --body '{\"status\":\"rejected\"}'`); a Finding \
              also auto-resolves on a clean re-grade and auto-blocks when its Plan's retries \
@@ -708,14 +708,14 @@ async fn dispatch_data(
                 .to_string(),
         ),
         (DataVerb::Delete, "change-request" | "change-requests") => Err(
-            "DATA-009: change requests have no DELETE — they move through \
+            "DATA-010: change requests have no DELETE — they move through \
              `proposed → approved → planned → rejected`, not removal. PATCH status to \
              'rejected' to close one (`newton data patch change-request <id> --body \
              '{\"status\":\"rejected\"}'`). See CONTEXT.md's Change Request lifecycle."
                 .to_string(),
         ),
         (DataVerb::Delete, "plan" | "plans") => Err(
-            "DATA-009: plans have no DELETE — the plan queue is retired via status \
+            "DATA-010: plans have no DELETE — the plan queue is retired via status \
              transitions (`draft → ready → running → complete | failed`, plus \
              'abandoned' for a human-shelved/rejected plan), not removal. PATCH status to \
              'abandoned' to close one (`newton data patch plan <id> --body \
@@ -723,7 +723,7 @@ async fn dispatch_data(
                 .to_string(),
         ),
         (DataVerb::Delete, "optimize-run" | "optimize-runs") => Err(
-            "DATA-009: optimize runs have no DELETE — a Run is the durable audit record \
+            "DATA-010: optimize runs have no DELETE — a Run is the durable audit record \
              of one loop invocation (status: running | converged | stalled_on_blocked | \
              max_cycles | regressed | no_progress). PATCH status if it needs to be \
              force-closed (`newton data patch optimize-run <id> --body '{\"status\":...}'`). \
@@ -731,25 +731,25 @@ async fn dispatch_data(
                 .to_string(),
         ),
         (DataVerb::Delete, "optimize-cycle" | "optimize-cycles") => Err(
-            "DATA-009: optimize cycles have no DELETE — a Cycle is an immutable Trajectory \
+            "DATA-010: optimize cycles have no DELETE — a Cycle is an immutable Trajectory \
              entry within its Optimize Run's audit trail and is never retired individually. \
              See CONTEXT.md's Cycle / Trajectory."
                 .to_string(),
         ),
         (DataVerb::Delete, "kpi" | "kpis") => Err(
-            "DATA-009: kpis have no DELETE — a KPI is a governance/reporting catalog entry \
+            "DATA-010: kpis have no DELETE — a KPI is a governance/reporting catalog entry \
              (there is currently no update operation for it either, only create/get/list); \
              retiring one requires an out-of-band catalog edit. See CONTEXT.md's KPI."
                 .to_string(),
         ),
         (DataVerb::Delete, "eval-run" | "eval-runs") => Err(
-            "DATA-009: eval-runs have no DELETE — each is an append-only historical record \
+            "DATA-010: eval-runs have no DELETE — each is an append-only historical record \
              of one completed evaluation and cannot be modified or removed. \
              See CONTEXT.md's Evaluation model."
                 .to_string(),
         ),
         (DataVerb::Delete, "grade" | "grades") => Err(
-            "DATA-009: grades have no DELETE — Grade is explicitly append-only \
+            "DATA-010: grades have no DELETE — Grade is explicitly append-only \
              (the score history a run is judged against) and cannot be removed. \
              See CONTEXT.md's Grade."
                 .to_string(),
@@ -1113,7 +1113,7 @@ mod p12_data_matrix_tests {
             .expect_err(&format!("delete {resource} must be rejected"));
         let exit = expect_cli_exit(err);
         assert!(
-            exit.message.contains("DATA-009"),
+            exit.message.contains("DATA-010"),
             "resource={resource} msg={}",
             exit.message
         );

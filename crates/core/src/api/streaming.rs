@@ -288,6 +288,15 @@ async fn handle_logs_socket(
     // that point (everything after it); with no `since_seq`, default to the
     // last DEFAULT_LOG_TAIL lines rather than a full, potentially unbounded
     // replay.
+    //
+    // Delivery note: this query runs after `rx.subscribe()` above, so a real
+    // log line persisted in that window would be visible here AND arrive
+    // again via the live-forwarding loop below — at-least-once, not
+    // exactly-once, delivery for that narrow race. No production call site
+    // appends real log lines with a broadcast today (see the module-level
+    // gap noted in spec 074 B18's commit), so this is currently unreachable;
+    // once one exists, a `seq <= last_replayed_seq` guard in the live loop
+    // would close it. Clients should dedup by `seq` regardless.
     let historical = match filters.since_seq {
         Some(since_seq) => {
             state

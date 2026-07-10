@@ -227,7 +227,20 @@ async fn execute_stage(exclude: &[String], cwd: &Path) -> Result<Value, AppError
 fn build_exclude_glob_set(exclude: &[String]) -> Result<globset::GlobSet, AppError> {
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in exclude {
-        let glob = globset::Glob::new(pattern).map_err(|e| {
+        // A pattern with no path separator (e.g. `test_results.*`) is a
+        // basename pattern: it must match that name at any depth, matching
+        // the pre-globset matcher's basename-extraction behavior. `globset`
+        // anchors a bare pattern to the full relative path, so without this
+        // `**/` prefix `test_results.*` would only match a root-level file
+        // and silently stop excluding the same name inside a subdirectory —
+        // exactly the regression this repo's own `git_stage` exclude lists
+        // (e.g. `test_results.*` in develop.yaml) would hit.
+        let effective_pattern = if pattern.contains('/') {
+            pattern.clone()
+        } else {
+            format!("**/{pattern}")
+        };
+        let glob = globset::Glob::new(&effective_pattern).map_err(|e| {
             AppError::new(
                 ErrorCategory::ValidationError,
                 format!("GIT-STAGE-001: invalid exclude glob pattern {pattern:?}: {e}"),
@@ -623,6 +636,22 @@ mod exclude_glob_tests {
     fn matches_prefix_dot_star_form() {
         assert!(matches(&["name.*"], "name.json"));
         assert!(!matches(&["name.*"], "other.json"));
+    }
+
+    /// Regression: a bare `name.*` (or any pattern with no `/`) must still
+    /// match at any depth, not just at the repo root — `globset::Glob`
+    /// anchors an unmodified pattern to the full relative path, which would
+    /// otherwise silently stop `test_results.*`-style excludes (used by this
+    /// repo's own `develop.yaml` workflows) from matching nested files.
+    #[test]
+    fn bare_pattern_matches_at_any_depth() {
+        assert!(matches(&["test_results.*"], "test_results.json"));
+        assert!(matches(&["test_results.*"], "artifacts/test_results.json"));
+        assert!(matches(&["test_results.*"], "a/b/c/test_results.xml"));
+        assert!(!matches(&["test_results.*"], "other.json"));
+
+        assert!(matches(&["*.log"], "app.log"));
+        assert!(matches(&["*.log"], "logs/app.log"));
     }
 
     // ── Multi-pattern exclude lists (the real call shape from execute_stage) ─
