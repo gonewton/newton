@@ -28,6 +28,13 @@ export {
   subWorkflow,
   git,
   gh,
+  barrier,
+  setContext,
+  noop,
+  graderCommand,
+  reconcile,
+  changeRequest,
+  graderAgent,
   OperatorCall,
 } from "./operators.js";
 export {
