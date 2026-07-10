@@ -26,7 +26,7 @@ async fn create_catalog_test_state() -> AppState {
 #[tokio::test]
 async fn test_get_product_found() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/products/prod-1")
         .body(Body::empty())
@@ -44,7 +44,7 @@ async fn test_get_product_found() {
 #[tokio::test]
 async fn test_get_product_not_found() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/products/nonexistent")
         .body(Body::empty())
@@ -61,7 +61,7 @@ async fn test_get_product_not_found() {
 #[tokio::test]
 async fn test_create_product_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({"name": "New Product"});
     let req = Request::builder()
         .method(Method::POST)
@@ -82,7 +82,7 @@ async fn test_create_product_success() {
 #[tokio::test]
 async fn test_put_product_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({"name": "Updated Product"});
     let req = Request::builder()
         .method(Method::PUT)
@@ -102,7 +102,7 @@ async fn test_put_product_success() {
 #[tokio::test]
 async fn test_put_product_not_found() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({"name": "Ghost"});
     let req = Request::builder()
         .method(Method::PUT)
@@ -117,7 +117,7 @@ async fn test_put_product_not_found() {
 #[tokio::test]
 async fn test_patch_product_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({"name": "Patched Product"});
     let req = Request::builder()
         .method(Method::PATCH)
@@ -138,7 +138,7 @@ async fn test_patch_product_success() {
 async fn test_delete_product_conflict_has_components() {
     // prod-1 has comp-1 in fixtures → expect 409
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .method(Method::DELETE)
         .uri("/products/prod-1")
@@ -156,7 +156,7 @@ async fn test_delete_product_conflict_has_components() {
 #[tokio::test]
 async fn test_delete_product_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     // Create a standalone product with no components
     let create_body = json!({"name": "Orphan Product"});
     let create_req = Request::builder()
@@ -192,7 +192,7 @@ async fn test_delete_product_success() {
 #[tokio::test]
 async fn test_get_component_found() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/components/comp-1")
         .body(Body::empty())
@@ -209,7 +209,7 @@ async fn test_get_component_found() {
 #[tokio::test]
 async fn test_get_component_not_found() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/components/nonexistent")
         .body(Body::empty())
@@ -221,7 +221,7 @@ async fn test_get_component_not_found() {
 #[tokio::test]
 async fn test_create_component_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({
         "name": "New Component",
         "productId": "prod-1",
@@ -252,7 +252,7 @@ async fn test_create_component_success() {
 #[tokio::test]
 async fn test_put_component_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({
         "name": "Updated Component",
         "productId": "prod-1",
@@ -282,7 +282,7 @@ async fn test_put_component_success() {
 #[tokio::test]
 async fn test_patch_component_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({"name": "Patched Component"});
     let req = Request::builder()
         .method(Method::PATCH)
@@ -303,7 +303,7 @@ async fn test_patch_component_success() {
 async fn test_delete_component_conflict_has_repos() {
     // comp-1 has repo-1 in fixtures → expect 409
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .method(Method::DELETE)
         .uri("/components/comp-1")
@@ -321,7 +321,7 @@ async fn test_delete_component_conflict_has_repos() {
 #[tokio::test]
 async fn test_delete_component_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     // Create a standalone product, then a component with no repos
     let prod_body = json!({"name": "Orphan Product For Comp"});
     let prod_req = Request::builder()
@@ -382,7 +382,7 @@ async fn test_delete_component_success() {
 #[tokio::test]
 async fn test_get_repo_found() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/repos/repo-1")
         .body(Body::empty())
@@ -399,7 +399,7 @@ async fn test_get_repo_found() {
 #[tokio::test]
 async fn test_get_repo_not_found() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/repos/nonexistent")
         .body(Body::empty())
@@ -411,7 +411,7 @@ async fn test_get_repo_not_found() {
 #[tokio::test]
 async fn test_create_repo_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({
         "name": "new-repo",
         "componentId": "comp-1",
@@ -443,7 +443,7 @@ async fn test_create_repo_success() {
 #[tokio::test]
 async fn test_put_repo_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     // Keep the same name (auth-api) to avoid FK violation on Regression(repoName)
     let body = json!({
         "name": "auth-api",
@@ -476,7 +476,7 @@ async fn test_put_repo_success() {
 #[tokio::test]
 async fn test_patch_repo_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({"owner": "new-owner"});
     let req = Request::builder()
         .method(Method::PATCH)
@@ -497,7 +497,7 @@ async fn test_patch_repo_success() {
 async fn test_delete_repo_conflict_has_modules() {
     // repo-1 has mod-1, mod-2 in fixtures → expect 409
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .method(Method::DELETE)
         .uri("/repos/repo-1")
@@ -515,7 +515,7 @@ async fn test_delete_repo_conflict_has_modules() {
 #[tokio::test]
 async fn test_delete_repo_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     // Create a repo with no modules under comp-1
     let body = json!({
         "name": "orphan-repo-for-delete",
@@ -562,7 +562,7 @@ async fn test_delete_repo_success() {
 #[tokio::test]
 async fn test_list_modules_ok() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/modules")
         .body(Body::empty())
@@ -579,7 +579,7 @@ async fn test_list_modules_ok() {
 #[tokio::test]
 async fn test_get_module_found() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/modules/mod-1")
         .body(Body::empty())
@@ -596,7 +596,7 @@ async fn test_get_module_found() {
 #[tokio::test]
 async fn test_get_module_not_found() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/modules/nonexistent")
         .body(Body::empty())
@@ -608,7 +608,7 @@ async fn test_get_module_not_found() {
 #[tokio::test]
 async fn test_create_module_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({
         "name": "new-module",
         "kind": "service",
@@ -633,7 +633,7 @@ async fn test_create_module_success() {
 #[tokio::test]
 async fn test_put_module_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({
         "name": "mod-1-updated",
         "kind": "library",
@@ -657,7 +657,7 @@ async fn test_put_module_success() {
 #[tokio::test]
 async fn test_patch_module_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({"kind": "cli"});
     let req = Request::builder()
         .method(Method::PATCH)
@@ -678,7 +678,7 @@ async fn test_patch_module_success() {
 async fn test_delete_module_conflict_has_dependencies() {
     // mod-1 is part of dep-1 in fixtures → expect 409
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .method(Method::DELETE)
         .uri("/modules/mod-1")
@@ -696,7 +696,7 @@ async fn test_delete_module_conflict_has_dependencies() {
 #[tokio::test]
 async fn test_delete_module_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     // Create a module with no dependencies
     let body = json!({
         "name": "orphan-module",
@@ -736,7 +736,7 @@ async fn test_delete_module_success() {
 #[tokio::test]
 async fn test_get_module_dependency_found() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/module-dependencies/dep-1")
         .body(Body::empty())
@@ -753,7 +753,7 @@ async fn test_get_module_dependency_found() {
 #[tokio::test]
 async fn test_get_module_dependency_not_found() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/module-dependencies/nonexistent")
         .body(Body::empty())
@@ -765,7 +765,7 @@ async fn test_get_module_dependency_not_found() {
 #[tokio::test]
 async fn test_patch_module_dependency_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({"label": "updated-label"});
     let req = Request::builder()
         .method(Method::PATCH)
@@ -785,7 +785,7 @@ async fn test_patch_module_dependency_success() {
 #[tokio::test]
 async fn test_patch_module_dependency_not_found() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({"label": "ghost"});
     let req = Request::builder()
         .method(Method::PATCH)
@@ -800,7 +800,7 @@ async fn test_patch_module_dependency_not_found() {
 #[tokio::test]
 async fn test_delete_module_dependency_success() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .method(Method::DELETE)
         .uri("/module-dependencies/dep-1")
@@ -818,7 +818,7 @@ async fn test_delete_module_dependency_success() {
 #[tokio::test]
 async fn test_delete_module_dependency_not_found() {
     let state = create_catalog_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .method(Method::DELETE)
         .uri("/module-dependencies/nonexistent")

@@ -19,7 +19,7 @@ pub(crate) fn data_verb_command(verb: DataVerb) -> Command {
             "Retrieve catalog entities (list or single-item)",
             DATA_GET_LONG_ABOUT,
             vec!["newton data get products", "newton data get product <id> --json"],
-            "get <resource> [ID] [--run-id RUNID] [--kpi-id KPIID] [--scope SCOPE] [--scope-id SCOPEID] [--source SOURCE] [--limit N] [--json] [--output-format FORMAT] [--workspace PATH]",
+            "get <resource> [ID] [--run-id RUNID] [--kpi-id KPIID] [--scope SCOPE] [--scope-id SCOPEID] [--source SOURCE] [--limit N] [--status STATUS] [--json] [--output-format FORMAT] [--workspace PATH]",
             false,
         ),
         DataVerb::Post => (
@@ -53,7 +53,10 @@ pub(crate) fn data_verb_command(verb: DataVerb) -> Command {
             "delete",
             "Delete a catalog entity",
             DATA_DELETE_LONG_ABOUT,
-            vec!["newton data delete product <id>"],
+            vec![
+                "newton data delete product <id>",
+                "newton data patch finding <id> --body '{\"status\":\"rejected\"}'  # findings have no DELETE; see --help",
+            ],
             "delete <resource> <ID> [--json] [--workspace PATH]",
             false,
         ),
@@ -67,7 +70,12 @@ pub(crate) fn data_verb_command(verb: DataVerb) -> Command {
             cardinality: Cardinality::Required,
             help: "Resource token (product, products, component, components, \
                    repo, repos, module, modules, module-dependency, module-dependencies, \
-                   kpi, kpis, eval-run, eval-runs, grade, grades)",
+                   kpi, kpis, eval-run, eval-runs, grade, grades, finding, findings, \
+                   change-request, change-requests, plan, plans, optimize-run, \
+                   optimize-runs, optimize-cycle, optimize-cycles). DELETE is only \
+                   implemented for product/component/repo/module/module-dependency — \
+                   the remaining resources are lifecycle-managed (retired via PATCH \
+                   status) or append-only; see `newton data delete --help`.",
             ..Default::default()
         },
         ArgSpec {
@@ -124,7 +132,7 @@ pub(crate) fn data_verb_command(verb: DataVerb) -> Command {
             long: Some("run-id"),
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            help: "Filter grade listings by EvalRun id (only used with: resource=grades)",
+            help: "Filter grade listings by EvalRun id, or select the owning Optimize Run for an optimize-cycle/optimize-cycles lookup (only used with: resource=grades, optimize-cycle, optimize-cycles)",
             ..Default::default()
         });
         args.push(ArgSpec {
@@ -142,7 +150,7 @@ pub(crate) fn data_verb_command(verb: DataVerb) -> Command {
             long: Some("scope"),
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            help: "Filter EvalRun listings by scope (only used with: resource=eval-runs)",
+            help: "Filter listings by scope, e.g. component|repo|module (only used with: resource=eval-runs, findings, plans)",
             ..Default::default()
         });
         args.push(ArgSpec {
@@ -151,7 +159,8 @@ pub(crate) fn data_verb_command(verb: DataVerb) -> Command {
             long: Some("scope-id"),
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
-            help: "Filter EvalRun listings by scope id (only used with: resource=eval-runs)",
+            help:
+                "Filter listings by scope id (only used with: resource=eval-runs, findings, plans)",
             ..Default::default()
         });
         args.push(ArgSpec {
@@ -170,6 +179,15 @@ pub(crate) fn data_verb_command(verb: DataVerb) -> Command {
             value_type: ArgValueType::String,
             cardinality: Cardinality::Optional,
             help: "Limit EvalRun listings (only used with: resource=eval-runs)",
+            ..Default::default()
+        });
+        args.push(ArgSpec {
+            name: "status",
+            kind: ArgKind::Option,
+            long: Some("status"),
+            value_type: ArgValueType::String,
+            cardinality: Cardinality::Optional,
+            help: "Filter listings by status (only used with: resource=findings, change-requests, plans)",
             ..Default::default()
         });
     }

@@ -151,7 +151,7 @@ async fn logs_ws_default_replay_is_tail_not_since_seq_zero_semantics() {
     }
 
     let state = make_state(Arc::clone(&backend));
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let port = spawn_router(app).await;
 
     // No since_seq query param: default tail replay.
@@ -191,7 +191,7 @@ async fn logs_ws_since_seq_resumes_after_given_seq() {
     }
 
     let state = make_state(Arc::clone(&backend));
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let port = spawn_router(app).await;
 
     // Reconnect as if resuming after having already seen seq 1..=6
@@ -234,7 +234,7 @@ async fn logs_ws_since_seq_at_latest_returns_no_historical_lines() {
     }
 
     let state = make_state(Arc::clone(&backend));
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let port = spawn_router(app).await;
 
     let ws_url =

@@ -61,24 +61,34 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
     let resource = args.resource.as_str();
 
     if (args.run_id.is_some() || args.kpi_id.is_some())
-        && resource != "grades"
-        && resource != "optimize-cycles"
+        && !matches!(resource, "grades" | "optimize-cycles" | "optimize-cycle")
     {
         return Err(CliExit::new(
             1,
-            "DATA-006: --run-id/--kpi-id are only supported with: resource=grades, optimize-cycles",
+            "DATA-006: --run-id/--kpi-id are only supported with: resource=grades, optimize-cycles, optimize-cycle",
         )
         .into());
     }
-    if (args.scope.is_some()
-        || args.scope_id.is_some()
-        || args.source.is_some()
-        || args.limit.is_some())
-        && resource != "eval-runs"
+    if (args.scope.is_some() || args.scope_id.is_some())
+        && !matches!(resource, "eval-runs" | "findings" | "plans")
     {
         return Err(CliExit::new(
             1,
-            "DATA-008: --scope/--scope-id/--source/--limit are only supported with: resource=eval-runs",
+            "DATA-008: --scope/--scope-id are only supported with: resource=eval-runs, findings, plans",
+        )
+        .into());
+    }
+    if (args.source.is_some() || args.limit.is_some()) && resource != "eval-runs" {
+        return Err(CliExit::new(
+            1,
+            "DATA-008: --source/--limit are only supported with: resource=eval-runs",
+        )
+        .into());
+    }
+    if args.status.is_some() && !matches!(resource, "findings" | "change-requests" | "plans") {
+        return Err(CliExit::new(
+            1,
+            "DATA-009: --status is only supported with: resource=findings, change-requests, plans",
         )
         .into());
     }
@@ -307,10 +317,15 @@ async fn dispatch_data(
     let id = args.id.as_deref().unwrap_or("");
     let grade_run_id = args.run_id.as_deref();
     let grade_kpi_id = args.kpi_id.as_deref();
+    // Shared by eval-runs (scope/scope-id/source/limit) and, per spec 074
+    // P12, findings/plans (status/scope/scope-id) — the CLI-level validation
+    // gate above already restricts which resource each combination is
+    // accepted for.
     let eval_scope = args.scope.as_deref();
     let eval_scope_id = args.scope_id.as_deref();
     let eval_source = args.source.as_deref();
     let eval_limit = args.limit;
+    let list_status = args.status.as_deref();
 
     match (verb, resource) {
         (DataVerb::Get, "products") => store
@@ -531,7 +546,11 @@ async fn dispatch_data(
                 .and_then(to_json)
         }
         (DataVerb::Get, "findings") => store
-            .list_findings(None, None, None)
+            .list_findings(
+                list_status.map(str::to_string),
+                eval_scope.map(str::to_string),
+                eval_scope_id.map(str::to_string),
+            )
             .await
             .map_err(api_err)
             .and_then(to_json),
@@ -557,7 +576,7 @@ async fn dispatch_data(
                 .and_then(to_json)
         }
         (DataVerb::Get, "change-requests") => store
-            .list_change_requests(None)
+            .list_change_requests(list_status.map(str::to_string))
             .await
             .map_err(api_err)
             .and_then(to_json),
@@ -583,7 +602,11 @@ async fn dispatch_data(
                 .and_then(to_json)
         }
         (DataVerb::Get, "plans") => store
-            .list_plans(None, None, None)
+            .list_plans(
+                list_status.map(str::to_string),
+                eval_scope.map(str::to_string),
+                eval_scope_id.map(str::to_string),
+            )
             .await
             .map_err(api_err)
             .and_then(to_json),
@@ -639,8 +662,26 @@ async fn dispatch_data(
                 .and_then(to_json)
         }
         (DataVerb::Get, "optimize-cycle") => {
-            // For single cycle GET we reuse get_optimize_run by run_id + trajectory; use list and filter by id
-            Err("use 'optimize-cycles --run-id <run_id>' to list cycles; single cycle GET not supported".to_string())
+            // A Cycle's natural lookup path is via its owning Optimize Run's
+            // Trajectory (`list_optimize_cycles(run_id)`) — there is no
+            // standalone get-by-id in the store API — so fetch that list and
+            // filter by the cycle's own id (spec 074 P12; this replaces the
+            // old always-Err dead path).
+            let Some(run_id) = grade_run_id else {
+                return Err(
+                    "DATA-011: --run-id is required for 'data get optimize-cycle <id>'".to_string(),
+                );
+            };
+            let cycles = store.list_optimize_cycles(run_id).await.map_err(api_err)?;
+            cycles
+                .into_iter()
+                .find(|c| c.id == id)
+                .ok_or_else(|| {
+                    api_err(newton_backend::err_not_found(&format!(
+                        "optimize cycle '{id}' not found in run '{run_id}'"
+                    )))
+                })
+                .and_then(to_json)
         }
         (DataVerb::Post, "optimize-cycle" | "optimize-cycles") => {
             let b = parse_body::<newton_backend::CreateOptimizeCycleBody>(body)?;
@@ -650,6 +691,70 @@ async fn dispatch_data(
                 .map_err(api_err)
                 .and_then(to_json)
         }
+
+        // ── DELETE: documented-unsupported combos (spec 074 P12) ───────────
+        //
+        // These resources are either lifecycle-managed (retired via a status
+        // transition — DELETE would destroy the audit trail CONTEXT.md's
+        // lifecycles depend on) or genuinely append-only. Rather than fall
+        // through to the generic "unsupported combination" error, each
+        // rejection names the resource and points at the correct operation.
+        (DataVerb::Delete, "finding" | "findings") => Err(
+            "DATA-009: findings have no DELETE — they are retired via status transitions, \
+             not removal. PATCH status to 'rejected' or 'deferred' to close one by hand \
+             (`newton data patch finding <id> --body '{\"status\":\"rejected\"}'`); a Finding \
+             also auto-resolves on a clean re-grade and auto-blocks when its Plan's retries \
+             exhaust. See CONTEXT.md's Finding lifecycle."
+                .to_string(),
+        ),
+        (DataVerb::Delete, "change-request" | "change-requests") => Err(
+            "DATA-009: change requests have no DELETE — they move through \
+             `proposed → approved → planned → rejected`, not removal. PATCH status to \
+             'rejected' to close one (`newton data patch change-request <id> --body \
+             '{\"status\":\"rejected\"}'`). See CONTEXT.md's Change Request lifecycle."
+                .to_string(),
+        ),
+        (DataVerb::Delete, "plan" | "plans") => Err(
+            "DATA-009: plans have no DELETE — the plan queue is retired via status \
+             transitions (`draft → ready → running → complete | failed`, plus \
+             'abandoned' for a human-shelved/rejected plan), not removal. PATCH status to \
+             'abandoned' to close one (`newton data patch plan <id> --body \
+             '{\"status\":\"abandoned\"}'`). See CONTEXT.md's Plan queue."
+                .to_string(),
+        ),
+        (DataVerb::Delete, "optimize-run" | "optimize-runs") => Err(
+            "DATA-009: optimize runs have no DELETE — a Run is the durable audit record \
+             of one loop invocation (status: running | converged | stalled_on_blocked | \
+             max_cycles | regressed | no_progress). PATCH status if it needs to be \
+             force-closed (`newton data patch optimize-run <id> --body '{\"status\":...}'`). \
+             See CONTEXT.md's Optimize Run."
+                .to_string(),
+        ),
+        (DataVerb::Delete, "optimize-cycle" | "optimize-cycles") => Err(
+            "DATA-009: optimize cycles have no DELETE — a Cycle is an immutable Trajectory \
+             entry within its Optimize Run's audit trail and is never retired individually. \
+             See CONTEXT.md's Cycle / Trajectory."
+                .to_string(),
+        ),
+        (DataVerb::Delete, "kpi" | "kpis") => Err(
+            "DATA-009: kpis have no DELETE — a KPI is a governance/reporting catalog entry \
+             (there is currently no update operation for it either, only create/get/list); \
+             retiring one requires an out-of-band catalog edit. See CONTEXT.md's KPI."
+                .to_string(),
+        ),
+        (DataVerb::Delete, "eval-run" | "eval-runs") => Err(
+            "DATA-009: eval-runs have no DELETE — each is an append-only historical record \
+             of one completed evaluation and cannot be modified or removed. \
+             See CONTEXT.md's Evaluation model."
+                .to_string(),
+        ),
+        (DataVerb::Delete, "grade" | "grades") => Err(
+            "DATA-009: grades have no DELETE — Grade is explicitly append-only \
+             (the score history a run is judged against) and cannot be removed. \
+             See CONTEXT.md's Grade."
+                .to_string(),
+        ),
+
         (v, r) => Err(format!("unsupported combination: {v} {r}")),
     }
 }
@@ -693,6 +798,7 @@ mod cli_exit_path_tests {
             scope_id: None,
             source: None,
             limit: None,
+            status: None,
         }
     }
 
@@ -943,5 +1049,424 @@ mod cli_exit_path_tests {
             "{}",
             exit.message
         );
+    }
+}
+
+/// Tests for spec 074 P12: the `data` verb/resource asymmetry fixes —
+/// documented delete rejections (instead of the generic "unsupported
+/// combination" error), the `optimize-cycle` single-GET fix, and the new
+/// findings/change-requests/plans list-filter flags. Uses the same
+/// in-process `data()`/`dispatch_data` seam as `cli_exit_path_tests` above.
+#[cfg(test)]
+mod p12_data_matrix_tests {
+    use super::*;
+    use crate::cli::args::DataVerb;
+    use tempfile::TempDir;
+
+    fn setup_workspace() -> TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join(".newton/state")).expect("create state dir");
+        dir
+    }
+
+    fn base_args(ws: &TempDir, verb: DataVerb, resource: &str) -> DataArgs {
+        DataArgs {
+            verb,
+            resource: resource.to_string(),
+            id: None,
+            file: None,
+            body: None,
+            json: false,
+            dry_run: false,
+            workspace: Some(ws.path().to_path_buf()),
+            state_dir: None,
+            run_id: None,
+            kpi_id: None,
+            scope: None,
+            scope_id: None,
+            source: None,
+            limit: None,
+            status: None,
+        }
+    }
+
+    async fn open_store(ws: &TempDir) -> newton_backend::SqliteBackendStore {
+        let state_dir = crate::cli::workspace_paths::resolve_state_dir(ws.path(), None);
+        let workspace_paths = WorkspacePaths::with_state_dir(ws.path().to_path_buf(), state_dir);
+        let db_url = workspace_paths.backend_sqlite_url();
+        newton_backend::SqliteBackendStore::new(&db_url)
+            .await
+            .expect("open store")
+    }
+
+    fn expect_cli_exit(err: anyhow::Error) -> CliExit {
+        err.downcast::<CliExit>()
+            .unwrap_or_else(|e| panic!("expected a CliExit, got: {e}"))
+    }
+
+    async fn assert_delete_documented(resource: &str, expect_substr: &str) {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Delete, resource);
+        args.id = Some("some-id".to_string());
+        let err = data(args)
+            .await
+            .expect_err(&format!("delete {resource} must be rejected"));
+        let exit = expect_cli_exit(err);
+        assert!(
+            exit.message.contains("DATA-009"),
+            "resource={resource} msg={}",
+            exit.message
+        );
+        assert!(
+            exit.message.contains(expect_substr),
+            "resource={resource} msg={}",
+            exit.message
+        );
+        assert!(
+            !exit.message.contains("unsupported combination"),
+            "resource={resource} must not fall through to the generic error: {}",
+            exit.message
+        );
+    }
+
+    // ── DELETE matrix: documented, resource-specific rejections ────────────
+
+    #[tokio::test]
+    async fn delete_finding_points_at_patch_status() {
+        assert_delete_documented("finding", "PATCH status").await;
+        assert_delete_documented("findings", "PATCH status").await;
+    }
+
+    #[tokio::test]
+    async fn delete_change_request_points_at_patch_status() {
+        assert_delete_documented("change-request", "PATCH status").await;
+        assert_delete_documented("change-requests", "PATCH status").await;
+    }
+
+    #[tokio::test]
+    async fn delete_plan_points_at_patch_status() {
+        assert_delete_documented("plan", "abandoned").await;
+        assert_delete_documented("plans", "abandoned").await;
+    }
+
+    #[tokio::test]
+    async fn delete_optimize_run_points_at_patch_status() {
+        assert_delete_documented("optimize-run", "PATCH status").await;
+        assert_delete_documented("optimize-runs", "PATCH status").await;
+    }
+
+    #[tokio::test]
+    async fn delete_optimize_cycle_is_documented_immutable() {
+        assert_delete_documented("optimize-cycle", "Trajectory").await;
+        assert_delete_documented("optimize-cycles", "Trajectory").await;
+    }
+
+    #[tokio::test]
+    async fn delete_kpi_is_documented_append_only() {
+        assert_delete_documented("kpi", "governance").await;
+        assert_delete_documented("kpis", "governance").await;
+    }
+
+    #[tokio::test]
+    async fn delete_eval_run_is_documented_append_only() {
+        assert_delete_documented("eval-run", "append-only").await;
+        assert_delete_documented("eval-runs", "append-only").await;
+    }
+
+    #[tokio::test]
+    async fn delete_grade_is_documented_append_only() {
+        assert_delete_documented("grade", "append-only").await;
+        assert_delete_documented("grades", "append-only").await;
+    }
+
+    // ── optimize-cycle single GET: was a dead error path, now real ─────────
+
+    #[tokio::test]
+    async fn optimize_cycle_get_requires_run_id() {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Get, "optimize-cycle");
+        args.id = Some("cycle-1".to_string());
+        let err = data(args).await.expect_err("must require --run-id");
+        let exit = expect_cli_exit(err);
+        assert!(exit.message.contains("DATA-011"), "{}", exit.message);
+    }
+
+    #[tokio::test]
+    async fn optimize_cycle_get_not_found_in_run() {
+        let ws = setup_workspace();
+        let store = open_store(&ws).await;
+        store
+            .create_optimize_run(newton_backend::CreateOptimizeRunBody {
+                id: "run-1".to_string(),
+                project_id: "proj-1".to_string(),
+                scope: "repo".to_string(),
+                scope_id: "gonewton/newton".to_string(),
+                max_cycles: 8,
+                graders: vec![],
+            })
+            .await
+            .expect("seed optimize-run");
+
+        let mut args = base_args(&ws, DataVerb::Get, "optimize-cycle");
+        args.id = Some("ghost-cycle".to_string());
+        args.run_id = Some("run-1".to_string());
+        let err = data(args).await.expect_err("cycle must not be found");
+        let exit = expect_cli_exit(err);
+        assert!(exit.message.contains("ERR_NOT_FOUND"), "{}", exit.message);
+        assert!(exit.message.contains("ghost-cycle"), "{}", exit.message);
+    }
+
+    #[tokio::test]
+    async fn optimize_cycle_get_returns_matching_cycle() {
+        let ws = setup_workspace();
+        let store = open_store(&ws).await;
+        store
+            .create_optimize_run(newton_backend::CreateOptimizeRunBody {
+                id: "run-2".to_string(),
+                project_id: "proj-1".to_string(),
+                scope: "repo".to_string(),
+                scope_id: "gonewton/newton".to_string(),
+                max_cycles: 8,
+                graders: vec![],
+            })
+            .await
+            .expect("seed optimize-run");
+        store
+            .create_optimize_cycle(newton_backend::CreateOptimizeCycleBody {
+                id: "cycle-a".to_string(),
+                run_id: "run-2".to_string(),
+                cycle: 1,
+                grades: serde_json::json!({}),
+                grade_min: None,
+                decision: "none".to_string(),
+                change_request_id: None,
+                plan_id: None,
+                execution_id: None,
+                develop_status: None,
+                open_findings: 0,
+                resolved_this_cycle: 0,
+            })
+            .await
+            .expect("seed optimize-cycle");
+
+        let args = DataArgs {
+            id: Some("cycle-a".to_string()),
+            run_id: Some("run-2".to_string()),
+            ..base_args(&ws, DataVerb::Get, "optimize-cycle")
+        };
+        let value = dispatch_data(&store, &args, None)
+            .await
+            .expect("optimize-cycle GET must succeed");
+        assert_eq!(value["id"], "cycle-a");
+        assert_eq!(value["runId"], "run-2");
+    }
+
+    // ── List filter flags actually filter (findings/change-requests/plans) ─
+
+    fn finding_body(id: &str, status: &str) -> newton_backend::CreateFindingBody {
+        newton_backend::CreateFindingBody {
+            id: id.to_string(),
+            source: "test".to_string(),
+            origin: "system".to_string(),
+            component_id: None,
+            module: None,
+            repo_id: None,
+            kpi_id: None,
+            dimension: "tests".to_string(),
+            location: None,
+            fingerprint: format!("fp-{id}"),
+            title: format!("finding {id}"),
+            why_it_matters: "because".to_string(),
+            recommended_action: "fix it".to_string(),
+            severity: "low".to_string(),
+            risk: "low".to_string(),
+            confidence: None,
+            evidence: None,
+            expected_value: None,
+            effort: None,
+            status: status.to_string(),
+            last_seen_at: None,
+            depends_on: vec![],
+            blocks: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn findings_status_flag_filters_listing() {
+        let ws = setup_workspace();
+        let store = open_store(&ws).await;
+        store
+            .create_finding(finding_body("f-triaged", "triaged"))
+            .await
+            .expect("seed triaged finding");
+        store
+            .create_finding(finding_body("f-resolved", "resolved"))
+            .await
+            .expect("seed resolved finding");
+
+        let args = DataArgs {
+            status: Some("triaged".to_string()),
+            ..base_args(&ws, DataVerb::Get, "findings")
+        };
+        let value = dispatch_data(&store, &args, None)
+            .await
+            .expect("filtered list must succeed");
+        let items = value.as_array().expect("array response");
+        assert_eq!(
+            items.len(),
+            1,
+            "expected exactly one triaged finding: {value}"
+        );
+        assert_eq!(items[0]["id"], "f-triaged");
+    }
+
+    #[tokio::test]
+    async fn change_requests_status_flag_filters_listing() {
+        let ws = setup_workspace();
+        let store = open_store(&ws).await;
+        store
+            .create_change_request(newton_backend::CreateChangeRequestBody {
+                id: "cr-proposed".to_string(),
+                title: "proposed CR".to_string(),
+                body: None,
+                origin: "system".to_string(),
+                author: None,
+                component_id: None,
+                repo_id: None,
+                finding_ids: vec![],
+                risk: "low".to_string(),
+                confidence: None,
+            })
+            .await
+            .expect("seed proposed CR");
+        store
+            .patch_change_request(
+                "cr-proposed",
+                newton_backend::PatchChangeRequestBody {
+                    status: Some("approved".to_string()),
+                },
+            )
+            .await
+            .expect("patch CR to approved");
+        store
+            .create_change_request(newton_backend::CreateChangeRequestBody {
+                id: "cr-proposed-2".to_string(),
+                title: "still proposed CR".to_string(),
+                body: None,
+                origin: "system".to_string(),
+                author: None,
+                component_id: None,
+                repo_id: None,
+                finding_ids: vec![],
+                risk: "low".to_string(),
+                confidence: None,
+            })
+            .await
+            .expect("seed second proposed CR");
+
+        let args = DataArgs {
+            status: Some("approved".to_string()),
+            ..base_args(&ws, DataVerb::Get, "change-requests")
+        };
+        let value = dispatch_data(&store, &args, None)
+            .await
+            .expect("filtered list must succeed");
+        let items = value.as_array().expect("array response");
+        assert_eq!(items.len(), 1, "expected exactly one approved CR: {value}");
+        assert_eq!(items[0]["id"], "cr-proposed");
+    }
+
+    #[tokio::test]
+    async fn plans_status_flag_filters_listing() {
+        let ws = setup_workspace();
+        let store = open_store(&ws).await;
+        // Plan.linkedChangeRequestId is a real FK — seed the ChangeRequests
+        // it points at first.
+        for cr_id in ["cr-x", "cr-y"] {
+            store
+                .create_change_request(newton_backend::CreateChangeRequestBody {
+                    id: cr_id.to_string(),
+                    title: format!("{cr_id} title"),
+                    body: None,
+                    origin: "system".to_string(),
+                    author: None,
+                    component_id: None,
+                    repo_id: None,
+                    finding_ids: vec![],
+                    risk: "low".to_string(),
+                    confidence: None,
+                })
+                .await
+                .unwrap_or_else(|e| panic!("seed {cr_id}: {e:?}"));
+        }
+        store
+            .create_plan(newton_backend::CreatePlanBody {
+                id: "plan-draft".to_string(),
+                title: "draft plan".to_string(),
+                linked_change_request_id: "cr-x".to_string(),
+                body: None,
+                status: "draft".to_string(),
+                component_id: None,
+                repo_id: None,
+                module: None,
+                confidence: 50,
+                risk: "low".to_string(),
+                expected_value: None,
+                expected_delta: None,
+            })
+            .await
+            .expect("seed draft plan");
+        store
+            .create_plan(newton_backend::CreatePlanBody {
+                id: "plan-ready".to_string(),
+                title: "ready plan".to_string(),
+                linked_change_request_id: "cr-y".to_string(),
+                body: None,
+                status: "ready".to_string(),
+                component_id: None,
+                repo_id: None,
+                module: None,
+                confidence: 50,
+                risk: "low".to_string(),
+                expected_value: None,
+                expected_delta: None,
+            })
+            .await
+            .expect("seed ready plan");
+
+        let args = DataArgs {
+            status: Some("ready".to_string()),
+            ..base_args(&ws, DataVerb::Get, "plans")
+        };
+        let value = dispatch_data(&store, &args, None)
+            .await
+            .expect("filtered list must succeed");
+        let items = value.as_array().expect("array response");
+        assert_eq!(items.len(), 1, "expected exactly one ready plan: {value}");
+        assert_eq!(items[0]["id"], "plan-ready");
+    }
+
+    // ── CLI-level validation gates for the new/widened filter flags ────────
+
+    #[tokio::test]
+    async fn status_flag_rejected_for_unsupported_resource() {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Get, "products");
+        args.status = Some("triaged".to_string());
+        let err = data(args).await.expect_err("must fail");
+        let exit = expect_cli_exit(err);
+        assert!(exit.message.contains("DATA-009"), "{}", exit.message);
+    }
+
+    #[tokio::test]
+    async fn scope_flag_now_allowed_for_findings_and_plans() {
+        let ws = setup_workspace();
+        let mut args = base_args(&ws, DataVerb::Get, "findings");
+        args.scope = Some("component".to_string());
+        args.scope_id = Some("does-not-matter".to_string());
+        // Must reach the store call (and succeed with an empty list), not
+        // the CLI-level DATA-008 validation gate.
+        let result = data(args).await;
+        assert!(result.is_ok(), "{result:?}");
     }
 }

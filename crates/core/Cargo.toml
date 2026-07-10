@@ -51,6 +51,7 @@ rhai = { workspace = true }
 petgraph = { workspace = true }
 async-trait = { workspace = true }
 regex = { workspace = true }
+globset = { workspace = true }
 indexmap = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }

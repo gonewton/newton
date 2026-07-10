@@ -87,7 +87,7 @@ async fn test_workflow_ws_delivers_lagged_frame_then_resumes() {
 
     let state = make_state(Arc::clone(&backend));
     let events_tx = state.events_tx.clone();
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let port = spawn_router(app).await;
 
     let ws_url = format!("ws://127.0.0.1:{port}/stream/workflow/{instance_id}/ws");
@@ -154,7 +154,7 @@ async fn test_logs_ws_delivers_lagged_frame_then_resumes() {
 
     let state = make_state(Arc::clone(&backend));
     let events_tx = state.events_tx.clone();
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let port = spawn_router(app).await;
 
     let ws_url = format!("ws://127.0.0.1:{port}/stream/logs/{instance_id}/{node_id}/ws");
@@ -224,7 +224,7 @@ async fn test_workflow_sse_delivers_lagged_frame_then_resumes() {
 
     let state = make_state(Arc::clone(&backend));
     let events_tx = state.events_tx.clone();
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let port = spawn_router(app).await;
 
     let client = reqwest::Client::new();
@@ -296,7 +296,7 @@ async fn test_workflow_ws_ends_cleanly_when_broadcast_channel_closes() {
     insert_instance(&backend, &instance_id).await;
 
     let state = make_state(Arc::clone(&backend));
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = tokio::spawn(async move {
@@ -354,7 +354,7 @@ async fn test_workflow_ws_server_survives_client_disconnect_mid_broadcast() {
 
     let state = make_state(Arc::clone(&backend));
     let events_tx = state.events_tx.clone();
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let port = spawn_router(app).await;
 
     let ws_url = format!("ws://127.0.0.1:{port}/stream/workflow/{instance_id}/ws");
@@ -400,7 +400,7 @@ async fn test_logs_ws_ends_cleanly_when_broadcast_channel_closes() {
     insert_instance(&backend, &instance_id).await;
 
     let state = make_state(Arc::clone(&backend));
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = tokio::spawn(async move {

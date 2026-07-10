@@ -339,6 +339,7 @@ impl FromArgValueMap for ServeArgs {
             ailoop_base_path,
             state_dir: get_opt_path(map, "state-dir"),
             import_existing: get_bool(map, "import-existing"),
+            with_magic_tools: get_bool(map, "with-magic-tools"),
         }
     }
 }
@@ -393,6 +394,7 @@ impl DataArgs {
         let scope = get_opt_str(map, "scope");
         let scope_id = get_opt_str(map, "scope-id");
         let source = get_opt_str(map, "source");
+        let status = get_opt_str(map, "status");
         let limit = if let Some(ArgValue::Str(s)) = map.get("limit") {
             Some(
                 s.parse::<u32>()
@@ -424,6 +426,7 @@ impl DataArgs {
             scope_id,
             source,
             limit,
+            status,
         })
     }
 }

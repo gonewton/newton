@@ -22,6 +22,7 @@ pub(crate) fn serve_command() -> Command {
                 "newton serve",
                 "newton serve --host 0.0.0.0 --port 9000",
                 "newton serve --no-web",
+                "newton serve --with-magic-tools",
             ],
             args: vec![
                 ArgSpec {
@@ -94,6 +95,15 @@ pub(crate) fn serve_command() -> Command {
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
                     help: "Run import scan of existing file-based runs before the HTTP listener binds",
+                    ..Default::default()
+                },
+                ArgSpec {
+                    name: "with-magic-tools",
+                    kind: ArgKind::Flag,
+                    long: Some("with-magic-tools"),
+                    value_type: ArgValueType::Bool,
+                    cardinality: Cardinality::Optional,
+                    help: "Mount the magic-tool router (/aitools/...). Off by default: only a newton/ping smoke-test tool is registered until real tool definitions land",
                     ..Default::default()
                 },
             ],

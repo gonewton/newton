@@ -27,7 +27,7 @@ macro_rules! parity_test {
         #[tokio::test]
         async fn $name() {
             let state = create_parity_test_state().await;
-            let app = newton_core::api::api_v1_router(state);
+            let app = newton_core::api::api_v1_router(state, false);
             let request = Request::builder()
                 .method($method)
                 .uri($path)
@@ -120,7 +120,7 @@ parity_test!(
 #[tokio::test]
 async fn test_products_returns_array() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let request = Request::builder()
         .uri("/products")
         .body(Body::empty())
@@ -140,7 +140,7 @@ async fn test_products_returns_array() {
 #[tokio::test]
 async fn test_persistence_put_get_delete() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let put_req = Request::builder()
         .method(Method::PUT)
@@ -184,7 +184,7 @@ async fn test_persistence_put_get_delete() {
 #[tokio::test]
 async fn test_persistence_get_not_found() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/persistence/nonexistent")
         .body(Body::empty())
@@ -201,7 +201,7 @@ async fn test_persistence_get_not_found() {
 #[tokio::test]
 async fn test_create_request_success() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({
         "id": "cr-parity-001",
         "title": "Fix auth bug",
@@ -228,7 +228,7 @@ async fn test_create_request_success() {
 #[tokio::test]
 async fn test_create_module_dependency_self_dep() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({
         "fromModuleId": "mod-1",
         "toModuleId": "mod-1",
@@ -253,7 +253,7 @@ async fn test_create_module_dependency_self_dep() {
 #[tokio::test]
 async fn test_create_module_dependency_not_found() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({
         "fromModuleId": "nonexistent",
         "toModuleId": "mod-1",
@@ -278,7 +278,7 @@ async fn test_create_module_dependency_not_found() {
 #[tokio::test]
 async fn test_create_module_dependency_cycle() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({
         "fromModuleId": "mod-1",
         "toModuleId": "mod-2",
@@ -303,7 +303,7 @@ async fn test_create_module_dependency_cycle() {
 #[tokio::test]
 async fn test_create_module_dependency_success() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({
         "fromModuleId": "mod-1",
         "toModuleId": "mod-2",
@@ -323,7 +323,7 @@ async fn test_create_module_dependency_success() {
 #[tokio::test]
 async fn test_get_plan_not_found() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/plans/nonexistent")
         .body(Body::empty())
@@ -340,7 +340,7 @@ async fn test_get_plan_not_found() {
 #[tokio::test]
 async fn test_approve_reject_plan_not_found() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let approve_req = Request::builder()
         .method(Method::POST)
@@ -362,7 +362,7 @@ async fn test_approve_reject_plan_not_found() {
 #[tokio::test]
 async fn test_patch_opportunity_not_found() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({"status": "triaged"});
     let req = Request::builder()
         .method(Method::PATCH)
@@ -377,7 +377,7 @@ async fn test_patch_opportunity_not_found() {
 #[tokio::test]
 async fn test_patch_opportunity_invalid_status() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let body = json!({"status": "triaged"});
     let req = Request::builder()
         .method(Method::PATCH)
@@ -444,7 +444,7 @@ async fn test_testing_reset_without_env_var_is_forbidden_and_data_intact() {
         "seed finding must be present before the reset attempt"
     );
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .method(Method::POST)
         .uri("/testing/reset")
@@ -483,7 +483,7 @@ async fn test_testing_reset_with_env_var_succeeds_and_empties_seed_data() {
         "seed finding must be present before reset"
     );
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .method(Method::POST)
         .uri("/testing/reset")
@@ -507,7 +507,7 @@ async fn test_testing_reset_with_env_var_succeeds_and_empties_seed_data() {
 #[tokio::test]
 async fn test_repos_include_dependency_arrays() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/repos")
         .body(Body::empty())
@@ -526,7 +526,7 @@ async fn test_repos_include_dependency_arrays() {
 #[tokio::test]
 async fn test_saved_views_grouped_without_kind() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/saved-views")
         .body(Body::empty())
@@ -538,7 +538,7 @@ async fn test_saved_views_grouped_without_kind() {
 #[tokio::test]
 async fn test_recent_actions_with_limit() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/recent-actions?limit=5")
         .body(Body::empty())
@@ -550,7 +550,7 @@ async fn test_recent_actions_with_limit() {
 #[tokio::test]
 async fn test_executions_with_plan_id_filter() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/executions?planId=some-plan")
         .body(Body::empty())
@@ -562,7 +562,7 @@ async fn test_executions_with_plan_id_filter() {
 #[tokio::test]
 async fn test_opportunity_status_filter() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/findings?status=awaiting_triage")
         .body(Body::empty())
@@ -574,7 +574,7 @@ async fn test_opportunity_status_filter() {
 #[tokio::test]
 async fn test_hil_list_events_by_workflow() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let req = Request::builder()
         .uri("/hil/workflows/test-instance-id")
         .body(Body::empty())
@@ -586,7 +586,7 @@ async fn test_hil_list_events_by_workflow() {
 #[tokio::test]
 async fn test_get_workflow_not_found_parity() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let uuid = uuid::Uuid::new_v4().to_string();
     let req = Request::builder()
         .uri(format!("/workflows/{uuid}"))
@@ -599,7 +599,7 @@ async fn test_get_workflow_not_found_parity() {
 #[tokio::test]
 async fn test_delete_persistence_idempotent() {
     let state = create_parity_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let del_req = Request::builder()
         .method(Method::DELETE)
         .uri("/persistence/nonexistent-key")
@@ -618,7 +618,7 @@ async fn test_delete_persistence_idempotent() {
 async fn test_approve_plan_emits_canonical_execution_update() {
     let state = create_parity_test_state().await;
     let mut rx = state.events_tx.subscribe();
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let req = Request::builder()
         .method(Method::POST)
@@ -691,7 +691,7 @@ async fn test_approve_plan_emits_canonical_execution_update() {
 async fn test_reject_plan_emits_plan_update_with_no_instance() {
     let state = create_parity_test_state().await;
     let mut rx = state.events_tx.subscribe();
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let req = Request::builder()
         .method(Method::POST)

@@ -194,12 +194,17 @@ async fn execute_create_branch(name: &str, cwd: &Path) -> Result<Value, AppError
 async fn execute_stage(exclude: &[String], cwd: &Path) -> Result<Value, AppError> {
     run_git_ok(&["add", "-A"], cwd).await?;
 
-    for pattern in exclude {
+    if !exclude.is_empty() {
+        // Build the GlobSet once, up front — not per-line — so real glob
+        // syntax (`build/*`, `**/*.log`, `dir/*.tmp`) is matched correctly
+        // and efficiently, replacing the old hand-rolled prefix/suffix-only
+        // matcher (spec 074 P11).
+        let exclude_set = build_exclude_glob_set(exclude)?;
         let listed = run_git(&["diff", "--cached", "--name-only"], cwd).await?;
         let matching: Vec<String> = listed
             .stdout
             .lines()
-            .filter(|line| glob_matches(pattern, line))
+            .filter(|line| exclude_set.is_match(line))
             .map(|s| s.to_string())
             .collect();
         for file in &matching {
@@ -213,17 +218,31 @@ async fn execute_stage(exclude: &[String], cwd: &Path) -> Result<Value, AppError
     Ok(json!({ "has_staged": has_staged }))
 }
 
-/// Minimal glob: supports `*` as wildcard.
-/// Handles patterns like "test_results.*" or "*.log".
-fn glob_matches(pattern: &str, s: &str) -> bool {
-    if let Some(prefix) = pattern.strip_suffix(".*") {
-        let basename = s.rsplit('/').next().unwrap_or(s);
-        return basename.starts_with(&format!("{prefix}."));
+/// Builds a `globset::GlobSet` from the `exclude` pattern list, so
+/// `execute_stage` can test "does this line match any exclude pattern" in
+/// one call per line instead of re-parsing patterns per line. Uses real glob
+/// syntax (`build/*`, `**/*.log`, `dir/*.tmp`) via the `globset` crate
+/// (spec 074 P11), replacing the previous hand-rolled matcher that only
+/// understood `*.ext` / `name.*`.
+fn build_exclude_glob_set(exclude: &[String]) -> Result<globset::GlobSet, AppError> {
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in exclude {
+        let glob = globset::Glob::new(pattern).map_err(|e| {
+            AppError::new(
+                ErrorCategory::ValidationError,
+                format!("GIT-STAGE-001: invalid exclude glob pattern {pattern:?}: {e}"),
+            )
+            .with_code("GIT-STAGE-001")
+        })?;
+        builder.add(glob);
     }
-    if let Some(suffix) = pattern.strip_prefix("*.") {
-        return s.ends_with(&format!(".{suffix}"));
-    }
-    s == pattern
+    builder.build().map_err(|e| {
+        AppError::new(
+            ErrorCategory::ValidationError,
+            format!("GIT-STAGE-002: failed to build exclude glob set: {e}"),
+        )
+        .with_code("GIT-STAGE-002")
+    })
 }
 
 /// Positive structural signature for `execute_commit`'s classification: is
@@ -553,5 +572,72 @@ impl Operator for GitOperator {
             GitParams::Diff { base, max_bytes } => execute_diff(&base, max_bytes, cwd).await,
             GitParams::CleanupMerge {} => execute_cleanup_merge(cwd).await,
         }
+    }
+}
+
+#[cfg(test)]
+mod exclude_glob_tests {
+    use super::build_exclude_glob_set;
+
+    fn matches(patterns: &[&str], line: &str) -> bool {
+        let patterns: Vec<String> = patterns.iter().map(|s| s.to_string()).collect();
+        build_exclude_glob_set(&patterns)
+            .expect("valid glob set")
+            .is_match(line)
+    }
+
+    // ── Real glob forms the old hand-rolled matcher silently failed on ──────
+
+    #[test]
+    fn matches_directory_star() {
+        assert!(matches(&["build/*"], "build/output.bin"));
+        assert!(matches(&["build/*"], "build/nested/output.bin"));
+        assert!(!matches(&["build/*"], "src/output.bin"));
+    }
+
+    #[test]
+    fn matches_double_star_extension() {
+        assert!(matches(&["**/*.log"], "app.log"));
+        assert!(matches(&["**/*.log"], "logs/app.log"));
+        assert!(matches(&["**/*.log"], "a/b/c/app.log"));
+        assert!(!matches(&["**/*.log"], "app.txt"));
+    }
+
+    #[test]
+    fn matches_dir_prefixed_extension() {
+        assert!(matches(&["dir/*.tmp"], "dir/scratch.tmp"));
+        assert!(!matches(&["dir/*.tmp"], "other/scratch.tmp"));
+        assert!(!matches(&["dir/*.tmp"], "dir/scratch.log"));
+    }
+
+    // ── Regression: the two forms the old matcher already supported ────────
+
+    #[test]
+    fn matches_suffix_extension_form() {
+        assert!(matches(&["*.ext"], "file.ext"));
+        assert!(matches(&["*.ext"], "nested/file.ext"));
+        assert!(!matches(&["*.ext"], "file.txt"));
+    }
+
+    #[test]
+    fn matches_prefix_dot_star_form() {
+        assert!(matches(&["name.*"], "name.json"));
+        assert!(!matches(&["name.*"], "other.json"));
+    }
+
+    // ── Multi-pattern exclude lists (the real call shape from execute_stage) ─
+
+    #[test]
+    fn multiple_patterns_match_any() {
+        let patterns = vec!["build/*", "**/*.log", "dir/*.tmp"];
+        assert!(matches(&patterns, "build/x"));
+        assert!(matches(&patterns, "a/b.log"));
+        assert!(matches(&patterns, "dir/c.tmp"));
+        assert!(!matches(&patterns, "src/main.rs"));
+    }
+
+    #[test]
+    fn empty_pattern_list_matches_nothing() {
+        assert!(!matches(&[], "anything.txt"));
     }
 }

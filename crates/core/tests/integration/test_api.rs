@@ -89,7 +89,7 @@ async fn insert_test_hil_event(state: &AppState, event: &HilEvent) {
 #[tokio::test]
 async fn test_list_workflows_empty() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .uri("/workflows")
@@ -126,7 +126,7 @@ async fn test_list_workflows_with_instances() {
 
     insert_test_instance(&state, &instance).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .uri("/workflows")
@@ -150,7 +150,7 @@ async fn test_list_workflows_with_instances() {
 #[tokio::test]
 async fn test_get_workflow_not_found() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let instance_id = Uuid::new_v4();
     let request = Request::builder()
@@ -175,7 +175,7 @@ async fn test_get_workflow_not_found() {
 #[tokio::test]
 async fn test_get_workflow_invalid_id() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .uri("/workflows/invalid-uuid")
@@ -219,7 +219,7 @@ async fn test_get_workflow_success() {
 
     insert_test_instance(&state, &instance).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .uri(format!("/workflows/{}", instance_id))
@@ -259,7 +259,7 @@ async fn test_update_workflow_success() {
 
     insert_test_instance(&state, &instance).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let update = json!({"workflow_id": "new-workflow"});
 
@@ -304,7 +304,7 @@ async fn test_update_workflow_definition_rejected() {
     insert_test_instance(&state, &instance).await;
 
     let backend = state.backend.clone();
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let update = WorkflowDefinition {
         workflow_id: "new-workflow".to_string(),
@@ -341,7 +341,7 @@ async fn test_update_workflow_definition_rejected() {
 #[tokio::test]
 async fn test_list_operators() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .uri("/operators")
@@ -364,7 +364,7 @@ async fn test_list_operators() {
 #[tokio::test]
 async fn test_list_hil_events_empty() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let instance_id = Uuid::new_v4();
     let request = Request::builder()
@@ -407,7 +407,7 @@ async fn test_list_hil_events_with_events() {
 
     insert_test_hil_event(&state, &event).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .uri(format!("/hil/workflows/{}", instance_id))
@@ -451,7 +451,7 @@ async fn test_submit_hil_action_success() {
 
     insert_test_hil_event(&state, &event).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let action = HilAction {
         answer: Some("Option A".to_string()),
@@ -476,7 +476,7 @@ async fn test_submit_hil_action_success() {
 #[tokio::test]
 async fn test_submit_hil_action_not_found() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let instance_id = Uuid::new_v4().to_string();
     let event_id = Uuid::new_v4().to_string();
@@ -531,7 +531,7 @@ async fn test_submit_hil_action_already_resolved() {
 
     insert_test_hil_event(&state, &event).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let action = HilAction {
         answer: Some("Option A".to_string()),
@@ -578,7 +578,7 @@ async fn test_submit_hil_action_timed_out_event_conflicts() {
 
     insert_test_hil_event(&state, &event).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let action = HilAction {
         answer: Some("Option A".to_string()),
@@ -627,7 +627,7 @@ async fn test_submit_hil_action_authorization_response_rejected_for_question_kin
 
     insert_test_hil_event(&state, &event).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let action = HilAction {
         answer: None,
@@ -675,7 +675,7 @@ async fn test_submit_hil_action_text_response_rejected_for_authorization_kind() 
 
     insert_test_hil_event(&state, &event).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let action = HilAction {
         answer: Some("some free text".to_string()),
@@ -722,7 +722,7 @@ async fn test_submit_hil_action_authorization_success() {
 
     insert_test_hil_event(&state, &event).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let action = HilAction {
         answer: None,
@@ -773,7 +773,7 @@ async fn test_submit_hil_action_accepts_opaque_event_id() {
 
     insert_test_hil_event(&state, &event).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let action = HilAction {
         answer: Some("Option A".to_string()),
@@ -818,7 +818,7 @@ async fn test_submit_hil_action_invalid_response_type() {
 
     insert_test_hil_event(&state, &event).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let action = HilAction {
         answer: Some("Option A".to_string()),
@@ -863,7 +863,7 @@ async fn test_submit_hil_action_missing_answer() {
 
     insert_test_hil_event(&state, &event).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let action = HilAction {
         answer: None,
@@ -888,7 +888,7 @@ async fn test_submit_hil_action_missing_answer() {
 #[tokio::test]
 async fn test_event_broadcasting() {
     let state = create_test_state().await;
-    let _ = newton_core::api::api_v1_router(state.clone());
+    let _ = newton_core::api::api_v1_router(state.clone(), false);
 
     let instance_id = Uuid::new_v4().to_string();
 
@@ -904,7 +904,7 @@ async fn test_event_broadcasting() {
 #[tokio::test]
 async fn test_create_workflow_success() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let instance_id = Uuid::new_v4().to_string();
     let instance = WorkflowInstance {
@@ -956,7 +956,7 @@ async fn test_create_workflow_duplicate_returns_409() {
 
     insert_test_instance(&state, &instance).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .method(Method::POST)
@@ -980,7 +980,7 @@ async fn test_create_workflow_duplicate_returns_409() {
 #[tokio::test]
 async fn test_create_workflow_invalid_uuid_returns_422() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let instance = json!({
         "instance_id": "not-a-valid-uuid",
@@ -1034,7 +1034,7 @@ async fn test_update_node_success() {
 
     insert_test_instance(&state, &instance).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let node_update = json!({
         "status": "succeeded",
@@ -1066,7 +1066,7 @@ async fn test_update_node_success() {
 #[tokio::test]
 async fn test_update_node_workflow_not_found_returns_404() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let instance_id = Uuid::new_v4().to_string();
     let node_update = json!({
@@ -1130,7 +1130,7 @@ async fn test_list_workflows_filter_by_status() {
     )
     .await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .uri("/workflows?status=running")
@@ -1172,7 +1172,7 @@ async fn test_list_workflows_pagination() {
         .await;
     }
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .uri("/workflows?limit=2&offset=1")
@@ -1209,7 +1209,7 @@ async fn test_update_workflow_status() {
 
     insert_test_instance(&state, &instance).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let update = json!({
         "status": "succeeded",
@@ -1260,7 +1260,7 @@ async fn test_update_node_upsert_creates_missing_node() {
 
     insert_test_instance(&state, &instance).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let node_update = json!({
         "status": "succeeded",
@@ -1342,7 +1342,7 @@ async fn test_workflow_definition_exposure() {
 
     insert_test_instance(&state, &instance).await;
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .uri(format!("/workflows/{}", instance_id))
@@ -1393,7 +1393,7 @@ async fn test_node_upsert_broadcasts_event() {
 
     let mut rx = state.events_tx.subscribe();
 
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let node_update = json!({
         "status": "running",
@@ -1472,7 +1472,7 @@ workflow:
 #[tokio::test]
 async fn test_workflow_files_503_when_not_configured() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .uri("/workflow-files")
@@ -1487,7 +1487,7 @@ async fn test_workflow_files_503_when_not_configured() {
 async fn test_workflow_files_list_empty() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .uri("/workflow-files")
@@ -1508,7 +1508,7 @@ async fn test_workflow_files_list_empty() {
 async fn test_workflow_files_put_and_get() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let body = serde_json::json!({
         "content": VALID_WORKFLOW_YAML,
@@ -1552,7 +1552,7 @@ async fn test_workflow_files_put_and_get() {
 async fn test_workflow_files_get_not_found() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .uri("/workflow-files/nonexistent")
@@ -1567,7 +1567,7 @@ async fn test_workflow_files_get_not_found() {
 async fn test_workflow_files_put_invalid_yaml() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let body = serde_json::json!({
         "content": "this: is: not: valid: yaml: {{{",
@@ -1589,7 +1589,7 @@ async fn test_workflow_files_put_invalid_yaml() {
 async fn test_workflow_files_delete() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     // Create
     let body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
@@ -1624,7 +1624,7 @@ async fn test_workflow_files_delete() {
 async fn test_workflow_files_delete_not_found() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let request = Request::builder()
         .method(Method::DELETE)
@@ -1640,7 +1640,7 @@ async fn test_workflow_files_delete_not_found() {
 async fn test_workflow_files_validate_endpoint() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
 
@@ -1665,7 +1665,7 @@ async fn test_workflow_files_validate_endpoint() {
 async fn test_workflow_files_list_shows_created_files() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     // Create two files
     for name in &["alpha", "beta"] {
@@ -1699,7 +1699,7 @@ async fn test_workflow_files_list_shows_created_files() {
 async fn test_workflow_files_slug_traversal_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     // GET with traversal slug
     let get_req = Request::builder()
@@ -1725,7 +1725,7 @@ async fn test_workflow_files_slug_traversal_rejected() {
 async fn test_workflow_files_if_match_conflict() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     // Create file first
     let body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
@@ -1764,7 +1764,7 @@ async fn test_workflow_files_if_match_conflict() {
 async fn test_workflow_files_if_match_put_after_delete_conflicts_not_recreated() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     // Create
     let body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
@@ -1834,7 +1834,7 @@ async fn test_workflow_files_if_match_put_after_delete_conflicts_not_recreated()
 async fn test_workflow_files_validate_invalid_semantic() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let body =
         serde_json::json!({ "content": INVALID_SEMANTIC_WORKFLOW_YAML, "expected_hash": null });
@@ -1870,7 +1870,7 @@ async fn test_workflow_files_validate_invalid_semantic() {
 async fn test_workflow_files_lenient_save_invalid_semantic() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let body =
         serde_json::json!({ "content": INVALID_SEMANTIC_WORKFLOW_YAML, "expected_hash": null });
@@ -1923,7 +1923,7 @@ async fn test_workflow_files_lenient_save_invalid_semantic() {
 async fn test_workflow_files_put_existing_without_precondition_428() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     // Create the file first (unconditional create is allowed).
     let create_body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
@@ -1983,7 +1983,7 @@ async fn test_workflow_files_put_existing_without_precondition_428() {
 async fn test_workflow_files_put_existing_with_correct_if_match_matches_subsequent_get() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     // Create.
     let create_body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
@@ -2047,7 +2047,7 @@ async fn test_workflow_files_put_existing_with_correct_if_match_matches_subseque
 async fn test_workflow_files_put_new_file_without_precondition_creates() {
     let dir = tempfile::tempdir().unwrap();
     let state = create_test_state_with_files(dir.path().to_owned()).await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
     let request = Request::builder()
@@ -2074,7 +2074,7 @@ async fn test_workflow_files_put_new_file_without_precondition_creates() {
 async fn test_create_finding_broadcasts_finding_update() {
     let state = create_test_state().await;
     let mut rx = state.events_tx.subscribe();
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let body = serde_json::json!({
         "id": "finding-broadcast-1",
@@ -2128,7 +2128,7 @@ async fn test_patch_finding_broadcasts_finding_update() {
         .expect("create_finding");
 
     let mut rx = state.events_tx.subscribe();
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let patch_body = serde_json::json!({ "status": "triaged" });
     let request = Request::builder()
@@ -2153,7 +2153,7 @@ async fn test_patch_finding_broadcasts_finding_update() {
 async fn test_create_change_request_broadcasts_change_request_update() {
     let state = create_test_state().await;
     let mut rx = state.events_tx.subscribe();
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let body = serde_json::json!({
         "id": "cr-broadcast-1",
@@ -2180,7 +2180,7 @@ async fn test_create_change_request_broadcasts_change_request_update() {
 #[tokio::test]
 async fn test_patch_change_request_broadcasts_change_request_update() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state.clone());
+    let app = newton_core::api::api_v1_router(state.clone(), false);
 
     let create_body = serde_json::json!({
         "id": "cr-broadcast-2",
@@ -2219,7 +2219,7 @@ async fn test_patch_change_request_broadcasts_change_request_update() {
 async fn test_create_product_broadcasts_catalog_update() {
     let state = create_test_state().await;
     let mut rx = state.events_tx.subscribe();
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let body = serde_json::json!({ "name": "broadcast-test-product" });
     let request = Request::builder()
@@ -2250,7 +2250,7 @@ async fn test_create_product_broadcasts_catalog_update() {
 #[tokio::test]
 async fn test_delete_product_broadcasts_catalog_update() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state.clone());
+    let app = newton_core::api::api_v1_router(state.clone(), false);
 
     let create_body = serde_json::json!({ "name": "broadcast-delete-product" });
     let create_request = Request::builder()

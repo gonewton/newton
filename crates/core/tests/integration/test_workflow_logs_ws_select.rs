@@ -86,7 +86,7 @@ async fn workflow_ws_sends_ping_on_idle_connection() {
     insert_instance(&backend, &instance_id).await;
 
     let state = make_state(Arc::clone(&backend), Duration::from_millis(50));
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let port = spawn_router(app).await;
 
     let ws_url = format!("ws://127.0.0.1:{port}/stream/workflow/{instance_id}/ws");
@@ -123,7 +123,7 @@ async fn logs_ws_sends_ping_on_idle_connection() {
     insert_instance(&backend, &instance_id).await;
 
     let state = make_state(Arc::clone(&backend), Duration::from_millis(50));
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let port = spawn_router(app).await;
 
     let ws_url = format!("ws://127.0.0.1:{port}/stream/logs/{instance_id}/{node_id}/ws");
@@ -168,7 +168,7 @@ async fn workflow_ws_exits_promptly_on_client_close() {
     // failure.
     let state = make_state(Arc::clone(&backend), Duration::from_secs(30));
     let events_tx = state.events_tx.clone();
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let port = spawn_router(app).await;
 
     let ws_url = format!("ws://127.0.0.1:{port}/stream/workflow/{instance_id}/ws");
@@ -214,7 +214,7 @@ async fn logs_ws_exits_promptly_on_client_close() {
 
     let state = make_state(Arc::clone(&backend), Duration::from_secs(30));
     let events_tx = state.events_tx.clone();
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
     let port = spawn_router(app).await;
 
     let ws_url = format!("ws://127.0.0.1:{port}/stream/logs/{instance_id}/{node_id}/ws");
