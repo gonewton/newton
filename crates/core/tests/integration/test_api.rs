@@ -2059,3 +2059,229 @@ async fn test_workflow_files_put_new_file_without_precondition_creates() {
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
 }
+
+// ── Spec 074 P3: realtime event parity ─────────────────────────────────────────
+//
+// One test per new `BroadcastEvent` variant (`FindingUpdate`,
+// `ChangeRequestUpdate`, `CatalogUpdate`), asserting the event is actually
+// sent on `events_tx` when the corresponding mutation happens. Follows the
+// same subscribe-before-triggering pattern as
+// `test_node_upsert_broadcasts_event` above. `OptimizeRunUpdate` has its own
+// direct unit tests colocated with the (currently unwired) write-and-broadcast
+// primitives in `crates/core/src/api/optimize_run.rs`.
+
+#[tokio::test]
+async fn test_create_finding_broadcasts_finding_update() {
+    let state = create_test_state().await;
+    let mut rx = state.events_tx.subscribe();
+    let app = newton_core::api::api_v1_router(state);
+
+    let body = serde_json::json!({
+        "id": "finding-broadcast-1",
+        "source": "test",
+        "origin": "system",
+        "dimension": "quality",
+        "fingerprint": "finding-broadcast-1",
+        "title": "test finding",
+        "whyItMatters": "proves FindingUpdate broadcasts",
+        "recommendedAction": "n/a",
+        "severity": "low",
+        "risk": "low",
+    });
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/findings")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let event = rx.try_recv().expect("FindingUpdate should be sent");
+    match event {
+        BroadcastEvent::FindingUpdate { finding_id } => {
+            assert_eq!(finding_id, "finding-broadcast-1");
+        }
+        other => panic!("expected FindingUpdate, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_patch_finding_broadcasts_finding_update() {
+    let state = create_test_state().await;
+    let create_body = serde_json::json!({
+        "id": "finding-broadcast-2",
+        "source": "test",
+        "origin": "system",
+        "dimension": "quality",
+        "fingerprint": "finding-broadcast-2",
+        "title": "test finding",
+        "whyItMatters": "proves FindingUpdate broadcasts on patch",
+        "recommendedAction": "n/a",
+        "severity": "low",
+        "risk": "low",
+    });
+    state
+        .backend
+        .create_finding(serde_json::from_value(create_body).unwrap())
+        .await
+        .expect("create_finding");
+
+    let mut rx = state.events_tx.subscribe();
+    let app = newton_core::api::api_v1_router(state);
+
+    let patch_body = serde_json::json!({ "status": "triaged" });
+    let request = Request::builder()
+        .method(Method::PATCH)
+        .uri("/findings/finding-broadcast-2")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&patch_body).unwrap()))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let event = rx.try_recv().expect("FindingUpdate should be sent");
+    match event {
+        BroadcastEvent::FindingUpdate { finding_id } => {
+            assert_eq!(finding_id, "finding-broadcast-2");
+        }
+        other => panic!("expected FindingUpdate, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_create_change_request_broadcasts_change_request_update() {
+    let state = create_test_state().await;
+    let mut rx = state.events_tx.subscribe();
+    let app = newton_core::api::api_v1_router(state);
+
+    let body = serde_json::json!({
+        "id": "cr-broadcast-1",
+        "title": "test change request",
+    });
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/change-requests")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let event = rx.try_recv().expect("ChangeRequestUpdate should be sent");
+    match event {
+        BroadcastEvent::ChangeRequestUpdate { change_request_id } => {
+            assert_eq!(change_request_id, "cr-broadcast-1");
+        }
+        other => panic!("expected ChangeRequestUpdate, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_patch_change_request_broadcasts_change_request_update() {
+    let state = create_test_state().await;
+    let app = newton_core::api::api_v1_router(state.clone());
+
+    let create_body = serde_json::json!({
+        "id": "cr-broadcast-2",
+        "title": "test change request",
+    });
+    let create_request = Request::builder()
+        .method(Method::POST)
+        .uri("/change-requests")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&create_body).unwrap()))
+        .unwrap();
+    let create_response = app.clone().oneshot(create_request).await.unwrap();
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+
+    let mut rx = state.events_tx.subscribe();
+    let patch_body = serde_json::json!({ "status": "approved" });
+    let patch_request = Request::builder()
+        .method(Method::PATCH)
+        .uri("/change-requests/cr-broadcast-2")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&patch_body).unwrap()))
+        .unwrap();
+    let patch_response = app.oneshot(patch_request).await.unwrap();
+    assert_eq!(patch_response.status(), StatusCode::OK);
+
+    let event = rx.try_recv().expect("ChangeRequestUpdate should be sent");
+    match event {
+        BroadcastEvent::ChangeRequestUpdate { change_request_id } => {
+            assert_eq!(change_request_id, "cr-broadcast-2");
+        }
+        other => panic!("expected ChangeRequestUpdate, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_create_product_broadcasts_catalog_update() {
+    let state = create_test_state().await;
+    let mut rx = state.events_tx.subscribe();
+    let app = newton_core::api::api_v1_router(state);
+
+    let body = serde_json::json!({ "name": "broadcast-test-product" });
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/products")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let created: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let product_id = created["id"].as_str().unwrap().to_string();
+
+    let event = rx.try_recv().expect("CatalogUpdate should be sent");
+    match event {
+        BroadcastEvent::CatalogUpdate { resource, id } => {
+            assert_eq!(resource, "product");
+            assert_eq!(id, product_id);
+        }
+        other => panic!("expected CatalogUpdate, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_delete_product_broadcasts_catalog_update() {
+    let state = create_test_state().await;
+    let app = newton_core::api::api_v1_router(state.clone());
+
+    let create_body = serde_json::json!({ "name": "broadcast-delete-product" });
+    let create_request = Request::builder()
+        .method(Method::POST)
+        .uri("/products")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&create_body).unwrap()))
+        .unwrap();
+    let create_response = app.clone().oneshot(create_request).await.unwrap();
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let create_body_bytes = axum::body::to_bytes(create_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let created: serde_json::Value = serde_json::from_slice(&create_body_bytes).unwrap();
+    let product_id = created["id"].as_str().unwrap().to_string();
+
+    let mut rx = state.events_tx.subscribe();
+    let delete_request = Request::builder()
+        .method(Method::DELETE)
+        .uri(format!("/products/{product_id}"))
+        .body(Body::empty())
+        .unwrap();
+    let delete_response = app.oneshot(delete_request).await.unwrap();
+    assert_eq!(delete_response.status(), StatusCode::OK);
+
+    let event = rx.try_recv().expect("CatalogUpdate should be sent");
+    match event {
+        BroadcastEvent::CatalogUpdate { resource, id } => {
+            assert_eq!(resource, "product");
+            assert_eq!(id, product_id);
+        }
+        other => panic!("expected CatalogUpdate, got {other:?}"),
+    }
+}

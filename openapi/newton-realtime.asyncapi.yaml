@@ -47,6 +47,14 @@ channels:
         $ref: '#/components/messages/PlanUpdate'
       executionUpdate:
         $ref: '#/components/messages/ExecutionUpdate'
+      findingUpdate:
+        $ref: '#/components/messages/FindingUpdate'
+      changeRequestUpdate:
+        $ref: '#/components/messages/ChangeRequestUpdate'
+      catalogUpdate:
+        $ref: '#/components/messages/CatalogUpdate'
+      optimizeRunUpdate:
+        $ref: '#/components/messages/OptimizeRunUpdate'
 
   workflowInstanceWs:
     address: /api/v1/stream/workflow/{instanceId}/ws
@@ -87,6 +95,14 @@ channels:
         $ref: '#/components/messages/PlanUpdate'
       executionUpdate:
         $ref: '#/components/messages/ExecutionUpdate'
+      findingUpdate:
+        $ref: '#/components/messages/FindingUpdate'
+      changeRequestUpdate:
+        $ref: '#/components/messages/ChangeRequestUpdate'
+      catalogUpdate:
+        $ref: '#/components/messages/CatalogUpdate'
+      optimizeRunUpdate:
+        $ref: '#/components/messages/OptimizeRunUpdate'
       lagged:
         $ref: '#/components/messages/Lagged'
 
@@ -157,6 +173,14 @@ channels:
         $ref: '#/components/messages/PlanUpdate'
       executionUpdate:
         $ref: '#/components/messages/ExecutionUpdate'
+      findingUpdate:
+        $ref: '#/components/messages/FindingUpdate'
+      changeRequestUpdate:
+        $ref: '#/components/messages/ChangeRequestUpdate'
+      catalogUpdate:
+        $ref: '#/components/messages/CatalogUpdate'
+      optimizeRunUpdate:
+        $ref: '#/components/messages/OptimizeRunUpdate'
       lagged:
         $ref: '#/components/messages/Lagged'
 
@@ -221,6 +245,52 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ExecutionUpdatePayload'
+
+    FindingUpdate:
+      name: FindingUpdate
+      title: Finding Update
+      description: |
+        Emitted after a Finding is created, patched, or unblocked. Id-only,
+        same shape as PlanUpdate/ExecutionUpdate: clients re-fetch the
+        authoritative record from `GET /findings/{id}` on receipt.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/FindingUpdatePayload'
+
+    ChangeRequestUpdate:
+      name: ChangeRequestUpdate
+      title: Change Request Update
+      description: |
+        Emitted after a Change Request is created or patched. Id-only;
+        clients re-fetch from `GET /change-requests/{id}` on receipt.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ChangeRequestUpdatePayload'
+
+    CatalogUpdate:
+      name: CatalogUpdate
+      title: Catalog Update
+      description: |
+        Emitted after any catalog resource (product, component, repo, module,
+        module-dependency, kpi, eval-run, grade) is created, replaced,
+        patched, or deleted. `resource` names the kind so clients can route
+        `id` to the matching read endpoint.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CatalogUpdatePayload'
+
+    OptimizeRunUpdate:
+      name: OptimizeRunUpdate
+      title: Optimize Run Update
+      description: |
+        Emitted when an OptimizeRun's status changes or a Cycle is appended
+        (closes the ADR-0013 event commitment). `cycle` is present when the
+        update accompanies a Cycle append, absent for a bare Run status/field
+        change. Published by the in-process optimize driver via the same
+        `events_tx` Plans/HIL already use.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/OptimizeRunUpdatePayload'
 
     Lagged:
       name: Lagged
@@ -350,6 +420,70 @@ components:
         plan_id: null
         status: running
         created_at: "2026-01-01T00:00:00Z"
+
+    FindingUpdatePayload:
+      type: object
+      required: [type, finding_id]
+      properties:
+        type:
+          type: string
+          enum: [finding_update]
+        finding_id:
+          type: string
+      example:
+        type: finding_update
+        finding_id: finding-abc
+
+    ChangeRequestUpdatePayload:
+      type: object
+      required: [type, change_request_id]
+      properties:
+        type:
+          type: string
+          enum: [change_request_update]
+        change_request_id:
+          type: string
+      example:
+        type: change_request_update
+        change_request_id: cr-abc
+
+    CatalogUpdatePayload:
+      type: object
+      required: [type, resource, id]
+      properties:
+        type:
+          type: string
+          enum: [catalog_update]
+        resource:
+          type: string
+          description: |
+            Catalog resource kind: product | component | repo | module |
+            module-dependency | kpi | eval-run | grade.
+        id:
+          type: string
+      example:
+        type: catalog_update
+        resource: component
+        id: component-abc
+
+    OptimizeRunUpdatePayload:
+      type: object
+      required: [type, run_id]
+      properties:
+        type:
+          type: string
+          enum: [optimize_run_update]
+        run_id:
+          type: string
+        cycle:
+          type: integer
+          format: int64
+          nullable: true
+          description: Present (cycle number) when this update accompanies a Cycle append; null for a bare Run status/field change.
+      example:
+        type: optimize_run_update
+        run_id: run-001
+        cycle: 3
 
     LaggedPayload:
       type: object

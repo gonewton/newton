@@ -131,6 +131,28 @@ pub enum BroadcastEvent {
         status: String,
         created_at: String,
     },
+    /// Emitted after a Finding is created, patched, or unblocked. Id-only,
+    /// same shape as `PlanUpdate`/`ExecutionUpdate`: clients re-fetch the
+    /// authoritative record from `GET /findings/{id}` on receipt.
+    #[serde(rename = "finding_update")]
+    FindingUpdate { finding_id: String },
+    /// Emitted after a Change Request is created or patched. Id-only; clients
+    /// re-fetch from `GET /change-requests/{id}` on receipt.
+    #[serde(rename = "change_request_update")]
+    ChangeRequestUpdate { change_request_id: String },
+    /// Emitted after any catalog resource (Product, Component, Repo, Module,
+    /// ModuleDependency, Kpi, EvalRun, Grade) is created, replaced, patched,
+    /// or deleted. `resource` names the kind (e.g. `"product"`, `"module"`)
+    /// so clients can route the id to the right re-fetch endpoint.
+    #[serde(rename = "catalog_update")]
+    CatalogUpdate { resource: String, id: String },
+    /// Emitted when an `OptimizeRun`'s status changes or a `Cycle` is
+    /// appended, closing the ADR-0013 event commitment. `cycle` is `Some`
+    /// when the update accompanies a Cycle append, `None` for a bare Run
+    /// status/field change. Published by the in-process optimize driver
+    /// (spec 073) via the same `events_tx` Plans/HIL already use.
+    #[serde(rename = "optimize_run_update")]
+    OptimizeRunUpdate { run_id: String, cycle: Option<i64> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

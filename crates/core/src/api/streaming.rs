@@ -404,6 +404,10 @@ fn should_send_event(event: &BroadcastEvent, instance_id: &str, filters: &Stream
             BroadcastEvent::HilEvent { .. } => "hilEvent",
             BroadcastEvent::PlanUpdate { .. } => "plan_update",
             BroadcastEvent::ExecutionUpdate { .. } => "execution_update",
+            BroadcastEvent::FindingUpdate { .. } => "finding_update",
+            BroadcastEvent::ChangeRequestUpdate { .. } => "change_request_update",
+            BroadcastEvent::CatalogUpdate { .. } => "catalog_update",
+            BroadcastEvent::OptimizeRunUpdate { .. } => "optimize_run_update",
         };
 
         if filter_type != event_type {
@@ -446,6 +450,16 @@ fn should_send_event(event: &BroadcastEvent, instance_id: &str, filters: &Stream
             instance_id: ref evt_id,
             ..
         } => evt_id == instance_id,
-        BroadcastEvent::PlanUpdate { .. } | BroadcastEvent::ExecutionUpdate { .. } => true,
+        // Not workflow-instance-scoped, same treatment as PlanUpdate/ExecutionUpdate:
+        // these are domain-object mutation events (Finding/ChangeRequest/Catalog/
+        // OptimizeRun), not tied to a workflow instance id, so `instance_id`
+        // filtering (handled above via `filters.instance_id`) doesn't apply to them
+        // and they pass through unconditionally here.
+        BroadcastEvent::PlanUpdate { .. }
+        | BroadcastEvent::ExecutionUpdate { .. }
+        | BroadcastEvent::FindingUpdate { .. }
+        | BroadcastEvent::ChangeRequestUpdate { .. }
+        | BroadcastEvent::CatalogUpdate { .. }
+        | BroadcastEvent::OptimizeRunUpdate { .. } => true,
     }
 }

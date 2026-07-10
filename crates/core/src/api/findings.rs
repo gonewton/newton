@@ -8,6 +8,7 @@ use axum::{
     Router,
 };
 use newton_types::ApiError;
+use newton_types::BroadcastEvent;
 use newton_types::{CreateFindingBody, PatchFindingBody};
 use serde::Deserialize;
 use std::sync::Arc;
@@ -68,7 +69,13 @@ pub(crate) async fn create_finding(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateFindingBody>,
 ) -> Response {
-    created_json(state.backend.create_finding(body).await)
+    let result = state.backend.create_finding(body).await;
+    if let Ok(ref item) = result {
+        let _ = state.events_tx.send(BroadcastEvent::FindingUpdate {
+            finding_id: item.id.clone(),
+        });
+    }
+    created_json(result)
 }
 
 #[utoipa::path(
@@ -107,7 +114,13 @@ pub(crate) async fn patch_finding(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchFindingBody>,
 ) -> Response {
-    ok_json(state.backend.patch_finding(&id, body).await)
+    let result = state.backend.patch_finding(&id, body).await;
+    if result.is_ok() {
+        let _ = state
+            .events_tx
+            .send(BroadcastEvent::FindingUpdate { finding_id: id });
+    }
+    ok_json(result)
 }
 
 #[utoipa::path(
@@ -126,5 +139,11 @@ pub(crate) async fn unblock_finding(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    ok_json(state.backend.unblock_finding(&id).await)
+    let result = state.backend.unblock_finding(&id).await;
+    if result.is_ok() {
+        let _ = state
+            .events_tx
+            .send(BroadcastEvent::FindingUpdate { finding_id: id });
+    }
+    ok_json(result)
 }
