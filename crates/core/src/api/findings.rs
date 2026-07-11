@@ -1,7 +1,6 @@
 use crate::api::state::AppState;
-use crate::api::{created_json, ok_json};
+use crate::api::{created_json, ok_json, AppJson};
 use axum::{
-    extract::Json,
     extract::{Path, Query, State},
     response::Response,
     routing::{get, post},
@@ -67,7 +66,7 @@ pub(crate) async fn list_findings(
 )]
 pub(crate) async fn create_finding(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<CreateFindingBody>,
+    AppJson(body): AppJson<CreateFindingBody>,
 ) -> Response {
     let result = state.backend.create_finding(body).await;
     if let Ok(ref item) = result {
@@ -112,7 +111,7 @@ pub(crate) async fn get_finding(
 pub(crate) async fn patch_finding(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
-    Json(body): Json<PatchFindingBody>,
+    AppJson(body): AppJson<PatchFindingBody>,
 ) -> Response {
     let result = state.backend.patch_finding(&id, body).await;
     if result.is_ok() {

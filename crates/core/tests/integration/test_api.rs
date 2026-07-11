@@ -2368,6 +2368,105 @@ async fn test_unblock_finding_broadcasts_finding_update() {
     }
 }
 
+// `status`/`severity`/`origin` on `CreateFindingBody`/`PatchFindingBody` are
+// typed enums (S3): serde now rejects an unrecognized value at JSON
+// deserialization time, inside axum's `Json<T>` extractor, before the
+// `create_finding`/`patch_finding` handlers ever run. Without the `AppJson`
+// wrapper (crates/core/src/api/mod.rs) that extractor failure would surface
+// as axum's default plain-text rejection instead of this API's `ApiError`
+// JSON envelope — a response-shape regression relative to the old
+// hand-rolled `validate_finding_status` check. These two tests prove the
+// `ApiError` shape survives the switch to typed enums (tranche 4 code
+// review, S3 follow-up).
+
+#[tokio::test]
+async fn test_create_finding_bad_status_returns_api_error_shape() {
+    let state = create_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    let body = serde_json::json!({
+        "id": "finding-bad-status",
+        "source": "test",
+        "origin": "system",
+        "dimension": "quality",
+        "fingerprint": "finding-bad-status",
+        "title": "test finding",
+        "whyItMatters": "proves bad status is rejected as ApiError, not axum's default body",
+        "recommendedAction": "n/a",
+        "status": "not-a-real-status",
+        "severity": "low",
+        "risk": "low",
+    });
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/findings")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: ApiError = serde_json::from_slice(&body)
+        .expect("response body should deserialize as ApiError, not axum's default rejection");
+    assert_eq!(err.code, "ERR_VALIDATION");
+    assert!(
+        err.message.to_lowercase().contains("status"),
+        "message should reference the offending `status` field, got: {}",
+        err.message
+    );
+}
+
+#[tokio::test]
+async fn test_patch_finding_bad_status_returns_api_error_shape() {
+    let state = create_test_state().await;
+    let create_body = serde_json::json!({
+        "id": "finding-bad-status-patch",
+        "source": "test",
+        "origin": "system",
+        "dimension": "quality",
+        "fingerprint": "finding-bad-status-patch",
+        "title": "test finding",
+        "whyItMatters": "proves bad status is rejected as ApiError, not axum's default body",
+        "recommendedAction": "n/a",
+        "severity": "low",
+        "risk": "low",
+    });
+    state
+        .backend
+        .create_finding(serde_json::from_value(create_body).unwrap())
+        .await
+        .expect("create_finding");
+
+    let app = newton_core::api::api_v1_router(state, false);
+
+    // `PatchFindingBody` only has `status` as a typed enum field (`severity`/
+    // `origin` aren't patchable), so exercise the same regression via `status`.
+    let patch_body = serde_json::json!({ "status": "not-a-real-status" });
+    let request = Request::builder()
+        .method(Method::PATCH)
+        .uri("/findings/finding-bad-status-patch")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&patch_body).unwrap()))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: ApiError = serde_json::from_slice(&body)
+        .expect("response body should deserialize as ApiError, not axum's default rejection");
+    assert_eq!(err.code, "ERR_VALIDATION");
+    assert!(
+        err.message.to_lowercase().contains("status"),
+        "message should reference the offending `status` field, got: {}",
+        err.message
+    );
+}
+
 #[tokio::test]
 async fn test_create_change_request_broadcasts_change_request_update() {
     let state = create_test_state().await;
