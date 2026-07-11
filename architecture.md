@@ -43,7 +43,7 @@ flowchart TB
 
 | Crate | Responsibility | Must not |
 | --- | --- | --- |
-| `newton-types` | Shared contract: the `BackendStore` trait plus the domain DTOs it speaks (`WorkflowInstance`, `ApiError`, `FindingItem`, portfolio types, …) used by core, backend, and OpenAPI generation | Depend on core, backend, or CLI |
+| `newton-types` | Shared contract: the `BackendStore` trait, the domain DTOs it speaks (`WorkflowInstance`, `ApiError`, `FindingItem`, portfolio types, …), and the `BroadcastEvent` streaming-event enum — used by core, backend, and OpenAPI generation | Depend on core, backend, or CLI |
 | `newton-backend` | Implements `newton_types::BackendStore` over sqlx/SQLite: workflows runtime, plans, catalog, grades, opportunities | Depend on core or CLI |
 | `newton-core` | Workflow parse/transform/execute, operators, checkpoints, batch config, HTTP router, ailoop/MCP integrations — consumes `Arc<dyn newton_types::BackendStore>` | Depend on clap/TUI crates or `newton-backend`/sqlx |
 | `newton-cli` | Argument parsing, command dispatch, logging bootstrap, MCP serve wiring — the only crate that constructs the concrete `SqliteBackendStore` and wires it into core | Contain business logic that belongs in core |
@@ -118,6 +118,10 @@ Built-in operators register in `crates/core/src/workflow/operators/mod.rs`:
 | `GitOperator` | `git/` | Typed git operations (`clean_check`, `sync_main`, `create_branch`, `commit`, `push`, `diff`, `cleanup_merge`) |
 | `HumanApprovalOperator` | `human_approval.rs` | Boolean HITL gate |
 | `HumanDecisionOperator` | `human_decision.rs` | Multiple-choice HITL gate |
+| `GraderCommandOperator` | `grader_command.rs` | Runs a shell-command Grader, validates the Assessment, persists it |
+| `GraderAgentOperator` | `grader_agent.rs` | Rubric-based Grader using AI via aikit-sdk Pipeline |
+| `ReconcileOperator` | `reconcile.rs` | Reads Observations from an Assessment and reconciles them with stored Findings |
+| `ChangeRequestOperator` | `change_request_op.rs` | Reads open Findings and synthesizes a Change Request |
 
 Each operator implements `params_schema()` and `output_schema()` ([ADR 0006](docs/adr/0006-operators-own-param-and-output-schemas.md)); `newton schema export` (`schema_export.rs`) composes these into a single operator-discriminated JSON Schema. Recurring shell patterns are promoted to typed operators (`GitOperator`), with `CommandOperator` (typed `success` / `exit_code` outputs) as the escape hatch ([ADR 0008](docs/adr/0008-shell-patterns-promoted-to-typed-operators.md)).
 
@@ -324,6 +328,10 @@ The YAML IR is the single, provenance-blind compile target ([ADR 0005](docs/adr/
 | **AgentOperator** | Runs an AI agent engine via aikit-sdk with **Signal**-based output routing; checkpoint/resume. |
 | **GhOperator** | Wraps the GitHub CLI for PR and project operations; checkpoint/resume. |
 | **ReadControlFileOperator** | Reads/parses a JSON file at a runtime-resolved path into task output. |
+| **GraderCommandOperator** | Runs a shell-command **Grader**, validates the resulting **Assessment**, and persists it (ADR-0014 descriptor/execution split). |
+| **GraderAgentOperator** | Runs a rubric-based **Grader** via an AI agent (aikit-sdk Pipeline), validates and persists the **Assessment**. |
+| **ReconcileOperator** | Reads **Observations** from an **Assessment** and reconciles them with stored **Findings** (create/update/resolve). |
+| **ChangeRequestOperator** | Reads open **Findings** and synthesizes a **Change Request**. |
 
 ### Agent execution
 
@@ -347,7 +355,7 @@ The YAML IR is the single, provenance-blind compile target ([ADR 0005](docs/adr/
 | Term | Definition | Aliases to avoid |
 | --- | --- | --- |
 | **ConnectionStatus** | WebSocket/SSE state: `disconnected | connecting | connected | reconnecting`. | Socket state |
-| **BroadcastEvent** | A WS notification carrying only IDs; the UI re-fetches via REST. Types: `workflowInstanceUpdated`, `nodeStateChanged`, `logMessage`, `hilEvent`. | Push event |
+| **BroadcastEvent** | A WS notification carrying only IDs (plus a few scoping/display fields); the UI re-fetches via REST. Defined in `newton-types`. Types: `workflowInstanceUpdated`, `nodeStateChanged`, `logMessage`, `hilEvent`, `plan_update`, `execution_update`, `finding_update`, `change_request_update`, `catalog_update`, `optimize_run_update`. | Push event |
 | **WorkflowMonitor** | The three-pane UI: instance list, DAG graph, task detail. | Dashboard |
 | **Magic Button** / **DraftCard** | A UI pattern where AI generates a draft a human reviews before applying; the review surface for it. Never auto-applied. | Auto-fill |
 | **SavedView** | A persisted filter/column configuration for portfolio or repository lists. | Filter preset |

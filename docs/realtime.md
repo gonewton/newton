@@ -37,10 +37,10 @@ instance or definition is unavailable.
 ### 404 enforcement
 
 `GET /api/stream/workflow/{id}/ws` and `GET /api/stream/workflow/{id}/sse`
-return HTTP `404` with a canonical `ApiError` body if the `id` does not exist
-in `state.instances`. The WebSocket upgrade (101 Switching Protocols) is never
-sent. Clients should check the HTTP response code before treating a connection
-as open.
+return HTTP `404` with a canonical `ApiError` body if `state.backend.get_workflow_instance(id)`
+(the `BackendStore`, the authoritative source) reports the instance does not
+exist. The WebSocket upgrade (101 Switching Protocols) is never sent. Clients
+should check the HTTP response code before treating a connection as open.
 
 ---
 
@@ -53,10 +53,34 @@ enum). Wire shapes:
 |---|---|
 | `workflowInstanceUpdated` | `instance_id` |
 | `nodeStateChanged` | `instance_id`, `node_id` |
-| `logMessage` | `instance_id`, `node_id`, `message` |
+| `logMessage` | `instance_id`, `node_id`, `message`, `seq` |
 | `hilEvent` | `instance_id`, `event_id` |
-| `plan_update` | `plan_id` |
-| `execution_update` | `execution_id`, `plan_id` (nullable), `status`, `created_at` |
+| `plan_update` | `plan_id`, `instance_id` (nullable) |
+| `execution_update` | `execution_id`, `plan_id` (nullable), `status`, `created_at`, `instance_id` |
+| `finding_update` | `finding_id` |
+| `change_request_update` | `change_request_id` |
+| `catalog_update` | `resource`, `id` |
+| `optimize_run_update` | `run_id`, `cycle` (nullable) |
+
+`logMessage.seq` is the log line's persisted sequence number (spec 074 B18), or
+`0` for synthetic, non-persisted lines (e.g. the "Connected to \<task\>" frame
+sent on logs WS connect). Clients reconnecting to the logs WS pass the highest
+`seq` they've seen as `since_seq` to resume without a full replay.
+
+`plan_update.instance_id` and `execution_update.instance_id` carry the owning
+workflow instance id (spec 074 B13). For `plan_update` this is `None` until a
+plan is approved and linked to a running instance (still awaiting approval, or
+rejected without ever running) — instance-scoped streams drop the event rather
+than guessing which instance it belongs to. `execution_update.instance_id` is
+never null: it falls back to the execution's own id until a real workflow
+instance attaches.
+
+`finding_update`, `change_request_update`, `catalog_update`, and
+`optimize_run_update` (spec 074 P3) are **not** workflow-instance-scoped —
+they are domain-object mutation events, not tied to any workflow instance id,
+so they pass through every stream's `instance_id` filter unconditionally.
+Clients re-fetch the authoritative record from the matching REST endpoint on
+receipt (e.g. `GET /findings/{id}`, `GET /change-requests/{id}`).
 
 ---
 
@@ -69,6 +93,7 @@ All streaming endpoints accept optional query parameters:
 | `instance_id` | Override the instance id used for filtering (legacy clients) |
 | `node_id` | Restrict to a specific node |
 | `event_type` | Restrict by event type name (e.g. `logMessage`) |
+| `since_seq` | Logs WS only (spec 074 B18): resume historical replay from log lines with `seq > since_seq` instead of the default tail-500. Ignored by every other stream endpoint. |
 
 ---
 
@@ -171,7 +196,12 @@ returns `404`, the browser fires an `error` event and closes the connection.
 ## Log Stream WebSocket (`GET /api/stream/logs/{id}/{nodeId}/ws`)
 
 Receives only `logMessage` events for the specified instance and node. The
-first frame is always a synthetic `logMessage` with `"Connected to <name>"`.
+first frame is always a synthetic `logMessage` with `"Connected to <name>"`
+(`seq: 0`, a documented sentinel — real seqs start at 1). After the connect
+frame, historical log lines are replayed before live forwarding begins: with
+`since_seq` set, everything with `seq > since_seq`; otherwise the last 500
+lines (`DEFAULT_LOG_TAIL`) rather than a full, potentially unbounded replay
+(spec 074 B18). Clients should dedup by `seq` regardless.
 
 ### JavaScript WebSocket Example
 
