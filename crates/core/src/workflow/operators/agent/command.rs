@@ -79,11 +79,15 @@ struct StreamingResult {
 }
 
 /// Interpolate template expressions in env values.
+///
+/// `allow_env_fn` gates the Rhai `env()` expression function (spec 074 S8) —
+/// callers should pass the owning workflow's `settings.allow_env_fn`.
 pub(super) fn interpolate_env(
     env: &HashMap<String, String>,
     eval_ctx: &EvaluationContext,
+    allow_env_fn: bool,
 ) -> Result<HashMap<String, String>, AppError> {
-    let engine = ExpressionEngine::default();
+    let engine = ExpressionEngine::new(allow_env_fn);
     let mut result = HashMap::new();
     for (k, v) in env {
         let interpolated = engine.interpolate_string(v, eval_ctx)?;

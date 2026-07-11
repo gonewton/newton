@@ -25,6 +25,7 @@ workflow:
     max_workflow_iterations: 15
 
     default_engine: codex
+    allow_env_fn: true
 
     command_operator:
       allow_shell: true

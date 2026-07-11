@@ -22,6 +22,7 @@ workflow:
     max_task_iterations: 15000
     max_workflow_iterations: 500
     default_engine: opencode
+    allow_env_fn: true
     command_operator:
       allow_shell: true
     artifact_storage:

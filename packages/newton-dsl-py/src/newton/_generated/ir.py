@@ -286,6 +286,10 @@ class WorkflowSettings(BaseModel):
     Execution settings for a workflow graph.
     """
 
+    allow_env_fn: bool | None = Field(
+        False,
+        description='Opt-in flag for the Rhai `env()` expression function (spec 074 S8).\n`env()` reads `std::env::var` at expression-eval time, which makes\nparam resolution environment-dependent and non-deterministic; it is\ntherefore disabled unless a workflow explicitly sets this to `true`.',
+    )
     artifact_storage: ArtifactStorageSettings | None = Field(
         {
             'base_path': '.newton/artifacts',

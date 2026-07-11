@@ -57,6 +57,7 @@ workflow:
         @r#"
     {
       "settings": {
+        "allow_env_fn": false,
         "artifact_storage": {
           "base_path": ".newton/artifacts",
           "cleanup_policy": "lru",
@@ -372,6 +373,7 @@ fn explain_prose_format_snapshot_test() {
     Effective workflow settings:
     ```json
     {
+      "allow_env_fn": false,
       "artifact_storage": {
         "base_path": ".newton/artifacts",
         "cleanup_policy": "lru",

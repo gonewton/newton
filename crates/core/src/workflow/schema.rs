@@ -141,6 +141,12 @@ pub struct WorkflowSettings {
     /// Individual agent tasks can override this setting.
     #[serde(default)]
     pub stream_agent_stdout: bool,
+    /// Opt-in flag for the Rhai `env()` expression function (spec 074 S8).
+    /// `env()` reads `std::env::var` at expression-eval time, which makes
+    /// param resolution environment-dependent and non-deterministic; it is
+    /// therefore disabled unless a workflow explicitly sets this to `true`.
+    #[serde(default)]
+    pub allow_env_fn: bool,
     /// Workflow I/O contract: input/output schemas and result mapping.
     #[serde(default, skip_serializing_if = "IoBlock::is_empty")]
     pub io: IoBlock,
@@ -169,6 +175,7 @@ impl Default for WorkflowSettings {
             default_engine: None,
             model_stylesheet: None,
             stream_agent_stdout: false,
+            allow_env_fn: false,
             io: IoBlock::default(),
             io_settings: IoSettings::default(),
         }

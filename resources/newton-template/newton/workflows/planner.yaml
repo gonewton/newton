@@ -28,6 +28,7 @@ workflow:
     default_engine: claude
     model_stylesheet:
       model: claude-sonnet-4-20250514
+    allow_env_fn: true
 
     command_operator:
       allow_shell: true

@@ -155,7 +155,7 @@ pub(super) fn build_workflow_runtime(
         compute_sha256_hex(&json_bytes)
     };
 
-    let engine = Arc::new(ExpressionEngine::default());
+    let engine = Arc::new(ExpressionEngine::new(graph_settings.allow_env_fn));
     let eval_ctx = context::resolve_initial_evaluation_context(
         &document.workflow.context,
         engine.as_ref(),
@@ -486,7 +486,7 @@ pub async fn resume_workflow(
         tasks_to_graph(document.workflow.tasks)?
     };
 
-    let engine = Arc::new(ExpressionEngine::default());
+    let engine = Arc::new(ExpressionEngine::new(graph_settings.allow_env_fn));
     let completed_records = hydrate_completed_records(&checkpoint_data.completed, &workspace_root)?;
     let state = Arc::new(tokio::sync::RwLock::new(ExecutionState {
         context: checkpoint_data.context.clone(),

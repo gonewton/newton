@@ -163,7 +163,8 @@ impl Operator for AgentOperator {
 
         let eval_ctx = ctx.state_view.evaluation_context();
 
-        let mut interpolated_env = command::interpolate_env(&config.env, &eval_ctx)?;
+        let mut interpolated_env =
+            command::interpolate_env(&config.env, &eval_ctx, self.settings.allow_env_fn)?;
 
         let paths = artifacts::setup_artifact_paths(&self.workspace_root, &self.settings, &ctx)?;
 
@@ -181,7 +182,7 @@ impl Operator for AgentOperator {
             config.validate_engine_command()?;
             let resolved_engine_command = {
                 let cmds = config.engine_command.as_deref().unwrap_or(&[]);
-                let expr_engine = ExpressionEngine::default();
+                let expr_engine = ExpressionEngine::new(self.settings.allow_env_fn);
                 let mut result = Vec::new();
                 for entry in cmds {
                     let interpolated = expr_engine.interpolate_string(entry, &eval_ctx)?;
