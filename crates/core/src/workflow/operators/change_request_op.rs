@@ -7,7 +7,7 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
 use async_trait::async_trait;
-use newton_types::{BackendStore, CreateChangeRequestBody};
+use newton_types::{BackendStore, CreateChangeRequestBody, FindingStatus, Severity};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -82,6 +82,8 @@ pub struct ChangeRequestOutput {
     pub change_request_id: Option<String>,
 }
 
+/// Ranks the `risk` portfolio-metadata field (kept `String`, out of S3's
+/// scope — see spec 074 S3 commit message) for `rollup_risk` below.
 fn severity_rank(s: &str) -> u8 {
     match s {
         "critical" => 0,
@@ -89,6 +91,18 @@ fn severity_rank(s: &str) -> u8 {
         "medium" => 2,
         "low" => 3,
         _ => 4,
+    }
+}
+
+/// Ranks the typed `Finding.severity` enum. Exhaustive match — no `_` catch-all,
+/// since every `Severity` variant is now a real value (unlike the free-form
+/// `risk` string above, which can legitimately fail to parse).
+fn finding_severity_rank(s: &Severity) -> u8 {
+    match s {
+        Severity::Critical => 0,
+        Severity::High => 1,
+        Severity::Medium => 2,
+        Severity::Low => 3,
     }
 }
 
@@ -116,11 +130,19 @@ fn rollup_confidence(confidences: impl Iterator<Item = f64>) -> Option<f64> {
     }
 }
 
-fn is_open_status(status: &str) -> bool {
-    matches!(
-        status,
-        "awaiting_triage" | "triaged" | "approved_for_planning"
-    )
+/// See the identical, independently-duplicated `is_open_status` in
+/// `reconcile.rs` for the exhaustive-match rationale (spec 074 S3).
+fn is_open_status(status: &FindingStatus) -> bool {
+    match status {
+        FindingStatus::AwaitingTriage
+        | FindingStatus::Triaged
+        | FindingStatus::ApprovedForPlanning => true,
+        FindingStatus::Structured
+        | FindingStatus::Deferred
+        | FindingStatus::Rejected
+        | FindingStatus::Resolved
+        | FindingStatus::Blocked => false,
+    }
 }
 
 const CR_SYNTHESIS_SCHEMA: &str = r#"{
@@ -182,10 +204,16 @@ impl Operator for ChangeRequestOperator {
         let scope = &parsed.scope;
         let scope_id = &parsed.scope_id;
         let max_findings = parsed.max_findings;
+        // `min_severity` is a free-form DSL param (stays `Option<String>` — not
+        // in S3's scope), so parse it into `Severity` here at the seam; an
+        // unrecognized string falls back to rank 4, same as the pre-enum
+        // behavior (matches every real `Severity`, i.e. no-op filter).
         let min_severity_rank = parsed
             .min_severity
             .as_deref()
-            .map(severity_rank)
+            .and_then(|s| s.parse::<Severity>().ok())
+            .as_ref()
+            .map(finding_severity_rank)
             .unwrap_or(4);
 
         // R1: list findings with scope so we actually find them.
@@ -207,10 +235,10 @@ impl Operator for ChangeRequestOperator {
             .collect();
 
         if parsed.min_severity.is_some() {
-            open.retain(|f| severity_rank(&f.severity) <= min_severity_rank);
+            open.retain(|f| finding_severity_rank(&f.severity) <= min_severity_rank);
         }
 
-        open.sort_by_key(|f| severity_rank(&f.severity));
+        open.sort_by_key(|f| finding_severity_rank(&f.severity));
 
         let selected: Vec<&newton_types::FindingItem> =
             open.into_iter().take(max_findings).collect();

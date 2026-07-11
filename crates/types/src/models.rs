@@ -227,12 +227,146 @@ pub struct SavedViewItem {
     pub sort_dir: Option<String>,
 }
 
-fn default_finding_origin() -> String {
-    "system".to_string()
+/// Finding lifecycle status (CONTEXT.md "Finding"):
+/// `awaiting_triage → triaged → approved_for_planning → structured →
+/// deferred | rejected`, plus `resolved` (set automatically by
+/// Reconciliation when the issue vanishes) and `blocked` (set automatically
+/// when the Plan implementing this Finding fails develop after the retry
+/// budget; cleared only by a human).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingStatus {
+    AwaitingTriage,
+    Triaged,
+    ApprovedForPlanning,
+    Structured,
+    Deferred,
+    Rejected,
+    Resolved,
+    Blocked,
 }
 
-fn default_finding_status() -> String {
-    "awaiting_triage".to_string()
+impl FindingStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FindingStatus::AwaitingTriage => "awaiting_triage",
+            FindingStatus::Triaged => "triaged",
+            FindingStatus::ApprovedForPlanning => "approved_for_planning",
+            FindingStatus::Structured => "structured",
+            FindingStatus::Deferred => "deferred",
+            FindingStatus::Rejected => "rejected",
+            FindingStatus::Resolved => "resolved",
+            FindingStatus::Blocked => "blocked",
+        }
+    }
+}
+
+impl std::fmt::Display for FindingStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for FindingStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "awaiting_triage" => Ok(FindingStatus::AwaitingTriage),
+            "triaged" => Ok(FindingStatus::Triaged),
+            "approved_for_planning" => Ok(FindingStatus::ApprovedForPlanning),
+            "structured" => Ok(FindingStatus::Structured),
+            "deferred" => Ok(FindingStatus::Deferred),
+            "rejected" => Ok(FindingStatus::Rejected),
+            "resolved" => Ok(FindingStatus::Resolved),
+            "blocked" => Ok(FindingStatus::Blocked),
+            other => Err(format!("invalid FindingStatus '{other}'")),
+        }
+    }
+}
+
+/// Finding severity. The codebase's ad-hoc string literals for this concept
+/// only ever used low/medium/high; `Critical` is added as a 4th tier since
+/// severity taxonomies conventionally have one and it costs nothing to
+/// reserve the slot now.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl Severity {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Severity::Low => "low",
+            Severity::Medium => "medium",
+            Severity::High => "high",
+            Severity::Critical => "critical",
+        }
+    }
+}
+
+impl std::fmt::Display for Severity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for Severity {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "low" => Ok(Severity::Low),
+            "medium" => Ok(Severity::Medium),
+            "high" => Ok(Severity::High),
+            "critical" => Ok(Severity::Critical),
+            other => Err(format!("invalid Severity '{other}'")),
+        }
+    }
+}
+
+/// Finding origin: who/what raised it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Origin {
+    System,
+    Human,
+}
+
+impl Origin {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Origin::System => "system",
+            Origin::Human => "human",
+        }
+    }
+}
+
+impl std::fmt::Display for Origin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for Origin {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "system" => Ok(Origin::System),
+            "human" => Ok(Origin::Human),
+            other => Err(format!("invalid Origin '{other}'")),
+        }
+    }
+}
+
+fn default_finding_origin() -> Origin {
+    Origin::System
+}
+
+fn default_finding_status() -> FindingStatus {
+    FindingStatus::AwaitingTriage
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -240,7 +374,7 @@ fn default_finding_status() -> String {
 pub struct FindingItem {
     pub id: String,
     pub source: String,
-    pub origin: String,
+    pub origin: Origin,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub component_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -256,7 +390,7 @@ pub struct FindingItem {
     pub title: String,
     pub why_it_matters: String,
     pub recommended_action: String,
-    pub severity: String,
+    pub severity: Severity,
     pub risk: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f64>,
@@ -266,7 +400,7 @@ pub struct FindingItem {
     pub expected_value: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
-    pub status: String,
+    pub status: FindingStatus,
     pub last_seen_at: String,
     pub depends_on: Vec<String>,
     pub blocks: Vec<String>,
@@ -288,7 +422,7 @@ pub struct CreateFindingBody {
     pub id: String,
     pub source: String,
     #[serde(default = "default_finding_origin")]
-    pub origin: String,
+    pub origin: Origin,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub component_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -304,7 +438,7 @@ pub struct CreateFindingBody {
     pub title: String,
     pub why_it_matters: String,
     pub recommended_action: String,
-    pub severity: String,
+    pub severity: Severity,
     pub risk: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f64>,
@@ -315,7 +449,7 @@ pub struct CreateFindingBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     #[serde(default = "default_finding_status")]
-    pub status: String,
+    pub status: FindingStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_seen_at: Option<String>,
     #[serde(default)]
@@ -328,7 +462,7 @@ pub struct CreateFindingBody {
 #[serde(rename_all = "camelCase")]
 pub struct PatchFindingBody {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
+    pub status: Option<FindingStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_value: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]

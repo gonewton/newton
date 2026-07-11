@@ -1018,13 +1018,13 @@ mod fk_tests {
 #[cfg(test)]
 mod finding_store_tests {
     use super::*;
-    use newton_types::CreateFindingBody;
+    use newton_types::{CreateFindingBody, FindingStatus, Origin, Severity};
 
     fn make_finding(id: &str) -> CreateFindingBody {
         CreateFindingBody {
             id: id.to_string(),
             source: "test".to_string(),
-            origin: "system".to_string(),
+            origin: Origin::System,
             component_id: None,
             module: None,
             repo_id: None,
@@ -1035,13 +1035,13 @@ mod finding_store_tests {
             title: "Test finding".to_string(),
             why_it_matters: "Coverage gap detected".to_string(),
             recommended_action: "Add more tests".to_string(),
-            severity: "medium".to_string(),
+            severity: Severity::Medium,
             risk: "low".to_string(),
             confidence: None,
             evidence: None,
             expected_value: None,
             effort: None,
-            status: "awaiting_triage".to_string(),
+            status: FindingStatus::AwaitingTriage,
             last_seen_at: None,
             depends_on: vec![],
             blocks: vec![],
@@ -1054,7 +1054,7 @@ mod finding_store_tests {
         let body = make_finding("find-001");
         let item = store.create_finding(body).await.unwrap();
         assert_eq!(item.id, "find-001");
-        assert_eq!(item.status, "awaiting_triage");
+        assert_eq!(item.status, FindingStatus::AwaitingTriage);
         assert_eq!(item.dimension, "tests");
         assert_eq!(item.risk, "low");
     }

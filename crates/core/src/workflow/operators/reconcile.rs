@@ -8,7 +8,9 @@ use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
 use async_trait::async_trait;
 use chrono::Utc;
-use newton_types::{BackendStore, CreateFindingBody, FindingItem, PatchFindingBody};
+use newton_types::{
+    BackendStore, CreateFindingBody, FindingItem, FindingStatus, Origin, PatchFindingBody, Severity,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -86,9 +88,16 @@ pub struct ReconcileOutput {
 }
 
 /// Observation extracted from assessment JSON.
+///
+/// `severity` is parsed from free-form grader/LLM JSON output, which is
+/// semi-trusted: a value the grader emits that isn't one of the known
+/// `Severity` strings (typo, new taxonomy the grader invented, etc.) is
+/// treated the same as a missing severity — dropped to `None` here and
+/// defaulted downstream — rather than propagating an arbitrary string into
+/// the now-typed `Severity` field or failing the whole Reconciliation run.
 struct Observation {
     dimension: String,
-    severity: Option<String>,
+    severity: Option<Severity>,
     observation: String,
     why_it_matters: Option<String>,
     recommended_action: Option<String>,
@@ -148,7 +157,7 @@ fn parse_observations(assessment: &Value) -> Vec<Observation> {
                 severity: item
                     .get("severity")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
+                    .and_then(|s| s.parse::<Severity>().ok()),
                 observation,
                 why_it_matters: item
                     .get("why_it_matters")
@@ -170,11 +179,22 @@ fn parse_observations(assessment: &Value) -> Vec<Observation> {
         .collect()
 }
 
-fn is_open_status(status: &str) -> bool {
-    matches!(
-        status,
-        "awaiting_triage" | "triaged" | "approved_for_planning"
-    )
+/// "Open" = still in play for Reconciliation (eligible to be refreshed or
+/// auto-resolved). Uses an exhaustive `match` rather than `matches!` so that
+/// adding a new `FindingStatus` variant forces an explicit open/not-open
+/// decision here at compile time — this is the actual "the compiler owns
+/// what `is_open_status` approximates" mechanism (spec 074 S3).
+fn is_open_status(status: &FindingStatus) -> bool {
+    match status {
+        FindingStatus::AwaitingTriage
+        | FindingStatus::Triaged
+        | FindingStatus::ApprovedForPlanning => true,
+        FindingStatus::Structured
+        | FindingStatus::Deferred
+        | FindingStatus::Rejected
+        | FindingStatus::Resolved
+        | FindingStatus::Blocked => false,
+    }
 }
 
 /// Adjudication result from the LLM.
@@ -353,7 +373,7 @@ impl Operator for ReconcileOperator {
                     f.dimension.clone(),
                     f.title.clone(),
                     f.fingerprint.clone(),
-                    f.status.clone(),
+                    f.status.to_string(),
                 )
             })
             .collect();
@@ -482,12 +502,12 @@ impl Operator for ReconcileOperator {
                     // Already patched this finding in this run — skip to avoid double-count.
                     continue;
                 }
-                if existing.status == "resolved" {
+                if existing.status == FindingStatus::Resolved {
                     self.store
                         .patch_finding(
                             &existing.id,
                             PatchFindingBody {
-                                status: Some("awaiting_triage".to_string()),
+                                status: Some(FindingStatus::AwaitingTriage),
                                 last_seen_at: Some(now.clone()),
                                 expected_value: None,
                                 effort: None,
@@ -564,7 +584,7 @@ impl Operator for ReconcileOperator {
                 let mut body = CreateFindingBody {
                     id: id.clone(),
                     source: grader.clone(),
-                    origin: "system".to_string(),
+                    origin: Origin::System,
                     component_id: None,
                     module: None,
                     repo_id: None,
@@ -575,8 +595,11 @@ impl Operator for ReconcileOperator {
                     title,
                     why_it_matters: obs.why_it_matters.clone().unwrap_or_default(),
                     recommended_action: obs.recommended_action.clone().unwrap_or_default(),
-                    severity: obs.severity.clone().unwrap_or_else(|| "medium".to_string()),
-                    risk: obs.severity.clone().unwrap_or_else(|| "medium".to_string()),
+                    severity: obs.severity.unwrap_or(Severity::Medium),
+                    risk: obs
+                        .severity
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "medium".to_string()),
                     confidence: obs.confidence,
                     evidence: obs
                         .evidence
@@ -584,7 +607,7 @@ impl Operator for ReconcileOperator {
                         .map(|e| serde_json::to_value(e).unwrap_or(Value::Null)),
                     expected_value: None,
                     effort: None,
-                    status: "awaiting_triage".to_string(),
+                    status: FindingStatus::AwaitingTriage,
                     last_seen_at: Some(now.clone()),
                     depends_on: vec![],
                     blocks: vec![],
@@ -616,7 +639,7 @@ impl Operator for ReconcileOperator {
                     .patch_finding(
                         &finding.id,
                         PatchFindingBody {
-                            status: Some("resolved".to_string()),
+                            status: Some(FindingStatus::Resolved),
                             last_seen_at: Some(now.clone()),
                             expected_value: None,
                             effort: None,
@@ -644,7 +667,7 @@ impl Operator for ReconcileOperator {
                         .patch_finding(
                             fid,
                             PatchFindingBody {
-                                status: Some("resolved".to_string()),
+                                status: Some(FindingStatus::Resolved),
                                 last_seen_at: Some(now.clone()),
                                 expected_value: None,
                                 effort: None,
@@ -835,7 +858,7 @@ mod tests {
         let grader_a_findings: Vec<_> =
             findings.iter().filter(|f| f.source == "grader-a").collect();
         assert_eq!(grader_a_findings.len(), 1);
-        assert_eq!(grader_a_findings[0].status, "awaiting_triage");
+        assert_eq!(grader_a_findings[0].status, FindingStatus::AwaitingTriage);
     }
 
     /// Two distinct observations with no location in the same dimension must produce
@@ -948,7 +971,7 @@ mod tests {
             .patch_finding(
                 &f1_id,
                 PatchFindingBody {
-                    status: Some("blocked".to_string()),
+                    status: Some(FindingStatus::Blocked),
                     last_seen_at: None,
                     expected_value: None,
                     effort: None,
@@ -1017,7 +1040,8 @@ mod tests {
         );
         let f1_after = after.iter().find(|f| f.id == f1_id).unwrap();
         assert_eq!(
-            f1_after.status, "blocked",
+            f1_after.status,
+            FindingStatus::Blocked,
             "blocked Findings must be untouched by the failure path"
         );
     }

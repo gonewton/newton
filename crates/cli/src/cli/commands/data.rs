@@ -1061,6 +1061,8 @@ mod cli_exit_path_tests {
 mod p12_data_matrix_tests {
     use super::*;
     use crate::cli::args::DataVerb;
+    use newton_types::{FindingStatus, Origin, Severity};
+    use std::str::FromStr;
     use tempfile::TempDir;
 
     fn setup_workspace() -> TempDir {
@@ -1267,7 +1269,7 @@ mod p12_data_matrix_tests {
         newton_backend::CreateFindingBody {
             id: id.to_string(),
             source: "test".to_string(),
-            origin: "system".to_string(),
+            origin: Origin::System,
             component_id: None,
             module: None,
             repo_id: None,
@@ -1278,13 +1280,13 @@ mod p12_data_matrix_tests {
             title: format!("finding {id}"),
             why_it_matters: "because".to_string(),
             recommended_action: "fix it".to_string(),
-            severity: "low".to_string(),
+            severity: Severity::Low,
             risk: "low".to_string(),
             confidence: None,
             evidence: None,
             expected_value: None,
             effort: None,
-            status: status.to_string(),
+            status: FindingStatus::from_str(status).unwrap_or_else(|e| panic!("finding_body: {e}")),
             last_seen_at: None,
             depends_on: vec![],
             blocks: vec![],

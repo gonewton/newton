@@ -4,7 +4,7 @@ use axum::{
 };
 use newton_backend::{BackendStore, CreateFindingBody, SqliteBackendStore};
 use newton_core::api::state::AppState;
-use newton_types::OperatorDescriptor;
+use newton_types::{FindingStatus, OperatorDescriptor, Origin, Severity};
 use serde_json::json;
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -399,7 +399,7 @@ fn seed_finding_body() -> CreateFindingBody {
     CreateFindingBody {
         id: RESET_TEST_FINDING_ID.to_string(),
         source: "reset-test-seed".to_string(),
-        origin: "system".to_string(),
+        origin: Origin::System,
         component_id: None,
         module: None,
         repo_id: None,
@@ -410,13 +410,13 @@ fn seed_finding_body() -> CreateFindingBody {
         title: "seed finding for testing-reset gate test".to_string(),
         why_it_matters: "proves reset does/doesn't run".to_string(),
         recommended_action: "n/a".to_string(),
-        severity: "low".to_string(),
+        severity: Severity::Low,
         risk: "low".to_string(),
         confidence: None,
         evidence: None,
         expected_value: None,
         effort: None,
-        status: "awaiting_triage".to_string(),
+        status: FindingStatus::AwaitingTriage,
         last_seen_at: None,
         depends_on: vec![],
         blocks: vec![],

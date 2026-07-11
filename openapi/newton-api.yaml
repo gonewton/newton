@@ -2784,7 +2784,7 @@ components:
           - string
           - 'null'
         origin:
-          type: string
+          $ref: '#/components/schemas/Origin'
         recommendedAction:
           type: string
         repoId:
@@ -2794,11 +2794,11 @@ components:
         risk:
           type: string
         severity:
-          type: string
+          $ref: '#/components/schemas/Severity'
         source:
           type: string
         status:
-          type: string
+          $ref: '#/components/schemas/FindingStatus'
         title:
           type: string
         whyItMatters:
@@ -3140,7 +3140,7 @@ components:
           - string
           - 'null'
         origin:
-          type: string
+          $ref: '#/components/schemas/Origin'
         recommendedAction:
           type: string
         repoId:
@@ -3150,17 +3150,35 @@ components:
         risk:
           type: string
         severity:
-          type: string
+          $ref: '#/components/schemas/Severity'
         source:
           type: string
         status:
-          type: string
+          $ref: '#/components/schemas/FindingStatus'
         title:
           type: string
         updatedAt:
           type: string
         whyItMatters:
           type: string
+    FindingStatus:
+      type: string
+      description: |-
+        Finding lifecycle status (CONTEXT.md "Finding"):
+        `awaiting_triage → triaged → approved_for_planning → structured →
+        deferred | rejected`, plus `resolved` (set automatically by
+        Reconciliation when the issue vanishes) and `blocked` (set automatically
+        when the Plan implementing this Finding fails develop after the retry
+        budget; cleared only by a human).
+      enum:
+      - awaiting_triage
+      - triaged
+      - approved_for_planning
+      - structured
+      - deferred
+      - rejected
+      - resolved
+      - blocked
     GradeItem:
       type: object
       required:
@@ -3578,6 +3596,12 @@ components:
             type: array
             items:
               $ref: '#/components/schemas/OptimizeCycleItem'
+    Origin:
+      type: string
+      description: 'Finding origin: who/what raised it.'
+      enum:
+      - system
+      - human
     PatchChangeRequestBody:
       type: object
       properties:
@@ -3646,9 +3670,9 @@ components:
           - string
           - 'null'
         status:
-          type:
-          - string
-          - 'null'
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/FindingStatus'
     PatchModuleBody:
       type: object
       properties:
@@ -4107,6 +4131,18 @@ components:
           type:
           - string
           - 'null'
+    Severity:
+      type: string
+      description: |-
+        Finding severity. The codebase's ad-hoc string literals for this concept
+        only ever used low/medium/high; `Critical` is added as a 4th tier since
+        severity taxonomies conventionally have one and it costs nothing to
+        reserve the slot now.
+      enum:
+      - low
+      - medium
+      - high
+      - critical
     WorkflowFileDetail:
       type: object
       required:

@@ -4,26 +4,15 @@ use crate::err_internal;
 use crate::err_not_found;
 use newton_types::ApiError;
 use newton_types::*;
+use std::str::FromStr;
 
-const FINDING_STATUSES: &[&str] = &[
-    "awaiting_triage",
-    "triaged",
-    "approved_for_planning",
-    "blocked",
-    "resolved",
-];
-
-fn validate_finding_status(status: &str) -> Result<(), ApiError> {
-    if FINDING_STATUSES.contains(&status) {
-        Ok(())
-    } else {
-        Err(crate::err_validation(&format!(
-            "invalid Finding status '{}'; must be one of: {}",
-            status,
-            FINDING_STATUSES.join(", ")
-        )))
-    }
-}
+// NOTE: the old `FINDING_STATUSES` allowlist + `validate_finding_status()`
+// runtime check (spec 074 S3) is gone — `CreateFindingBody.status` /
+// `PatchFindingBody.status` are now `FindingStatus`, so an invalid status
+// string is rejected by serde at JSON-deserialization time (axum's `Json`
+// extractor rejection), before this code ever runs. That's a strictly
+// stronger guarantee than the old list, which only covered 5 of the 8
+// canonical statuses (missing `structured`/`deferred`/`rejected`).
 
 const FINDING_SELECT: &str =
     "SELECT f.id, f.source, f.origin, f.componentId as component_id, c.name as component_name, \
@@ -51,7 +40,15 @@ const CR_SELECT: &str = "SELECT cr.id, cr.title, cr.body, cr.origin, cr.author, 
      LEFT JOIN Component c ON cr.componentId = c.id \
      LEFT JOIN Repo r ON cr.repoId = r.id";
 
-fn finding_row_to_item(row: FindingRow) -> FindingItem {
+/// Convert a raw DB row into the wire-facing `FindingItem`, parsing the
+/// three lifecycle string columns (`status`, `severity`, `origin`) into
+/// their typed enums. A DB value that doesn't parse (legacy/corrupt data)
+/// is treated as store corruption and surfaced as an internal error rather
+/// than silently coerced or dropped — the row struct stays `String` at the
+/// SQL boundary (sqlx `FromRow` needs primitive column types), so this is
+/// the one seam where that String must prove it's actually a valid enum
+/// value before it reaches API/operator code.
+fn finding_row_to_item(row: FindingRow) -> Result<FindingItem, ApiError> {
     let depends_on: Vec<String> = row
         .depends_on
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -61,10 +58,17 @@ fn finding_row_to_item(row: FindingRow) -> FindingItem {
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
 
-    FindingItem {
+    let origin = Origin::from_str(&row.origin)
+        .map_err(|e| err_internal(&format!("Finding {} has invalid origin: {e}", row.id)))?;
+    let severity = Severity::from_str(&row.severity)
+        .map_err(|e| err_internal(&format!("Finding {} has invalid severity: {e}", row.id)))?;
+    let status = FindingStatus::from_str(&row.status)
+        .map_err(|e| err_internal(&format!("Finding {} has invalid status: {e}", row.id)))?;
+
+    Ok(FindingItem {
         id: row.id,
         source: row.source,
-        origin: row.origin,
+        origin,
         component_id: row.component_id,
         module: row.module,
         repo_id: row.repo_id,
@@ -75,13 +79,13 @@ fn finding_row_to_item(row: FindingRow) -> FindingItem {
         title: row.title,
         why_it_matters: row.why_it_matters,
         recommended_action: row.recommended_action,
-        severity: row.severity,
+        severity,
         risk: row.risk,
         confidence: row.confidence,
         evidence: row.evidence.and_then(|s| serde_json::from_str(&s).ok()),
         expected_value: row.expected_value,
         effort: row.effort,
-        status: row.status,
+        status,
         last_seen_at: row.last_seen_at,
         depends_on,
         blocks,
@@ -91,7 +95,7 @@ fn finding_row_to_item(row: FindingRow) -> FindingItem {
         blocked_change_request_id: row.blocked_change_request_id,
         created_at: row.created_at,
         updated_at: row.updated_at,
-    }
+    })
 }
 
 fn cr_row_to_item(row: ChangeRequestRow) -> ChangeRequestItem {
@@ -164,7 +168,7 @@ impl super::SqliteBackendStore {
 
         let rows = q.fetch_all(&self.pool).await.map_err(query_err)?;
 
-        Ok(rows.into_iter().map(finding_row_to_item).collect())
+        rows.into_iter().map(finding_row_to_item).collect()
     }
 
     pub(super) async fn get_finding_db(&self, id: &str) -> Result<FindingItem, ApiError> {
@@ -175,14 +179,13 @@ impl super::SqliteBackendStore {
             .map_err(query_err)?
             .ok_or_else(|| err_not_found("Finding not found"))?;
 
-        Ok(finding_row_to_item(row))
+        finding_row_to_item(row)
     }
 
     pub(super) async fn create_finding_db(
         &self,
         body: CreateFindingBody,
     ) -> Result<FindingItem, ApiError> {
-        validate_finding_status(&body.status)?;
         let now = Self::now_iso();
         let last_seen_at = body.last_seen_at.unwrap_or_else(|| now.clone());
         let depends_on_json =
@@ -231,7 +234,7 @@ impl super::SqliteBackendStore {
         )
         .bind(&body.id)
         .bind(&body.source)
-        .bind(&body.origin)
+        .bind(body.origin.to_string())
         .bind(&body.component_id)
         .bind(&body.module)
         .bind(&body.repo_id)
@@ -242,13 +245,13 @@ impl super::SqliteBackendStore {
         .bind(&body.title)
         .bind(&body.why_it_matters)
         .bind(&body.recommended_action)
-        .bind(&body.severity)
+        .bind(body.severity.to_string())
         .bind(&body.risk)
         .bind(body.confidence)
         .bind(&evidence_json)
         .bind(body.expected_value)
         .bind(&body.effort)
-        .bind(&body.status)
+        .bind(body.status.to_string())
         .bind(&last_seen_at)
         .bind(&depends_on_json)
         .bind(&blocks_json)
@@ -272,10 +275,9 @@ impl super::SqliteBackendStore {
 
         let now = Self::now_iso();
 
-        if let Some(ref status) = body.status {
-            validate_finding_status(status)?;
+        if let Some(status) = body.status {
             sqlx::query("UPDATE Finding SET status = ?, updatedAt = ? WHERE id = ?")
-                .bind(status)
+                .bind(status.to_string())
                 .bind(&now)
                 .bind(id)
                 .execute(&self.pool)
@@ -333,7 +335,7 @@ impl super::SqliteBackendStore {
 
     pub(super) async fn unblock_finding_db(&self, id: &str) -> Result<FindingItem, ApiError> {
         let finding = self.get_finding_db(id).await?;
-        if finding.status != "blocked" {
+        if finding.status != FindingStatus::Blocked {
             return Err(crate::err_conflict("finding is not blocked"));
         }
         let now = Self::now_iso();
@@ -454,13 +456,15 @@ impl super::SqliteBackendStore {
 #[cfg(test)]
 mod finding_tests {
     use super::super::SqliteBackendStore;
-    use newton_types::{CreateChangeRequestBody, CreateFindingBody};
+    use newton_types::{
+        CreateChangeRequestBody, CreateFindingBody, FindingStatus, Origin, Severity,
+    };
 
     fn make_finding(id: &str) -> CreateFindingBody {
         CreateFindingBody {
             id: id.to_string(),
             source: "test".to_string(),
-            origin: "system".to_string(),
+            origin: Origin::System,
             component_id: None,
             module: None,
             repo_id: None,
@@ -471,13 +475,13 @@ mod finding_tests {
             title: "Test finding".to_string(),
             why_it_matters: "Because tests matter".to_string(),
             recommended_action: "Add more tests".to_string(),
-            severity: "medium".to_string(),
+            severity: Severity::Medium,
             risk: "medium".to_string(),
             confidence: None,
             evidence: None,
             expected_value: None,
             effort: None,
-            status: "awaiting_triage".to_string(),
+            status: FindingStatus::AwaitingTriage,
             last_seen_at: None,
             depends_on: vec![],
             blocks: vec![],
@@ -490,7 +494,7 @@ mod finding_tests {
         let body = make_finding("finding-001");
         let item = store.create_finding_db(body).await.unwrap();
         assert_eq!(item.id, "finding-001");
-        assert_eq!(item.status, "awaiting_triage");
+        assert_eq!(item.status, FindingStatus::AwaitingTriage);
         assert_eq!(item.dimension, "tests");
     }
 
