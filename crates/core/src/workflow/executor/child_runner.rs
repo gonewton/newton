@@ -57,7 +57,11 @@ impl ChildWorkflowRunner for InProcessChildWorkflowRunner {
         }
 
         let raw_document = schema::parse_workflow(&input.workflow_path)?;
-        let mut document = transform::apply_default_pipeline(raw_document)?;
+        // Live execution: honor the workflow's own opt-in (spec 074 S8) so
+        // `env()` works in macro args / include_if / templates, not just
+        // task `$expr` params.
+        let allow_env_fn = raw_document.workflow.settings.allow_env_fn;
+        let mut document = transform::apply_default_pipeline(raw_document, allow_env_fn)?;
 
         if let Some(merge) = input.context_merge.as_ref() {
             document.workflow.context = shallow_merge_objects(&document.workflow.context, merge)?;

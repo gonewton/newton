@@ -1121,3 +1121,135 @@ async fn test_kpis_pagination_limit_and_offset() {
     assert_eq!(status, StatusCode::OK);
     assert!(capped.len() <= 4);
 }
+
+/// `/repos` and `/module-dependencies` were relocated into this file
+/// alongside the other paginated list endpoints but never got the same
+/// `limit`/`offset` treatment (spec 074 S12 follow-up, tranche 4 code
+/// review).
+#[tokio::test]
+async fn test_repos_pagination_limit_and_offset() {
+    let state = create_catalog_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    // Fixture already has 1 repo (repo-1); add 3 more under comp-1.
+    for i in 0..3 {
+        let body = json!({
+            "name": format!("paginated-repo-{i}"),
+            "componentId": "comp-1",
+            "owner": "team-a",
+            "criticality": "low",
+            "autonomy": "full",
+            "qualityScore": 70,
+            "coverage": 60,
+            "secScore": 75,
+            "execStatus": "idle",
+            "lastEval": "2026-01-01T00:00:00Z"
+        });
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/repos")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+
+    let (status, all) = get_json(app.clone(), "/repos").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(all.len(), 4, "expected 1 fixture + 3 created repos");
+
+    let (status, page) = get_json(app.clone(), "/repos?limit=2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page.len(), 2, "limit=2 must constrain the page to 2 rows");
+
+    let (status, rest) = get_json(app.clone(), "/repos?limit=2&offset=2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(rest.len(), 2, "offset=2 must skip the first page");
+    assert_ne!(
+        page[0]["id"], rest[0]["id"],
+        "offset must move the page window"
+    );
+
+    let (status, capped) = get_json(app.clone(), "/repos?limit=99999").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(capped.len() <= 4);
+}
+
+#[tokio::test]
+async fn test_module_dependencies_pagination_limit_and_offset() {
+    let state = create_catalog_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    // Fixture already has 1 module dependency (dep-1: mod-2 -> mod-1) and 2
+    // modules (mod-1, mod-2). Create 3 more modules (ids are server-generated,
+    // not the `name` field) and chain them with new, non-cyclic dependency
+    // edges so the dependency table has extra rows.
+    let mut new_module_ids = Vec::new();
+    for name in ["mod-p", "mod-q", "mod-r"] {
+        let body = json!({
+            "name": name,
+            "kind": "library",
+            "repoId": "repo-1"
+        });
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/modules")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let created: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        new_module_ids.push(created["id"].as_str().unwrap().to_string());
+    }
+
+    let chain = [
+        ("mod-1".to_string(), new_module_ids[0].clone()),
+        (new_module_ids[0].clone(), new_module_ids[1].clone()),
+        (new_module_ids[1].clone(), new_module_ids[2].clone()),
+    ];
+    for (from, to) in chain {
+        let body = json!({
+            "fromModuleId": from,
+            "toModuleId": to,
+            "type": "runtime",
+            "label": "uses"
+        });
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/module-dependencies")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+
+    let (status, all) = get_json(app.clone(), "/module-dependencies").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        all.len(),
+        4,
+        "expected 1 fixture + 3 created module dependencies"
+    );
+
+    let (status, page) = get_json(app.clone(), "/module-dependencies?limit=2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page.len(), 2, "limit=2 must constrain the page to 2 rows");
+
+    let (status, rest) = get_json(app.clone(), "/module-dependencies?limit=2&offset=2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(rest.len(), 2, "offset=2 must skip the first page");
+    assert_ne!(
+        page[0]["id"], rest[0]["id"],
+        "offset must move the page window"
+    );
+
+    let (status, capped) = get_json(app.clone(), "/module-dependencies?limit=99999").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(capped.len() <= 4);
+}

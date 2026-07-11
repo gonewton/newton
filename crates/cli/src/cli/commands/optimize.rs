@@ -105,7 +105,11 @@ async fn execute_workflow_for_plan(
     let workspace = plan_config.project_root.clone();
     let workflow_path = plan_config.workflow_file.clone();
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
-    let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
+    // Live execution: honor the workflow's own opt-in (spec 074 S8) so
+    // `env()` works in macro args / include_if / templates, not just
+    // task `$expr` params.
+    let allow_env_fn = raw_document.workflow.settings.allow_env_fn;
+    let mut document = workflow_transform::apply_default_pipeline(raw_document, allow_env_fn)?;
 
     let trigger_payload = json!({
         "input_file": task_layout.input_file.display().to_string(),

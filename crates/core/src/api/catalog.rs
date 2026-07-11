@@ -573,13 +573,27 @@ pub(crate) async fn delete_component(
     get,
     path = "/repos",
     tag = "catalog",
+    params(
+        ("limit" = Option<u32>, Query, description = "Max rows to return (default 100, hard cap 1000)"),
+        ("offset" = Option<u32>, Query, description = "Rows to skip (default 0)")
+    ),
     responses(
         (status = 200, description = "Repository list", body = [newton_types::RepoItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
-pub(crate) async fn list_repos(State(state): State<Arc<AppState>>) -> Response {
-    ok_json(state.backend.list_repos().await)
+pub(crate) async fn list_repos(
+    Query(query): Query<ListPageQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let (limit, offset) = clamp_page(query.limit, query.offset);
+    ok_json(state.backend.list_repos().await.map(|items| {
+        items
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>()
+    }))
 }
 
 #[utoipa::path(
@@ -840,13 +854,27 @@ pub(crate) async fn delete_module(
     get,
     path = "/module-dependencies",
     tag = "catalog",
+    params(
+        ("limit" = Option<u32>, Query, description = "Max rows to return (default 100, hard cap 1000)"),
+        ("offset" = Option<u32>, Query, description = "Rows to skip (default 0)")
+    ),
     responses(
         (status = 200, description = "Module dependency list", body = [newton_types::ModuleDependencyItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
-pub(crate) async fn list_module_dependencies(State(state): State<Arc<AppState>>) -> Response {
-    ok_json(state.backend.list_module_dependencies().await)
+pub(crate) async fn list_module_dependencies(
+    Query(query): Query<ListPageQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let (limit, offset) = clamp_page(query.limit, query.offset);
+    ok_json(state.backend.list_module_dependencies().await.map(|items| {
+        items
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>()
+    }))
 }
 
 #[utoipa::path(

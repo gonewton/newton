@@ -624,7 +624,9 @@ impl WorkflowDocument {
     /// Load and validate a workflow document from a YAML file.
     pub fn load_from_file(path: &Path) -> Result<Self, AppError> {
         let raw = Self::parse_from_file(path)?;
-        let doc = transform::apply_default_pipeline(raw)?;
+        // Validate-only: keep deterministic (no env()) so `newton workflow
+        // validate`/`dot` results are reproducible regardless of real env state.
+        let doc = transform::apply_default_pipeline(raw, false)?;
         let engine = ExpressionEngine::default();
         doc.validate(&engine)?;
         Ok(doc)

@@ -218,7 +218,6 @@ async fn stream_and_process_output(
     child: &mut tokio::process::Child,
     params: &ExecParams<'_>,
 ) -> Result<StreamingResult, AppError> {
-    use std::io::Write;
     use tokio::io::{AsyncWriteExt, BufReader};
 
     let mut stdout_bytes_written: usize = 0;
@@ -248,26 +247,16 @@ async fn stream_and_process_output(
                 match extract_text_from_stream_json(&text) {
                     Some(t) => t,
                     None => {
-                        if stdout_bytes_written + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
-                            if let Err(err) = stdout_file
-                                .write_all(text.as_bytes())
-                                .and_then(|()| stdout_file.write_all(b"\n"))
-                            {
-                                tracing::warn!(
-                                    path = %params.paths.stdout_path.display(),
-                                    error = %err,
-                                    "AgentOperator: failed to write stdout capture artifact"
-                                );
-                                if stdout_capture_warning.is_none() {
-                                    stdout_capture_warning = Some(format!("write error: {err}"));
-                                }
-                            }
-                            stdout_bytes_written += text.len() + 1;
-                        } else if stdout_capture_warning.is_none() {
-                            stdout_capture_warning = Some(format!(
-                                "output exceeded {OUTPUT_CAPTURE_LIMIT_BYTES} byte capture limit"
-                            ));
-                        }
+                        let (new_bytes, warning) = super::artifacts::write_capture_chunk(
+                            stdout_file,
+                            params.paths.stdout_path,
+                            stdout_bytes_written,
+                            &text,
+                            stdout_capture_warning.take(),
+                            "stdout",
+                        );
+                        stdout_bytes_written = new_bytes;
+                        stdout_capture_warning = warning;
                         continue;
                     }
                 }
@@ -275,26 +264,16 @@ async fn stream_and_process_output(
                 text.clone()
             };
 
-            if stdout_bytes_written + text_for_matching.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
-                if let Err(err) = stdout_file
-                    .write_all(text_for_matching.as_bytes())
-                    .and_then(|()| stdout_file.write_all(b"\n"))
-                {
-                    tracing::warn!(
-                        path = %params.paths.stdout_path.display(),
-                        error = %err,
-                        "AgentOperator: failed to write stdout capture artifact"
-                    );
-                    if stdout_capture_warning.is_none() {
-                        stdout_capture_warning = Some(format!("write error: {err}"));
-                    }
-                }
-                stdout_bytes_written += text_for_matching.len() + 1;
-            } else if stdout_capture_warning.is_none() {
-                stdout_capture_warning = Some(format!(
-                    "output exceeded {OUTPUT_CAPTURE_LIMIT_BYTES} byte capture limit"
-                ));
-            }
+            let (new_bytes, warning) = super::artifacts::write_capture_chunk(
+                stdout_file,
+                params.paths.stdout_path,
+                stdout_bytes_written,
+                &text_for_matching,
+                stdout_capture_warning.take(),
+                "stdout",
+            );
+            stdout_bytes_written = new_bytes;
+            stdout_capture_warning = warning;
 
             if params.stream_to_terminal {
                 let mut terminal_stdout = tokio::io::stdout();

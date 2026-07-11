@@ -10,7 +10,14 @@ pub fn load_and_lint_workflow(
     workflow_path: &Path,
 ) -> Result<(WorkflowDocument, Vec<LintResult>), AppError> {
     let raw_document = crate::workflow::schema::parse_workflow(workflow_path)?;
-    let document = transform::apply_default_pipeline(raw_document)?;
+    // NOTE: despite the name, this is the load path for `newton run`'s
+    // top-level workflow (see `execute_run_command` in
+    // crates/cli/src/cli/commands/workflow.rs), not a validate/lint-only
+    // command — the returned `document` is handed straight to
+    // `workflow_executor::execute_workflow`. So, like child_runner.rs's
+    // real-execution path, honor the workflow's own opt-in (spec 074 S8).
+    let allow_env_fn = raw_document.workflow.settings.allow_env_fn;
+    let document = transform::apply_default_pipeline(raw_document, allow_env_fn)?;
     let lint_results = LintRegistry::new().run(&document);
     check_lint_errors(&lint_results)?;
     Ok((document, lint_results))

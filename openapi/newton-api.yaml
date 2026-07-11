@@ -993,6 +993,23 @@ paths:
       tags:
       - catalog
       operationId: list_module_dependencies
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Module dependency list
@@ -2038,6 +2055,23 @@ paths:
       tags:
       - catalog
       operationId: list_repos
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Repository list

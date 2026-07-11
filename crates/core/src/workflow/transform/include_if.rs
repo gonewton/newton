@@ -7,7 +7,17 @@ use serde_json::{Map, Value};
 use std::collections::HashSet;
 
 pub struct NormalizeSchemaTransform;
-pub struct IncludeIfTransform;
+
+pub struct IncludeIfTransform {
+    allow_env_fn: bool,
+}
+
+impl IncludeIfTransform {
+    pub fn new(allow_env_fn: bool) -> Self {
+        Self { allow_env_fn }
+    }
+}
+
 pub struct ExprPrecompileTransform;
 
 impl WorkflowTransform for NormalizeSchemaTransform {
@@ -27,7 +37,7 @@ impl WorkflowTransform for IncludeIfTransform {
 
     fn transform(&self, doc: WorkflowDocument) -> Result<WorkflowDocument, AppError> {
         let mut doc = doc;
-        let engine = ExpressionEngine::default();
+        let engine = ExpressionEngine::new(self.allow_env_fn);
         let triggers = doc.triggers.as_ref().map_or_else(
             || Value::Object(Map::new()),
             |trigger| trigger.payload.clone(),

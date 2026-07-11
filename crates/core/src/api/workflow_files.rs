@@ -156,7 +156,9 @@ fn run_diagnostics(content: &str) -> WorkflowFileDiagnostics {
         }
     };
     // Step 2: transform
-    let transformed = match transform::apply_default_pipeline(parsed) {
+    // Lint/validate-on-save (web UI): keep deterministic (no env()) so
+    // diagnostics don't depend on real env vars being set on the server.
+    let transformed = match transform::apply_default_pipeline(parsed, false) {
         Ok(doc) => doc,
         Err(e) => {
             return WorkflowFileDiagnostics {

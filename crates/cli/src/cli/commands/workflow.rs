@@ -316,7 +316,9 @@ pub fn dot(args: DotArgs) -> StdResult<(), AppError> {
 pub fn lint(args: LintArgs) -> StdResult<(), AppError> {
     let workflow_path = args.workflow.clone();
     let raw_document = workflow_schema::parse_workflow(&workflow_path)?;
-    let document = workflow_transform::apply_default_pipeline(raw_document)?;
+    // Lint-only: keep deterministic (no env()) so results don't depend on
+    // real env vars being set on the machine running `newton workflow lint`.
+    let document = workflow_transform::apply_default_pipeline(raw_document, false)?;
     let results = LintRegistry::new().run(&document);
     match args.format {
         OutputFormat::Json => super::print_lint_results_json(&results)?,
@@ -354,7 +356,10 @@ pub fn explain(args: ExplainArgs) -> StdResult<(), AppError> {
     let source_tasks = raw_document.workflow.tasks.len();
     let source_macro_invocations = raw_document.workflow.macro_invocation_count();
     let source_macro_names = raw_document.workflow.macro_names_referenced();
-    let mut document = workflow_transform::apply_default_pipeline(raw_document)?;
+    // Explain-only: keep deterministic (no env()) so explain output doesn't
+    // depend on real env vars being set on the machine running `newton
+    // workflow explain`.
+    let mut document = workflow_transform::apply_default_pipeline(raw_document, false)?;
     let overrides = super::parse_set_overrides(&args.context);
     let trigger_payload = super::build_trigger_payload(&args.parameters_json, &args.trigger)?
         .unwrap_or_else(|| Value::Object(serde_json::Map::new()));

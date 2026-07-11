@@ -247,6 +247,7 @@ pub enum FindingStatus {
 }
 
 impl FindingStatus {
+    /// Returns the snake_case wire representation of this status, matching its serde encoding.
     pub fn as_str(&self) -> &'static str {
         match self {
             FindingStatus::AwaitingTriage => "awaiting_triage",
@@ -298,6 +299,7 @@ pub enum Severity {
 }
 
 impl Severity {
+    /// Returns the snake_case wire representation of this severity, matching its serde encoding.
     pub fn as_str(&self) -> &'static str {
         match self {
             Severity::Low => "low",
@@ -336,6 +338,7 @@ pub enum Origin {
 }
 
 impl Origin {
+    /// Returns the snake_case wire representation of this origin, matching its serde encoding.
     pub fn as_str(&self) -> &'static str {
         match self {
             Origin::System => "system",
