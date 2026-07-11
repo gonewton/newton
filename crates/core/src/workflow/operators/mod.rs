@@ -1,6 +1,5 @@
 pub mod agent;
 pub mod assert_completed;
-pub mod assessment;
 pub mod barrier;
 pub mod change_request_op;
 pub mod command;

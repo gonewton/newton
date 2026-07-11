@@ -8,6 +8,7 @@ pub mod executor;
 pub mod explain;
 pub mod expression;
 pub mod file_store;
+pub mod grading;
 pub mod human;
 pub mod io;
 pub mod lint;

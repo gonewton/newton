@@ -24,7 +24,6 @@ utoipa-swagger-ui = { version = "9.0.2", default-features = false, features = ["
 newton-core = { path = "../core" }
 newton-types = { path = "../types" }
 newton-backend = { path = "../backend" }
-clap = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

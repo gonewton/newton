@@ -1,137 +1,92 @@
-use clap::{Args, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use std::str::FromStr;
 use uuid::Uuid;
 
-fn parse_positive_usize(value: &str) -> Result<usize, String> {
-    let parsed = value
-        .parse::<usize>()
-        .map_err(|_| "LOG-003: --last must be a positive integer".to_string())?;
-    if parsed == 0 {
-        Err("LOG-003: --last must be a positive integer".to_string())
-    } else {
-        Ok(parsed)
-    }
-}
-
 // ── Runs (was Log) ────────────────────────────────────────────────────────────
 
-#[derive(Args, Clone)]
+#[derive(Clone)]
 pub struct RunsArgs {
-    #[command(subcommand)]
     pub command: RunsCommand,
 }
 
-#[derive(Subcommand, Clone)]
+#[derive(Clone)]
 pub enum RunsCommand {
-    #[command(
-        about = "List workflow execution history for a workspace",
-        after_help = "EXAMPLES:\n  newton runs list --workspace ./workspace\n  newton runs list --last 10 --json"
-    )]
     List {
-        #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
         /// Only list the N most recent executions (after sort by started_at desc)
-        #[arg(long, value_name = "N", value_parser = parse_positive_usize)]
         last: Option<usize>,
         /// Emit machine-readable JSON
-        #[arg(long)]
         json: bool,
         /// Override the state root directory where checkpoints/executions are
         /// stored. Defaults to auto-resolved from workspace root.
-        #[arg(long, value_name = "PATH")]
         state_dir: Option<PathBuf>,
     },
-    #[command(
-        about = "Replay task-by-task execution detail for a specific run",
-        after_help = "EXAMPLES:\n  newton runs show <run-id>\n  newton runs show <run-id> --task my-task --verbose"
-    )]
     Show {
         /// Run identifier (UUID)
-        #[arg(value_name = "RUN_ID")]
         run_id: Uuid,
-        #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
         /// Filter output to a single task ID
-        #[arg(long, value_name = "TASK_ID")]
         task: Option<String>,
         /// Expand single-task output for debugging
-        #[arg(short, long)]
         verbose: bool,
         /// Emit machine-readable JSON
-        #[arg(long)]
         json: bool,
         /// Override the state root directory where checkpoints/executions are
         /// stored. Defaults to auto-resolved from workspace root.
-        #[arg(long, value_name = "PATH")]
         state_dir: Option<PathBuf>,
     },
 }
 
 // ── Run ───────────────────────────────────────────────────────────────────────
 
-#[derive(Args, Clone)]
+#[derive(Clone)]
 pub struct RunArgs {
     /// Path to the workflow YAML file
-    #[arg(value_name = "WORKFLOW", index = 1)]
     pub workflow: PathBuf,
 
     /// Optional path written into triggers.payload.input_file
-    #[arg(value_name = "INPUT_FILE", index = 2)]
     pub input_file: Option<PathBuf>,
 
     /// Workspace root directory (default: current directory)
-    #[arg(long, value_name = "PATH")]
     pub workspace: Option<PathBuf>,
 
     /// Merge KEY into trigger payload; VALUE may be @path to read from file, @@ for literal @
-    #[arg(long = "trigger", value_name = "KEY=VALUE")]
     pub trigger: Vec<KeyValuePair>,
 
     /// Merge KEY into workflow.context at runtime
-    #[arg(long = "context", value_name = "KEY=VALUE")]
     pub context: Vec<KeyValuePair>,
 
     /// Load JSON object as base parameters before --trigger overrides.
     /// Accepts a bare path or @path syntax.
-    #[arg(long = "parameters-json", value_name = "PATH")]
     pub parameters_json: Option<PathBuf>,
 
     /// Write structured completion envelope to stdout as JSON.
-    #[arg(long = "emit-completion-json")]
     pub emit_completion_json: bool,
 
     /// Runtime override for bounded task concurrency
-    #[arg(long, value_name = "N")]
     pub parallel_limit: Option<usize>,
 
     /// Runtime wall-clock limit override (seconds)
-    #[arg(long = "timeout", value_name = "SECONDS")]
     pub timeout_seconds: Option<u64>,
 
     /// Print task stdout/stderr to terminal after each task completes
-    #[arg(short, long)]
     pub verbose: bool,
 
     /// Newton server URL to register this run (optional)
-    #[arg(long, value_name = "URL")]
     pub server: Option<String>,
 
     /// Override the state root directory where checkpoints, artifacts, and backend.sqlite are stored. Defaults to auto-resolved from workspace root.
-    #[arg(long, value_name = "PATH")]
     pub state_dir: Option<PathBuf>,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
-#[value(rename_all = "lowercase")]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum OutputFormat {
     Text,
     Json,
     Prose,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Default)]
-#[value(rename_all = "lowercase")]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum GraphFormat {
     #[default]
     Dot,
@@ -139,188 +94,134 @@ pub enum GraphFormat {
 
 // ── Workflow group ────────────────────────────────────────────────────────────
 
-#[derive(Args, Clone)]
+#[derive(Clone)]
 pub struct WorkflowArgs {
-    #[command(subcommand)]
     pub command: WorkflowCommand,
 }
 
-#[derive(Subcommand, Clone)]
+#[derive(Clone)]
 pub enum WorkflowCommand {
-    #[command(about = "Validate a workflow graph definition")]
     Validate(ValidateArgs),
-    #[command(about = "Check workflow for best practices and potential issues")]
     Lint(LintArgs),
-    #[command(about = "Preview what the workflow will do at runtime")]
     Preview(ExplainArgs),
-    #[command(about = "Render the workflow graph (dot output)")]
     Graph(DotArgs),
-    #[command(
-        about = "Execute a workflow graph",
-        long_about = crate::cli::framework_setup::WORKFLOW_RUN_LONG_ABOUT
-    )]
     Run(RunArgs),
-    #[command(about = "Backfill existing file-based workflow runs into the shared database")]
     Import(ImportArgs),
 }
 
-#[derive(Args, Clone)]
+#[derive(Clone)]
 pub struct ImportArgs {
     /// Override the state root directory where checkpoints, artifacts, and backend.sqlite are stored.
-    #[arg(long, value_name = "PATH")]
     pub state_dir: Option<PathBuf>,
 
     /// Workspace root to scan for existing runs (default: CWD)
-    #[arg(long, value_name = "PATH")]
     pub workspace: Option<PathBuf>,
 
     /// Recursively walk workspace for all .newton/state/workflows directories
-    #[arg(long)]
     pub recursive: bool,
 }
 
-#[derive(Args, Clone)]
+#[derive(Clone)]
 pub struct LintArgs {
     /// Path to the workflow YAML file
-    #[arg(value_name = "WORKFLOW")]
     pub workflow: PathBuf,
 
-    #[arg(long, value_enum, default_value = "text")]
     pub format: OutputFormat,
 }
 
-#[derive(Args, Clone)]
+#[derive(Clone)]
 pub struct ExplainArgs {
     /// Path to the workflow YAML file
-    #[arg(value_name = "WORKFLOW")]
     pub workflow: PathBuf,
 
     /// Workspace root directory (default: current directory)
-    #[arg(long, value_name = "PATH")]
     pub workspace: Option<PathBuf>,
 
     /// Merge KEY into workflow.context at runtime
-    #[arg(long = "context", value_name = "KEY=VALUE")]
     pub context: Vec<KeyValuePair>,
 
     /// Trigger payload override in KEY=VALUE form (supports VALUE=@path)
-    #[arg(long = "trigger", value_name = "KEY=VALUE")]
     pub trigger: Vec<KeyValuePair>,
 
-    #[arg(long, value_enum, default_value = "text")]
     pub format: OutputFormat,
 
     /// Path to JSON file containing manual trigger payload (base).
     /// Accepts a bare path or @path syntax.
-    #[arg(long = "parameters-json", value_name = "PATH")]
     pub parameters_json: Option<PathBuf>,
 }
 
-#[derive(Args, Clone)]
+#[derive(Clone)]
 pub struct ValidateArgs {
     /// Path to the workflow YAML file
-    #[arg(value_name = "WORKFLOW")]
     pub workflow: PathBuf,
 }
 
-#[derive(Args, Clone)]
+#[derive(Clone)]
 pub struct DotArgs {
     /// Path to the workflow YAML file
-    #[arg(value_name = "WORKFLOW")]
     pub workflow: PathBuf,
 
     /// Output graph format (currently only `dot` is supported)
-    #[arg(long, value_enum, default_value = "dot")]
     pub format: GraphFormat,
 
     /// Output destination file (defaults to stdout)
-    #[arg(short = 'o', long = "output", value_name = "PATH")]
     pub output: Option<PathBuf>,
 }
 
-#[derive(Args, Clone)]
+#[derive(Clone)]
 pub struct ResumeArgs {
     /// Run identifier (UUID) of the workflow execution to resume
-    #[arg(long = "run-id", value_name = "UUID")]
     pub run_id: Uuid,
 
-    #[arg(long, value_name = "PATH")]
     pub workspace: Option<PathBuf>,
 
-    #[arg(long)]
     pub allow_workflow_change: bool,
 
     /// Override the state root directory where checkpoints, artifacts, and backend.sqlite are stored. Defaults to auto-resolved from workspace root.
-    #[arg(long, value_name = "PATH")]
     pub state_dir: Option<PathBuf>,
 
     /// Write structured completion envelope to stdout as JSON (parity with `run`)
-    #[arg(long = "emit-completion-json")]
     pub emit_completion_json: bool,
 
     /// Print task stdout/stderr to terminal after each task completes (parity with `run`)
-    #[arg(short, long)]
     pub verbose: bool,
 }
 
-#[derive(Args, Clone)]
+#[derive(Clone)]
 pub struct CheckpointArgs {
-    #[command(subcommand)]
     pub command: CheckpointCommand,
 }
 
-#[derive(Subcommand, Clone)]
+#[derive(Clone)]
 pub enum CheckpointCommand {
-    #[command(
-        about = "Display available workflow executions and their checkpoint details",
-        after_help = "EXAMPLES:\n  newton checkpoint list --workspace ./workspace\n  newton checkpoint list --workspace ./workspace --json"
-    )]
     List {
-        #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
 
-        #[arg(long, value_name = "PATH")]
         state_dir: Option<PathBuf>,
 
-        #[arg(long = "json")]
         json: bool,
     },
-    #[command(
-        about = "Remove old checkpoint files to free up disk space",
-        after_help = "EXAMPLES:\n  newton checkpoint clean --workspace ./workspace --older-than 7d"
-    )]
     Clean {
-        #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
 
-        #[arg(long, value_name = "PATH")]
         state_dir: Option<PathBuf>,
 
-        #[arg(long, value_name = "DURATION")]
         older_than: String,
     },
 }
 
-#[derive(Args, Clone)]
+#[derive(Clone)]
 pub struct ArtifactArgs {
-    #[command(subcommand)]
     pub command: ArtifactCommand,
 }
 
-#[derive(Subcommand, Clone)]
+#[derive(Clone)]
 pub enum ArtifactCommand {
-    #[command(
-        about = "Remove old workflow output files and execution artifacts",
-        after_help = "EXAMPLES:\n  newton artifact clean --workspace ./workspace --older-than 30d"
-    )]
     Clean {
-        #[arg(long, value_name = "PATH")]
         workspace: Option<PathBuf>,
 
-        #[arg(long, value_name = "PATH")]
         state_dir: Option<PathBuf>,
 
-        #[arg(long, value_name = "DURATION")]
         older_than: String,
     },
 }
@@ -353,77 +254,61 @@ impl FromStr for KeyValuePair {
     }
 }
 
-#[derive(Args, Clone)]
+#[derive(Clone)]
 pub struct OptimizeArgs {
     /// Project identifier that maps to .newton/configs/<project_id>.conf
-    #[arg(value_name = "PROJECT_ID")]
     pub project_id: String,
 
     /// Workspace root containing the .newton directory (default: discover from CWD)
-    #[arg(long, value_name = "PATH")]
     pub workspace: Option<PathBuf>,
 
     /// Process a single Plan and exit instead of running as a daemon
-    #[arg(long)]
     pub once: bool,
 
     /// Seconds to wait when the Plan queue is empty (default: 60)
-    #[arg(long = "poll-interval", default_value = "60", value_name = "SECONDS")]
     pub poll_interval_seconds: u64,
 }
 
-#[derive(Args)]
 pub struct InitArgs {
     /// Directory where .newton/ will be created (defaults to current directory)
-    #[arg(value_name = "PATH")]
     pub path: Option<PathBuf>,
 
     /// Template source (GitHub repo, URL, or local path; default: gonewton/newton-templates)
-    #[arg(long = "template", value_name = "SOURCE")]
     pub template: Option<String>,
 }
 
-#[derive(Args, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct ServeArgs {
     /// Host address to bind the server to (default: 127.0.0.1)
-    #[arg(long, default_value = "127.0.0.1")]
     pub host: String,
 
     /// Port to listen on (default: 8080)
-    #[arg(long, default_value = "8080")]
     pub port: u16,
 
     /// Disable serving the embedded web UI (API-only). By default `newton serve`
     /// serves the UI compiled into the binary at all non-API paths.
-    #[arg(long = "no-web", default_value_t = false)]
     pub no_web: bool,
 
     /// Mount the MCP HTTP router on the same listener as the Newton API.
-    #[arg(long = "with-mcp", default_value_t = false)]
     pub with_mcp: bool,
 
     /// Embed the ailoop HTTP/WebSocket server on the same listener as the Newton API.
-    #[arg(long = "with-embedded-ailoop", default_value_t = false)]
     pub with_embedded_ailoop: bool,
 
     /// Path prefix at which the embedded ailoop router is mounted
     /// (used only with --with-embedded-ailoop). Must not be `/api`.
-    #[arg(long = "ailoop-base-path", default_value = "/ailoop")]
     pub ailoop_base_path: String,
 
     /// Override the state root directory where checkpoints, artifacts, and backend.sqlite are stored. Defaults to auto-resolved from workspace root.
-    #[arg(long, value_name = "PATH")]
     pub state_dir: Option<PathBuf>,
 
     /// Run import scan of existing file-based runs before the HTTP listener binds.
-    #[arg(long, default_value_t = false)]
     pub import_existing: bool,
 
     /// Mount the magic-tool router (`/aitools/...`). Off by default: today it
     /// registers only a `newton/ping` smoke-test tool, with real tool
     /// definitions landing in a future release (spec 074 P9). Not reflected
     /// in the OpenAPI doc until then.
-    #[arg(long = "with-magic-tools", default_value_t = false)]
     pub with_magic_tools: bool,
 }
 

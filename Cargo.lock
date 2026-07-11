@@ -2468,7 +2468,6 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
- "clap",
  "cli-framework",
  "dirs-next",
  "futures",
