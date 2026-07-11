@@ -7,6 +7,7 @@ use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::grading::assessment;
 use crate::workflow::operator::{ExecutionContext, Operator};
+use crate::workflow::operators::llm_client::{AgentClient, RealAgentClient};
 use async_trait::async_trait;
 use chrono::Utc;
 use newton_types::BackendStore;
@@ -19,6 +20,7 @@ use uuid::Uuid;
 pub struct GraderAgentOperator {
     workspace_root: PathBuf,
     store: Arc<dyn BackendStore>,
+    agent_client: Arc<dyn AgentClient>,
 }
 
 impl GraderAgentOperator {
@@ -32,6 +34,22 @@ impl GraderAgentOperator {
         Self {
             workspace_root,
             store,
+            agent_client: Arc::new(RealAgentClient),
+        }
+    }
+
+    /// Test/injection seam (spec 074 S8): construct with a stubbed
+    /// `AgentClient` instead of the real `aikit_sdk`-backed one, so tests
+    /// can drive `execute`'s grading logic without a real agent subprocess.
+    pub fn with_agent_client(
+        workspace_root: PathBuf,
+        store: Arc<dyn BackendStore>,
+        agent_client: Arc<dyn AgentClient>,
+    ) -> Self {
+        Self {
+            workspace_root,
+            store,
+            agent_client,
         }
     }
 
@@ -201,49 +219,33 @@ impl Operator for GraderAgentOperator {
             "GraderAgentOperator: invoking AI engine via Pipeline"
         );
 
-        // R2: run via aikit Pipeline (schema-in → schema-out → validate → retry).
-        // Pipeline::run is blocking; wrap in spawn_blocking.
-        let pipeline_result = tokio::task::spawn_blocking(move || {
-            let runner = aikit_sdk::AgentRunner::new()
-                .agent(&engine)
-                .working_dir(&workspace_root.to_string_lossy())
-                .timeout(std::time::Duration::from_secs(timeout_secs));
-            let runner = if let Some(ref m) = model {
-                runner.model(m)
-            } else {
-                runner
-            };
-
-            let pipeline =
-                aikit_sdk::pipeline::Pipeline::new(ASSESSMENT_PROMPT_TEMPLATE, ASSESSMENT_SCHEMA)
-                    .max_retries(2);
-
-            pipeline.run(
+        // R2: run via the injected AgentClient (real impl: aikit Pipeline,
+        // schema-in → schema-out → validate → retry, wrapped in
+        // spawn_blocking since Pipeline::run is blocking — see llm_client.rs).
+        let mut assessment_json = self
+            .agent_client
+            .run_pipeline(
+                ASSESSMENT_PROMPT_TEMPLATE,
+                ASSESSMENT_SCHEMA,
                 &[
                     ("rubric", rubric.as_str()),
                     ("scope", scope.as_str()),
                     ("scope_id", scope_id.as_str()),
                 ],
-                runner,
+                &engine,
+                model.as_deref(),
+                &workspace_root,
+                std::time::Duration::from_secs(timeout_secs),
+                2,
             )
-        })
-        .await
-        .map_err(|e| {
-            AppError::new(
-                ErrorCategory::ToolExecutionError,
-                format!("GraderAgentOperator: spawn_blocking panicked: {e}"),
-            )
-            .with_code("GRADER-AGENT-002")
-        })?
-        .map_err(|e| {
-            AppError::new(
-                ErrorCategory::ToolExecutionError,
-                format!("GraderAgentOperator: Pipeline failed: {e}"),
-            )
-            .with_code("GRADER-AGENT-002")
-        })?;
-
-        let mut assessment_json = pipeline_result.data;
+            .await
+            .map_err(|e| {
+                AppError::new(
+                    ErrorCategory::ToolExecutionError,
+                    format!("GraderAgentOperator: Pipeline failed: {e}"),
+                )
+                .with_code("GRADER-AGENT-002")
+            })?;
 
         // M1: overwrite envelope fields authoritatively (ignore whatever the grader emitted).
         let now = Utc::now().to_rfc3339();
@@ -273,5 +275,109 @@ impl Operator for GraderAgentOperator {
         .await?;
 
         Ok(assessment::build_output(&content, assessment_json))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workflow::executor::{ExecutionOverrides, GraphHandle};
+    use crate::workflow::operator::{OperatorRegistry, StateView};
+    use newton_backend::SqliteBackendStore;
+    use serde_json::json;
+
+    fn make_ctx() -> crate::workflow::operator::ExecutionContext {
+        crate::workflow::operator::ExecutionContext {
+            workspace_path: std::path::PathBuf::from("/tmp"),
+            execution_id: "test-exec".to_string(),
+            task_id: "test-task".to_string(),
+            iteration: 1,
+            state_view: StateView::new(json!({}), json!({}), json!({})),
+            graph: GraphHandle::new(std::collections::HashMap::new()),
+            workflow_file: std::path::PathBuf::from("/tmp/test.yaml"),
+            nesting_depth: 0,
+            execution_overrides: ExecutionOverrides {
+                parallel_limit: None,
+                max_time_seconds: None,
+                checkpoint_base_path: None,
+                artifact_base_path: None,
+                max_nesting_depth: None,
+                verbose: false,
+                sink: None,
+                pre_seed_nodes: true,
+                state_dir: None,
+            },
+            operator_registry: OperatorRegistry::new(),
+        }
+    }
+
+    /// Stub `AgentClient` that returns a canned Assessment JSON, ignoring
+    /// its inputs — proving `execute` uses the injected client rather than
+    /// a real LLM (spec 074 S8).
+    struct StubAgentClient {
+        response: Value,
+    }
+
+    #[async_trait]
+    impl AgentClient for StubAgentClient {
+        async fn run_pipeline(
+            &self,
+            _template: &str,
+            _schema: &str,
+            _vars: &[(&str, &str)],
+            _engine: &str,
+            _model: Option<&str>,
+            _workspace_root: &std::path::Path,
+            _timeout: std::time::Duration,
+            _max_retries: u32,
+        ) -> Result<Value, String> {
+            Ok(self.response.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_uses_injected_agent_client_not_a_real_llm() {
+        let store: Arc<dyn BackendStore> =
+            Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
+        // `persist_assessment` -> `create_eval_run` validates the scope
+        // entity exists; "product" is the only scope level with no FK
+        // dependencies of its own, so seed one.
+        let product = store
+            .create_product(newton_types::CreateProductBody {
+                name: "test-product".to_string(),
+            })
+            .await
+            .unwrap();
+
+        let stub = StubAgentClient {
+            response: json!({
+                "overall_score": 82.0,
+                "verdict": "pass",
+                "summary": "stubbed",
+                "scores": [{"dimension": "tests", "score": 90.0, "rationale": "ok"}],
+                "observations": []
+            }),
+        };
+        let op = GraderAgentOperator::with_agent_client(
+            std::path::PathBuf::from("/tmp"),
+            store.clone(),
+            Arc::new(stub),
+        );
+
+        let params = json!({
+            "grader": "stub-grader",
+            "scope": "product",
+            "scope_id": product.id,
+            "rubric": "Evaluate test coverage.",
+        });
+
+        let result = op.execute(params, make_ctx()).await.unwrap();
+
+        assert_eq!(
+            result["overall_score"], 82.0,
+            "must reflect stub, not a real LLM call"
+        );
+        assert_eq!(result["verdict"], "pass");
+        assert_eq!(result["score_by_dimension"]["tests"], 90.0);
     }
 }

@@ -11,6 +11,7 @@ pub mod grader_agent;
 pub mod grader_command;
 pub mod human_approval;
 pub mod human_decision;
+pub mod llm_client;
 pub mod noop;
 pub mod read_control_file;
 pub mod reconcile;
