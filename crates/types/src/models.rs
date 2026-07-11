@@ -998,3 +998,109 @@ pub struct PatchModuleDependencyBody {
 pub struct DeletedItem {
     pub id: String,
 }
+
+#[cfg(test)]
+mod tests {
+    //! `FindingStatus`/`Severity`/`Origin`'s `as_str`/`Display`/`FromStr`
+    //! (spec 074 S3) round-trip every variant, plus the `FromStr` error arm
+    //! and the two `#[serde(default = ...)]` helper functions used by
+    //! `CreateFindingBody`.
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn finding_status_as_str_and_display_and_from_str_round_trip_every_variant() {
+        let variants = [
+            (FindingStatus::AwaitingTriage, "awaiting_triage"),
+            (FindingStatus::Triaged, "triaged"),
+            (FindingStatus::ApprovedForPlanning, "approved_for_planning"),
+            (FindingStatus::Structured, "structured"),
+            (FindingStatus::Deferred, "deferred"),
+            (FindingStatus::Rejected, "rejected"),
+            (FindingStatus::Resolved, "resolved"),
+            (FindingStatus::Blocked, "blocked"),
+        ];
+        for (variant, s) in variants {
+            assert_eq!(variant.as_str(), s);
+            assert_eq!(variant.to_string(), s);
+            assert_eq!(FindingStatus::from_str(s), Ok(variant));
+        }
+    }
+
+    #[test]
+    fn finding_status_from_str_rejects_unknown_value() {
+        let err = FindingStatus::from_str("not_a_status").unwrap_err();
+        assert!(err.contains("invalid FindingStatus"));
+        assert!(err.contains("not_a_status"));
+    }
+
+    #[test]
+    fn severity_as_str_and_display_and_from_str_round_trip_every_variant() {
+        let variants = [
+            (Severity::Low, "low"),
+            (Severity::Medium, "medium"),
+            (Severity::High, "high"),
+            (Severity::Critical, "critical"),
+        ];
+        for (variant, s) in variants {
+            assert_eq!(variant.as_str(), s);
+            assert_eq!(variant.to_string(), s);
+            assert_eq!(Severity::from_str(s), Ok(variant));
+        }
+    }
+
+    #[test]
+    fn severity_from_str_rejects_unknown_value() {
+        let err = Severity::from_str("catastrophic").unwrap_err();
+        assert!(err.contains("invalid Severity"));
+        assert!(err.contains("catastrophic"));
+    }
+
+    #[test]
+    fn origin_as_str_and_display_and_from_str_round_trip_every_variant() {
+        let variants = [(Origin::System, "system"), (Origin::Human, "human")];
+        for (variant, s) in variants {
+            assert_eq!(variant.as_str(), s);
+            assert_eq!(variant.to_string(), s);
+            assert_eq!(Origin::from_str(s), Ok(variant));
+        }
+    }
+
+    #[test]
+    fn origin_from_str_rejects_unknown_value() {
+        let err = Origin::from_str("robot").unwrap_err();
+        assert!(err.contains("invalid Origin"));
+        assert!(err.contains("robot"));
+    }
+
+    #[test]
+    fn default_finding_origin_is_system() {
+        assert_eq!(default_finding_origin(), Origin::System);
+    }
+
+    #[test]
+    fn default_finding_status_is_awaiting_triage() {
+        assert_eq!(default_finding_status(), FindingStatus::AwaitingTriage);
+    }
+
+    #[test]
+    fn create_finding_body_deserializes_origin_and_status_defaults_when_absent() {
+        // Exercises the `#[serde(default = "default_finding_origin")]` /
+        // `#[serde(default = "default_finding_status")]` attributes on
+        // `CreateFindingBody` end-to-end, not just the bare functions above.
+        let json = serde_json::json!({
+            "id": "f-1",
+            "source": "grader",
+            "dimension": "quality",
+            "fingerprint": "abc123",
+            "title": "t",
+            "whyItMatters": "w",
+            "recommendedAction": "r",
+            "severity": "low",
+            "risk": "low",
+        });
+        let body: CreateFindingBody = serde_json::from_value(json).unwrap();
+        assert_eq!(body.origin, Origin::System);
+        assert_eq!(body.status, FindingStatus::AwaitingTriage);
+    }
+}

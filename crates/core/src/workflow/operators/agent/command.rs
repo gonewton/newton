@@ -908,6 +908,67 @@ fi"#,
         );
     }
 
+    // `spawn_engine_process`'s stderr capture runs in its own `tokio::spawn`
+    // task (separate from `stream_and_process_output`'s stdout loop above),
+    // with its own independent `OUTPUT_CAPTURE_LIMIT_BYTES` guard — so the
+    // stdout-only test above doesn't exercise it. This drives a real
+    // subprocess that emits well over the cap on *both* streams, in loop
+    // mode, so it also covers `execute_loop`'s
+    // `result.stderr_capture_warning.is_some()` carry-forward (mirroring the
+    // stdout one exercised implicitly by other loop-mode tests).
+    #[tokio::test]
+    async fn execute_stderr_capture_truncation_marker_written_when_cap_exceeded() {
+        let tmp = TempDir::new().unwrap();
+        let settings = WorkflowSettings::default();
+        let op = AgentOperator::with_default_registry(tmp.path().to_path_buf(), settings);
+        let ctx = make_ctx(&tmp);
+        // ~1.5MB on stderr, then the same on stdout, then a signal line so
+        // the loop stops after one iteration.
+        let params = json!({
+            "engine": "command",
+            "engine_command": [
+                "bash", "-c",
+                "yes '01234567890123456789012345678901234567890123456789012345678901234567890123' | head -n 20000 1>&2; \
+                 yes '01234567890123456789012345678901234567890123456789012345678901234567890123' | head -n 20000; \
+                 echo '<promise>COMPLETE</promise>'"
+            ],
+            "loop": true,
+            "max_iterations": 3,
+            "signals": { "complete": "<promise>COMPLETE</promise>" }
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+        assert_eq!(result["signal"], json!("complete"));
+
+        let stderr_artifact = result["stderr_artifact"]
+            .as_str()
+            .expect("stderr_artifact must be a string");
+        let stderr_abs = tmp.path().join(stderr_artifact);
+        let contents = std::fs::read_to_string(&stderr_abs).expect("read stderr artifact");
+        assert!(
+            contents.contains("[capture truncated:"),
+            "expected a capture-truncation marker in the stderr artifact"
+        );
+
+        let warning = result["stderr_capture_warning"]
+            .as_str()
+            .expect("stderr_capture_warning must be set on the task result");
+        assert!(
+            warning.contains("byte capture limit"),
+            "unexpected stderr_capture_warning reason: {warning}"
+        );
+        // Stdout was also over the cap; `execute_loop`'s carry-forward for
+        // the stdout side is already exercised by the single-iteration
+        // (non-loop) test above, but asserting it here too confirms both
+        // warnings survive the loop-mode result plumbing together.
+        let stdout_warning = result["stdout_capture_warning"]
+            .as_str()
+            .expect("stdout_capture_warning must be set on the task result");
+        assert!(
+            stdout_warning.contains("byte capture limit"),
+            "unexpected stdout_capture_warning reason: {stdout_warning}"
+        );
+    }
+
     #[tokio::test]
     async fn execute_first_matching_signal_wins() {
         let tmp = TempDir::new().unwrap();

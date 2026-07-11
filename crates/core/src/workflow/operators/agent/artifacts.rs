@@ -103,3 +103,41 @@ pub(super) fn append_capture_truncation_marker(path: &Path, reason: &str) {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn append_capture_truncation_marker_writes_marker_line_on_success() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("stdout.txt");
+        std::fs::write(&path, "existing output\n").unwrap();
+
+        append_capture_truncation_marker(&path, "output exceeded 1048576 byte capture limit");
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            contents,
+            "existing output\n[capture truncated: output exceeded 1048576 byte capture limit]\n"
+        );
+    }
+
+    /// Covers the best-effort open-failure branch: this is diagnostic-only
+    /// (spec 074 S15 doc comment above), so a missing parent directory must
+    /// be swallowed — logged, not panicked, and no file/dir created as a
+    /// side effect.
+    #[test]
+    fn append_capture_truncation_marker_does_not_panic_when_open_fails() {
+        let tmp = TempDir::new().unwrap();
+        let unopenable_path = tmp.path().join("missing_parent_dir").join("stdout.txt");
+
+        append_capture_truncation_marker(&unopenable_path, "some reason");
+
+        assert!(
+            !unopenable_path.exists(),
+            "no file should be created when the parent directory is missing"
+        );
+    }
+}

@@ -179,3 +179,67 @@ impl LlmAdjudicator for RealLlmAdjudicator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! `RealAgentClient`/`RealLlmAdjudicator` wrap real `aikit_sdk` calls, so
+    //! they can't be exercised end-to-end without network/credentials — but
+    //! `aikit_sdk::AgentRunner::run` fails *synchronously*, before spawning
+    //! any subprocess, for an agent key that isn't in its `runnable_agents()`
+    //! allowlist (e.g. `"copilot"`; see `RunError::AgentNotRunnable`). That
+    //! gives full coverage of the `spawn_blocking` + error-mapping bodies
+    //! here without ever reaching a real agent — the same technique
+    //! `command.rs`'s `execute_non_runnable_ai_engine_returns_sdk_002` uses
+    //! at the operator level.
+
+    use super::*;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn real_agent_client_run_pipeline_maps_non_runnable_engine_error() {
+        let tmp = TempDir::new().unwrap();
+        let client = RealAgentClient;
+        // `Some(model)` (rather than `None`) exercises the `runner.model(m)`
+        // branch too — still fails fast on the non-runnable engine before
+        // any of it matters for the actual call, but the branch itself runs.
+        let result = client
+            .run_pipeline(
+                "template {{x}}",
+                r#"{"type":"object"}"#,
+                &[("x", "y")],
+                "copilot",
+                Some("test-model"),
+                tmp.path(),
+                Duration::from_secs(5),
+                1,
+            )
+            .await;
+        let err = result.expect_err("non-runnable engine must fail, not hang");
+        assert!(
+            err.starts_with("Pipeline failed:"),
+            "expected the Ok(Err(e)) => Err(format!(\"Pipeline failed: {{e}}\")) branch, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn real_llm_adjudicator_adjudicate_maps_non_runnable_engine_error() {
+        let tmp = TempDir::new().unwrap();
+        let adjudicator = RealLlmAdjudicator;
+        // Same `Some(model)` rationale as the `RealAgentClient` test above.
+        let result = adjudicator
+            .adjudicate(
+                "[]",
+                "[]",
+                "copilot",
+                Some("test-model"),
+                tmp.path(),
+                Duration::from_secs(5),
+            )
+            .await;
+        let err = result.expect_err("non-runnable engine must fail, not hang");
+        assert!(
+            err.contains("LLM adjudication failed"),
+            "expected the Err(e) => Err(format!(\"LLM adjudication failed: {{e}}\")) branch, got: {err}"
+        );
+    }
+}
