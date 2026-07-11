@@ -12,44 +12,10 @@ use std::sync::Arc;
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/products", get(list_products))
-        .route("/components", get(list_components))
         .route("/pending-approvals", get(list_pending_approvals))
         .route("/regressions", get(list_regressions))
         .route("/recent-actions", get(list_recent_actions))
         .with_state(state)
-}
-
-#[utoipa::path(
-    get,
-    path = "/products",
-    tag = "dashboard",
-    responses(
-        (status = 200, description = "Product list", body = [newton_types::ProductItem]),
-        (status = 500, description = "Internal error", body = ApiError)
-    )
-)]
-pub(crate) async fn list_products(State(state): State<Arc<AppState>>) -> Response {
-    match state.backend.list_products().await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
-    }
-}
-
-#[utoipa::path(
-    get,
-    path = "/components",
-    tag = "dashboard",
-    responses(
-        (status = 200, description = "Component list", body = [newton_types::ComponentItem]),
-        (status = 500, description = "Internal error", body = ApiError)
-    )
-)]
-pub(crate) async fn list_components(State(state): State<Arc<AppState>>) -> Response {
-    match state.backend.list_components().await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
-    }
 }
 
 #[utoipa::path(
@@ -68,18 +34,39 @@ pub(crate) async fn list_pending_approvals(State(state): State<Arc<AppState>>) -
     }
 }
 
+/// Query params for the previously-unbounded `/regressions` list endpoint
+/// (audit S12): `limit` defaults to 100 and is hard-capped at 1000; `offset`
+/// defaults to 0. `u32` deserialization already rejects negative values.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RegressionsQuery {
+    limit: Option<u32>,
+    offset: Option<u32>,
+}
+
 #[utoipa::path(
     get,
     path = "/regressions",
     tag = "dashboard",
+    params(
+        ("limit" = Option<u32>, Query, description = "Max rows to return (default 100, hard cap 1000)"),
+        ("offset" = Option<u32>, Query, description = "Rows to skip (default 0)")
+    ),
     responses(
         (status = 200, description = "Regression list", body = [newton_types::RegressionItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
-pub(crate) async fn list_regressions(State(state): State<Arc<AppState>>) -> Response {
+pub(crate) async fn list_regressions(
+    Query(query): Query<RegressionsQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let limit = query.limit.unwrap_or(100).min(1000) as usize;
+    let offset = query.offset.unwrap_or(0) as usize;
     match state.backend.list_regressions().await {
-        Ok(items) => (StatusCode::OK, Json(items)).into_response(),
+        Ok(items) => {
+            let items: Vec<_> = items.into_iter().skip(offset).take(limit).collect();
+            (StatusCode::OK, Json(items)).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
     }
 }

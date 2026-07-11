@@ -3,16 +3,16 @@ use crate::api::{api_status, created_json, ok_json};
 use axum::{
     extract::{Path, Query, State},
     response::{IntoResponse, Json, Response},
-    routing::{get, post},
+    routing::get,
     Router,
 };
 use newton_types::ApiError;
 use newton_types::BroadcastEvent;
 use newton_types::{
     CreateComponentBody, CreateEvalRunBody, CreateGradeBody, CreateKpiBody, CreateModuleBody,
-    CreateProductBody, CreateRepoBody, DeletedItem, PatchComponentBody, PatchModuleBody,
-    PatchModuleDependencyBody, PatchProductBody, PatchRepoBody, PutComponentBody, PutModuleBody,
-    PutProductBody, PutRepoBody,
+    CreateModuleDependencyBody, CreateProductBody, CreateRepoBody, DeletedItem, PatchComponentBody,
+    PatchModuleBody, PatchModuleDependencyBody, PatchProductBody, PatchRepoBody, PutComponentBody,
+    PutModuleBody, PutProductBody, PutRepoBody,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/grades", get(list_grades).post(create_grade))
         .route("/grades/{id}", get(get_grade))
         // Product
-        .route("/products", post(create_product))
+        .route("/products", get(list_products).post(create_product))
         .route(
             "/products/{id}",
             get(get_product)
@@ -39,7 +39,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
                 .delete(delete_product),
         )
         // Component
-        .route("/components", post(create_component))
+        .route("/components", get(list_components).post(create_component))
         .route(
             "/components/{id}",
             get(get_component)
@@ -48,7 +48,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
                 .delete(delete_component),
         )
         // Repo
-        .route("/repos", post(create_repo))
+        .route("/repos", get(list_repos).post(create_repo))
         .route(
             "/repos/{id}",
             get(get_repo)
@@ -66,6 +66,10 @@ pub fn routes(state: Arc<AppState>) -> Router {
                 .delete(delete_module),
         )
         // ModuleDependency
+        .route(
+            "/module-dependencies",
+            get(list_module_dependencies).post(create_module_dependency),
+        )
         .route(
             "/module-dependencies/{id}",
             get(get_module_dependency)
@@ -88,17 +92,56 @@ fn catalog_event(state: &AppState, resource: &str, id: impl Into<String>) {
     });
 }
 
+/// Query params shared by the catalog list endpoints that got unbounded
+/// (audit S12): `limit` defaults to `DEFAULT_LIST_LIMIT` and is hard-capped
+/// at `MAX_LIST_LIMIT`; `offset` defaults to 0. `u32` deserialization already
+/// rejects negative values, so no extra validation is needed here.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListPageQuery {
+    limit: Option<u32>,
+    offset: Option<u32>,
+}
+
+/// Default page size for previously-unbounded catalog/dashboard list
+/// endpoints (spec 074 S12).
+const DEFAULT_LIST_LIMIT: u32 = 100;
+/// Hard cap on the page size for previously-unbounded catalog/dashboard list
+/// endpoints (spec 074 S12).
+const MAX_LIST_LIMIT: u32 = 1000;
+
+/// Clamp raw `limit`/`offset` query values to the S12 pagination policy and
+/// return them as `usize` for slicing.
+fn clamp_page(limit: Option<u32>, offset: Option<u32>) -> (usize, usize) {
+    let limit = limit.unwrap_or(DEFAULT_LIST_LIMIT).min(MAX_LIST_LIMIT);
+    let offset = offset.unwrap_or(0);
+    (limit as usize, offset as usize)
+}
+
 #[utoipa::path(
     get,
     path = "/kpis",
     tag = "catalog",
+    params(
+        ("limit" = Option<u32>, Query, description = "Max rows to return (default 100, hard cap 1000)"),
+        ("offset" = Option<u32>, Query, description = "Rows to skip (default 0)")
+    ),
     responses(
         (status = 200, description = "KPI list", body = [newton_types::KpiItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
-pub(crate) async fn list_kpis(State(state): State<Arc<AppState>>) -> Response {
-    ok_json(state.backend.list_kpis().await)
+pub(crate) async fn list_kpis(
+    Query(query): Query<ListPageQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let (limit, offset) = clamp_page(query.limit, query.offset);
+    ok_json(state.backend.list_kpis().await.map(|items| {
+        items
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>()
+    }))
 }
 
 #[utoipa::path(
@@ -247,6 +290,33 @@ pub(crate) async fn list_eval_run_grades(
 
 #[utoipa::path(
     get,
+    path = "/products",
+    tag = "catalog",
+    params(
+        ("limit" = Option<u32>, Query, description = "Max rows to return (default 100, hard cap 1000)"),
+        ("offset" = Option<u32>, Query, description = "Rows to skip (default 0)")
+    ),
+    responses(
+        (status = 200, description = "Product list", body = [newton_types::ProductItem]),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_products(
+    Query(query): Query<ListPageQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let (limit, offset) = clamp_page(query.limit, query.offset);
+    ok_json(state.backend.list_products().await.map(|items| {
+        items
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>()
+    }))
+}
+
+#[utoipa::path(
+    get,
     path = "/products/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Product ID")),
@@ -361,6 +431,33 @@ pub(crate) async fn delete_product(
 
 #[utoipa::path(
     get,
+    path = "/components",
+    tag = "catalog",
+    params(
+        ("limit" = Option<u32>, Query, description = "Max rows to return (default 100, hard cap 1000)"),
+        ("offset" = Option<u32>, Query, description = "Rows to skip (default 0)")
+    ),
+    responses(
+        (status = 200, description = "Component list", body = [newton_types::ComponentItem]),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_components(
+    Query(query): Query<ListPageQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let (limit, offset) = clamp_page(query.limit, query.offset);
+    ok_json(state.backend.list_components().await.map(|items| {
+        items
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>()
+    }))
+}
+
+#[utoipa::path(
+    get,
     path = "/components/{id}",
     tag = "catalog",
     params(("id" = String, Path, description = "Component ID")),
@@ -471,6 +568,19 @@ pub(crate) async fn delete_component(
 }
 
 // ── Repo ──────────────────────────────────────────────────────────────────────
+
+#[utoipa::path(
+    get,
+    path = "/repos",
+    tag = "catalog",
+    responses(
+        (status = 200, description = "Repository list", body = [newton_types::RepoItem]),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_repos(State(state): State<Arc<AppState>>) -> Response {
+    ok_json(state.backend.list_repos().await)
+}
 
 #[utoipa::path(
     get,
@@ -590,13 +700,27 @@ pub(crate) async fn delete_repo(
     get,
     path = "/modules",
     tag = "catalog",
+    params(
+        ("limit" = Option<u32>, Query, description = "Max rows to return (default 100, hard cap 1000)"),
+        ("offset" = Option<u32>, Query, description = "Rows to skip (default 0)")
+    ),
     responses(
         (status = 200, description = "Module list", body = [newton_types::ModuleItem]),
         (status = 500, description = "Internal error", body = ApiError)
     )
 )]
-pub(crate) async fn list_modules(State(state): State<Arc<AppState>>) -> Response {
-    ok_json(state.backend.list_modules().await)
+pub(crate) async fn list_modules(
+    Query(query): Query<ListPageQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let (limit, offset) = clamp_page(query.limit, query.offset);
+    ok_json(state.backend.list_modules().await.map(|items| {
+        items
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>()
+    }))
 }
 
 #[utoipa::path(
@@ -711,6 +835,39 @@ pub(crate) async fn delete_module(
 }
 
 // ── ModuleDependency ──────────────────────────────────────────────────────────
+
+#[utoipa::path(
+    get,
+    path = "/module-dependencies",
+    tag = "catalog",
+    responses(
+        (status = 200, description = "Module dependency list", body = [newton_types::ModuleDependencyItem]),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_module_dependencies(State(state): State<Arc<AppState>>) -> Response {
+    ok_json(state.backend.list_module_dependencies().await)
+}
+
+#[utoipa::path(
+    post,
+    path = "/module-dependencies",
+    tag = "catalog",
+    request_body = CreateModuleDependencyBody,
+    responses(
+        (status = 201, description = "Created module dependency", body = newton_types::ModuleDependencyItem),
+        (status = 404, description = "Module not found", body = ApiError),
+        (status = 409, description = "Dependency conflict", body = ApiError),
+        (status = 422, description = "Validation error", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn create_module_dependency(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateModuleDependencyBody>,
+) -> Response {
+    created_json(state.backend.create_module_dependency(body).await)
+}
 
 #[utoipa::path(
     get,

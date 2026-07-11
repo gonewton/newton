@@ -827,3 +827,198 @@ async fn test_delete_module_dependency_not_found() {
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
+
+// ── Pagination (spec 074 S12) ────────────────────────────────────────────────
+//
+// `/products`, `/components`, `/modules` and `/kpis` were previously
+// unbounded list endpoints. These tests seed a few extra rows on top of the
+// single fixture row each table starts with, then prove `limit`/`offset`
+// actually constrain the page and that an oversized `limit` is clamped to
+// the 1000 hard cap rather than erroring.
+
+async fn get_json(app: axum::Router, uri: &str) -> (StatusCode, Vec<serde_json::Value>) {
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    (status, items)
+}
+
+#[tokio::test]
+async fn test_products_pagination_limit_and_offset() {
+    let state = create_catalog_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    // Fixture already has 1 product (prod-1); add 3 more so limit/offset have
+    // something to actually constrain.
+    for i in 0..3 {
+        let body = json!({"name": format!("Paginated Product {i}")});
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/products")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+
+    let (status, all) = get_json(app.clone(), "/products").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(all.len(), 4, "expected 1 fixture + 3 created products");
+
+    let (status, page) = get_json(app.clone(), "/products?limit=2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page.len(), 2, "limit=2 must constrain the page to 2 rows");
+
+    let (status, rest) = get_json(app.clone(), "/products?limit=2&offset=2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(rest.len(), 2, "offset=2 must skip the first page");
+    assert_ne!(
+        page[0]["id"], rest[0]["id"],
+        "offset must move the page window"
+    );
+
+    // Hard cap: an oversized limit must not error and must never exceed the
+    // number of rows actually inserted.
+    let (status, capped) = get_json(app.clone(), "/products?limit=99999").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(capped.len() <= 4);
+}
+
+#[tokio::test]
+async fn test_components_pagination_limit_and_offset() {
+    let state = create_catalog_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    // Fixture already has 1 component (comp-1); add 3 more under prod-1.
+    for i in 0..3 {
+        let body = json!({
+            "name": format!("Paginated Component {i}"),
+            "productId": "prod-1",
+            "domain": "backend",
+            "owner": "team-a",
+            "criticality": "high",
+            "autonomy": "full",
+            "trend": 1,
+            "lastEval": "2026-01-01T00:00:00Z"
+        });
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/components")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+
+    let (status, all) = get_json(app.clone(), "/components").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(all.len(), 4, "expected 1 fixture + 3 created components");
+
+    let (status, page) = get_json(app.clone(), "/components?limit=1").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page.len(), 1, "limit=1 must constrain the page to 1 row");
+
+    let (status, rest) = get_json(app.clone(), "/components?offset=3").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(rest.len(), 1, "offset=3 must skip to the last row");
+
+    let (status, capped) = get_json(app.clone(), "/components?limit=99999").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(capped.len() <= 4);
+}
+
+#[tokio::test]
+async fn test_modules_pagination_limit_and_offset() {
+    let state = create_catalog_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    // Fixture already has 2 modules (mod-1, mod-2); add 2 more under repo-1.
+    for i in 0..2 {
+        let body = json!({
+            "name": format!("paginated-module-{i}"),
+            "kind": "service",
+            "repoId": "repo-1"
+        });
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/modules")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+
+    let (status, all) = get_json(app.clone(), "/modules").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(all.len(), 4, "expected 2 fixture + 2 created modules");
+
+    let (status, page) = get_json(app.clone(), "/modules?limit=2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page.len(), 2, "limit=2 must constrain the page to 2 rows");
+
+    let (status, rest) = get_json(app.clone(), "/modules?limit=2&offset=2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(rest.len(), 2, "offset=2 must skip the first page");
+    assert_ne!(
+        page[0]["id"], rest[0]["id"],
+        "offset must move the page window"
+    );
+
+    let (status, capped) = get_json(app.clone(), "/modules?limit=99999").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(capped.len() <= 4);
+}
+
+#[tokio::test]
+async fn test_kpis_pagination_limit_and_offset() {
+    let state = create_catalog_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    // Fixture already has 1 KPI (test-discipline); add 3 more.
+    for i in 0..3 {
+        let body = json!({
+            "id": format!("paginated-kpi-{i}"),
+            "name": format!("Paginated KPI {i}"),
+            "description": "seeded for pagination test",
+            "scopeLevel": "repo",
+            "threshold": 80.0,
+            "weight": 1.0,
+            "aggFn": "latest"
+        });
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/kpis")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+
+    let (status, all) = get_json(app.clone(), "/kpis").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(all.len(), 4, "expected 1 fixture + 3 created KPIs");
+
+    let (status, page) = get_json(app.clone(), "/kpis?limit=2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page.len(), 2, "limit=2 must constrain the page to 2 rows");
+
+    let (status, rest) = get_json(app.clone(), "/kpis?limit=2&offset=2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(rest.len(), 2, "offset=2 must skip the first page");
+    assert_ne!(
+        page[0]["id"], rest[0]["id"],
+        "offset must move the page window"
+    );
+
+    let (status, capped) = get_json(app.clone(), "/kpis?limit=99999").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(capped.len() <= 4);
+}

@@ -142,8 +142,25 @@ paths:
   /components:
     get:
       tags:
-      - dashboard
+      - catalog
       operationId: list_components
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Component list
@@ -873,6 +890,23 @@ paths:
       tags:
       - catalog
       operationId: list_kpis
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: KPI list
@@ -957,7 +991,7 @@ paths:
   /module-dependencies:
     get:
       tags:
-      - portfolio
+      - catalog
       operationId: list_module_dependencies
       responses:
         '200':
@@ -976,7 +1010,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
     post:
       tags:
-      - portfolio
+      - catalog
       operationId: create_module_dependency
       requestBody:
         content:
@@ -1117,6 +1151,23 @@ paths:
       tags:
       - catalog
       operationId: list_modules
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Module list
@@ -1548,6 +1599,23 @@ paths:
       tags:
       - plans
       operationId: list_plans
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Plan list
@@ -1671,8 +1739,25 @@ paths:
   /products:
     get:
       tags:
-      - dashboard
+      - catalog
       operationId: list_products
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Product list
@@ -1896,6 +1981,23 @@ paths:
       tags:
       - dashboard
       operationId: list_regressions
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Regression list
@@ -1934,7 +2036,7 @@ paths:
   /repos:
     get:
       tags:
-      - portfolio
+      - catalog
       operationId: list_repos
       responses:
         '200':
@@ -4281,9 +4383,9 @@ components:
           - 'null'
 tags:
 - name: dashboard
-  description: Product, component, KPI, and activity aggregate endpoints
+  description: Pending approval, regression, and recent-activity aggregate endpoints
 - name: portfolio
-  description: Repository, module graph, and saved view endpoints
+  description: Repository dependency graph and saved view endpoints
 - name: findings
   description: Finding listing, creation, and state transition endpoints
 - name: change-requests
