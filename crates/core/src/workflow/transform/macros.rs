@@ -6,7 +6,15 @@ use crate::workflow::transform::WorkflowTransform;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-pub struct MacroExpansionTransform;
+pub struct MacroExpansionTransform {
+    allow_env_fn: bool,
+}
+
+impl MacroExpansionTransform {
+    pub fn new(allow_env_fn: bool) -> Self {
+        Self { allow_env_fn }
+    }
+}
 
 impl WorkflowTransform for MacroExpansionTransform {
     fn name(&self) -> &'static str {
@@ -21,7 +29,7 @@ impl WorkflowTransform for MacroExpansionTransform {
             .map(|def| (def.name, def.tasks))
             .collect();
 
-        let engine = ExpressionEngine::default();
+        let engine = ExpressionEngine::new(self.allow_env_fn);
         let mut expanded: Vec<TaskOrMacro> = Vec::new();
         for item in doc.workflow.tasks {
             match item {

@@ -8,12 +8,10 @@ release/
 .idea/
 *.log
 .env*
-target
-repomix-output.xml
 .claude
-.newton/*
-!.newton/scripts/
-!.newton/scripts/**
+**/.newton/*
+!**/.newton/scripts/
+!**/.newton/scripts/**
 specs
 tarpaulin-report.html.gitignore
 # Auto-release workflow trigger file
@@ -35,5 +33,4 @@ auto_release_trigger.txt
 .dk
 dk.toml
 
-.newton
 docs/adr

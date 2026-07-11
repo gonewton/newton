@@ -57,7 +57,11 @@ impl ChildWorkflowRunner for InProcessChildWorkflowRunner {
         }
 
         let raw_document = schema::parse_workflow(&input.workflow_path)?;
-        let mut document = transform::apply_default_pipeline(raw_document)?;
+        // Live execution: honor the workflow's own opt-in (spec 074 S8) so
+        // `env()` works in macro args / include_if / templates, not just
+        // task `$expr` params.
+        let allow_env_fn = raw_document.workflow.settings.allow_env_fn;
+        let mut document = transform::apply_default_pipeline(raw_document, allow_env_fn)?;
 
         if let Some(merge) = input.context_merge.as_ref() {
             document.workflow.context = shallow_merge_objects(&document.workflow.context, merge)?;
@@ -155,7 +159,7 @@ pub(super) fn build_workflow_runtime(
         compute_sha256_hex(&json_bytes)
     };
 
-    let engine = Arc::new(ExpressionEngine::default());
+    let engine = Arc::new(ExpressionEngine::new(graph_settings.allow_env_fn));
     let eval_ctx = context::resolve_initial_evaluation_context(
         &document.workflow.context,
         engine.as_ref(),
@@ -251,6 +255,7 @@ pub(super) fn build_workflow_runtime(
         trigger_payload: trigger_payload.clone(),
         task_runs: Vec::new(),
         warnings: Vec::new(),
+        terminal_stop: false,
     };
     let artifact_store =
         ArtifactStore::new(workspace_root.clone(), &graph_settings.artifact_storage);
@@ -485,7 +490,7 @@ pub async fn resume_workflow(
         tasks_to_graph(document.workflow.tasks)?
     };
 
-    let engine = Arc::new(ExpressionEngine::default());
+    let engine = Arc::new(ExpressionEngine::new(graph_settings.allow_env_fn));
     let completed_records = hydrate_completed_records(&checkpoint_data.completed, &workspace_root)?;
     let state = Arc::new(tokio::sync::RwLock::new(ExecutionState {
         context: checkpoint_data.context.clone(),

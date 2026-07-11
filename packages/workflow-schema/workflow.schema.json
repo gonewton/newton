@@ -456,6 +456,11 @@
     "WorkflowSettings": {
       "description": "Execution settings for a workflow graph.",
       "properties": {
+        "allow_env_fn": {
+          "default": false,
+          "description": "Opt-in flag for the Rhai `env()` expression function (spec 074 S8).\n`env()` reads `std::env::var` at expression-eval time, which makes\nparam resolution environment-dependent and non-deterministic; it is\ntherefore disabled unless a workflow explicitly sets this to `true`.",
+          "type": "boolean"
+        },
         "artifact_storage": {
           "$ref": "#/$defs/ArtifactStorageSettings",
           "default": {

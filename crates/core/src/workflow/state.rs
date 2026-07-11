@@ -46,6 +46,13 @@ pub struct WorkflowExecution {
     pub task_runs: Vec<WorkflowTaskRunSummary>,
     #[serde(default)]
     pub warnings: Vec<Value>,
+    /// True when the run stopped because a task with `terminal:` completed
+    /// while `completion.stop_on_terminal` was enabled, rather than because
+    /// the ready queue emptied out normally (all tasks done) or a
+    /// time/iteration limit was hit. Distinguishes an intentional early
+    /// stop from ordinary completion; see spec 074 finding P14.
+    #[serde(default)]
+    pub terminal_stop: bool,
 }
 
 /// Execution status enumeration for workflow graphs.

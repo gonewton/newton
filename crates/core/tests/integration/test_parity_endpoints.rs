@@ -2,9 +2,11 @@ use axum::{
     body::Body,
     http::{header, method::Method, Request, StatusCode},
 };
-use newton_backend::{BackendStore, CreateFindingBody, SqliteBackendStore};
+use newton_backend::{
+    BackendStore, CreateChangeRequestBody, CreateFindingBody, CreatePlanBody, SqliteBackendStore,
+};
 use newton_core::api::state::AppState;
-use newton_types::OperatorDescriptor;
+use newton_types::{FindingStatus, OperatorDescriptor, Origin, Severity};
 use serde_json::json;
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -399,7 +401,7 @@ fn seed_finding_body() -> CreateFindingBody {
     CreateFindingBody {
         id: RESET_TEST_FINDING_ID.to_string(),
         source: "reset-test-seed".to_string(),
-        origin: "system".to_string(),
+        origin: Origin::System,
         component_id: None,
         module: None,
         repo_id: None,
@@ -410,13 +412,13 @@ fn seed_finding_body() -> CreateFindingBody {
         title: "seed finding for testing-reset gate test".to_string(),
         why_it_matters: "proves reset does/doesn't run".to_string(),
         recommended_action: "n/a".to_string(),
-        severity: "low".to_string(),
+        severity: Severity::Low,
         risk: "low".to_string(),
         confidence: None,
         evidence: None,
         expected_value: None,
         effort: None,
-        status: "awaiting_triage".to_string(),
+        status: FindingStatus::AwaitingTriage,
         last_seen_at: None,
         depends_on: vec![],
         blocks: vec![],
@@ -685,6 +687,111 @@ async fn test_approve_plan_emits_canonical_execution_update() {
     // their instance_id must agree (this is what makes a workflow-A-scoped
     // stream see both, and a workflow-B-scoped stream see neither).
     assert_eq!(plan_update_instance_id, execution_update_instance_id);
+}
+
+// ── Pagination (spec 074 S12) ────────────────────────────────────────────────
+
+async fn get_json_items(app: axum::Router, uri: &str) -> (StatusCode, Vec<serde_json::Value>) {
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    (status, items)
+}
+
+#[tokio::test]
+async fn test_plans_pagination_limit_and_offset() {
+    let state = create_parity_test_state().await;
+    let backend = state.backend.clone();
+
+    // Fixture already has 1 plan (plan-1); add 3 more, each linked to its own
+    // ChangeRequest (Plan.linkedChangeRequestId has an FK to ChangeRequest).
+    for i in 0..3 {
+        let cr_id = format!("cr-pagination-{i}");
+        backend
+            .create_change_request(CreateChangeRequestBody {
+                id: cr_id.clone(),
+                title: format!("CR for pagination plan {i}"),
+                body: None,
+                origin: "system".to_string(),
+                author: None,
+                component_id: None,
+                repo_id: None,
+                finding_ids: vec![],
+                risk: "low".to_string(),
+                confidence: None,
+            })
+            .await
+            .unwrap();
+        backend
+            .create_plan(CreatePlanBody {
+                id: format!("plan-pagination-{i}"),
+                title: format!("Pagination plan {i}"),
+                linked_change_request_id: cr_id,
+                body: None,
+                status: "draft".to_string(),
+                component_id: None,
+                repo_id: None,
+                module: None,
+                confidence: 50,
+                risk: "low".to_string(),
+                expected_value: None,
+                expected_delta: None,
+            })
+            .await
+            .unwrap();
+    }
+
+    let app = newton_core::api::api_v1_router(state, false);
+
+    let (status, all) = get_json_items(app.clone(), "/plans").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(all.len(), 4, "expected 1 fixture + 3 created plans");
+
+    let (status, page) = get_json_items(app.clone(), "/plans?limit=2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page.len(), 2, "limit=2 must constrain the page to 2 rows");
+
+    let (status, rest) = get_json_items(app.clone(), "/plans?limit=2&offset=2").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(rest.len(), 2, "offset=2 must skip the first page");
+    assert_ne!(
+        page[0]["id"], rest[0]["id"],
+        "offset must move the page window"
+    );
+
+    let (status, capped) = get_json_items(app.clone(), "/plans?limit=99999").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(capped.len() <= 4);
+}
+
+#[tokio::test]
+async fn test_regressions_pagination_offset_and_cap() {
+    // Regression has no create endpoint (list-only, populated by the
+    // grading/regression pipeline), so this proves pagination on the single
+    // fixture row: offset=1 must skip past it (proving offset is honored),
+    // and an oversized limit must not error and must never return more rows
+    // than exist.
+    let state = create_parity_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    let (status, all) = get_json_items(app.clone(), "/regressions").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(all.len(), 1, "expected exactly the 1 fixture regression");
+
+    let (status, skipped) = get_json_items(app.clone(), "/regressions?offset=1").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        skipped.is_empty(),
+        "offset=1 must skip past the only fixture row"
+    );
+
+    let (status, capped) = get_json_items(app.clone(), "/regressions?limit=99999").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(capped.len() <= 1, "hard-capped limit must not error");
 }
 
 #[tokio::test]

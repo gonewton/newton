@@ -355,7 +355,11 @@ impl WorkflowTestHarness {
             });
         }
 
-        document = newton_core::workflow::transform::apply_default_pipeline(document)?;
+        // Live execution harness: honor the fixture's own opt-in (spec 074 S8),
+        // matching child_runner.rs's real-execution behavior.
+        let allow_env_fn = document.workflow.settings.allow_env_fn;
+        document =
+            newton_core::workflow::transform::apply_default_pipeline(document, allow_env_fn)?;
         document.validate(&newton_core::workflow::expression::ExpressionEngine::default())?;
 
         let deps = BuiltinOperatorDeps {

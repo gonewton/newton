@@ -18,6 +18,7 @@ pub mod workflows;
 
 use crate::api::state::AppState;
 use axum::{
+    extract::{rejection::JsonRejection, FromRequest, Request},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Json, Response},
     Router,
@@ -47,6 +48,50 @@ pub(crate) fn created_json<T: Serialize>(r: Result<T, ApiError>) -> Response {
     match r {
         Ok(v) => (StatusCode::CREATED, Json(v)).into_response(),
         Err(e) => (api_status(&e), Json(e)).into_response(),
+    }
+}
+
+/// Drop-in replacement for `axum::extract::Json<T>` that maps extractor
+/// failures (malformed JSON, a body that doesn't match `T` — including a
+/// `#[serde(rename_all = ...)]` enum field with an unrecognized variant, e.g.
+/// a typed Finding `status`/`severity`/`origin`) to this API's `ApiError`
+/// JSON envelope instead of axum's plain-text default rejection body.
+///
+/// Every other 4xx in this API is a structured `ApiError{code, category,
+/// message, details}` (see `err_validation` and friends in
+/// `newton_types::store`); without this wrapper, a bad enum value on a
+/// `Json<T>`-extracted body slips through as axum's default rejection,
+/// breaking that consistency (tranche 4 code review, S3 follow-up).
+///
+/// Currently adopted only by the two Finding handlers that surfaced the bug
+/// (`create_finding`/`patch_finding` in `findings.rs`). Swapping the rest of
+/// this API's many `Json<T>` extractors (`catalog.rs`, `plans.rs`,
+/// `workflow_files.rs`, etc.) over to `AppJson<T>` is a reasonable follow-up
+/// but out of scope here — those endpoints don't have this specific
+/// typed-enum-rejection bug, and blanket-swapping them is a much bigger,
+/// untested diff than this fix calls for.
+pub(crate) struct AppJson<T>(pub(crate) T);
+
+impl<S, T> FromRequest<S> for AppJson<T>
+where
+    Json<T>: FromRequest<S, Rejection = JsonRejection>,
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        match Json::<T>::from_request(req, state).await {
+            Ok(Json(v)) => Ok(AppJson(v)),
+            Err(rejection) => {
+                let e = ApiError {
+                    code: "ERR_VALIDATION".to_string(),
+                    category: "validation".to_string(),
+                    message: rejection.body_text(),
+                    details: None,
+                };
+                Err((api_status(&e), Json(e)).into_response())
+            }
+        }
     }
 }
 

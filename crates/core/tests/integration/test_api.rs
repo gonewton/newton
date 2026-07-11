@@ -2060,6 +2060,176 @@ async fn test_workflow_files_put_new_file_without_precondition_creates() {
     assert_eq!(response.status(), StatusCode::CREATED);
 }
 
+/// `validate_workflow_file` first checks whether `content` even parses as
+/// YAML at all (`serde_yaml::from_str::<WorkflowDocument>(..).is_err()`)
+/// before running diagnostics — distinct from, and upstream of, the
+/// semantic-validity checks covered by `test_workflow_files_validate_invalid_semantic`
+/// above (whose fixture parses fine and only fails schema/lint checks).
+/// Genuinely unparseable YAML was previously untested here (spec 074
+/// tranche 4 diff-coverage).
+#[tokio::test]
+async fn test_workflow_files_validate_unparseable_yaml_returns_422() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = create_test_state_with_files(dir.path().to_owned()).await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    // Not even valid YAML syntax (unterminated flow mapping).
+    let body = serde_json::json!({ "content": "nodes: [unterminated", "expected_hash": null });
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/workflow-files/validate")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let resp_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: ApiError = serde_json::from_slice(&resp_body).unwrap();
+    assert!(err.message.contains("not parseable"));
+}
+
+// ── Spec 074 tranche 4: spawn_blocking JoinError (panicked-task) mapping ───────
+//
+// `workflow_files.rs`'s handlers each run their blocking body via
+// `tokio::task::spawn_blocking` and map a panicked task to a 500 (S10). That
+// branch can't be hit through `FsWorkflowFileStore` (its methods don't
+// panic), so this store double panics unconditionally to drive it — a
+// direct, non-fragile use of the existing `WorkflowFileStore` trait seam
+// (the same one `FsWorkflowFileStore` and any other backend implement),
+// rather than an OS-level trick.
+
+struct PanickingWorkflowFileStore;
+
+impl newton_core::workflow::file_store::WorkflowFileStore for PanickingWorkflowFileStore {
+    fn list(
+        &self,
+    ) -> Result<
+        Vec<newton_core::workflow::file_store::WorkflowFileRecord>,
+        newton_core::core::error::AppError,
+    > {
+        panic!("PanickingWorkflowFileStore::list")
+    }
+
+    fn read(
+        &self,
+        _name: &str,
+    ) -> Result<
+        newton_core::workflow::file_store::WorkflowFileRecord,
+        newton_core::core::error::AppError,
+    > {
+        panic!("PanickingWorkflowFileStore::read")
+    }
+
+    fn write(
+        &self,
+        _name: &str,
+        _content: &str,
+        _if_match: Option<&str>,
+    ) -> Result<newton_core::workflow::file_store::WriteOutcome, newton_core::core::error::AppError>
+    {
+        panic!("PanickingWorkflowFileStore::write")
+    }
+
+    fn delete(&self, _name: &str) -> Result<(), newton_core::core::error::AppError> {
+        panic!("PanickingWorkflowFileStore::delete")
+    }
+
+    fn exists(&self, _name: &str) -> Result<bool, newton_core::core::error::AppError> {
+        panic!("PanickingWorkflowFileStore::exists")
+    }
+}
+
+async fn create_test_state_with_panicking_store() -> AppState {
+    let state = create_test_state().await;
+    state.with_workflow_files(std::sync::Arc::new(PanickingWorkflowFileStore))
+}
+
+#[tokio::test]
+async fn test_workflow_files_list_500_when_store_task_panics() {
+    let state = create_test_state_with_panicking_store().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/workflow-files")
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let resp_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: ApiError = serde_json::from_slice(&resp_body).unwrap();
+    assert!(err.message.contains("task panicked"));
+}
+
+#[tokio::test]
+async fn test_workflow_files_get_500_when_store_task_panics() {
+    let state = create_test_state_with_panicking_store().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/workflow-files/anything")
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let resp_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: ApiError = serde_json::from_slice(&resp_body).unwrap();
+    assert!(err.message.contains("task panicked"));
+}
+
+#[tokio::test]
+async fn test_workflow_files_put_500_when_store_task_panics() {
+    let state = create_test_state_with_panicking_store().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    let body = serde_json::json!({ "content": VALID_WORKFLOW_YAML, "expected_hash": null });
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri("/workflow-files/anything")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let resp_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: ApiError = serde_json::from_slice(&resp_body).unwrap();
+    assert!(err.message.contains("task panicked"));
+}
+
+#[tokio::test]
+async fn test_workflow_files_delete_500_when_store_task_panics() {
+    let state = create_test_state_with_panicking_store().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    let request = Request::builder()
+        .method(Method::DELETE)
+        .uri("/workflow-files/anything")
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let resp_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: ApiError = serde_json::from_slice(&resp_body).unwrap();
+    assert!(err.message.contains("task panicked"));
+}
+
 // ── Spec 074 P3: realtime event parity ─────────────────────────────────────────
 //
 // One test per new `BroadcastEvent` variant (`FindingUpdate`,
@@ -2196,6 +2366,105 @@ async fn test_unblock_finding_broadcasts_finding_update() {
         }
         other => panic!("expected FindingUpdate, got {other:?}"),
     }
+}
+
+// `status`/`severity`/`origin` on `CreateFindingBody`/`PatchFindingBody` are
+// typed enums (S3): serde now rejects an unrecognized value at JSON
+// deserialization time, inside axum's `Json<T>` extractor, before the
+// `create_finding`/`patch_finding` handlers ever run. Without the `AppJson`
+// wrapper (crates/core/src/api/mod.rs) that extractor failure would surface
+// as axum's default plain-text rejection instead of this API's `ApiError`
+// JSON envelope — a response-shape regression relative to the old
+// hand-rolled `validate_finding_status` check. These two tests prove the
+// `ApiError` shape survives the switch to typed enums (tranche 4 code
+// review, S3 follow-up).
+
+#[tokio::test]
+async fn test_create_finding_bad_status_returns_api_error_shape() {
+    let state = create_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    let body = serde_json::json!({
+        "id": "finding-bad-status",
+        "source": "test",
+        "origin": "system",
+        "dimension": "quality",
+        "fingerprint": "finding-bad-status",
+        "title": "test finding",
+        "whyItMatters": "proves bad status is rejected as ApiError, not axum's default body",
+        "recommendedAction": "n/a",
+        "status": "not-a-real-status",
+        "severity": "low",
+        "risk": "low",
+    });
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/findings")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: ApiError = serde_json::from_slice(&body)
+        .expect("response body should deserialize as ApiError, not axum's default rejection");
+    assert_eq!(err.code, "ERR_VALIDATION");
+    assert!(
+        err.message.to_lowercase().contains("status"),
+        "message should reference the offending `status` field, got: {}",
+        err.message
+    );
+}
+
+#[tokio::test]
+async fn test_patch_finding_bad_status_returns_api_error_shape() {
+    let state = create_test_state().await;
+    let create_body = serde_json::json!({
+        "id": "finding-bad-status-patch",
+        "source": "test",
+        "origin": "system",
+        "dimension": "quality",
+        "fingerprint": "finding-bad-status-patch",
+        "title": "test finding",
+        "whyItMatters": "proves bad status is rejected as ApiError, not axum's default body",
+        "recommendedAction": "n/a",
+        "severity": "low",
+        "risk": "low",
+    });
+    state
+        .backend
+        .create_finding(serde_json::from_value(create_body).unwrap())
+        .await
+        .expect("create_finding");
+
+    let app = newton_core::api::api_v1_router(state, false);
+
+    // `PatchFindingBody` only has `status` as a typed enum field (`severity`/
+    // `origin` aren't patchable), so exercise the same regression via `status`.
+    let patch_body = serde_json::json!({ "status": "not-a-real-status" });
+    let request = Request::builder()
+        .method(Method::PATCH)
+        .uri("/findings/finding-bad-status-patch")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&patch_body).unwrap()))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: ApiError = serde_json::from_slice(&body)
+        .expect("response body should deserialize as ApiError, not axum's default rejection");
+    assert_eq!(err.code, "ERR_VALIDATION");
+    assert!(
+        err.message.to_lowercase().contains("status"),
+        "message should reference the offending `status` field, got: {}",
+        err.message
+    );
 }
 
 #[tokio::test]

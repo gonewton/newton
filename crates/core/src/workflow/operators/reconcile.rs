@@ -6,9 +6,12 @@
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
+use crate::workflow::operators::llm_client::{LlmAdjudicator, RealLlmAdjudicator};
 use async_trait::async_trait;
 use chrono::Utc;
-use newton_types::{BackendStore, CreateFindingBody, FindingItem, PatchFindingBody};
+use newton_types::{
+    BackendStore, CreateFindingBody, FindingItem, FindingStatus, Origin, PatchFindingBody, Severity,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -19,15 +22,29 @@ use uuid::Uuid;
 pub struct ReconcileOperator {
     workspace_root: PathBuf,
     store: Arc<dyn BackendStore>,
+    adjudicator: Arc<dyn LlmAdjudicator>,
 }
 
 impl ReconcileOperator {
     pub const NAME: &'static str = "ReconcileOperator";
 
     pub fn new(workspace_root: PathBuf, store: Arc<dyn BackendStore>) -> Self {
+        Self::with_adjudicator(workspace_root, store, Arc::new(RealLlmAdjudicator))
+    }
+
+    /// Test/injection seam (spec 074 S8): construct with a stubbed
+    /// `LlmAdjudicator` instead of the real `aikit_sdk`-backed one, so tests
+    /// can drive the adjudication-matched, adjudication-failed (B2), and
+    /// adjudication-resolved paths deterministically without a real agent.
+    pub fn with_adjudicator(
+        workspace_root: PathBuf,
+        store: Arc<dyn BackendStore>,
+        adjudicator: Arc<dyn LlmAdjudicator>,
+    ) -> Self {
         Self {
             workspace_root,
             store,
+            adjudicator,
         }
     }
 
@@ -86,9 +103,16 @@ pub struct ReconcileOutput {
 }
 
 /// Observation extracted from assessment JSON.
+///
+/// `severity` is parsed from free-form grader/LLM JSON output, which is
+/// semi-trusted: a value the grader emits that isn't one of the known
+/// `Severity` strings (typo, new taxonomy the grader invented, etc.) is
+/// treated the same as a missing severity — dropped to `None` here and
+/// defaulted downstream — rather than propagating an arbitrary string into
+/// the now-typed `Severity` field or failing the whole Reconciliation run.
 struct Observation {
     dimension: String,
-    severity: Option<String>,
+    severity: Option<Severity>,
     observation: String,
     why_it_matters: Option<String>,
     recommended_action: Option<String>,
@@ -148,7 +172,7 @@ fn parse_observations(assessment: &Value) -> Vec<Observation> {
                 severity: item
                     .get("severity")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
+                    .and_then(|s| s.parse::<Severity>().ok()),
                 observation,
                 why_it_matters: item
                     .get("why_it_matters")
@@ -170,29 +194,45 @@ fn parse_observations(assessment: &Value) -> Vec<Observation> {
         .collect()
 }
 
-fn is_open_status(status: &str) -> bool {
-    matches!(
-        status,
-        "awaiting_triage" | "triaged" | "approved_for_planning"
-    )
+/// "Open" = still in play for Reconciliation (eligible to be refreshed or
+/// auto-resolved). Uses an exhaustive `match` rather than `matches!` so that
+/// adding a new `FindingStatus` variant forces an explicit open/not-open
+/// decision here at compile time — this is the actual "the compiler owns
+/// what `is_open_status` approximates" mechanism (spec 074 S3).
+fn is_open_status(status: &FindingStatus) -> bool {
+    match status {
+        FindingStatus::AwaitingTriage
+        | FindingStatus::Triaged
+        | FindingStatus::ApprovedForPlanning => true,
+        FindingStatus::Structured
+        | FindingStatus::Deferred
+        | FindingStatus::Rejected
+        | FindingStatus::Resolved
+        | FindingStatus::Blocked => false,
+    }
 }
 
 /// Adjudication result from the LLM.
+///
+/// `pub(crate)` (rather than private): constructed via `serde_json`
+/// deserialization inside `llm_client::RealLlmAdjudicator` and, in tests,
+/// directly by stub `LlmAdjudicator` impls that need to hand `execute` a
+/// canned plan — see `llm_client.rs` and this file's `mod tests`.
 #[derive(Debug, Deserialize)]
-struct AdjudicationPlan {
+pub struct AdjudicationPlan {
     /// Each entry: (observation_index, finding_id) — LLM says these match.
-    matched: Vec<AdjudicationMatch>,
+    pub matched: Vec<AdjudicationMatch>,
     /// Finding IDs the LLM says are resolved (not seen in this run at all).
-    resolved: Vec<String>,
+    pub resolved: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct AdjudicationMatch {
-    observation_index: usize,
-    finding_id: String,
+pub struct AdjudicationMatch {
+    pub observation_index: usize,
+    pub finding_id: String,
 }
 
-const RECONCILE_ADJUDICATION_SCHEMA: &str = r#"{
+pub(crate) const RECONCILE_ADJUDICATION_SCHEMA: &str = r#"{
   "type": "object",
   "properties": {
     "matched": {
@@ -353,7 +393,7 @@ impl Operator for ReconcileOperator {
                     f.dimension.clone(),
                     f.title.clone(),
                     f.fingerprint.clone(),
-                    f.status.clone(),
+                    f.status.to_string(),
                 )
             })
             .collect();
@@ -365,89 +405,65 @@ impl Operator for ReconcileOperator {
         // BEFORE any store mutation (Phase 1/2/3 below), so that a transient LLM
         // outage can never create duplicate Findings or wrongly auto-resolve real
         // ones (including `blocked` Findings, which only a human may clear).
-        let adj_plan: Option<AdjudicationPlan> = if !unmatched_owned.is_empty()
-            && !candidates_owned.is_empty()
-        {
-            let obs_json: Vec<serde_json::Value> = unmatched_owned
-                .iter()
-                .map(|(idx, dim, obs_text, loc)| {
-                    serde_json::json!({
-                        "index": idx,
-                        "dimension": dim,
-                        "observation": obs_text,
-                        "location": loc,
+        let adj_plan: Option<AdjudicationPlan> =
+            if !unmatched_owned.is_empty() && !candidates_owned.is_empty() {
+                let obs_json: Vec<serde_json::Value> = unmatched_owned
+                    .iter()
+                    .map(|(idx, dim, obs_text, loc)| {
+                        serde_json::json!({
+                            "index": idx,
+                            "dimension": dim,
+                            "observation": obs_text,
+                            "location": loc,
+                        })
                     })
-                })
-                .collect();
-            let findings_json: Vec<serde_json::Value> = candidates_owned
-                .iter()
-                .map(|(id, dim, title, fp, status)| {
-                    serde_json::json!({
-                        "id": id,
-                        "dimension": dim,
-                        "title": title,
-                        "fingerprint": fp,
-                        "status": status,
+                    .collect();
+                let findings_json: Vec<serde_json::Value> = candidates_owned
+                    .iter()
+                    .map(|(id, dim, title, fp, status)| {
+                        serde_json::json!({
+                            "id": id,
+                            "dimension": dim,
+                            "title": title,
+                            "fingerprint": fp,
+                            "status": status,
+                        })
                     })
-                })
-                .collect();
-            let obs_str = serde_json::to_string_pretty(&obs_json).unwrap_or_default();
-            let findings_str = serde_json::to_string_pretty(&findings_json).unwrap_or_default();
+                    .collect();
+                let obs_str = serde_json::to_string_pretty(&obs_json).unwrap_or_default();
+                let findings_str = serde_json::to_string_pretty(&findings_json).unwrap_or_default();
 
-            let join_result = tokio::task::spawn_blocking(move || {
-                let template = "You are a semantic matching agent. Your job is ONLY to judge whether observations from a grader run match existing findings by meaning — not to evaluate quality or add new analysis.\n\n## Unmatched observations (this run)\n{{observations}}\n\n## Candidate open findings (existing)\n{{findings}}\n\n## Task\nFor each observation, decide:\n- Does it semantically describe the same issue as an existing finding? If so, record the match.\n- Is it genuinely new? Record its index in `new`.\n- Are any candidate findings NOT covered by any observation (resolved)? Record their IDs in `resolved`.\n\nReturn a JSON object matching the schema. Keep temperature low — judge sameness strictly.";
-
-                let runner = aikit_sdk::AgentRunner::new()
-                    .agent(&engine)
-                    .working_dir(&workspace_root.to_string_lossy())
-                    .timeout(std::time::Duration::from_secs(timeout_secs));
-                let runner = if let Some(ref m) = model {
-                    runner.model(m)
-                } else {
-                    runner
-                };
-
-                let pipeline = aikit_sdk::pipeline::Pipeline::new(template, RECONCILE_ADJUDICATION_SCHEMA)
-                    .max_retries(1);
-
-                match pipeline.run(&[("observations", &obs_str), ("findings", &findings_str)], runner) {
-                    Ok(pr) => serde_json::from_value::<AdjudicationPlan>(pr.data)
-                        .map_err(|e| format!("failed to parse adjudication plan: {e}")),
-                    Err(e) => Err(format!("LLM adjudication failed: {e}")),
-                }
-            })
-            .await;
-
-            // Adjudication failure (LLM error, unparseable plan, or a panicked
-            // blocking task) fails the whole operator BEFORE any store mutation —
-            // see the "Fuzziness is not failure tolerance" note above. This is
-            // NOT a ValidationError (which task_execution::is_retryable treats as
-            // hard-non-retryable): it is a ToolExecutionError so the normal
-            // transient-failure retry/backoff applies, and only a persistent
-            // failure fails the task/cycle.
-            let plan = match join_result {
-                Ok(Ok(plan)) => plan,
-                Ok(Err(msg)) => {
-                    return Err(AppError::new(
-                        ErrorCategory::ToolExecutionError,
-                        format!("ReconcileOperator: adjudication failed: {msg}"),
+                // Adjudication failure (LLM error, unparseable plan, or a panicked
+                // blocking task — all folded into a single `Err(String)` by the
+                // `LlmAdjudicator` impl, see llm_client.rs) fails the whole
+                // operator BEFORE any store mutation — see the "Fuzziness is not
+                // failure tolerance" note above. This is NOT a ValidationError
+                // (which task_execution::is_retryable treats as
+                // hard-non-retryable): it is a ToolExecutionError so the normal
+                // transient-failure retry/backoff applies, and only a persistent
+                // failure fails the task/cycle.
+                let plan = self
+                    .adjudicator
+                    .adjudicate(
+                        &obs_str,
+                        &findings_str,
+                        &engine,
+                        model.as_deref(),
+                        &workspace_root,
+                        std::time::Duration::from_secs(timeout_secs),
                     )
-                    .with_code("WFG-RECONCILE-ADJ-001"));
-                }
-                Err(join_err) => {
-                    return Err(AppError::new(
-                        ErrorCategory::ToolExecutionError,
-                        format!(
-                            "ReconcileOperator: adjudication task did not complete: {join_err}"
-                        ),
-                    )
-                    .with_code("WFG-RECONCILE-ADJ-001"));
-                }
+                    .await
+                    .map_err(|msg| {
+                        AppError::new(
+                            ErrorCategory::ToolExecutionError,
+                            format!("ReconcileOperator: adjudication failed: {msg}"),
+                        )
+                        .with_code("WFG-RECONCILE-ADJ-001")
+                    })?;
+                Some(plan)
+            } else {
+                None
             };
-            Some(plan)
-        } else {
-            None
-        };
 
         // Build sets of: llm-matched obs indices → finding_id, llm-resolved finding IDs.
         let mut llm_matched: HashMap<usize, String> = HashMap::new(); // obs_idx → finding_id
@@ -482,12 +498,12 @@ impl Operator for ReconcileOperator {
                     // Already patched this finding in this run — skip to avoid double-count.
                     continue;
                 }
-                if existing.status == "resolved" {
+                if existing.status == FindingStatus::Resolved {
                     self.store
                         .patch_finding(
                             &existing.id,
                             PatchFindingBody {
-                                status: Some("awaiting_triage".to_string()),
+                                status: Some(FindingStatus::AwaitingTriage),
                                 last_seen_at: Some(now.clone()),
                                 expected_value: None,
                                 effort: None,
@@ -564,7 +580,7 @@ impl Operator for ReconcileOperator {
                 let mut body = CreateFindingBody {
                     id: id.clone(),
                     source: grader.clone(),
-                    origin: "system".to_string(),
+                    origin: Origin::System,
                     component_id: None,
                     module: None,
                     repo_id: None,
@@ -575,8 +591,11 @@ impl Operator for ReconcileOperator {
                     title,
                     why_it_matters: obs.why_it_matters.clone().unwrap_or_default(),
                     recommended_action: obs.recommended_action.clone().unwrap_or_default(),
-                    severity: obs.severity.clone().unwrap_or_else(|| "medium".to_string()),
-                    risk: obs.severity.clone().unwrap_or_else(|| "medium".to_string()),
+                    severity: obs.severity.unwrap_or(Severity::Medium),
+                    risk: obs
+                        .severity
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "medium".to_string()),
                     confidence: obs.confidence,
                     evidence: obs
                         .evidence
@@ -584,7 +603,7 @@ impl Operator for ReconcileOperator {
                         .map(|e| serde_json::to_value(e).unwrap_or(Value::Null)),
                     expected_value: None,
                     effort: None,
-                    status: "awaiting_triage".to_string(),
+                    status: FindingStatus::AwaitingTriage,
                     last_seen_at: Some(now.clone()),
                     depends_on: vec![],
                     blocks: vec![],
@@ -616,7 +635,7 @@ impl Operator for ReconcileOperator {
                     .patch_finding(
                         &finding.id,
                         PatchFindingBody {
-                            status: Some("resolved".to_string()),
+                            status: Some(FindingStatus::Resolved),
                             last_seen_at: Some(now.clone()),
                             expected_value: None,
                             effort: None,
@@ -644,7 +663,7 @@ impl Operator for ReconcileOperator {
                         .patch_finding(
                             fid,
                             PatchFindingBody {
-                                status: Some("resolved".to_string()),
+                                status: Some(FindingStatus::Resolved),
                                 last_seen_at: Some(now.clone()),
                                 expected_value: None,
                                 effort: None,
@@ -835,7 +854,7 @@ mod tests {
         let grader_a_findings: Vec<_> =
             findings.iter().filter(|f| f.source == "grader-a").collect();
         assert_eq!(grader_a_findings.len(), 1);
-        assert_eq!(grader_a_findings[0].status, "awaiting_triage");
+        assert_eq!(grader_a_findings[0].status, FindingStatus::AwaitingTriage);
     }
 
     /// Two distinct observations with no location in the same dimension must produce
@@ -948,7 +967,7 @@ mod tests {
             .patch_finding(
                 &f1_id,
                 PatchFindingBody {
-                    status: Some("blocked".to_string()),
+                    status: Some(FindingStatus::Blocked),
                     last_seen_at: None,
                     expected_value: None,
                     effort: None,
@@ -1017,8 +1036,282 @@ mod tests {
         );
         let f1_after = after.iter().find(|f| f.id == f1_id).unwrap();
         assert_eq!(
-            f1_after.status, "blocked",
+            f1_after.status,
+            FindingStatus::Blocked,
             "blocked Findings must be untouched by the failure path"
+        );
+    }
+
+    /// Stub `LlmAdjudicator` that always fails, deterministically and
+    /// without any subprocess/network I/O. This is the actual point of spec
+    /// 074 S8's trait-injection half of B2: before this seam existed, the
+    /// only way to force adjudication to fail was the `not-a-real-agent`
+    /// engine trick used by
+    /// `adjudication_failure_fails_closed_with_zero_mutations` above (which
+    /// still exercises `RealLlmAdjudicator`'s error path and must keep
+    /// passing unmodified); now a test can inject a failing stub directly.
+    struct FailingAdjudicator;
+
+    #[async_trait]
+    impl LlmAdjudicator for FailingAdjudicator {
+        async fn adjudicate(
+            &self,
+            _observations_json: &str,
+            _findings_json: &str,
+            _engine: &str,
+            _model: Option<&str>,
+            _workspace_root: &std::path::Path,
+            _timeout: std::time::Duration,
+        ) -> Result<AdjudicationPlan, String> {
+            Err("stub: adjudicator intentionally failing".to_string())
+        }
+    }
+
+    /// Stub `LlmAdjudicator` that returns a canned plan, ignoring its
+    /// inputs entirely — proving `execute`'s matched/new/resolved counts are
+    /// driven by whatever the injected `LlmAdjudicator` returns, not by any
+    /// real LLM output (the "so tests can stub it" half of spec 074 S8's fix
+    /// text, distinct from the failure-path pin below).
+    struct SucceedingAdjudicator {
+        matched: Vec<(usize, String)>,
+        resolved: Vec<String>,
+    }
+
+    #[async_trait]
+    impl LlmAdjudicator for SucceedingAdjudicator {
+        async fn adjudicate(
+            &self,
+            _observations_json: &str,
+            _findings_json: &str,
+            _engine: &str,
+            _model: Option<&str>,
+            _workspace_root: &std::path::Path,
+            _timeout: std::time::Duration,
+        ) -> Result<AdjudicationPlan, String> {
+            Ok(AdjudicationPlan {
+                matched: self
+                    .matched
+                    .iter()
+                    .map(|(idx, finding_id)| AdjudicationMatch {
+                        observation_index: *idx,
+                        finding_id: finding_id.clone(),
+                    })
+                    .collect(),
+                resolved: self.resolved.clone(),
+            })
+        }
+    }
+
+    /// B2 regression pin, seam variant (spec 074 S8): same "fails closed"
+    /// guarantee as `adjudication_failure_fails_closed_with_zero_mutations`
+    /// above, but forced via an injected `FailingAdjudicator` stub instead
+    /// of aikit-sdk's `AgentNotRunnable` fast-fail — this is what the fix
+    /// text means by "so tests can stub it — this is also the enabler for
+    /// testing B2's failure paths": adjudication failure is now testable
+    /// without depending on any real-agent-allow-list quirk.
+    #[tokio::test]
+    async fn stub_adjudicator_failure_fails_closed_with_zero_mutations() {
+        let store: Arc<dyn BackendStore> =
+            Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
+        let op = ReconcileOperator::with_adjudicator(
+            std::path::PathBuf::from("/tmp"),
+            store.clone(),
+            Arc::new(FailingAdjudicator),
+        );
+
+        // Seed: one location-based finding (deterministically re-matched by
+        // fingerprint on rerun, so it stays an untouched adjudication
+        // candidate) and one location-less finding (always routed to the
+        // adjudicator, so a repeat run always reaches the gate).
+        let seed_assessment = make_assessment(vec![
+            make_obs("tests", "Coverage is below threshold", Some("src/main.rs")),
+            make_obs("security", "Dependency has known CVE", None),
+        ]);
+        let seed_params = json!({
+            "scope": "module",
+            "scope_id": "mod-stub-fail-001",
+            "grader": "adj-grader",
+            "assessment": seed_assessment,
+        });
+        let seed_result = op.execute(seed_params, make_ctx()).await.unwrap();
+        assert_eq!(seed_result["created"], 2, "seed run creates both findings");
+
+        let before = store
+            .list_findings(
+                None,
+                Some("module".to_string()),
+                Some("mod-stub-fail-001".to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(before.len(), 2);
+        let before_json: Vec<serde_json::Value> = before
+            .iter()
+            .map(|f| serde_json::to_value(f).unwrap())
+            .collect();
+
+        // Rerun: the location-less "security" observation is repeated, so
+        // it is an unmatched adjudication target, and the "tests" finding
+        // (not present in this run's observations) is an open adjudication
+        // candidate — both non-empty, so the gate is reached and
+        // `FailingAdjudicator::adjudicate` is actually invoked.
+        let rerun_assessment =
+            make_assessment(vec![make_obs("security", "Dependency has known CVE", None)]);
+        let rerun_params = json!({
+            "scope": "module",
+            "scope_id": "mod-stub-fail-001",
+            "grader": "adj-grader",
+            "assessment": rerun_assessment,
+        });
+
+        let err = op
+            .execute(rerun_params, make_ctx())
+            .await
+            .expect_err("stub adjudicator failure must fail the operator");
+        assert_eq!(err.code, "WFG-RECONCILE-ADJ-001");
+        assert_eq!(err.category, ErrorCategory::ToolExecutionError);
+
+        let after = store
+            .list_findings(
+                None,
+                Some("module".to_string()),
+                Some("mod-stub-fail-001".to_string()),
+            )
+            .await
+            .unwrap();
+        let after_json: Vec<serde_json::Value> = after
+            .iter()
+            .map(|f| serde_json::to_value(f).unwrap())
+            .collect();
+
+        assert_eq!(
+            after.len(),
+            2,
+            "no Finding may be created or removed on the failure path"
+        );
+        assert_eq!(
+            before_json, after_json,
+            "Finding store must be byte-identical before/after a stub-failed adjudication"
+        );
+    }
+
+    /// Proves the injection point actually drives `execute`'s downstream
+    /// logic: a `SucceedingAdjudicator` stub decides which existing Finding
+    /// a semantically-repeated, location-less observation matches, and the
+    /// resulting created/refreshed/resolved counts follow the stub's canned
+    /// plan rather than any real LLM output.
+    #[tokio::test]
+    async fn stub_adjudicator_drives_matched_and_resolved_counts() {
+        let store: Arc<dyn BackendStore> =
+            Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
+
+        // Seed run: no existing findings yet, so no adjudication candidates
+        // exist and this call succeeds without invoking the adjudicator at
+        // all — creates two distinct, location-less "security" findings.
+        let seed_op = ReconcileOperator::with_adjudicator(
+            std::path::PathBuf::from("/tmp"),
+            store.clone(),
+            Arc::new(SucceedingAdjudicator {
+                matched: vec![],
+                resolved: vec![],
+            }),
+        );
+        let seed_assessment = make_assessment(vec![
+            make_obs("security", "Dependency A has known CVE", None),
+            make_obs("security", "Dependency B has known CVE", None),
+        ]);
+        let seed_params = json!({
+            "scope": "module",
+            "scope_id": "mod-stub-succ-001",
+            "grader": "adj-grader",
+            "assessment": seed_assessment,
+        });
+        let seed_result = seed_op.execute(seed_params, make_ctx()).await.unwrap();
+        assert_eq!(seed_result["created"], 2, "seed run creates both findings");
+
+        let seeded = store
+            .list_findings(
+                None,
+                Some("module".to_string()),
+                Some("mod-stub-succ-001".to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(seeded.len(), 2);
+        let a_id = seeded
+            .iter()
+            .find(|f| f.title.contains("Dependency A"))
+            .unwrap()
+            .id
+            .clone();
+        let b_id = seeded
+            .iter()
+            .find(|f| f.title.contains("Dependency B"))
+            .unwrap()
+            .id
+            .clone();
+
+        // Rerun with a single observation. A real LLM would have to judge
+        // semantic sameness; the stub instead deterministically says
+        // "matches finding A" — proving `execute` follows the stub, not any
+        // real inference. Finding B is absent from this run's observations,
+        // so it is swept as resolved regardless of the plan's `resolved`
+        // list (a useful cross-check that the seam doesn't short-circuit
+        // the surrounding Reconciliation logic).
+        let rerun_op = ReconcileOperator::with_adjudicator(
+            std::path::PathBuf::from("/tmp"),
+            store.clone(),
+            Arc::new(SucceedingAdjudicator {
+                matched: vec![(0, a_id.clone())],
+                resolved: vec![],
+            }),
+        );
+        let rerun_assessment = make_assessment(vec![make_obs(
+            "security",
+            "Dependency A has known CVE",
+            None,
+        )]);
+        let rerun_params = json!({
+            "scope": "module",
+            "scope_id": "mod-stub-succ-001",
+            "grader": "adj-grader",
+            "assessment": rerun_assessment,
+        });
+        let result = rerun_op.execute(rerun_params, make_ctx()).await.unwrap();
+
+        assert_eq!(
+            result["created"], 0,
+            "stub says the observation matches an existing finding, so nothing new is created"
+        );
+        assert_eq!(
+            result["refreshed"], 1,
+            "the stub-matched finding (A) must be refreshed"
+        );
+        assert_eq!(
+            result["resolved"], 1,
+            "finding B, absent from this run and not matched, must be resolved"
+        );
+
+        let after = store
+            .list_findings(
+                None,
+                Some("module".to_string()),
+                Some("mod-stub-succ-001".to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(after.len(), 2, "no new Finding was created");
+        let a_after = after.iter().find(|f| f.id == a_id).unwrap();
+        assert_eq!(
+            a_after.status,
+            FindingStatus::AwaitingTriage,
+            "finding A (stub-matched) must remain open, not resolved"
+        );
+        let b_after = after.iter().find(|f| f.id == b_id).unwrap();
+        assert_eq!(
+            b_after.status,
+            FindingStatus::Resolved,
+            "finding B (absent this run) must be resolved"
         );
     }
 }

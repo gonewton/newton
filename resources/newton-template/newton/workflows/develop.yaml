@@ -28,6 +28,7 @@ workflow:
     # Fallback when a task omits params.model. Use sonnet so claude_code never inherits a GLM id.
     model_stylesheet:
       model: zai-coding-plan/glm-5
+    allow_env_fn: true
 
     command_operator:
       allow_shell: true

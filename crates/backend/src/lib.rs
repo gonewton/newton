@@ -1,4 +1,5 @@
 pub mod fixtures;
+pub mod service;
 pub mod store;
 
 pub use store::SqliteBackendStore;

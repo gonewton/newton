@@ -10,7 +10,8 @@ fn test_version_constant() {
 
 #[test]
 fn test_cli_parsing() {
-    // Test that CLI can be parsed (this will use clap's Parser derive)
+    // Test that CLI can be parsed (real parsing goes through cli-framework's
+    // ArgSpecs; clap is no longer a dependency of this crate — see spec 074 S6)
 
     // Test with help argument (this should succeed)
     let result = std::process::Command::new(std::env::current_exe().unwrap())
@@ -36,7 +37,6 @@ fn test_main_dependencies() {
     // tracing_subscriber should be available
     let _filter = tracing_subscriber::EnvFilter::from_default_env();
 
-    // clap should be available
     let _args: Vec<String> = ["test"].iter().map(|s| s.to_string()).collect();
 
     // tokio should be available

@@ -163,18 +163,26 @@ impl Operator for AgentOperator {
 
         let eval_ctx = ctx.state_view.evaluation_context();
 
-        let mut interpolated_env = command::interpolate_env(&config.env, &eval_ctx)?;
+        let mut interpolated_env =
+            command::interpolate_env(&config.env, &eval_ctx, self.settings.allow_env_fn)?;
 
         let paths = artifacts::setup_artifact_paths(&self.workspace_root, &self.settings, &ctx)?;
 
         let mut sdk_events_artifact: Option<String> = None;
         let mut sdk_events_token_usage: Option<serde_json::Value> = None;
+        // Surfaces truncation of the stdout/stderr capture artifacts (either
+        // a genuine write failure or hitting `OUTPUT_CAPTURE_LIMIT_BYTES`) on
+        // the task result, since the artifact file itself only gets a
+        // best-effort `[capture truncated: ...]` marker line — see spec 074
+        // S15 and `output::build_agent_output`.
+        let stdout_capture_warning: Option<String>;
+        let stderr_capture_warning: Option<String>;
 
         let (signal, signal_data, exit_code, final_iteration) = if engine_name == "command" {
             config.validate_engine_command()?;
             let resolved_engine_command = {
                 let cmds = config.engine_command.as_deref().unwrap_or(&[]);
-                let expr_engine = ExpressionEngine::default();
+                let expr_engine = ExpressionEngine::new(self.settings.allow_env_fn);
                 let mut result = Vec::new();
                 for entry in cmds {
                     let interpolated = expr_engine.interpolate_string(entry, &eval_ctx)?;
@@ -243,9 +251,19 @@ impl Operator for AgentOperator {
             };
 
             if config.loop_mode {
-                command::execute_loop(&config, &exec_params).await?
+                let loop_result = command::execute_loop(&config, &exec_params).await?;
+                stdout_capture_warning = loop_result.stdout_capture_warning;
+                stderr_capture_warning = loop_result.stderr_capture_warning;
+                (
+                    loop_result.signal,
+                    loop_result.signal_data,
+                    loop_result.exit_code,
+                    loop_result.iteration,
+                )
             } else {
                 let result = command::execute_single(&exec_params).await?;
+                stdout_capture_warning = result.stdout_capture_warning;
+                stderr_capture_warning = result.stderr_capture_warning;
                 (result.signal, result.signal_data, result.exit_code, 1u32)
             }
         } else {
@@ -273,6 +291,8 @@ impl Operator for AgentOperator {
 
             sdk_events_artifact = sdk_result.events_artifact_path;
             sdk_events_token_usage = sdk_result.token_usage;
+            stdout_capture_warning = sdk_result.stdout_capture_warning;
+            stderr_capture_warning = sdk_result.stderr_capture_warning;
 
             (
                 sdk_result.signal,
@@ -317,6 +337,8 @@ impl Operator for AgentOperator {
             engine_is_command: engine_name == "command",
             sdk_token_usage: sdk_events_token_usage,
             sdk_events_artifact,
+            stdout_capture_warning,
+            stderr_capture_warning,
         }))
     }
 }

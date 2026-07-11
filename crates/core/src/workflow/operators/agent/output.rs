@@ -24,6 +24,13 @@ pub(super) struct AgentOutput {
     pub(super) engine_is_command: bool,
     pub(super) sdk_token_usage: Option<serde_json::Value>,
     pub(super) sdk_events_artifact: Option<String>,
+    /// `Some(reason)` when the stdout/stderr capture artifact was truncated
+    /// (a write failure or hitting `OUTPUT_CAPTURE_LIMIT_BYTES`) — surfaced
+    /// on the task result output so it's visible without having to notice
+    /// the `[capture truncated: ...]` marker line inside the artifact file
+    /// itself. See spec 074 S15.
+    pub(super) stdout_capture_warning: Option<String>,
+    pub(super) stderr_capture_warning: Option<String>,
 }
 
 /// Assemble the `Value::Object` returned by `AgentOperator::execute`.
@@ -100,6 +107,12 @@ pub(super) fn build_agent_output(out: AgentOutput) -> Value {
     }
     if let Some(events_path) = out.sdk_events_artifact {
         map.insert("events_artifact".to_string(), Value::String(events_path));
+    }
+    if let Some(warning) = out.stdout_capture_warning {
+        map.insert("stdout_capture_warning".to_string(), Value::String(warning));
+    }
+    if let Some(warning) = out.stderr_capture_warning {
+        map.insert("stderr_capture_warning".to_string(), Value::String(warning));
     }
 
     Value::Object(map)

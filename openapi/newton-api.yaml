@@ -142,8 +142,25 @@ paths:
   /components:
     get:
       tags:
-      - dashboard
+      - catalog
       operationId: list_components
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Component list
@@ -873,6 +890,23 @@ paths:
       tags:
       - catalog
       operationId: list_kpis
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: KPI list
@@ -957,8 +991,25 @@ paths:
   /module-dependencies:
     get:
       tags:
-      - portfolio
+      - catalog
       operationId: list_module_dependencies
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Module dependency list
@@ -976,7 +1027,7 @@ paths:
                 $ref: '#/components/schemas/ApiError'
     post:
       tags:
-      - portfolio
+      - catalog
       operationId: create_module_dependency
       requestBody:
         content:
@@ -1117,6 +1168,23 @@ paths:
       tags:
       - catalog
       operationId: list_modules
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Module list
@@ -1548,6 +1616,23 @@ paths:
       tags:
       - plans
       operationId: list_plans
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Plan list
@@ -1671,8 +1756,25 @@ paths:
   /products:
     get:
       tags:
-      - dashboard
+      - catalog
       operationId: list_products
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Product list
@@ -1896,6 +1998,23 @@ paths:
       tags:
       - dashboard
       operationId: list_regressions
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Regression list
@@ -1934,8 +2053,25 @@ paths:
   /repos:
     get:
       tags:
-      - portfolio
+      - catalog
       operationId: list_repos
+      parameters:
+      - name: limit
+        in: query
+        description: Max rows to return (default 100, hard cap 1000)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      - name: offset
+        in: query
+        description: Rows to skip (default 0)
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
       responses:
         '200':
           description: Repository list
@@ -2784,7 +2920,7 @@ components:
           - string
           - 'null'
         origin:
-          type: string
+          $ref: '#/components/schemas/Origin'
         recommendedAction:
           type: string
         repoId:
@@ -2794,11 +2930,11 @@ components:
         risk:
           type: string
         severity:
-          type: string
+          $ref: '#/components/schemas/Severity'
         source:
           type: string
         status:
-          type: string
+          $ref: '#/components/schemas/FindingStatus'
         title:
           type: string
         whyItMatters:
@@ -3140,7 +3276,7 @@ components:
           - string
           - 'null'
         origin:
-          type: string
+          $ref: '#/components/schemas/Origin'
         recommendedAction:
           type: string
         repoId:
@@ -3150,17 +3286,35 @@ components:
         risk:
           type: string
         severity:
-          type: string
+          $ref: '#/components/schemas/Severity'
         source:
           type: string
         status:
-          type: string
+          $ref: '#/components/schemas/FindingStatus'
         title:
           type: string
         updatedAt:
           type: string
         whyItMatters:
           type: string
+    FindingStatus:
+      type: string
+      description: |-
+        Finding lifecycle status (CONTEXT.md "Finding"):
+        `awaiting_triage → triaged → approved_for_planning → structured →
+        deferred | rejected`, plus `resolved` (set automatically by
+        Reconciliation when the issue vanishes) and `blocked` (set automatically
+        when the Plan implementing this Finding fails develop after the retry
+        budget; cleared only by a human).
+      enum:
+      - awaiting_triage
+      - triaged
+      - approved_for_planning
+      - structured
+      - deferred
+      - rejected
+      - resolved
+      - blocked
     GradeItem:
       type: object
       required:
@@ -3578,6 +3732,12 @@ components:
             type: array
             items:
               $ref: '#/components/schemas/OptimizeCycleItem'
+    Origin:
+      type: string
+      description: 'Finding origin: who/what raised it.'
+      enum:
+      - system
+      - human
     PatchChangeRequestBody:
       type: object
       properties:
@@ -3646,9 +3806,9 @@ components:
           - string
           - 'null'
         status:
-          type:
-          - string
-          - 'null'
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/FindingStatus'
     PatchModuleBody:
       type: object
       properties:
@@ -4107,6 +4267,18 @@ components:
           type:
           - string
           - 'null'
+    Severity:
+      type: string
+      description: |-
+        Finding severity. The codebase's ad-hoc string literals for this concept
+        only ever used low/medium/high; `Critical` is added as a 4th tier since
+        severity taxonomies conventionally have one and it costs nothing to
+        reserve the slot now.
+      enum:
+      - low
+      - medium
+      - high
+      - critical
     WorkflowFileDetail:
       type: object
       required:
@@ -4245,9 +4417,9 @@ components:
           - 'null'
 tags:
 - name: dashboard
-  description: Product, component, KPI, and activity aggregate endpoints
+  description: Pending approval, regression, and recent-activity aggregate endpoints
 - name: portfolio
-  description: Repository, module graph, and saved view endpoints
+  description: Repository dependency graph and saved view endpoints
 - name: findings
   description: Finding listing, creation, and state transition endpoints
 - name: change-requests

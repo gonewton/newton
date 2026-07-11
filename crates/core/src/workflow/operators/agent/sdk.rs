@@ -1,4 +1,3 @@
-use super::command::OUTPUT_CAPTURE_LIMIT_BYTES;
 use super::config::AgentOperatorConfig;
 use super::quota::{quota_signal_to_error, sdk_io_error};
 use super::signals::match_signals;
@@ -24,6 +23,13 @@ pub(super) struct SdkExecResult {
     pub(super) events_artifact_path: Option<String>,
     /// Aggregated token usage from the SDK run.
     pub(super) token_usage: Option<serde_json::Value>,
+    /// `Some(reason)` when a stdout/stderr capture write to the artifact
+    /// file was dropped (I/O failure) or skipped (`OUTPUT_CAPTURE_LIMIT_BYTES`
+    /// exceeded) at some point across the run's iterations — surfaced on the
+    /// task result so a truncated artifact isn't silently mistaken for the
+    /// whole output. See spec 074 S15.
+    pub(super) stdout_capture_warning: Option<String>,
+    pub(super) stderr_capture_warning: Option<String>,
 }
 
 /// Execute an AI engine via aikit-sdk, handling loop mode and signal matching.
@@ -63,6 +69,12 @@ pub(super) async fn execute_sdk_engine(
     let start = Instant::now();
     let mut fallback_token_usage: Option<serde_json::Value> = None;
     let mut primary_token_usage: Option<serde_json::Value> = None;
+    // Truncation causes (I/O failure or hitting `OUTPUT_CAPTURE_LIMIT_BYTES`)
+    // across all loop iterations; stdout/stderr artifacts are opened in
+    // append mode each iteration, so a truncation anywhere in the run is
+    // relevant to the whole result. See spec 074 S15.
+    let mut stdout_capture_warning: Option<String> = None;
+    let mut stderr_capture_warning: Option<String> = None;
     let events_artifact_rel = events_ndjson_path.strip_prefix(workspace_root).map_or_else(
         |_| events_ndjson_path.to_string_lossy().to_string(),
         |p| p.to_string_lossy().to_string(),
@@ -131,6 +143,13 @@ pub(super) async fn execute_sdk_engine(
         let mut stdout_bytes: usize = 0;
         let mut signal_found: Option<String> = None;
         let mut signal_data_found: HashMap<String, String> = HashMap::new();
+        // Per-iteration truncation cause; first cause encountered within
+        // this iteration wins (mirrors the command-engine path). Merged into
+        // the run-level `stdout_capture_warning`/`stderr_capture_warning`
+        // below once this iteration's events are fully processed. See spec
+        // 074 S15.
+        let mut iter_stdout_capture_warning: Option<String> = None;
+        let mut iter_stderr_capture_warning: Option<String> = None;
 
         for event in &events {
             let event_json = serde_json::to_string(event).map_err(|e| {
@@ -176,12 +195,17 @@ pub(super) async fn execute_sdk_engine(
             }
 
             if let Some(text) = extract_text_from_sdk_event(event) {
-                if matches!(event.stream, aikit_sdk::AgentEventStream::Stdout)
-                    && stdout_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES
-                {
-                    let _ = stdout_file.write_all(text.as_bytes());
-                    let _ = stdout_file.write_all(b"\n");
-                    stdout_bytes += text.len() + 1;
+                if matches!(event.stream, aikit_sdk::AgentEventStream::Stdout) {
+                    let (new_bytes, warning) = super::artifacts::write_capture_chunk(
+                        &mut stdout_file,
+                        stdout_path,
+                        stdout_bytes,
+                        &text,
+                        iter_stdout_capture_warning.take(),
+                        "stdout",
+                    );
+                    stdout_bytes = new_bytes;
+                    iter_stdout_capture_warning = warning;
                 }
 
                 if signal_found.is_none() {
@@ -191,6 +215,13 @@ pub(super) async fn execute_sdk_engine(
                     }
                 }
             }
+        }
+
+        if let Some(reason) = &iter_stdout_capture_warning {
+            super::artifacts::append_capture_truncation_marker(stdout_path, reason);
+        }
+        if iter_stdout_capture_warning.is_some() {
+            stdout_capture_warning = iter_stdout_capture_warning;
         }
 
         let stderr_events: Vec<&aikit_sdk::AgentEvent> = events
@@ -212,19 +243,29 @@ pub(super) async fn execute_sdk_engine(
             for event in &stderr_events {
                 match &event.payload {
                     aikit_sdk::AgentEventPayload::RawLine(s) => {
-                        if stderr_bytes + s.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
-                            let _ = stderr_file.write_all(s.as_bytes());
-                            let _ = stderr_file.write_all(b"\n");
-                            stderr_bytes += s.len() + 1;
-                        }
+                        let (new_bytes, warning) = super::artifacts::write_capture_chunk(
+                            &mut stderr_file,
+                            stderr_path,
+                            stderr_bytes,
+                            s,
+                            iter_stderr_capture_warning.take(),
+                            "stderr",
+                        );
+                        stderr_bytes = new_bytes;
+                        iter_stderr_capture_warning = warning;
                     }
                     aikit_sdk::AgentEventPayload::JsonLine(v) => {
                         let text = v.to_string();
-                        if stderr_bytes + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
-                            let _ = stderr_file.write_all(text.as_bytes());
-                            let _ = stderr_file.write_all(b"\n");
-                            stderr_bytes += text.len() + 1;
-                        }
+                        let (new_bytes, warning) = super::artifacts::write_capture_chunk(
+                            &mut stderr_file,
+                            stderr_path,
+                            stderr_bytes,
+                            &text,
+                            iter_stderr_capture_warning.take(),
+                            "stderr",
+                        );
+                        stderr_bytes = new_bytes;
+                        iter_stderr_capture_warning = warning;
                     }
                     aikit_sdk::AgentEventPayload::RawBytes(_) => {}
                     aikit_sdk::AgentEventPayload::StreamMessage(_) => {}
@@ -244,6 +285,12 @@ pub(super) async fn execute_sdk_engine(
                     // function turns any new SDK variant into a compile error.
                     _ => {}
                 }
+            }
+            if let Some(reason) = &iter_stderr_capture_warning {
+                super::artifacts::append_capture_truncation_marker(stderr_path, reason);
+            }
+            if iter_stderr_capture_warning.is_some() {
+                stderr_capture_warning = iter_stderr_capture_warning;
             }
         }
 
@@ -301,5 +348,7 @@ pub(super) async fn execute_sdk_engine(
         iteration,
         events_artifact_path: Some(events_artifact_path),
         token_usage,
+        stdout_capture_warning,
+        stderr_capture_warning,
     })
 }

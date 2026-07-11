@@ -29,7 +29,25 @@ pub struct ExpressionEngine {
 }
 
 impl Default for ExpressionEngine {
+    /// Deterministic engine: no `env()` function registered. This is what
+    /// every call site gets unless it explicitly opts in via
+    /// [`ExpressionEngine::new`] — see `WorkflowSettings::allow_env_fn`.
     fn default() -> Self {
+        Self::new(false)
+    }
+}
+
+impl ExpressionEngine {
+    /// Build an expression engine. When `allow_env_fn` is `true`, the Rhai
+    /// `env()` function is registered, reading `std::env::var` at
+    /// expression-eval time (same as `newton run`); empty string if unset.
+    /// When `false` (the default via [`ExpressionEngine::default`]), calling
+    /// `env()` in an expression fails to compile/evaluate ("function not
+    /// found"), keeping expression evaluation deterministic.
+    ///
+    /// This flag is opt-in per workflow via the schema's
+    /// `settings.allow_env_fn` — see spec 074 S8.
+    pub fn new(allow_env_fn: bool) -> Self {
         let mut engine = Engine::new_raw();
         engine.set_max_operations(50_000);
         engine.set_max_call_levels(64);
@@ -43,10 +61,12 @@ impl Default for ExpressionEngine {
                 .and_then(|s| s.to_str())
                 .map_or_else(|| "spec".to_string(), std::string::ToString::to_string)
         });
-        // Reads process env at eval time (same as `newton run`). Empty if unset.
-        engine.register_fn("env", |name: String| -> String {
-            std::env::var(&name).unwrap_or_default()
-        });
+        if allow_env_fn {
+            // Reads process env at eval time (same as `newton run`). Empty if unset.
+            engine.register_fn("env", |name: String| -> String {
+                std::env::var(&name).unwrap_or_default()
+            });
+        }
         // documenter.yaml: coerce trigger allowlist (JSON string or array of strings) to newline-separated paths.
         engine.register_fn("documenter_allowlist_str", documenter_allowlist_str);
         engine.on_print(|_| {});
@@ -287,5 +307,63 @@ mod documenter_allowlist_str_tests {
     fn missing_key_is_empty() {
         let v = eval_allowlist_expr(json!({}));
         assert_eq!(v, json!(""));
+    }
+}
+
+#[cfg(test)]
+mod env_fn_opt_in_tests {
+    use super::{EvaluationContext, ExpressionEngine};
+    use serde_json::json;
+
+    fn ctx() -> EvaluationContext {
+        EvaluationContext::new(json!({}), json!({}), json!({}))
+    }
+
+    /// Deterministic-by-default (spec 074 S8): `ExpressionEngine::default()`
+    /// (and therefore `ExpressionEngine::new(false)`) has no `env()`
+    /// function registered, so calling it fails at eval time rather than
+    /// silently reading process state.
+    #[test]
+    fn env_fn_errors_when_not_allowed() {
+        let engine = ExpressionEngine::default();
+        let err = engine
+            .evaluate(r#"env("NEWTON_S8_ENV_FN_TEST_VAR")"#, &ctx())
+            .expect_err("env() should not be registered by default");
+        assert!(
+            err.message.contains("env"),
+            "expected error to mention 'env', got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn env_fn_errors_when_explicitly_disallowed() {
+        let engine = ExpressionEngine::new(false);
+        engine
+            .evaluate(r#"env("NEWTON_S8_ENV_FN_TEST_VAR")"#, &ctx())
+            .expect_err("env() should not be registered when allow_env_fn=false");
+    }
+
+    /// Opt-in per workflow: `ExpressionEngine::new(true)` registers `env()`
+    /// exactly as the old always-on behavior did.
+    #[test]
+    fn env_fn_works_when_allowed() {
+        std::env::set_var("NEWTON_S8_ENV_FN_TEST_VAR", "hello");
+        let engine = ExpressionEngine::new(true);
+        let result = engine
+            .evaluate(r#"env("NEWTON_S8_ENV_FN_TEST_VAR")"#, &ctx())
+            .expect("env() should be available when allow_env_fn=true");
+        assert_eq!(result, json!("hello"));
+        std::env::remove_var("NEWTON_S8_ENV_FN_TEST_VAR");
+    }
+
+    #[test]
+    fn env_fn_returns_empty_string_for_unset_var_when_allowed() {
+        std::env::remove_var("NEWTON_S8_ENV_FN_TEST_VAR_UNSET");
+        let engine = ExpressionEngine::new(true);
+        let result = engine
+            .evaluate(r#"env("NEWTON_S8_ENV_FN_TEST_VAR_UNSET")"#, &ctx())
+            .expect("env() should evaluate even for unset vars");
+        assert_eq!(result, json!(""));
     }
 }

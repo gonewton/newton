@@ -156,7 +156,9 @@ fn run_diagnostics(content: &str) -> WorkflowFileDiagnostics {
         }
     };
     // Step 2: transform
-    let transformed = match transform::apply_default_pipeline(parsed) {
+    // Lint/validate-on-save (web UI): keep deterministic (no env()) so
+    // diagnostics don't depend on real env vars being set on the server.
+    let transformed = match transform::apply_default_pipeline(parsed, false) {
         Ok(doc) => doc,
         Err(e) => {
             return WorkflowFileDiagnostics {
@@ -224,9 +226,12 @@ pub(crate) async fn list_workflow_files(State(state): State<Arc<AppState>>) -> R
         Some(s) => s.clone(),
         None => return err_503(),
     };
-    match store.list() {
-        Ok(records) => {
-            let summaries: Vec<WorkflowFileSummary> = records
+    // S10: `store.list()` (blocking fs IO) and the per-record `extract_metadata`
+    // YAML parse are both synchronous CPU/IO work — run them together on the
+    // blocking pool so a large workflows dir can't stall the async runtime.
+    let result = tokio::task::spawn_blocking(move || {
+        store.list().map(|records| {
+            records
                 .iter()
                 .map(|r| {
                     let (metadata_name, description, tags) = extract_metadata(&r.content);
@@ -240,10 +245,14 @@ pub(crate) async fn list_workflow_files(State(state): State<Arc<AppState>>) -> R
                         content_hash: r.content_hash.clone(),
                     }
                 })
-                .collect();
-            (StatusCode::OK, Json(summaries)).into_response()
-        }
-        Err(e) => map_store_error(&e),
+                .collect::<Vec<WorkflowFileSummary>>()
+        })
+    })
+    .await;
+    match result {
+        Ok(Ok(summaries)) => (StatusCode::OK, Json(summaries)).into_response(),
+        Ok(Err(e)) => map_store_error(&e),
+        Err(e) => err_500(format!("workflow file store task panicked: {e}")),
     }
 }
 
@@ -267,21 +276,47 @@ pub(crate) async fn get_workflow_file(
         Some(s) => s.clone(),
         None => return err_503(),
     };
-    match store.read(&name) {
-        Ok(record) => {
+    // S10: `store.read()` (blocking fs IO) and `run_diagnostics` (sync YAML
+    // parse+validate+lint) are combined into a single blocking-pool hop
+    // rather than two separate `spawn_blocking` round-trips.
+    let result = tokio::task::spawn_blocking(move || {
+        store.read(&name).map(|record| {
             let diagnostics = run_diagnostics(&record.content);
-            let etag = format!("\"{}\"", record.content_hash);
-            let detail = WorkflowFileDetail {
-                name: record.name,
-                content: record.content,
-                content_hash: record.content_hash,
-                modified_at: record.modified_at,
-                diagnostics,
-            };
-            (StatusCode::OK, [(header::ETAG, etag)], Json(detail)).into_response()
-        }
-        Err(e) => map_store_error(&e),
-    }
+            (record, diagnostics)
+        })
+    })
+    .await;
+    let (record, diagnostics) = match result {
+        Ok(Ok(pair)) => pair,
+        Ok(Err(e)) => return map_store_error(&e),
+        Err(e) => return err_500(format!("workflow file store task panicked: {e}")),
+    };
+    let etag = format!("\"{}\"", record.content_hash);
+    let detail = WorkflowFileDetail {
+        name: record.name,
+        content: record.content,
+        content_hash: record.content_hash,
+        modified_at: record.modified_at,
+        diagnostics,
+    };
+    (StatusCode::OK, [(header::ETAG, etag)], Json(detail)).into_response()
+}
+
+/// Outcome of the blocking body of [`put_workflow_file`] — carries whatever
+/// the handler needs to build the eventual response, computed entirely on
+/// the blocking pool (S10).
+struct PutSuccess {
+    write_outcome: WriteOutcome,
+    content: String,
+    diagnostics: WorkflowFileDiagnostics,
+}
+
+/// Failure outcomes of the blocking body of [`put_workflow_file`], mirroring
+/// the distinct early-return branches the handler used to take inline.
+enum PutFailure {
+    InvalidYaml,
+    PreconditionRequired,
+    Store(crate::core::error::AppError),
 }
 
 #[utoipa::path(
@@ -310,11 +345,6 @@ pub(crate) async fn put_workflow_file(
         None => return err_503(),
     };
 
-    // Parse YAML first (422 if fails)
-    if serde_yaml::from_str::<WorkflowDocument>(&body.content).is_err() {
-        return err_validation("content is not parseable as a WorkflowDocument");
-    }
-
     // Extract If-Match from header or body
     let if_match: Option<String> = headers
         .get(header::IF_MATCH)
@@ -322,48 +352,87 @@ pub(crate) async fn put_workflow_file(
         .map(|s| s.trim_matches('"').to_string())
         .or_else(|| body.expected_hash.clone());
 
-    // Spec 074 B17 / settled decision 8: overwriting an *existing* file
-    // without a precondition is a lost-update hazard for concurrent
-    // editors of executable workflow programs. Unconditional CREATE of a
-    // brand-new file stays allowed, so only check existence (and only pay
-    // for the extra read) when the caller didn't supply either mechanism.
-    if if_match.is_none() {
-        // Fix 6 (B17): a cheap existence probe — `exists()` is a
-        // `validate_slug` + fs `metadata()` stat, not a full read + SHA-256
-        // hash of the (possibly large) file content that's about to be
-        // discarded either way.
-        match store.exists(&name) {
-            Ok(true) => {
-                return err_precondition_required(
-                    "workflow file already exists; overwriting it requires either an \
-                     If-Match header or an expected_hash body field carrying the \
-                     file's current content_hash (fetch it via GET first)",
-                )
-            }
-            Ok(false) => {
-                // No existing file: unconditional create is fine.
-            }
-            Err(e) => return map_store_error(&e),
-        }
-    }
+    let content = body.content;
 
-    match store.write(&name, &body.content, if_match.as_deref()) {
-        Ok(outcome) => {
-            let diagnostics = run_diagnostics(&body.content);
-            let (status, record) = match outcome {
+    // S10: the YAML parse-check, the conditional `exists()` probe, the
+    // `write()` call, and `run_diagnostics` are all synchronous CPU/IO work —
+    // run the whole sequence in a single blocking-pool hop instead of one
+    // `spawn_blocking` per operation. The write outcome must be in hand
+    // before diagnostics are computed anyway, so combining them here also
+    // saves an extra `.await` round-trip.
+    let blocking_result: Result<Result<PutSuccess, PutFailure>, tokio::task::JoinError> =
+        tokio::task::spawn_blocking(move || {
+            // Parse YAML first (422 if fails)
+            if serde_yaml::from_str::<WorkflowDocument>(&content).is_err() {
+                return Err(PutFailure::InvalidYaml);
+            }
+
+            // Spec 074 B17 / settled decision 8: overwriting an *existing* file
+            // without a precondition is a lost-update hazard for concurrent
+            // editors of executable workflow programs. Unconditional CREATE of a
+            // brand-new file stays allowed, so only check existence (and only pay
+            // for the extra read) when the caller didn't supply either mechanism.
+            if if_match.is_none() {
+                // Fix 6 (B17): a cheap existence probe — `exists()` is a
+                // `validate_slug` + fs `metadata()` stat, not a full read + SHA-256
+                // hash of the (possibly large) file content that's about to be
+                // discarded either way.
+                match store.exists(&name) {
+                    Ok(true) => return Err(PutFailure::PreconditionRequired),
+                    Ok(false) => {
+                        // No existing file: unconditional create is fine.
+                    }
+                    Err(e) => return Err(PutFailure::Store(e)),
+                }
+            }
+
+            match store.write(&name, &content, if_match.as_deref()) {
+                Ok(write_outcome) => {
+                    let diagnostics = run_diagnostics(&content);
+                    Ok(PutSuccess {
+                        write_outcome,
+                        content,
+                        diagnostics,
+                    })
+                }
+                Err(e) => Err(PutFailure::Store(e)),
+            }
+        })
+        .await;
+
+    let outcome = match blocking_result {
+        Ok(inner) => inner,
+        Err(e) => return err_500(format!("workflow file store task panicked: {e}")),
+    };
+
+    match outcome {
+        Ok(PutSuccess {
+            write_outcome,
+            content,
+            diagnostics,
+        }) => {
+            let (status, record) = match write_outcome {
                 WriteOutcome::Created(r) => (StatusCode::CREATED, r),
                 WriteOutcome::Updated(r) => (StatusCode::OK, r),
             };
             let detail = WorkflowFileDetail {
                 name: record.name,
-                content: body.content,
+                content,
                 content_hash: record.content_hash,
                 modified_at: record.modified_at,
                 diagnostics,
             };
             (status, Json(detail)).into_response()
         }
-        Err(e) => map_store_error(&e),
+        Err(PutFailure::InvalidYaml) => {
+            err_validation("content is not parseable as a WorkflowDocument")
+        }
+        Err(PutFailure::PreconditionRequired) => err_precondition_required(
+            "workflow file already exists; overwriting it requires either an \
+             If-Match header or an expected_hash body field carrying the \
+             file's current content_hash (fetch it via GET first)",
+        ),
+        Err(PutFailure::Store(e)) => map_store_error(&e),
     }
 }
 
@@ -387,9 +456,12 @@ pub(crate) async fn delete_workflow_file(
         Some(s) => s.clone(),
         None => return err_503(),
     };
-    match store.delete(&name) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => map_store_error(&e),
+    // S10: `store.delete()` is blocking fs IO — run it on the blocking pool.
+    let result = tokio::task::spawn_blocking(move || store.delete(&name)).await;
+    match result {
+        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(e)) => map_store_error(&e),
+        Err(e) => err_500(format!("workflow file store task panicked: {e}")),
     }
 }
 
@@ -407,10 +479,19 @@ pub(crate) async fn validate_workflow_file(
     State(_state): State<Arc<AppState>>,
     Json(body): Json<PutWorkflowFileBody>,
 ) -> Response {
-    // Validate is stateless — no file store required
-    if serde_yaml::from_str::<WorkflowDocument>(&body.content).is_err() {
-        return err_validation("content is not parseable as a WorkflowDocument");
+    // Validate is stateless — no file store required. S10: the YAML parse
+    // check and `run_diagnostics` (parse+validate+lint) are still
+    // synchronous CPU work, so run them on the blocking pool.
+    let result = tokio::task::spawn_blocking(move || {
+        if serde_yaml::from_str::<WorkflowDocument>(&body.content).is_err() {
+            return Err(());
+        }
+        Ok(run_diagnostics(&body.content))
+    })
+    .await;
+    match result {
+        Ok(Ok(diagnostics)) => (StatusCode::OK, Json(diagnostics)).into_response(),
+        Ok(Err(())) => err_validation("content is not parseable as a WorkflowDocument"),
+        Err(e) => err_500(format!("workflow file diagnostics task panicked: {e}")),
     }
-    let diagnostics = run_diagnostics(&body.content);
-    (StatusCode::OK, Json(diagnostics)).into_response()
 }

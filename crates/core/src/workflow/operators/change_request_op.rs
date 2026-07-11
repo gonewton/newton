@@ -6,8 +6,9 @@
 use crate::core::error::AppError;
 use crate::core::types::ErrorCategory;
 use crate::workflow::operator::{ExecutionContext, Operator};
+use crate::workflow::operators::llm_client::{AgentClient, RealAgentClient};
 use async_trait::async_trait;
-use newton_types::{BackendStore, CreateChangeRequestBody};
+use newton_types::{BackendStore, CreateChangeRequestBody, FindingStatus, Severity};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -17,6 +18,7 @@ use uuid::Uuid;
 pub struct ChangeRequestOperator {
     workspace_root: PathBuf,
     store: Arc<dyn BackendStore>,
+    agent_client: Arc<dyn AgentClient>,
 }
 
 impl ChangeRequestOperator {
@@ -26,6 +28,23 @@ impl ChangeRequestOperator {
         Self {
             workspace_root,
             store,
+            agent_client: Arc::new(RealAgentClient),
+        }
+    }
+
+    /// Test/injection seam (spec 074 S8): construct with a stubbed
+    /// `AgentClient` instead of the real `aikit_sdk`-backed one, so tests
+    /// can drive `execute`'s synthesis logic (including the graceful
+    /// LLM-unavailable fallback below) without a real agent subprocess.
+    pub fn with_agent_client(
+        workspace_root: PathBuf,
+        store: Arc<dyn BackendStore>,
+        agent_client: Arc<dyn AgentClient>,
+    ) -> Self {
+        Self {
+            workspace_root,
+            store,
+            agent_client,
         }
     }
 
@@ -82,6 +101,8 @@ pub struct ChangeRequestOutput {
     pub change_request_id: Option<String>,
 }
 
+/// Ranks the `risk` portfolio-metadata field (kept `String`, out of S3's
+/// scope — see spec 074 S3 commit message) for `rollup_risk` below.
 fn severity_rank(s: &str) -> u8 {
     match s {
         "critical" => 0,
@@ -89,6 +110,18 @@ fn severity_rank(s: &str) -> u8 {
         "medium" => 2,
         "low" => 3,
         _ => 4,
+    }
+}
+
+/// Ranks the typed `Finding.severity` enum. Exhaustive match — no `_` catch-all,
+/// since every `Severity` variant is now a real value (unlike the free-form
+/// `risk` string above, which can legitimately fail to parse).
+fn finding_severity_rank(s: &Severity) -> u8 {
+    match s {
+        Severity::Critical => 0,
+        Severity::High => 1,
+        Severity::Medium => 2,
+        Severity::Low => 3,
     }
 }
 
@@ -116,11 +149,19 @@ fn rollup_confidence(confidences: impl Iterator<Item = f64>) -> Option<f64> {
     }
 }
 
-fn is_open_status(status: &str) -> bool {
-    matches!(
-        status,
-        "awaiting_triage" | "triaged" | "approved_for_planning"
-    )
+/// See the identical, independently-duplicated `is_open_status` in
+/// `reconcile.rs` for the exhaustive-match rationale (spec 074 S3).
+fn is_open_status(status: &FindingStatus) -> bool {
+    match status {
+        FindingStatus::AwaitingTriage
+        | FindingStatus::Triaged
+        | FindingStatus::ApprovedForPlanning => true,
+        FindingStatus::Structured
+        | FindingStatus::Deferred
+        | FindingStatus::Rejected
+        | FindingStatus::Resolved
+        | FindingStatus::Blocked => false,
+    }
 }
 
 const CR_SYNTHESIS_SCHEMA: &str = r#"{
@@ -182,10 +223,16 @@ impl Operator for ChangeRequestOperator {
         let scope = &parsed.scope;
         let scope_id = &parsed.scope_id;
         let max_findings = parsed.max_findings;
+        // `min_severity` is a free-form DSL param (stays `Option<String>` — not
+        // in S3's scope), so parse it into `Severity` here at the seam; an
+        // unrecognized string falls back to rank 4, same as the pre-enum
+        // behavior (matches every real `Severity`, i.e. no-op filter).
         let min_severity_rank = parsed
             .min_severity
             .as_deref()
-            .map(severity_rank)
+            .and_then(|s| s.parse::<Severity>().ok())
+            .as_ref()
+            .map(finding_severity_rank)
             .unwrap_or(4);
 
         // R1: list findings with scope so we actually find them.
@@ -207,10 +254,10 @@ impl Operator for ChangeRequestOperator {
             .collect();
 
         if parsed.min_severity.is_some() {
-            open.retain(|f| severity_rank(&f.severity) <= min_severity_rank);
+            open.retain(|f| finding_severity_rank(&f.severity) <= min_severity_rank);
         }
 
-        open.sort_by_key(|f| severity_rank(&f.severity));
+        open.sort_by_key(|f| finding_severity_rank(&f.severity));
 
         let selected: Vec<&newton_types::FindingItem> =
             open.into_iter().take(max_findings).collect();
@@ -246,28 +293,33 @@ impl Operator for ChangeRequestOperator {
         let timeout_secs = parsed.synthesis_timeout_seconds;
         let workspace_root = self.workspace_root.clone();
 
-        let synthesis: Option<CrSynthesis> = tokio::task::spawn_blocking(move || {
-            let template = "You are a change request author. Synthesize a concise, actionable change request from the following open findings for scope {{scope}}.\n\n## Findings\n{{findings}}\n\n## Instructions\n- Write a short, specific title (under 120 chars) describing the overall action needed.\n- Write a markdown body summarizing the findings and why they matter. Reference severity.\n- Focus on what needs to change, not on describing the grader.\n\nReturn ONLY a JSON object matching the schema.";
+        const CR_SYNTHESIS_TEMPLATE: &str = "You are a change request author. Synthesize a concise, actionable change request from the following open findings for scope {{scope}}.\n\n## Findings\n{{findings}}\n\n## Instructions\n- Write a short, specific title (under 120 chars) describing the overall action needed.\n- Write a markdown body summarizing the findings and why they matter. Reference severity.\n- Focus on what needs to change, not on describing the grader.\n\nReturn ONLY a JSON object matching the schema.";
 
-                let runner = aikit_sdk::AgentRunner::new()
-                    .agent(&engine)
-                    .working_dir(&workspace_root.to_string_lossy())
-                    .timeout(std::time::Duration::from_secs(timeout_secs));
-                let runner = if let Some(ref m) = model { runner.model(m) } else { runner };
-
-                let pipeline = aikit_sdk::pipeline::Pipeline::new(template, CR_SYNTHESIS_SCHEMA)
-                    .max_retries(1);
-
-                match pipeline.run(&[("scope", &scope_label), ("findings", &findings_str)], runner) {
-                    Ok(pr) => serde_json::from_value::<CrSynthesis>(pr.data).ok(),
-                    Err(e) => {
-                        tracing::warn!("ChangeRequestOperator: LLM synthesis failed, using fallback: {e}");
-                        None
-                    }
-                }
-        })
-        .await
-        .unwrap_or(None);
+        // R2: run via the injected AgentClient (real impl: aikit Pipeline,
+        // wrapped in spawn_blocking — see llm_client.rs). Synthesis failure
+        // (including a stub explicitly returning Err) is tolerated here —
+        // unlike ReconcileOperator's adjudication, a change request can
+        // always fall back to a deterministic title/body below.
+        let synthesis: Option<CrSynthesis> = match self
+            .agent_client
+            .run_pipeline(
+                CR_SYNTHESIS_TEMPLATE,
+                CR_SYNTHESIS_SCHEMA,
+                &[("scope", &scope_label), ("findings", &findings_str)],
+                &engine,
+                model.as_deref(),
+                &workspace_root,
+                std::time::Duration::from_secs(timeout_secs),
+                1,
+            )
+            .await
+        {
+            Ok(v) => serde_json::from_value::<CrSynthesis>(v).ok(),
+            Err(e) => {
+                tracing::warn!("ChangeRequestOperator: LLM synthesis failed, using fallback: {e}");
+                None
+            }
+        };
 
         // Fallback synthesis when LLM is unavailable.
         let (title, body) = if let Some(s) = synthesis {
@@ -336,5 +388,168 @@ impl Operator for ChangeRequestOperator {
             "decision": "propose",
             "change_request_id": cr_id,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workflow::executor::{ExecutionOverrides, GraphHandle};
+    use crate::workflow::operator::{OperatorRegistry, StateView};
+    use newton_backend::SqliteBackendStore;
+    use newton_types::{CreateFindingBody, Origin};
+    use serde_json::json;
+
+    fn make_ctx() -> crate::workflow::operator::ExecutionContext {
+        crate::workflow::operator::ExecutionContext {
+            workspace_path: std::path::PathBuf::from("/tmp"),
+            execution_id: "test-exec".to_string(),
+            task_id: "test-task".to_string(),
+            iteration: 1,
+            state_view: StateView::new(json!({}), json!({}), json!({})),
+            graph: GraphHandle::new(std::collections::HashMap::new()),
+            workflow_file: std::path::PathBuf::from("/tmp/test.yaml"),
+            nesting_depth: 0,
+            execution_overrides: ExecutionOverrides {
+                parallel_limit: None,
+                max_time_seconds: None,
+                checkpoint_base_path: None,
+                artifact_base_path: None,
+                max_nesting_depth: None,
+                verbose: false,
+                sink: None,
+                pre_seed_nodes: true,
+                state_dir: None,
+            },
+            operator_registry: OperatorRegistry::new(),
+        }
+    }
+
+    /// Stub `AgentClient` returning a canned result (or a canned failure),
+    /// ignoring its inputs — proving `execute` uses the injected client
+    /// rather than a real LLM (spec 074 S8).
+    struct StubAgentClient {
+        response: Result<Value, String>,
+    }
+
+    #[async_trait]
+    impl AgentClient for StubAgentClient {
+        async fn run_pipeline(
+            &self,
+            _template: &str,
+            _schema: &str,
+            _vars: &[(&str, &str)],
+            _engine: &str,
+            _model: Option<&str>,
+            _workspace_root: &std::path::Path,
+            _timeout: std::time::Duration,
+            _max_retries: u32,
+        ) -> Result<Value, String> {
+            self.response.clone()
+        }
+    }
+
+    async fn seed_finding(store: &Arc<dyn BackendStore>, scope_id: &str) {
+        store
+            .create_finding(CreateFindingBody {
+                id: Uuid::new_v4().to_string(),
+                source: "test-grader".to_string(),
+                origin: Origin::System,
+                component_id: None,
+                module: Some(scope_id.to_string()),
+                repo_id: None,
+                kpi_id: None,
+                dimension: "tests".to_string(),
+                location: None,
+                fingerprint: format!("module:{scope_id}:tests:"),
+                title: "Coverage is low".to_string(),
+                why_it_matters: "matters".to_string(),
+                recommended_action: "fix it".to_string(),
+                severity: Severity::High,
+                risk: "high".to_string(),
+                confidence: Some(0.8),
+                evidence: None,
+                expected_value: None,
+                effort: None,
+                status: FindingStatus::AwaitingTriage,
+                last_seen_at: None,
+                depends_on: vec![],
+                blocks: vec![],
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn execute_uses_injected_agent_client_title_and_body() {
+        let store: Arc<dyn BackendStore> =
+            Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
+        seed_finding(&store, "mod-cr-001").await;
+
+        let stub = StubAgentClient {
+            response: Ok(json!({
+                "title": "Stub-authored change request",
+                "body": "Stub body text"
+            })),
+        };
+        let op = ChangeRequestOperator::with_agent_client(
+            std::path::PathBuf::from("/tmp"),
+            store.clone(),
+            Arc::new(stub),
+        );
+
+        let params = json!({
+            "scope": "module",
+            "scope_id": "mod-cr-001",
+        });
+
+        let result = op.execute(params, make_ctx()).await.unwrap();
+        assert_eq!(result["decision"], "propose");
+        let cr_id = result["change_request_id"].as_str().unwrap().to_string();
+
+        let cr = store.get_change_request(&cr_id).await.unwrap();
+        assert_eq!(
+            cr.title, "Stub-authored change request",
+            "must use the stub's synthesized title, not the deterministic fallback"
+        );
+        assert_eq!(cr.body.as_deref(), Some("Stub body text"));
+    }
+
+    /// Proves the graceful-fallback behavior (untouched by this seam) still
+    /// works when the injected `AgentClient` fails — same tolerance the
+    /// operator had for a real LLM outage, now directly testable.
+    #[tokio::test]
+    async fn execute_falls_back_when_agent_client_fails() {
+        let store: Arc<dyn BackendStore> =
+            Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
+        seed_finding(&store, "mod-cr-002").await;
+
+        let stub = StubAgentClient {
+            response: Err("stub: synthesis intentionally failing".to_string()),
+        };
+        let op = ChangeRequestOperator::with_agent_client(
+            std::path::PathBuf::from("/tmp"),
+            store.clone(),
+            Arc::new(stub),
+        );
+
+        let params = json!({
+            "scope": "module",
+            "scope_id": "mod-cr-002",
+        });
+
+        let result = op.execute(params, make_ctx()).await.unwrap();
+        assert_eq!(
+            result["decision"], "propose",
+            "synthesis failure must not fail the whole operator"
+        );
+        let cr_id = result["change_request_id"].as_str().unwrap().to_string();
+
+        let cr = store.get_change_request(&cr_id).await.unwrap();
+        assert!(
+            cr.title.starts_with("Address 1 finding"),
+            "must use the deterministic fallback title when the AgentClient fails, got: {}",
+            cr.title
+        );
     }
 }

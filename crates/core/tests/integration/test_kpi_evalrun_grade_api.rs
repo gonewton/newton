@@ -21,6 +21,75 @@ async fn create_test_state() -> AppState {
     AppState::new(operators, store_arc)
 }
 
+/// Spec 074 S5: proves `create_eval_run` already returns a clean
+/// `ERR_NOT_FOUND` JSON error for an unresolvable `scopeId` (checked inside
+/// `create_eval_run_db`'s `BEGIN IMMEDIATE` transaction in
+/// `crates/backend/src/store/eval.rs`), not a raw SQL error.
+#[tokio::test]
+async fn test_create_eval_run_bad_scope_fk_returns_clean_error() {
+    let state = create_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    let eval_run_body = json!({
+        "id": "evalrun.dk-review.repo.ghost-repo.2026-05-26T00:00:00Z",
+        "source": "dk-review",
+        "scope": "repo",
+        "scopeId": "ghost-repo",
+        "evaluatedAt": "2026-05-26T00:00:00Z"
+    });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/eval-runs")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&eval_run_body).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(err["code"], "ERR_NOT_FOUND");
+    assert!(
+        err["message"].as_str().unwrap().contains("ghost-repo"),
+        "{err}"
+    );
+}
+
+/// Spec 074 S5: proves `create_grade` already returns a clean `ERR_NOT_FOUND`
+/// JSON error for an unresolvable `runId` (checked inside `create_grade_db`'s
+/// `BEGIN IMMEDIATE` transaction), not a raw SQL error.
+#[tokio::test]
+async fn test_create_grade_bad_run_fk_returns_clean_error() {
+    let state = create_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+
+    let grade_body = json!({
+        "id": "grade.ghost-run.tests",
+        "runId": "ghost-run",
+        "kpiId": null,
+        "dimension": "tests",
+        "score": 60
+    });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/grades")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&grade_body).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(err["code"], "ERR_NOT_FOUND");
+    assert!(
+        err["message"].as_str().unwrap().contains("ghost-run"),
+        "{err}"
+    );
+}
+
 #[tokio::test]
 async fn test_grade_roundtrip_get_by_id() {
     let state = create_test_state().await;

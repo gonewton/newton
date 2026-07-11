@@ -1,6 +1,5 @@
 pub mod agent;
 pub mod assert_completed;
-pub mod assessment;
 pub mod barrier;
 pub mod change_request_op;
 pub mod command;
@@ -12,6 +11,7 @@ pub mod grader_agent;
 pub mod grader_command;
 pub mod human_approval;
 pub mod human_decision;
+pub mod llm_client;
 pub mod noop;
 pub mod read_control_file;
 pub mod reconcile;

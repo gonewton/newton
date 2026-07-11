@@ -1,38 +1,20 @@
+use crate::api::ok_json;
 use crate::api::state::AppState;
-use crate::api::{created_json, ok_json};
 use axum::{
-    extract::Json,
     extract::{Query, State},
     response::Response,
-    routing::{get, post},
+    routing::get,
     Router,
 };
 use newton_types::ApiError;
-use newton_types::CreateModuleDependencyBody;
 use serde::Deserialize;
 use std::sync::Arc;
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/repos", get(list_repos))
         .route("/repo-dependencies", get(list_repo_dependencies))
-        .route("/module-dependencies", get(list_module_dependencies))
-        .route("/module-dependencies", post(create_module_dependency))
         .route("/saved-views", get(list_saved_views))
         .with_state(state)
-}
-
-#[utoipa::path(
-    get,
-    path = "/repos",
-    tag = "portfolio",
-    responses(
-        (status = 200, description = "Repository list", body = [newton_types::RepoItem]),
-        (status = 500, description = "Internal error", body = ApiError)
-    )
-)]
-pub(crate) async fn list_repos(State(state): State<Arc<AppState>>) -> Response {
-    ok_json(state.backend.list_repos().await)
 }
 
 #[utoipa::path(
@@ -46,39 +28,6 @@ pub(crate) async fn list_repos(State(state): State<Arc<AppState>>) -> Response {
 )]
 pub(crate) async fn list_repo_dependencies(State(state): State<Arc<AppState>>) -> Response {
     ok_json(state.backend.list_repo_dependencies().await)
-}
-
-#[utoipa::path(
-    get,
-    path = "/module-dependencies",
-    tag = "portfolio",
-    responses(
-        (status = 200, description = "Module dependency list", body = [newton_types::ModuleDependencyItem]),
-        (status = 500, description = "Internal error", body = ApiError)
-    )
-)]
-pub(crate) async fn list_module_dependencies(State(state): State<Arc<AppState>>) -> Response {
-    ok_json(state.backend.list_module_dependencies().await)
-}
-
-#[utoipa::path(
-    post,
-    path = "/module-dependencies",
-    tag = "portfolio",
-    request_body = CreateModuleDependencyBody,
-    responses(
-        (status = 201, description = "Created module dependency", body = newton_types::ModuleDependencyItem),
-        (status = 404, description = "Module not found", body = ApiError),
-        (status = 409, description = "Dependency conflict", body = ApiError),
-        (status = 422, description = "Validation error", body = ApiError),
-        (status = 500, description = "Internal error", body = ApiError)
-    )
-)]
-pub(crate) async fn create_module_dependency(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<CreateModuleDependencyBody>,
-) -> Response {
-    created_json(state.backend.create_module_dependency(body).await)
 }
 
 #[derive(Debug, Deserialize)]

@@ -191,6 +191,13 @@ export interface WorkflowDefinition {
  * via the `definition` "WorkflowSettings".
  */
 export interface WorkflowSettings {
+  /**
+   * Opt-in flag for the Rhai `env()` expression function (spec 074 S8).
+   * `env()` reads `std::env::var` at expression-eval time, which makes
+   * param resolution environment-dependent and non-deterministic; it is
+   * therefore disabled unless a workflow explicitly sets this to `true`.
+   */
+  allow_env_fn?: boolean;
   artifact_storage?: ArtifactStorageSettings;
   checkpoint?: CheckpointSettings;
   command_operator?: CommandOperatorSettings;

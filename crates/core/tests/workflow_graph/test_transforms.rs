@@ -35,7 +35,7 @@ workflow:
 "#;
     let file = write_workflow(workflow);
     let raw = schema::parse_workflow(file.path()).expect("parse");
-    let transformed = transform::apply_default_pipeline(raw).expect("transform");
+    let transformed = transform::apply_default_pipeline(raw, false).expect("transform");
     assert!(transformed
         .workflow
         .tasks()
@@ -71,7 +71,7 @@ workflow:
 "#;
     let file = write_workflow(workflow);
     let raw = schema::parse_workflow(file.path()).expect("parse");
-    let err = transform::apply_default_pipeline(raw).expect_err("collision should fail");
+    let err = transform::apply_default_pipeline(raw, false).expect_err("collision should fail");
     assert_eq!(err.code, "WFG-MACRO-001");
 }
 
@@ -103,7 +103,7 @@ workflow:
 "#;
     let file = write_workflow(workflow);
     let raw = schema::parse_workflow(file.path()).expect("parse");
-    let transformed = transform::apply_default_pipeline(raw).expect("transform");
+    let transformed = transform::apply_default_pipeline(raw, false).expect("transform");
     assert!(transformed.workflow.tasks().all(|task| task.id != "maybe"));
     let keep = transformed
         .workflow
@@ -139,7 +139,7 @@ workflow:
 "#;
     let file = write_workflow(workflow);
     let raw = schema::parse_workflow(file.path()).expect("parse");
-    let err = transform::apply_default_pipeline(raw).expect_err("tasks.* in include_if");
+    let err = transform::apply_default_pipeline(raw, false).expect_err("tasks.* in include_if");
     assert_eq!(err.code, "WFG-INCLUDE-001");
 }
 
@@ -171,7 +171,7 @@ workflow:
 "#;
     let file = write_workflow(workflow);
     let raw = schema::parse_workflow(file.path()).expect("parse");
-    let transformed = transform::apply_default_pipeline(raw).expect("transform");
+    let transformed = transform::apply_default_pipeline(raw, false).expect("transform");
     let start = transformed
         .workflow
         .tasks()
@@ -202,7 +202,7 @@ workflow:
 "#;
     let file = write_workflow(workflow);
     let raw = schema::parse_workflow(file.path()).expect("parse");
-    let err = transform::apply_default_pipeline(raw).expect_err("invalid template");
+    let err = transform::apply_default_pipeline(raw, false).expect_err("invalid template");
     assert_eq!(err.code, "WFG-TPL-001");
 }
 
@@ -229,8 +229,87 @@ workflow:
 "#;
     let file = write_workflow(workflow);
     let raw = schema::parse_workflow(file.path()).expect("parse");
-    let err = transform::apply_default_pipeline(raw).expect_err("invalid expr");
+    let err = transform::apply_default_pipeline(raw, false).expect_err("invalid expr");
     assert_eq!(err.code, "WFG-LINT-005");
+}
+
+/// Regression test for spec 074 S8 follow-up (tranche 4 code review): the
+/// `allow_env_fn` flag must reach the transforms that *evaluate* expressions
+/// at transform time (here, `include_if`), not just the task `$expr` engine
+/// used later during execution. Before the fix, `apply_default_pipeline`
+/// always built `IncludeIfTransform`'s engine via `ExpressionEngine::default()`
+/// (env() unregistered), so this workflow failed to load even though it opts
+/// in via `settings.allow_env_fn: true`.
+#[test]
+fn f9_include_if_env_fn_allowed_when_opted_in() {
+    std::env::set_var("NEWTON_S8_PIPELINE_TEST_VAR", "1");
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: start
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 20
+    allow_env_fn: true
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+    - id: maybe
+      operator: NoOpOperator
+      include_if:
+        $expr: "env(\"NEWTON_S8_PIPELINE_TEST_VAR\") == \"1\""
+      params: {}
+"#;
+    let file = write_workflow(workflow);
+    let raw = schema::parse_workflow(file.path()).expect("parse");
+    let allow_env_fn = raw.workflow.settings.allow_env_fn;
+    assert!(allow_env_fn, "fixture must opt in to allow_env_fn");
+    let transformed =
+        transform::apply_default_pipeline(raw, allow_env_fn).expect("transform should succeed");
+    assert!(transformed.workflow.tasks().any(|task| task.id == "maybe"));
+    std::env::remove_var("NEWTON_S8_PIPELINE_TEST_VAR");
+}
+
+/// Determinism-by-default is preserved: the same `env()`-in-`include_if`
+/// workflow still fails when `allow_env_fn` is left at its default `false`
+/// (or the caller passes `false`, as validation/lint call sites do).
+#[test]
+fn f9b_include_if_env_fn_rejected_without_opt_in() {
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: start
+    max_time_seconds: 30
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 20
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+    - id: maybe
+      operator: NoOpOperator
+      include_if:
+        $expr: "env(\"NEWTON_S8_PIPELINE_TEST_VAR\") == \"1\""
+      params: {}
+"#;
+    let file = write_workflow(workflow);
+    let raw = schema::parse_workflow(file.path()).expect("parse");
+    let allow_env_fn = raw.workflow.settings.allow_env_fn;
+    assert!(!allow_env_fn, "fixture must NOT opt in by default");
+    let err = transform::apply_default_pipeline(raw, allow_env_fn)
+        .expect_err("env() must stay unavailable without opt-in");
+    assert_eq!(err.code, "WFG-TPL-001");
 }
 
 #[test]
@@ -262,8 +341,8 @@ workflow:
     let file = write_workflow(workflow);
     let raw_a = schema::parse_workflow(file.path()).expect("parse");
     let raw_b = schema::parse_workflow(file.path()).expect("parse");
-    let a = transform::apply_default_pipeline(raw_a).expect("transform a");
-    let b = transform::apply_default_pipeline(raw_b).expect("transform b");
+    let a = transform::apply_default_pipeline(raw_a, false).expect("transform a");
+    let b = transform::apply_default_pipeline(raw_b, false).expect("transform b");
     let a_json = serde_json::to_string(&a).expect("serialize");
     let b_json = serde_json::to_string(&b).expect("serialize");
     assert_eq!(a_json, b_json);

@@ -5,7 +5,15 @@ use crate::workflow::schema::WorkflowDocument;
 use crate::workflow::transform::WorkflowTransform;
 use serde_json::{Map, Value};
 
-pub struct TemplateStringTransform;
+pub struct TemplateStringTransform {
+    allow_env_fn: bool,
+}
+
+impl TemplateStringTransform {
+    pub fn new(allow_env_fn: bool) -> Self {
+        Self { allow_env_fn }
+    }
+}
 
 impl WorkflowTransform for TemplateStringTransform {
     fn name(&self) -> &'static str {
@@ -14,7 +22,7 @@ impl WorkflowTransform for TemplateStringTransform {
 
     fn transform(&self, doc: WorkflowDocument) -> Result<WorkflowDocument, AppError> {
         let mut doc = doc;
-        let engine = ExpressionEngine::default();
+        let engine = ExpressionEngine::new(self.allow_env_fn);
         let triggers = doc.triggers.as_ref().map_or_else(
             || Value::Object(Map::new()),
             |trigger| trigger.payload.clone(),

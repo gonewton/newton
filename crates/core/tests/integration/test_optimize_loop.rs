@@ -14,6 +14,8 @@ use newton_backend::{
     BackendStore, CreateChangeRequestBody, CreateComponentBody, CreateFindingBody, CreatePlanBody,
     CreateProductBody, CreateRepoBody, SqliteBackendStore,
 };
+use newton_types::{FindingStatus, Origin, Severity};
+use std::str::FromStr;
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -265,7 +267,7 @@ async fn test_optimize_loop_tier1_deterministic() {
                 .create_finding(CreateFindingBody {
                     id: fingerprint.clone(),
                     source: "seed-grader".to_string(),
-                    origin: "system".to_string(),
+                    origin: Origin::System,
                     component_id: None,
                     module: None,
                     repo_id: Some(repo_id.clone()),
@@ -279,13 +281,16 @@ async fn test_optimize_loop_tier1_deterministic() {
                         .as_str()
                         .unwrap_or("")
                         .to_string(),
-                    severity: obs["severity"].as_str().unwrap_or("medium").to_string(),
+                    severity: obs["severity"]
+                        .as_str()
+                        .and_then(|s| Severity::from_str(s).ok())
+                        .unwrap_or(Severity::Medium),
                     risk: "medium".to_string(),
                     confidence: obs["confidence"].as_f64(),
                     evidence: None,
                     expected_value: None,
                     effort: None,
-                    status: "awaiting_triage".to_string(),
+                    status: FindingStatus::AwaitingTriage,
                     last_seen_at: Some(now.clone()),
                     depends_on: vec![],
                     blocks: vec![],
@@ -316,7 +321,7 @@ async fn test_optimize_loop_tier1_deterministic() {
                     .patch_finding(
                         &f.id,
                         newton_backend::PatchFindingBody {
-                            status: Some("resolved".to_string()),
+                            status: Some(FindingStatus::Resolved),
                             ..Default::default()
                         },
                     )
@@ -329,7 +334,9 @@ async fn test_optimize_loop_tier1_deterministic() {
                 .list_findings(None, Some("repo".to_string()), Some(repo_id.clone()))
                 .await
                 .unwrap();
-            all.iter().filter(|f| f.status == "resolved").count()
+            all.iter()
+                .filter(|f| f.status == FindingStatus::Resolved)
+                .count()
         };
 
         // ── Change Request synthesis ──────────────────────────────────────
