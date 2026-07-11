@@ -356,7 +356,7 @@ impl WorkflowRuntime {
         }
 
         let final_state = self.state.read().await;
-        let (final_exec_status, maybe_err) =
+        let (final_exec_status, maybe_err, stopped_via_terminal_task) =
             self.compute_final_status(&final_state, terminal_stop_triggered);
         let mut final_failed_records: Vec<(String, TaskRunRecord)> = final_state
             .completed
@@ -368,6 +368,7 @@ impl WorkflowRuntime {
         drop(final_state);
 
         self.workflow_execution.status = final_exec_status;
+        self.workflow_execution.terminal_stop = stopped_via_terminal_task;
         self.workflow_execution.completed_at = Some(Utc::now());
         if let Some(err) = maybe_err {
             if err.code == "WFG-EXEC-001" && !final_failed_records.is_empty() {
@@ -541,11 +542,22 @@ impl WorkflowRuntime {
         })
     }
 
+    /// Determines the final `WorkflowExecutionStatus` for a completed run.
+    ///
+    /// `terminal_stop` reports whether the run loop broke early because a
+    /// task with `terminal:` completed while `completion.stop_on_terminal`
+    /// was enabled (see [`Self::handle_terminal_tasks`]), rather than
+    /// because the ready queue emptied out normally. The returned bool is
+    /// `true` only when the run both stopped that way *and* is otherwise
+    /// classified as `Completed` — an early stop that also fails goal gates
+    /// or hits a `terminal: failure` task is already fully explained by the
+    /// `Failed` status and its error code, so the distinction adds no new
+    /// information in that case (spec 074, P14).
     fn compute_final_status(
         &self,
         state: &ExecutionState,
-        _terminal_stop: bool,
-    ) -> (WorkflowExecutionStatus, Option<AppError>) {
+        terminal_stop: bool,
+    ) -> (WorkflowExecutionStatus, Option<AppError>, bool) {
         let completion = &self.graph_settings.completion;
 
         let goal_gate_tasks: Vec<WorkflowTask> = self
@@ -589,7 +601,7 @@ impl WorkflowRuntime {
                     format!("goal gates not passed: {}", failing_gates.join(", ")),
                 )
                 .with_code("WFG-GATE-001");
-                return (WorkflowExecutionStatus::Failed, Some(err));
+                return (WorkflowExecutionStatus::Failed, Some(err), false);
             }
         }
 
@@ -604,7 +616,7 @@ impl WorkflowRuntime {
                 "workflow failed: one or more tasks failed",
             )
             .with_code("WFG-EXEC-001");
-            return (WorkflowExecutionStatus::Failed, Some(err));
+            return (WorkflowExecutionStatus::Failed, Some(err), false);
         }
 
         let mut terminal_failure_task: Option<&str> = None;
@@ -622,10 +634,10 @@ impl WorkflowRuntime {
                 format!("workflow terminated at failure terminal task '{task_id}'"),
             )
             .with_code("WFG-EXEC-002");
-            return (WorkflowExecutionStatus::Failed, Some(err));
+            return (WorkflowExecutionStatus::Failed, Some(err), false);
         }
 
-        (WorkflowExecutionStatus::Completed, None)
+        (WorkflowExecutionStatus::Completed, None, terminal_stop)
     }
 
     async fn process_frontier(

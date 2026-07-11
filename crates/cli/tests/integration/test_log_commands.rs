@@ -58,6 +58,7 @@ fn make_execution(id: Uuid, workflow: &str, status: WorkflowExecutionStatus) -> 
         trigger_payload: json!({}),
         task_runs: vec![],
         warnings: vec![],
+        terminal_stop: false,
     }
 }
 

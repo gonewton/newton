@@ -164,6 +164,101 @@ workflow:
     assert!(results.iter().any(|result| result.code == "WFG-LINT-008"));
 }
 
+#[test]
+fn lint_116_context_fidelity_non_default_warns() {
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: start
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    model_stylesheet:
+      model: test-model
+      context_fidelity: full
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+    let file = NamedTempFile::new().expect("temp file");
+    fs::write(file.path(), workflow).expect("write workflow");
+    let document = schema::parse_workflow(file.path()).expect("parse workflow");
+    let results = LintRegistry::new().run(&document);
+    let hit = results
+        .iter()
+        .find(|r| r.code == "WFG-LINT-116")
+        .expect("expected WFG-LINT-116 for non-default context_fidelity");
+    assert_eq!(hit.severity, LintSeverity::Warning);
+    assert!(hit.message.contains("no effect"));
+}
+
+#[test]
+fn lint_116_no_false_positive_for_default_context_fidelity() {
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: start
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+    model_stylesheet:
+      model: test-model
+      context_fidelity: summary
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+    let file = NamedTempFile::new().expect("temp file");
+    fs::write(file.path(), workflow).expect("write workflow");
+    let document = schema::parse_workflow(file.path()).expect("parse workflow");
+    let results = LintRegistry::new().run(&document);
+    assert!(
+        !results.iter().any(|r| r.code == "WFG-LINT-116"),
+        "expected no WFG-LINT-116 for default context_fidelity, got: {results:?}"
+    );
+}
+
+#[test]
+fn lint_116_no_false_positive_without_model_stylesheet() {
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: start
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 3
+    max_workflow_iterations: 10
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+    let file = NamedTempFile::new().expect("temp file");
+    fs::write(file.path(), workflow).expect("write workflow");
+    let document = schema::parse_workflow(file.path()).expect("parse workflow");
+    let results = LintRegistry::new().run(&document);
+    assert!(
+        !results.iter().any(|r| r.code == "WFG-LINT-116"),
+        "expected no WFG-LINT-116 without model_stylesheet, got: {results:?}"
+    );
+}
+
 fn severity_rank(severity: LintSeverity) -> u8 {
     match severity {
         LintSeverity::Error => 3,

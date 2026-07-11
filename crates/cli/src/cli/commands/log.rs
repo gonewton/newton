@@ -363,6 +363,9 @@ fn log_show_text(
     println!("Execution: {}", execution.execution_id);
     println!("Workflow:  {}", execution.workflow_file);
     println!("Status:    {}", execution.status.as_str());
+    if execution.terminal_stop {
+        println!("           (stopped early via a `terminal:` task)");
+    }
     println!(
         "Started:   {}",
         execution.started_at.format("%Y-%m-%d %H:%M:%S UTC")

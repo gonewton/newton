@@ -46,6 +46,28 @@ workflow:
       params: {}
 "#;
 
+// P14: single task marked `terminal: success` — stop_on_terminal (default
+// true) should cause the run loop to break early via handle_terminal_tasks,
+// which compute_final_status must surface as `terminal_stop: true`.
+const TERMINAL_SUCCESS_WORKFLOW: &str = r#"
+version: 2.0
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: start
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 5
+    max_workflow_iterations: 10
+  tasks:
+    - id: start
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+"#;
+
 const GOAL_GATE_GROUP_WORKFLOW: &str = r#"
 version: 2.0
 mode: workflow_graph
@@ -986,5 +1008,102 @@ async fn test_workflow_instance_definition_non_null_for_cli_run() {
         !body["definition"].is_null(),
         "WorkflowInstance.definition must be non-null in the workflow-started notification; got: {:?}",
         body["definition"]
+    );
+}
+
+// ── P14: wire `_terminal_stop` into the persisted final status ────────────
+
+#[tokio::test]
+async fn terminal_stop_true_when_terminal_task_completes() {
+    let workspace = tempdir().expect("workspace");
+    let workflow_file = write_workflow(TERMINAL_SUCCESS_WORKFLOW);
+    let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+    let overrides = ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
+        max_nesting_depth: None,
+        verbose: false,
+        sink: None,
+        pre_seed_nodes: true,
+        state_dir: None,
+    };
+
+    let summary = executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry,
+        workspace.path().to_path_buf(),
+        overrides,
+    )
+    .await
+    .expect("run with a terminal:success task succeeded");
+
+    let execution_path = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(summary.execution_id.to_string())
+        .join("execution.json");
+    let execution_value = read_json(&execution_path);
+
+    assert_eq!(execution_value["status"], Value::String("Completed".into()));
+    assert_eq!(
+        execution_value["terminal_stop"],
+        Value::Bool(true),
+        "a run that stopped via a `terminal:` task must report terminal_stop=true, got: {execution_value}"
+    );
+}
+
+#[tokio::test]
+async fn terminal_stop_false_when_no_terminal_task_configured() {
+    // RESUME_WORKFLOW's tasks have no `terminal:` field; the run completes
+    // because the ready queue empties out naturally, not because
+    // handle_terminal_tasks broke the loop early.
+    let workspace = tempdir().expect("workspace");
+    let workflow_file = write_workflow(RESUME_WORKFLOW);
+    let document = schema::load_workflow(workflow_file.path()).expect("valid workflow");
+    let settings = document.workflow.settings.clone();
+    let registry = build_registry(workspace.path().to_path_buf(), settings);
+    let overrides = ExecutionOverrides {
+        parallel_limit: None,
+        max_time_seconds: None,
+        checkpoint_base_path: None,
+        artifact_base_path: None,
+        max_nesting_depth: None,
+        verbose: false,
+        sink: None,
+        pre_seed_nodes: true,
+        state_dir: None,
+    };
+
+    let summary = executor::execute_workflow(
+        document,
+        workflow_file.path().to_path_buf(),
+        registry,
+        workspace.path().to_path_buf(),
+        overrides,
+    )
+    .await
+    .expect("run without any terminal task succeeded");
+
+    let execution_path = workspace
+        .path()
+        .join(".newton")
+        .join("state")
+        .join("workflows")
+        .join(summary.execution_id.to_string())
+        .join("execution.json");
+    let execution_value = read_json(&execution_path);
+
+    assert_eq!(execution_value["status"], Value::String("Completed".into()));
+    assert_eq!(
+        execution_value["terminal_stop"],
+        Value::Bool(false),
+        "a run that completed via an emptied ready queue must report terminal_stop=false, got: {execution_value}"
     );
 }

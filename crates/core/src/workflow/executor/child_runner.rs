@@ -251,6 +251,7 @@ pub(super) fn build_workflow_runtime(
         trigger_payload: trigger_payload.clone(),
         task_runs: Vec::new(),
         warnings: Vec::new(),
+        terminal_stop: false,
     };
     let artifact_store =
         ArtifactStore::new(workspace_root.clone(), &graph_settings.artifact_storage);

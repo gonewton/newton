@@ -1,5 +1,5 @@
 use super::super::{LintResult, LintSeverity, WorkflowLintRule};
-use crate::workflow::schema::WorkflowDocument;
+use crate::workflow::schema::{ContextFidelity, WorkflowDocument};
 use regex::Regex;
 use serde_json::Value;
 
@@ -212,6 +212,39 @@ impl WorkflowLintRule for AgentNamedDriverNoPromptRule {
     }
 }
 
+struct ModelStylesheetContextFidelityNoEffectRule;
+
+impl WorkflowLintRule for ModelStylesheetContextFidelityNoEffectRule {
+    fn validate(&self, workflow: &WorkflowDocument) -> Vec<LintResult> {
+        let mut out = Vec::new();
+
+        let Some(stylesheet) = workflow.workflow.settings.model_stylesheet.as_ref() else {
+            return out;
+        };
+        // ContextFidelity::Summary is the default and has no distinguishable
+        // effect anyway; only warn when a non-default variant is set, since
+        // that's the case where an author might reasonably expect a change
+        // in behavior that does not actually happen.
+        if matches!(
+            stylesheet.context_fidelity,
+            ContextFidelity::Full | ContextFidelity::Truncate
+        ) {
+            out.push(LintResult::new(
+                "WFG-LINT-116",
+                LintSeverity::Warning,
+                "settings.model_stylesheet.context_fidelity is not yet implemented \
+                 and has no effect on agent execution"
+                    .to_string(),
+                None,
+                Some(
+                    "remove context_fidelity or leave it unset until the feature lands".to_string(),
+                ),
+            ));
+        }
+        out
+    }
+}
+
 pub(super) fn rules() -> Vec<Box<dyn WorkflowLintRule>> {
     vec![
         Box::new(AgentNoEngineRule),
@@ -219,5 +252,6 @@ pub(super) fn rules() -> Vec<Box<dyn WorkflowLintRule>> {
         Box::new(AgentUnboundedLoopRule),
         Box::new(AgentCommandNoEngineCommandRule),
         Box::new(AgentNamedDriverNoPromptRule),
+        Box::new(ModelStylesheetContextFidelityNoEffectRule),
     ]
 }
