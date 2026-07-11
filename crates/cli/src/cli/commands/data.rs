@@ -165,105 +165,45 @@ pub async fn data(args: DataArgs) -> anyhow::Result<()> {
     if args.dry_run {
         if matches!(args.verb, DataVerb::Post | DataVerb::Put | DataVerb::Patch) {
             if let Some(ref v) = body_value {
-                match resource {
+                // Per-resource FK-existence checks live in
+                // `newton_backend::service` (spec 074 S5) — this block just
+                // extracts the relevant field(s) from the raw JSON payload
+                // (a dry run validates whatever FK fields are present
+                // without requiring the rest of the payload's required
+                // fields to be filled in) and reports a failure the same way
+                // a real write would.
+                let fk_check = match resource {
                     "component" | "components" => {
-                        if let Some(product_id) = v.get("productId").and_then(|p| p.as_str()) {
-                            if let Err(e) = store.get_product(product_id).await {
-                                return Err(CliExit::new(
-                                    1,
-                                    format!(
-                                        "[dry-run] FK validation failed: productId '{}' not found: {}",
-                                        product_id, e.message
-                                    ),
-                                )
-                                .into());
-                            }
-                        }
+                        let product_id = v.get("productId").and_then(|p| p.as_str());
+                        newton_backend::service::validate_component_fks(&store, product_id).await
                     }
                     "repo" | "repos" => {
-                        if let Some(component_id) = v.get("componentId").and_then(|c| c.as_str()) {
-                            if let Err(e) = store.get_component(component_id).await {
-                                return Err(CliExit::new(1, format!("[dry-run] FK validation failed: componentId '{}' not found: {}", component_id, e.message)).into());
-                            }
-                        }
+                        let component_id = v.get("componentId").and_then(|c| c.as_str());
+                        newton_backend::service::validate_repo_fks(&store, component_id).await
                     }
                     "module" | "modules" => {
-                        if let Some(repo_id) = v.get("repoId").and_then(|r| r.as_str()) {
-                            if let Err(e) = store.get_repo(repo_id).await {
-                                return Err(CliExit::new(
-                                    1,
-                                    format!(
-                                        "[dry-run] FK validation failed: repoId '{}' not found: {}",
-                                        repo_id, e.message
-                                    ),
-                                )
-                                .into());
-                            }
-                        }
+                        let repo_id = v.get("repoId").and_then(|r| r.as_str());
+                        newton_backend::service::validate_module_fks(&store, repo_id).await
                     }
                     "eval-run" | "eval-runs" => {
-                        let scope = v.get("scope").and_then(|s| s.as_str()).unwrap_or("");
-                        let scope_id = v.get("scopeId").and_then(|s| s.as_str()).unwrap_or("");
-                        if scope.is_empty() || scope_id.is_empty() {
-                            return Err(CliExit::new(
-                                1,
-                                "[dry-run] FK validation failed: scope and scopeId are required",
-                            )
-                            .into());
-                        }
-                        let fk_result = match scope {
-                            "product" => store.get_product(scope_id).await.map(|_| ()),
-                            "component" => store.get_component(scope_id).await.map(|_| ()),
-                            "repo" => store.get_repo(scope_id).await.map(|_| ()),
-                            "module" => store.get_module(scope_id).await.map(|_| ()),
-                            _ => Err(newton_backend::err_validation(
-                                "scope must be one of: product, component, repo, module",
-                            )),
-                        };
-                        if let Err(e) = fk_result {
-                            return Err(CliExit::new(
-                                1,
-                                format!(
-                                    "[dry-run] FK validation failed: {} '{}' not found: {}",
-                                    scope, scope_id, e.message
-                                ),
-                            )
-                            .into());
-                        }
+                        let scope = v.get("scope").and_then(|s| s.as_str());
+                        let scope_id = v.get("scopeId").and_then(|s| s.as_str());
+                        newton_backend::service::validate_eval_run_fks(&store, scope, scope_id)
+                            .await
                     }
                     "grade" | "grades" => {
                         let run_id = v.get("runId").and_then(|r| r.as_str());
-                        let Some(run_id) = run_id else {
-                            return Err(CliExit::new(
-                                1,
-                                "[dry-run] FK validation failed: runId is required",
-                            )
-                            .into());
-                        };
-                        if let Err(e) = store.get_eval_run(run_id).await {
-                            return Err(CliExit::new(
-                                1,
-                                format!(
-                                    "[dry-run] FK validation failed: runId '{}' not found: {}",
-                                    run_id, e.message
-                                ),
-                            )
-                            .into());
-                        }
-                        if let Some(kpi_id) = v.get("kpiId").and_then(|k| k.as_str()) {
-                            if let Err(e) = store.get_kpi(kpi_id).await {
-                                return Err(CliExit::new(
-                                    1,
-                                    format!(
-                                        "[dry-run] FK validation failed: kpiId '{}' not found: {}",
-                                        kpi_id, e.message
-                                    ),
-                                )
-                                .into());
-                            }
-                        }
+                        let kpi_id = v.get("kpiId").and_then(|k| k.as_str());
+                        newton_backend::service::validate_grade_fks(&store, run_id, kpi_id).await
                     }
-                    _ => {}
+                    _ => Ok(()),
+                };
+                if let Err(e) = fk_check {
+                    return Err(CliExit::new(
+                        1,
+                        format!("[dry-run] FK validation failed: {}", e.message),
+                    )
+                    .into());
                 }
                 eprintln!("[dry-run] validated payload (no DB write):");
                 println!("{}", serde_json::to_string_pretty(v)?);

@@ -249,6 +249,43 @@ async fn test_create_component_success() {
     assert!(item["id"].is_string());
 }
 
+/// Spec 074 S5: proves `create_component` already returns a clean
+/// `ERR_NOT_FOUND` JSON error (via `create_component_db`'s FK pre-check
+/// in `crates/backend/src/store/catalog.rs`) for an unresolvable
+/// `productId` — not a raw SQL constraint-violation error.
+#[tokio::test]
+async fn test_create_component_bad_product_fk_returns_clean_error() {
+    let state = create_catalog_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+    let body = json!({
+        "name": "Orphan Component",
+        "productId": "ghost-product",
+        "domain": "backend",
+        "owner": "team-a",
+        "criticality": "high",
+        "autonomy": "full",
+        "trend": 0,
+        "lastEval": "2026-01-01T00:00:00Z"
+    });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/components")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(err["code"], "ERR_NOT_FOUND");
+    assert!(
+        err["message"].as_str().unwrap().contains("product"),
+        "{err}"
+    );
+}
+
 #[tokio::test]
 async fn test_put_component_success() {
     let state = create_catalog_test_state().await;
@@ -440,6 +477,40 @@ async fn test_create_repo_success() {
     assert!(item["id"].is_string());
 }
 
+/// Spec 074 S5: proves `create_repo` already returns a clean `ERR_NOT_FOUND`
+/// JSON error for an unresolvable `componentId`, not a raw SQL error.
+#[tokio::test]
+async fn test_create_repo_bad_component_fk_returns_clean_error() {
+    let state = create_catalog_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+    let body = json!({
+        "name": "orphan-repo",
+        "componentId": "ghost-component",
+        "owner": "team-a",
+        "criticality": "high",
+        "autonomy": "full",
+        "execStatus": "idle",
+        "lastEval": "2026-01-01T00:00:00Z"
+    });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/repos")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(err["code"], "ERR_NOT_FOUND");
+    assert!(
+        err["message"].as_str().unwrap().contains("component"),
+        "{err}"
+    );
+}
+
 #[tokio::test]
 async fn test_put_repo_success() {
     let state = create_catalog_test_state().await;
@@ -628,6 +699,34 @@ async fn test_create_module_success() {
     let item: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     assert_eq!(item["name"], "new-module");
     assert!(item["id"].is_string());
+}
+
+/// Spec 074 S5: proves `create_module` already returns a clean
+/// `ERR_NOT_FOUND` JSON error for an unresolvable `repoId`, not a raw SQL
+/// error.
+#[tokio::test]
+async fn test_create_module_bad_repo_fk_returns_clean_error() {
+    let state = create_catalog_test_state().await;
+    let app = newton_core::api::api_v1_router(state, false);
+    let body = json!({
+        "name": "orphan-module",
+        "kind": "service",
+        "repoId": "ghost-repo"
+    });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/modules")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let err: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(err["code"], "ERR_NOT_FOUND");
+    assert!(err["message"].as_str().unwrap().contains("repo"), "{err}");
 }
 
 #[tokio::test]
