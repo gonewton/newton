@@ -36,14 +36,19 @@ impl ServerNotifier {
 
     /// Notify the server that a workflow has started.
     pub fn notify_workflow_started(&self, instance: WorkflowInstance) {
-        let _ = self.event_tx.send(NotifierEvent::WorkflowStarted(instance));
+        if let Err(e) = self.event_tx.send(NotifierEvent::WorkflowStarted(instance)) {
+            tracing::debug!(error = %e, "ServerNotifier: failed to enqueue workflow-started event");
+        }
     }
 
     /// Notify the server of a node state update.
     pub fn notify_node_updated(&self, instance_id: String, node: NodeState) {
-        let _ = self
+        if let Err(e) = self
             .event_tx
-            .send(NotifierEvent::NodeUpdated { instance_id, node });
+            .send(NotifierEvent::NodeUpdated { instance_id, node })
+        {
+            tracing::debug!(error = %e, "ServerNotifier: failed to enqueue node-updated event");
+        }
     }
 
     /// Notify the server that a workflow has completed.
@@ -53,11 +58,13 @@ impl ServerNotifier {
         status: WorkflowStatus,
         ended_at: DateTime<Utc>,
     ) {
-        let _ = self.event_tx.send(NotifierEvent::WorkflowCompleted {
+        if let Err(e) = self.event_tx.send(NotifierEvent::WorkflowCompleted {
             instance_id,
             status,
             ended_at,
-        });
+        }) {
+            tracing::debug!(error = %e, "ServerNotifier: failed to enqueue workflow-completed event");
+        }
     }
 
     async fn background_loop(server_url: String, mut rx: mpsc::UnboundedReceiver<NotifierEvent>) {
@@ -132,5 +139,55 @@ impl WorkflowSink for ServerNotifier {
         ended_at: DateTime<Utc>,
     ) {
         self.notify_workflow_completed(instance_id, status, ended_at);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use newton_types::{NodeStatus, WorkflowStatus};
+
+    /// A dropped receiver (background loop task gone, e.g. during shutdown) means
+    /// `event_tx.send` fails. S7: this must be logged at `debug!` and MUST NOT panic
+    /// or escalate to `warn!`/`error!`. We construct `ServerNotifier` directly
+    /// (bypassing `ServerNotifier::new`'s spawned background loop) so we control the
+    /// receiver's lifetime and can drop it before exercising the send-failure path.
+    /// There's no log-assertion crate (e.g. `tracing-test`) already in use in this
+    /// codebase, so this test proves the non-panicking behavior rather than
+    /// asserting log content.
+    #[tokio::test]
+    async fn test_server_notifier_dropped_receiver_does_not_panic() {
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        drop(event_rx);
+        let notifier = ServerNotifier { event_tx };
+
+        let instance = WorkflowInstance {
+            instance_id: "dropped-001".to_string(),
+            workflow_id: "wf-dropped".to_string(),
+            status: WorkflowStatus::Running,
+            nodes: vec![],
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            definition: None,
+            linked_plan_id: None,
+        };
+        notifier.notify_workflow_started(instance);
+
+        let node = NodeState {
+            node_id: "node-dropped".to_string(),
+            status: NodeStatus::Running,
+            started_at: Some(chrono::Utc::now()),
+            ended_at: None,
+            operator_type: None,
+        };
+        notifier.notify_node_updated("dropped-001".to_string(), node);
+
+        notifier.notify_workflow_completed(
+            "dropped-001".to_string(),
+            WorkflowStatus::Succeeded,
+            chrono::Utc::now(),
+        );
+        // Reaching this point without panicking proves the send-failure branch is
+        // handled gracefully.
     }
 }
