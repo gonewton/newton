@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # Newton Test Runner Script
-# Runs fmt check, clippy, then tests with cargo-nextest; captures results and emits report to stdout (text or JSON).
+# Runs fmt check, clippy, then tests with cargo-nextest, then the
+# newton-dsl-ts (pnpm) and newton-dsl-py (uv/pytest, NEWTON_REQUIRE_BINARY=1)
+# suites; captures results and emits report to stdout (text or JSON).
 #
 # Usage: ./run-tests.sh [OPTIONS]
 #
@@ -69,7 +71,9 @@ while [[ $# -gt 0 ]]; do
         -h|--help)
             echo "Newton Test Runner Script"
             echo ""
-            echo "Runs fmt check, clippy, then tests with cargo-nextest; captures results and emits report to stdout (text or JSON)."
+            echo "Runs fmt check, clippy, then tests with cargo-nextest, then the"
+            echo "newton-dsl-ts (pnpm) and newton-dsl-py (uv/pytest, NEWTON_REQUIRE_BINARY=1)"
+            echo "suites; captures results and emits report to stdout (text or JSON)."
             echo ""
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -84,10 +88,14 @@ while [[ $# -gt 0 ]]; do
             echo "Requirements:"
             echo "  - cargo-nextest: Fast test runner for Rust"
             echo "  - cargo-clippy: Rust linter (included with rustup)"
+            echo "  - pnpm: for packages/newton-dsl-ts tests"
+            echo "  - uv: for packages/newton-dsl-py tests"
             echo ""
             echo "Install requirements:"
             echo "  cargo install cargo-nextest"
             echo "  rustup component add clippy"
+            echo "  # pnpm: https://pnpm.io/installation"
+            echo "  # uv: https://docs.astral.sh/uv/getting-started/installation/"
             exit 0
             ;;
         *)
@@ -102,6 +110,8 @@ echo -e "${YELLOW}Checking dependencies...${NC}" >&2
 check_command "cargo" "Cargo (Rust package manager)"
 check_command "cargo-nextest" "cargo-nextest (install with: cargo install cargo-nextest)"
 check_command "cargo-clippy" "cargo-clippy (install with: rustup component add clippy)"
+check_command "pnpm" "pnpm (needed for packages/newton-dsl-ts tests)"
+check_command "uv" "uv (needed for packages/newton-dsl-py tests)"
 
 echo -e "${GREEN}All dependencies found!${NC}" >&2
 echo "" >&2
@@ -158,6 +168,58 @@ else
     echo -e "${RED}Some tests failed!${NC}" >&2
 fi
 
+echo "" >&2
+
+# --- DSL package test suites (spec 074 P15) --------------------------------
+# newton-dsl-ts (pnpm/vitest) and newton-dsl-py (uv/pytest) previously had
+# no signal in this script at all — a developer running run-tests.sh got no
+# indication the DSL suites even existed, let alone whether the roundtrip
+# suite was silently skipping (see conftest.py's NEWTON_REQUIRE_BINARY gate).
+# NEWTON_REQUIRE_BINARY=1 here matches CI: a missing newton binary turns
+# roundtrip skips into hard failures instead of a quiet, all-green no-op.
+# The `cargo nextest run` above (with CARGO_TARGET_DIR honored) already
+# builds the newton bin target at $CARGO_TARGET_DIR/debug/newton.
+#
+# Scope note: DSL suite results are reported as a simple pass/fail addendum
+# below, not folded into the detailed statistics parsing (PASSED/FAILED/
+# SKIPPED counts, progress bar, etc.) a few lines down — that machinery
+# greps cargo-nextest's specific summary line format, and adapting it to
+# two more, unrelated test runners' output formats is out of scope for this
+# item. Their exit status IS folded into the script's overall EXIT_CODE /
+# OVERALL_STATUS and therefore the final process exit code.
+DSL_TS_STATUS="SKIPPED"
+DSL_PY_STATUS="SKIPPED"
+
+echo -e "${YELLOW}Running newton-dsl-ts tests (pnpm)...${NC}" >&2
+set +e
+(cd "$NEWTON_DIR/packages/newton-dsl-ts" && pnpm install --frozen-lockfile && pnpm test) >&2
+DSL_TS_EXIT=$?
+set -e
+if [ "$DSL_TS_EXIT" -eq 0 ]; then
+    DSL_TS_STATUS="PASSED"
+    echo -e "${GREEN}newton-dsl-ts tests passed!${NC}" >&2
+else
+    DSL_TS_STATUS="FAILED"
+    EXIT_CODE=1
+    OVERALL_STATUS="FAILED"
+    echo -e "${RED}newton-dsl-ts tests failed!${NC}" >&2
+fi
+echo "" >&2
+
+echo -e "${YELLOW}Running newton-dsl-py tests (uv/pytest, NEWTON_REQUIRE_BINARY=1)...${NC}" >&2
+set +e
+(cd "$NEWTON_DIR/packages/newton-dsl-py" && uv sync && NEWTON_REQUIRE_BINARY=1 uv run pytest) >&2
+DSL_PY_EXIT=$?
+set -e
+if [ "$DSL_PY_EXIT" -eq 0 ]; then
+    DSL_PY_STATUS="PASSED"
+    echo -e "${GREEN}newton-dsl-py tests passed!${NC}" >&2
+else
+    DSL_PY_STATUS="FAILED"
+    EXIT_CODE=1
+    OVERALL_STATUS="FAILED"
+    echo -e "${RED}newton-dsl-py tests failed!${NC}" >&2
+fi
 echo "" >&2
 
 # Parse test results from output
@@ -236,6 +298,16 @@ if [ "${FAILED:-0}" -gt 0 ]; then
     FAILED_TESTS=$(echo "$TEST_OUTPUT" | grep -A 5 -B 1 "FAIL\|✗" | grep "^\s*[^-]*test.*" | sed 's/.*--- \(.*\) ---.*/\1/' | grep -v "^\s*$" | head -10)
 fi
 
+# DSL suite results as a simple pass/fail addendum (see scope note above —
+# not folded into test_statistics, which is nextest-specific).
+DSL_SUITES_JSON=$(cat << EOF
+  "dsl_suites": {
+    "newton_dsl_ts": "$DSL_TS_STATUS",
+    "newton_dsl_py": "$DSL_PY_STATUS"
+  }
+EOF
+)
+
 # Build JSON content (for stdout and/or file)
 if [ "$COMPILATION_FAILED" = true ]; then
     JSON_CONTENT=$(cat << EOF
@@ -250,7 +322,8 @@ if [ "$COMPILATION_FAILED" = true ]; then
     "failed": 0,
     "skipped": 0,
     "passing_percentage": 0
-  }
+  },
+$DSL_SUITES_JSON
 }
 EOF
 )
@@ -267,7 +340,8 @@ else
     "failed": ${FAILED:-0},
     "skipped": ${SKIPPED:-0},
     "passing_percentage": $PASSING_PERCENTAGE
-  }
+  },
+$DSL_SUITES_JSON
 }
 EOF
 )
@@ -321,6 +395,14 @@ else
             echo "- Skipped: ${SKIPPED:-0}"
             echo "- Passing Rate: ${PASSING_PERCENTAGE}%"
         fi
+        echo ""
+
+        # DSL package suites (spec 074 P15) — simple pass/fail addendum,
+        # deliberately not merged into "Test Statistics" above (see scope
+        # note near where these suites are run).
+        echo "## DSL Package Suites"
+        echo "- newton-dsl-ts (pnpm test): $DSL_TS_STATUS"
+        echo "- newton-dsl-py (uv run pytest, NEWTON_REQUIRE_BINARY=1): $DSL_PY_STATUS"
         echo ""
 
         if [ "$COMPILATION_FAILED" = true ]; then
@@ -400,6 +482,10 @@ else
     echo "  Passed: ${PASSED:-0} (${PASSING_PERCENTAGE}%)" >&2
     echo "  Failed: ${FAILED:-0}" >&2
     echo "  Skipped: ${SKIPPED:-0}" >&2
+    echo "" >&2
+    echo "DSL Suites:" >&2
+    echo "  newton-dsl-ts: $DSL_TS_STATUS" >&2
+    echo "  newton-dsl-py: $DSL_PY_STATUS" >&2
     echo "" >&2
 
     if [ "$EXIT_CODE" -eq 0 ]; then

@@ -7,6 +7,7 @@ use axum::{
     Router,
 };
 use newton_types::ApiError;
+use newton_types::BroadcastEvent;
 use newton_types::{
     CreateComponentBody, CreateEvalRunBody, CreateGradeBody, CreateKpiBody, CreateModuleBody,
     CreateProductBody, CreateRepoBody, DeletedItem, PatchComponentBody, PatchModuleBody,
@@ -74,6 +75,19 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+/// Publish a `CatalogUpdate` broadcast event after a catalog mutation
+/// succeeds. `resource` names the catalog kind (`"product"`, `"component"`,
+/// `"repo"`, `"module"`, `"module-dependency"`, `"kpi"`, `"eval-run"`,
+/// `"grade"`) so subscribers can route `id` to the matching read endpoint.
+/// Fire-and-forget: no active subscriber is not an error (same pattern as
+/// `plans.rs`).
+fn catalog_event(state: &AppState, resource: &str, id: impl Into<String>) {
+    let _ = state.events_tx.send(BroadcastEvent::CatalogUpdate {
+        resource: resource.to_string(),
+        id: id.into(),
+    });
+}
+
 #[utoipa::path(
     get,
     path = "/kpis",
@@ -121,7 +135,11 @@ pub(crate) async fn create_kpi(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateKpiBody>,
 ) -> Response {
-    created_json(state.backend.create_kpi(body).await)
+    let result = state.backend.create_kpi(body).await;
+    if let Ok(ref item) = result {
+        catalog_event(&state, "kpi", item.id.clone());
+    }
+    created_json(result)
 }
 
 // ── EvalRun ───────────────────────────────────────────────────────────────────
@@ -152,7 +170,11 @@ pub(crate) async fn create_eval_run(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateEvalRunBody>,
 ) -> Response {
-    created_json(state.backend.create_eval_run(body).await)
+    let result = state.backend.create_eval_run(body).await;
+    if let Ok(ref item) = result {
+        catalog_event(&state, "eval-run", item.id.clone());
+    }
+    created_json(result)
 }
 
 #[utoipa::path(
@@ -256,7 +278,11 @@ pub(crate) async fn create_product(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateProductBody>,
 ) -> Response {
-    created_json(state.backend.create_product(body).await)
+    let result = state.backend.create_product(body).await;
+    if let Ok(ref item) = result {
+        catalog_event(&state, "product", item.id.clone());
+    }
+    created_json(result)
 }
 
 #[utoipa::path(
@@ -277,7 +303,11 @@ pub(crate) async fn put_product(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PutProductBody>,
 ) -> Response {
-    ok_json(state.backend.put_product(&id, body).await)
+    let result = state.backend.put_product(&id, body).await;
+    if result.is_ok() {
+        catalog_event(&state, "product", id);
+    }
+    ok_json(result)
 }
 
 #[utoipa::path(
@@ -297,7 +327,11 @@ pub(crate) async fn patch_product(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchProductBody>,
 ) -> Response {
-    ok_json(state.backend.patch_product(&id, body).await)
+    let result = state.backend.patch_product(&id, body).await;
+    if result.is_ok() {
+        catalog_event(&state, "product", id);
+    }
+    ok_json(result)
 }
 
 #[utoipa::path(
@@ -316,13 +350,11 @@ pub(crate) async fn delete_product(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    ok_json(
-        state
-            .backend
-            .delete_product(&id)
-            .await
-            .map(|id| DeletedItem { id }),
-    )
+    let result = state.backend.delete_product(&id).await;
+    if result.is_ok() {
+        catalog_event(&state, "product", id);
+    }
+    ok_json(result.map(|id| DeletedItem { id }))
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -360,7 +392,11 @@ pub(crate) async fn create_component(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateComponentBody>,
 ) -> Response {
-    created_json(state.backend.create_component(body).await)
+    let result = state.backend.create_component(body).await;
+    if let Ok(ref item) = result {
+        catalog_event(&state, "component", item.id.clone());
+    }
+    created_json(result)
 }
 
 #[utoipa::path(
@@ -380,7 +416,11 @@ pub(crate) async fn put_component(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PutComponentBody>,
 ) -> Response {
-    ok_json(state.backend.put_component(&id, body).await)
+    let result = state.backend.put_component(&id, body).await;
+    if result.is_ok() {
+        catalog_event(&state, "component", id);
+    }
+    ok_json(result)
 }
 
 #[utoipa::path(
@@ -400,7 +440,11 @@ pub(crate) async fn patch_component(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchComponentBody>,
 ) -> Response {
-    ok_json(state.backend.patch_component(&id, body).await)
+    let result = state.backend.patch_component(&id, body).await;
+    if result.is_ok() {
+        catalog_event(&state, "component", id);
+    }
+    ok_json(result)
 }
 
 #[utoipa::path(
@@ -419,13 +463,11 @@ pub(crate) async fn delete_component(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    ok_json(
-        state
-            .backend
-            .delete_component(&id)
-            .await
-            .map(|id| DeletedItem { id }),
-    )
+    let result = state.backend.delete_component(&id).await;
+    if result.is_ok() {
+        catalog_event(&state, "component", id);
+    }
+    ok_json(result.map(|id| DeletedItem { id }))
 }
 
 // ── Repo ──────────────────────────────────────────────────────────────────────
@@ -464,7 +506,11 @@ pub(crate) async fn create_repo(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateRepoBody>,
 ) -> Response {
-    created_json(state.backend.create_repo(body).await)
+    let result = state.backend.create_repo(body).await;
+    if let Ok(ref item) = result {
+        catalog_event(&state, "repo", item.id.clone());
+    }
+    created_json(result)
 }
 
 #[utoipa::path(
@@ -484,7 +530,11 @@ pub(crate) async fn put_repo(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PutRepoBody>,
 ) -> Response {
-    ok_json(state.backend.put_repo(&id, body).await)
+    let result = state.backend.put_repo(&id, body).await;
+    if result.is_ok() {
+        catalog_event(&state, "repo", id);
+    }
+    ok_json(result)
 }
 
 #[utoipa::path(
@@ -504,7 +554,11 @@ pub(crate) async fn patch_repo(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchRepoBody>,
 ) -> Response {
-    ok_json(state.backend.patch_repo(&id, body).await)
+    let result = state.backend.patch_repo(&id, body).await;
+    if result.is_ok() {
+        catalog_event(&state, "repo", id);
+    }
+    ok_json(result)
 }
 
 #[utoipa::path(
@@ -523,13 +577,11 @@ pub(crate) async fn delete_repo(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    ok_json(
-        state
-            .backend
-            .delete_repo(&id)
-            .await
-            .map(|id| DeletedItem { id }),
-    )
+    let result = state.backend.delete_repo(&id).await;
+    if result.is_ok() {
+        catalog_event(&state, "repo", id);
+    }
+    ok_json(result.map(|id| DeletedItem { id }))
 }
 
 // ── Module ────────────────────────────────────────────────────────────────────
@@ -580,7 +632,11 @@ pub(crate) async fn create_module(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateModuleBody>,
 ) -> Response {
-    created_json(state.backend.create_module(body).await)
+    let result = state.backend.create_module(body).await;
+    if let Ok(ref item) = result {
+        catalog_event(&state, "module", item.id.clone());
+    }
+    created_json(result)
 }
 
 #[utoipa::path(
@@ -600,7 +656,11 @@ pub(crate) async fn put_module(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PutModuleBody>,
 ) -> Response {
-    ok_json(state.backend.put_module(&id, body).await)
+    let result = state.backend.put_module(&id, body).await;
+    if result.is_ok() {
+        catalog_event(&state, "module", id);
+    }
+    ok_json(result)
 }
 
 #[utoipa::path(
@@ -620,7 +680,11 @@ pub(crate) async fn patch_module(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchModuleBody>,
 ) -> Response {
-    ok_json(state.backend.patch_module(&id, body).await)
+    let result = state.backend.patch_module(&id, body).await;
+    if result.is_ok() {
+        catalog_event(&state, "module", id);
+    }
+    ok_json(result)
 }
 
 #[utoipa::path(
@@ -639,13 +703,11 @@ pub(crate) async fn delete_module(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    ok_json(
-        state
-            .backend
-            .delete_module(&id)
-            .await
-            .map(|id| DeletedItem { id }),
-    )
+    let result = state.backend.delete_module(&id).await;
+    if result.is_ok() {
+        catalog_event(&state, "module", id);
+    }
+    ok_json(result.map(|id| DeletedItem { id }))
 }
 
 // ── ModuleDependency ──────────────────────────────────────────────────────────
@@ -685,7 +747,11 @@ pub(crate) async fn patch_module_dependency(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchModuleDependencyBody>,
 ) -> Response {
-    ok_json(state.backend.patch_module_dependency(&id, body).await)
+    let result = state.backend.patch_module_dependency(&id, body).await;
+    if result.is_ok() {
+        catalog_event(&state, "module-dependency", id);
+    }
+    ok_json(result)
 }
 
 #[utoipa::path(
@@ -703,13 +769,11 @@ pub(crate) async fn delete_module_dependency(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    ok_json(
-        state
-            .backend
-            .delete_module_dependency(&id)
-            .await
-            .map(|id| DeletedItem { id }),
-    )
+    let result = state.backend.delete_module_dependency(&id).await;
+    if result.is_ok() {
+        catalog_event(&state, "module-dependency", id);
+    }
+    ok_json(result.map(|id| DeletedItem { id }))
 }
 
 // ── Grade ─────────────────────────────────────────────────────────────────────
@@ -758,7 +822,11 @@ pub(crate) async fn create_grade(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateGradeBody>,
 ) -> Response {
-    created_json(state.backend.create_grade(body).await)
+    let result = state.backend.create_grade(body).await;
+    if let Ok(ref item) = result {
+        catalog_event(&state, "grade", item.id.clone());
+    }
+    created_json(result)
 }
 
 #[utoipa::path(

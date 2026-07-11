@@ -624,6 +624,12 @@ pub struct PlanApproverItem {
 pub struct ApprovedPlan {
     pub plan: PlanItem,
     pub execution_id: String,
+    /// Owning workflow instance id for the freshly-inserted ExecutionRecord.
+    /// No workflow instance has attached to it yet at approval time (its
+    /// `instanceId` column is NULL), so this mirrors `execution_id` per the
+    /// same NULL-fallback convention `list_executions_db` applies when
+    /// building `ExecutionItem::instance_id`.
+    pub instance_id: String,
     pub created_at: String,
 }
 

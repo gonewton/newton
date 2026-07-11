@@ -418,6 +418,13 @@ pub struct ServeArgs {
     /// Run import scan of existing file-based runs before the HTTP listener binds.
     #[arg(long, default_value_t = false)]
     pub import_existing: bool,
+
+    /// Mount the magic-tool router (`/aitools/...`). Off by default: today it
+    /// registers only a `newton/ping` smoke-test tool, with real tool
+    /// definitions landing in a future release (spec 074 P9). Not reflected
+    /// in the OpenAPI doc until then.
+    #[arg(long = "with-magic-tools", default_value_t = false)]
+    pub with_magic_tools: bool,
 }
 
 // ── Data ─────────────────────────────────────────────────────────────────────
@@ -463,16 +470,21 @@ pub struct DataArgs {
     /// Defaults to auto-resolved from workspace root (flag > NEWTON_STATE_DIR
     /// > newton.toml [workflow].state_dir > workspace default).
     pub state_dir: Option<PathBuf>,
-    /// Optional filter: restrict grade listings to a single evaluation run.
+    /// Optional filter: restrict grade listings to a single evaluation run,
+    /// or restrict an `optimize-cycle` GET to the cycle's owning run.
     pub run_id: Option<String>,
     /// Optional filter: restrict grade listings to a single KPI.
     pub kpi_id: Option<String>,
-    /// Optional filter: restrict eval run listings by scope.
+    /// Optional filter: restrict eval-run/finding/plan listings by scope.
     pub scope: Option<String>,
-    /// Optional filter: restrict eval run listings by scope id.
+    /// Optional filter: restrict eval-run/finding/plan listings by scope id.
     pub scope_id: Option<String>,
     /// Optional filter: restrict eval run listings by source.
     pub source: Option<String>,
     /// Optional filter: restrict eval run listings to N results.
     pub limit: Option<u32>,
+    /// Optional filter: restrict finding/change-request/plan listings by
+    /// status (spec 074 P12 — these `Option`s already existed in the store
+    /// API; this is the CLI flag that plumbs them through).
+    pub status: Option<String>,
 }

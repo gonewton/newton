@@ -14,6 +14,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use futures::{SinkExt, StreamExt};
 use newton_types::{ApiError, BroadcastEvent};
 use serde::Deserialize;
 use std::convert::Infallible;
@@ -22,8 +23,13 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
-const HEARTBEAT_PING_INTERVAL: Duration = Duration::from_secs(30);
 const WELCOME_FRAME: &str = r#"{"type":"welcome"}"#;
+
+/// Default number of historical log lines replayed on a fresh logs WS
+/// connection (no `since_seq` given). Spec 074 B18: a full replay of
+/// potentially unbounded history is not an acceptable default; callers that
+/// need everything since a known point should pass `since_seq` instead.
+const DEFAULT_LOG_TAIL: i64 = 500;
 
 /// Builds the JSON payload sent to a stream consumer when the shared broadcast
 /// channel overflowed and this consumer missed `skipped` events. Same shape is
@@ -46,6 +52,10 @@ pub struct StreamFilters {
     pub node_id: Option<String>,
     /// Filter by event type (e.g. `logMessage`, `nodeStateChanged`).
     pub event_type: Option<String>,
+    /// Logs WS only (spec 074 B18): resume replay from lines with `seq >
+    /// since_seq` instead of the default tail-500. Ignored by every other
+    /// stream endpoint.
+    pub since_seq: Option<i64>,
 }
 
 /// Routes for streaming endpoints (WebSocket + SSE).
@@ -84,7 +94,7 @@ async fn handle_heartbeat_socket(mut socket: WebSocket, state: Arc<AppState>) {
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(_) => break,
             },
-            _ = tokio::time::sleep(HEARTBEAT_PING_INTERVAL) => {
+            _ = tokio::time::sleep(state.ws_ping_interval) => {
                 if socket.send(Message::Ping(vec![].into())).await.is_err() {
                     break;
                 }
@@ -151,6 +161,7 @@ async fn handle_workflow_socket(
     filters: StreamFilters,
 ) {
     let mut rx = state.events_tx.subscribe();
+    let ping_interval = state.ws_ping_interval;
     // Not used again below: drop the AppState/Sender reference this task
     // holds so the receive loop's `RecvError::Closed` arm is actually
     // reachable once every *other* reference (router, other connections)
@@ -166,24 +177,50 @@ async fn handle_workflow_socket(
         }
     }
 
+    // Split so the loop below can `select!` over reading the client's half
+    // of the socket (to notice a client-initiated Close promptly, and to
+    // drain the socket so OS receive-buffer backpressure never stalls it)
+    // at the same time as the broadcast receiver and the ping tick (spec
+    // 074 B14).
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+
     loop {
-        match rx.recv().await {
-            Ok(event) => {
-                if should_send_event(&event, &instance_id, &filters) {
-                    if let Ok(json) = serde_json::to_string(&event) {
-                        if socket.send(Message::Text(json.into())).await.is_err() {
-                            break;
+        tokio::select! {
+            ws_msg = ws_receiver.next() => match ws_msg {
+                // Client closed the connection: stop pushing to it.
+                Some(Ok(Message::Close(_))) => break,
+                // Clients don't send meaningful data on this read-only
+                // stream, but the socket must still be drained (Pong,
+                // stray Text/Binary, etc.) or backpressure could stall it.
+                Some(Ok(_)) => continue,
+                // Socket error reading from the client.
+                Some(Err(_)) => break,
+                // Stream ended: connection dropped.
+                None => break,
+            },
+            recv_result = rx.recv() => match recv_result {
+                Ok(event) => {
+                    if should_send_event(&event, &instance_id, &filters) {
+                        if let Ok(json) = serde_json::to_string(&event) {
+                            if ws_sender.send(Message::Text(json.into())).await.is_err() {
+                                break;
+                            }
                         }
                     }
                 }
-            }
-            Err(broadcast::error::RecvError::Lagged(n)) => {
-                let frame = lagged_frame_json(n);
-                if socket.send(Message::Text(frame.into())).await.is_err() {
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    let frame = lagged_frame_json(n);
+                    if ws_sender.send(Message::Text(frame.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            _ = tokio::time::sleep(ping_interval) => {
+                if ws_sender.send(Message::Ping(vec![].into())).await.is_err() {
                     break;
                 }
             }
-            Err(broadcast::error::RecvError::Closed) => break,
         }
     }
 }
@@ -230,12 +267,16 @@ async fn handle_logs_socket(
 ) {
     // Subscribe first to avoid missing events during historical replay
     let mut rx = state.events_tx.subscribe();
+    let ping_interval = state.ws_ping_interval;
 
     let task_name = resolve_task_name(&state, &instance_id, &node_id).await;
     let connect_line = BroadcastEvent::LogMessage {
         instance_id: instance_id.clone(),
         node_id: node_id.clone(),
         message: format!("Connected to {task_name}"),
+        // Synthetic, never persisted: 0 is a documented sentinel, not a real
+        // seq (real seqs start at 1).
+        seq: 0,
     };
     if let Ok(json) = serde_json::to_string(&connect_line) {
         if socket.send(Message::Text(json.into())).await.is_err() {
@@ -243,17 +284,40 @@ async fn handle_logs_socket(
         }
     }
 
-    // Replay historical log lines (seq > 0 returns all)
-    if let Ok(historical) = state
-        .backend
-        .list_log_lines(&instance_id, &node_id, 0)
-        .await
-    {
+    // Replay historical log lines (spec 074 B18): `since_seq` resumes from
+    // that point (everything after it); with no `since_seq`, default to the
+    // last DEFAULT_LOG_TAIL lines rather than a full, potentially unbounded
+    // replay.
+    //
+    // Delivery note: this query runs after `rx.subscribe()` above, so a real
+    // log line persisted in that window would be visible here AND arrive
+    // again via the live-forwarding loop below — at-least-once, not
+    // exactly-once, delivery for that narrow race. No production call site
+    // appends real log lines with a broadcast today (see the module-level
+    // gap noted in spec 074 B18's commit), so this is currently unreachable;
+    // once one exists, a `seq <= last_replayed_seq` guard in the live loop
+    // would close it. Clients should dedup by `seq` regardless.
+    let historical = match filters.since_seq {
+        Some(since_seq) => {
+            state
+                .backend
+                .list_log_lines(&instance_id, &node_id, since_seq)
+                .await
+        }
+        None => {
+            state
+                .backend
+                .list_log_lines_tail(&instance_id, &node_id, DEFAULT_LOG_TAIL)
+                .await
+        }
+    };
+    if let Ok(historical) = historical {
         for line in historical {
             let event = BroadcastEvent::LogMessage {
                 instance_id: line.instance_id.clone(),
                 node_id: line.node_id.clone(),
                 message: line.message.clone(),
+                seq: line.seq,
             };
             if let Ok(json) = serde_json::to_string(&event) {
                 if socket.send(Message::Text(json.into())).await.is_err() {
@@ -270,34 +334,60 @@ async fn handle_logs_socket(
     // the shared broadcast channel open forever.
     drop(state);
 
+    // Split so the loop below can `select!` over reading the client's half
+    // of the socket (to notice a client-initiated Close promptly, and to
+    // drain the socket so OS receive-buffer backpressure never stalls it)
+    // at the same time as the broadcast receiver and the ping tick (spec
+    // 074 B14).
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+
     // Forward live broadcast events
     loop {
-        match rx.recv().await {
-            Ok(event) => {
-                if should_send_event(&event, &instance_id, &filters) {
-                    if let BroadcastEvent::LogMessage {
-                        instance_id: ref evt_inst,
-                        node_id: ref evt_node,
-                        ..
-                    } = event
-                    {
-                        if evt_inst == &instance_id && evt_node == &node_id {
-                            if let Ok(json) = serde_json::to_string(&event) {
-                                if socket.send(Message::Text(json.into())).await.is_err() {
-                                    break;
+        tokio::select! {
+            ws_msg = ws_receiver.next() => match ws_msg {
+                // Client closed the connection: stop pushing to it.
+                Some(Ok(Message::Close(_))) => break,
+                // Clients don't send meaningful data on this read-only
+                // stream, but the socket must still be drained (Pong,
+                // stray Text/Binary, etc.) or backpressure could stall it.
+                Some(Ok(_)) => continue,
+                // Socket error reading from the client.
+                Some(Err(_)) => break,
+                // Stream ended: connection dropped.
+                None => break,
+            },
+            recv_result = rx.recv() => match recv_result {
+                Ok(event) => {
+                    if should_send_event(&event, &instance_id, &filters) {
+                        if let BroadcastEvent::LogMessage {
+                            instance_id: ref evt_inst,
+                            node_id: ref evt_node,
+                            ..
+                        } = event
+                        {
+                            if evt_inst == &instance_id && evt_node == &node_id {
+                                if let Ok(json) = serde_json::to_string(&event) {
+                                    if ws_sender.send(Message::Text(json.into())).await.is_err() {
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            Err(broadcast::error::RecvError::Lagged(n)) => {
-                let frame = lagged_frame_json(n);
-                if socket.send(Message::Text(frame.into())).await.is_err() {
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    let frame = lagged_frame_json(n);
+                    if ws_sender.send(Message::Text(frame.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            _ = tokio::time::sleep(ping_interval) => {
+                if ws_sender.send(Message::Ping(vec![].into())).await.is_err() {
                     break;
                 }
             }
-            Err(broadcast::error::RecvError::Closed) => break,
         }
     }
 }
@@ -404,6 +494,10 @@ fn should_send_event(event: &BroadcastEvent, instance_id: &str, filters: &Stream
             BroadcastEvent::HilEvent { .. } => "hilEvent",
             BroadcastEvent::PlanUpdate { .. } => "plan_update",
             BroadcastEvent::ExecutionUpdate { .. } => "execution_update",
+            BroadcastEvent::FindingUpdate { .. } => "finding_update",
+            BroadcastEvent::ChangeRequestUpdate { .. } => "change_request_update",
+            BroadcastEvent::CatalogUpdate { .. } => "catalog_update",
+            BroadcastEvent::OptimizeRunUpdate { .. } => "optimize_run_update",
         };
 
         if filter_type != event_type {
@@ -446,6 +540,133 @@ fn should_send_event(event: &BroadcastEvent, instance_id: &str, filters: &Stream
             instance_id: ref evt_id,
             ..
         } => evt_id == instance_id,
-        BroadcastEvent::PlanUpdate { .. } | BroadcastEvent::ExecutionUpdate { .. } => true,
+        // Plan/Execution events genuinely have an owning workflow instance
+        // once a plan is approved and executed (spec 074 B13): scope them
+        // like WorkflowInstanceUpdated/NodeStateChanged/HilEvent above so a
+        // workflow-A-scoped stream never sees workflow-B's plan/execution
+        // events.
+        BroadcastEvent::PlanUpdate {
+            instance_id: ref evt_id,
+            ..
+        } => {
+            // `None` means the plan has no linked execution/instance (still
+            // awaiting approval, or rejected without ever running). There is
+            // no instance to match against, so drop it from every
+            // instance-scoped stream rather than guessing which one wants it.
+            matches!(evt_id, Some(id) if id == instance_id)
+        }
+        BroadcastEvent::ExecutionUpdate {
+            instance_id: ref evt_id,
+            ..
+        } => evt_id == instance_id,
+        // Not workflow-instance-scoped: these are domain-object mutation
+        // events (Finding/ChangeRequest/Catalog/OptimizeRun), not tied to a
+        // workflow instance id, so `instance_id` filtering (handled above via
+        // `filters.instance_id`) doesn't apply to them and they pass through
+        // unconditionally here.
+        BroadcastEvent::FindingUpdate { .. }
+        | BroadcastEvent::ChangeRequestUpdate { .. }
+        | BroadcastEvent::CatalogUpdate { .. }
+        | BroadcastEvent::OptimizeRunUpdate { .. } => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn no_filters() -> StreamFilters {
+        StreamFilters {
+            instance_id: None,
+            node_id: None,
+            event_type: None,
+            since_seq: None,
+        }
+    }
+
+    /// Literal T3 acceptance gate (spec 074 B13): a workflow-A-scoped stream
+    /// receives no workflow-B plan events.
+    #[test]
+    fn plan_update_is_scoped_to_its_owning_instance() {
+        let filters = no_filters();
+        let event = BroadcastEvent::PlanUpdate {
+            plan_id: "plan-b".to_string(),
+            instance_id: Some("instance-b".to_string()),
+        };
+
+        assert!(
+            !should_send_event(&event, "instance-a", &filters),
+            "a workflow-A-scoped stream must not receive a PlanUpdate owned by instance B"
+        );
+        assert!(
+            should_send_event(&event, "instance-b", &filters),
+            "a workflow-B-scoped stream must receive a PlanUpdate owned by instance B"
+        );
+    }
+
+    /// Same acceptance gate, for ExecutionUpdate.
+    #[test]
+    fn execution_update_is_scoped_to_its_owning_instance() {
+        let filters = no_filters();
+        let event = BroadcastEvent::ExecutionUpdate {
+            execution_id: "exec-b".to_string(),
+            plan_id: Some("plan-b".to_string()),
+            status: "running".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            instance_id: "instance-b".to_string(),
+        };
+
+        assert!(
+            !should_send_event(&event, "instance-a", &filters),
+            "a workflow-A-scoped stream must not receive an ExecutionUpdate owned by instance B"
+        );
+        assert!(
+            should_send_event(&event, "instance-b", &filters),
+            "a workflow-B-scoped stream must receive an ExecutionUpdate owned by instance B"
+        );
+    }
+
+    /// A PlanUpdate with no linked instance (still awaiting approval, or
+    /// rejected without ever running) has nothing to match against, so every
+    /// instance-scoped stream must drop it rather than guess.
+    #[test]
+    fn plan_update_with_no_instance_is_dropped_from_every_scoped_stream() {
+        let filters = no_filters();
+        let event = BroadcastEvent::PlanUpdate {
+            plan_id: "plan-a".to_string(),
+            instance_id: None,
+        };
+
+        assert!(!should_send_event(&event, "instance-a", &filters));
+        assert!(!should_send_event(&event, "instance-b", &filters));
+    }
+
+    /// Domain-object mutation events with no instance concept at all
+    /// (Finding/ChangeRequest/Catalog/OptimizeRun) must remain unconditional
+    /// pass-through, unaffected by B13's Plan/Execution scoping change.
+    #[test]
+    fn non_instance_scoped_events_remain_unconditional_pass_through() {
+        let filters = no_filters();
+        let events = [
+            BroadcastEvent::FindingUpdate {
+                finding_id: "finding-1".to_string(),
+            },
+            BroadcastEvent::ChangeRequestUpdate {
+                change_request_id: "cr-1".to_string(),
+            },
+            BroadcastEvent::CatalogUpdate {
+                resource: "product".to_string(),
+                id: "product-1".to_string(),
+            },
+            BroadcastEvent::OptimizeRunUpdate {
+                run_id: "run-1".to_string(),
+                cycle: None,
+            },
+        ];
+
+        for event in &events {
+            assert!(should_send_event(event, "instance-a", &filters));
+            assert!(should_send_event(event, "instance-b", &filters));
+        }
     }
 }

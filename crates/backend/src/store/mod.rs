@@ -487,6 +487,15 @@ impl BackendStore for SqliteBackendStore {
         self.list_log_lines_db(instance_id, node_id, since_seq)
             .await
     }
+    async fn list_log_lines_tail(
+        &self,
+        instance_id: &str,
+        node_id: &str,
+        limit: i64,
+    ) -> Result<Vec<newton_types::LogLine>, ApiError> {
+        self.list_log_lines_tail_db(instance_id, node_id, limit)
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -543,6 +552,9 @@ mod store_tests {
             level: "info".to_string(),
             message: msg.to_string(),
             timestamp: Utc::now(),
+            // append_log_line_db assigns the real seq; this placeholder is
+            // never read on the write path.
+            seq: 0,
         }
     }
 
@@ -650,6 +662,47 @@ mod store_tests {
         assert_eq!(tail.len(), 5);
         assert_eq!(tail[0].message, "line-5");
         assert_eq!(tail[4].message, "line-9");
+    }
+
+    /// Spec 074 B18: `list_log_lines_tail` returns the last N lines in
+    /// ascending seq order, not a full replay — proves both the slicing
+    /// (last N, not first N) and the ordering (oldest-of-the-tail first).
+    #[tokio::test]
+    async fn list_log_lines_tail_returns_last_n_in_ascending_order() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let inst = make_instance("inst-6");
+        store.upsert_workflow_instance(&inst).await.unwrap();
+
+        for i in 0..10 {
+            let line = make_log("inst-6", "node-y", &format!("line-{i}"));
+            store
+                .append_log_line("inst-6", "node-y", &line)
+                .await
+                .unwrap();
+        }
+
+        let tail = store
+            .list_log_lines_tail("inst-6", "node-y", 3)
+            .await
+            .unwrap();
+        assert_eq!(tail.len(), 3, "tail must be exactly `limit` lines");
+        assert_eq!(
+            tail.iter().map(|l| l.message.as_str()).collect::<Vec<_>>(),
+            vec!["line-7", "line-8", "line-9"],
+            "tail must be the last 3 lines, in ascending seq order"
+        );
+        assert_eq!(tail[0].seq, 8);
+        assert_eq!(tail[2].seq, 10);
+
+        // A limit larger than the available rows returns everything, still
+        // ascending, with no error and no padding.
+        let full = store
+            .list_log_lines_tail("inst-6", "node-y", 500)
+            .await
+            .unwrap();
+        assert_eq!(full.len(), 10);
+        assert_eq!(full[0].message, "line-0");
+        assert_eq!(full[9].message, "line-9");
     }
 }
 

@@ -51,6 +51,7 @@ rhai = { workspace = true }
 petgraph = { workspace = true }
 async-trait = { workspace = true }
 regex = { workspace = true }
+globset = { workspace = true }
 indexmap = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
@@ -197,6 +198,14 @@ path = "tests/integration/test_persistence_parity.rs"
 [[test]]
 name = "test_lag_tolerant_streams"
 path = "tests/integration/test_lag_tolerant_streams.rs"
+
+[[test]]
+name = "test_workflow_logs_ws_select"
+path = "tests/integration/test_workflow_logs_ws_select.rs"
+
+[[test]]
+name = "test_logs_ws_since_seq"
+path = "tests/integration/test_logs_ws_since_seq.rs"
 
 [[test]]
 name = "test_magic_tools"

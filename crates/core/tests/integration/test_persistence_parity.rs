@@ -40,7 +40,7 @@ async fn test_restart_persistence() {
     // ── Phase 1: create state and populate ───────────────────────────────────
     {
         let state = make_state(Arc::clone(&backend));
-        let app = newton_core::api::api_v1_router(state);
+        let app = newton_core::api::api_v1_router(state, false);
 
         // POST workflow
         let instance = WorkflowInstance {
@@ -88,7 +88,7 @@ async fn test_restart_persistence() {
     // ── Phase 2: new AppState over the same backend (simulate restart) ───────
     {
         let state2 = make_state(Arc::clone(&backend));
-        let app2 = newton_core::api::api_v1_router(state2);
+        let app2 = newton_core::api::api_v1_router(state2, false);
 
         let req = Request::builder()
             .uri(format!("/workflows/{}", instance_id))
@@ -152,6 +152,9 @@ async fn test_log_replay_after_restart() {
             level: "info".to_string(),
             message: format!("log-line-{i}"),
             timestamp: chrono::Utc::now(),
+            // append_log_line assigns the real seq; this placeholder is
+            // never read on the write path.
+            seq: 0,
         };
         backend
             .append_log_line(&instance_id, node_id, &line)
@@ -161,7 +164,7 @@ async fn test_log_replay_after_restart() {
 
     // ── Simulate restart: new AppState over the same backend ─────────────────
     let state2 = make_state(Arc::clone(&backend));
-    let app2 = newton_core::api::api_v1_router(state2);
+    let app2 = newton_core::api::api_v1_router(state2, false);
 
     // Bind to an ephemeral port and spawn the axum server in the background
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -253,7 +256,7 @@ async fn test_hil_persistence_after_restart() {
     // Phase 1: insert HIL event and submit action
     {
         let state = make_state(Arc::clone(&backend));
-        let app = newton_core::api::api_v1_router(state);
+        let app = newton_core::api::api_v1_router(state, false);
 
         // Insert HIL event via backend (no HTTP endpoint for creating HIL events externally)
         backend
@@ -291,7 +294,7 @@ async fn test_hil_persistence_after_restart() {
     // Phase 2: restart — new AppState over the same backend
     {
         let state2 = make_state(Arc::clone(&backend));
-        let app2 = newton_core::api::api_v1_router(state2);
+        let app2 = newton_core::api::api_v1_router(state2, false);
 
         let req = Request::builder()
             .uri(format!("/hil/workflows/{}", instance_id))
@@ -324,7 +327,7 @@ async fn test_list_after_restart_with_filter() {
     // Phase 1: insert 3 instances
     {
         let state = make_state(Arc::clone(&backend));
-        let app = newton_core::api::api_v1_router(state);
+        let app = newton_core::api::api_v1_router(state, false);
 
         for (id, status) in [
             (id_running1.clone(), "running"),
@@ -353,7 +356,7 @@ async fn test_list_after_restart_with_filter() {
     // Phase 2: restart — new AppState, check filtered list
     {
         let state2 = make_state(Arc::clone(&backend));
-        let app2 = newton_core::api::api_v1_router(state2);
+        let app2 = newton_core::api::api_v1_router(state2, false);
 
         let req = Request::builder()
             .uri("/workflows?status=running")
@@ -378,7 +381,7 @@ async fn test_list_after_restart_with_filter() {
             .body(Body::empty())
             .unwrap();
         let state3 = make_state(Arc::clone(&backend));
-        let app3 = newton_core::api::api_v1_router(state3);
+        let app3 = newton_core::api::api_v1_router(state3, false);
         let resp = app3.oneshot(req).await.unwrap();
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await

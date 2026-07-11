@@ -85,6 +85,7 @@ pub(crate) async fn approve_plan(
                 .events_tx
                 .send(newton_types::BroadcastEvent::PlanUpdate {
                     plan_id: id.clone(),
+                    instance_id: Some(approved.instance_id.clone()),
                 });
             let _ = state
                 .events_tx
@@ -93,6 +94,7 @@ pub(crate) async fn approve_plan(
                     plan_id: Some(id.clone()),
                     status: "running".to_string(),
                     created_at: approved.created_at.clone(),
+                    instance_id: approved.instance_id.clone(),
                 });
             (StatusCode::OK, Json(approved.plan)).into_response()
         }
@@ -129,6 +131,15 @@ pub(crate) async fn reject_plan(
                 .events_tx
                 .send(newton_types::BroadcastEvent::PlanUpdate {
                     plan_id: id.clone(),
+                    // Rejection is only reachable from `awaiting_approval` /
+                    // `needs_revision` (see `reject_plan_db`) — states in
+                    // which this plan has no *currently owning* execution
+                    // instance. Even if `execution_ids` holds ids from a
+                    // prior failed approve/run cycle, none of them own this
+                    // rejection, so `None` is the honest value (and the safe
+                    // one: instance-scoped streams drop it rather than
+                    // routing it to a stale instance).
+                    instance_id: None,
                 });
             (StatusCode::OK, Json(plan)).into_response()
         }

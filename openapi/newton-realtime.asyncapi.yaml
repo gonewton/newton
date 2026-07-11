@@ -21,9 +21,11 @@ x-connection-lifecycle:
     keepalive_interval_seconds: 10
     lag_handling: 'on broadcast Lagged(n), emits lagged then continues (never closes)'
   logs_ws:
-    connect_confirmation: 'logMessage "Connected to <task_name>"'
+    connect_confirmation: 'logMessage "Connected to <task_name>" (seq: 0, sentinel — not persisted)'
     close_codes: [1000, 1001]
     lag_handling: 'on broadcast Lagged(n), emits lagged then continues (never closes)'
+    replay_default: 'no since_seq query param: last 500 lines (tail), not full history (spec 074 B18)'
+    replay_resumption: 'since_seq=N query param: all persisted lines with seq > N, ascending'
 
 channels:
   heartbeat:
@@ -47,6 +49,14 @@ channels:
         $ref: '#/components/messages/PlanUpdate'
       executionUpdate:
         $ref: '#/components/messages/ExecutionUpdate'
+      findingUpdate:
+        $ref: '#/components/messages/FindingUpdate'
+      changeRequestUpdate:
+        $ref: '#/components/messages/ChangeRequestUpdate'
+      catalogUpdate:
+        $ref: '#/components/messages/CatalogUpdate'
+      optimizeRunUpdate:
+        $ref: '#/components/messages/OptimizeRunUpdate'
 
   workflowInstanceWs:
     address: /api/v1/stream/workflow/{instanceId}/ws
@@ -87,6 +97,14 @@ channels:
         $ref: '#/components/messages/PlanUpdate'
       executionUpdate:
         $ref: '#/components/messages/ExecutionUpdate'
+      findingUpdate:
+        $ref: '#/components/messages/FindingUpdate'
+      changeRequestUpdate:
+        $ref: '#/components/messages/ChangeRequestUpdate'
+      catalogUpdate:
+        $ref: '#/components/messages/CatalogUpdate'
+      optimizeRunUpdate:
+        $ref: '#/components/messages/OptimizeRunUpdate'
       lagged:
         $ref: '#/components/messages/Lagged'
 
@@ -94,10 +112,17 @@ channels:
     address: /api/v1/stream/logs/{instanceId}/{nodeId}/ws
     description: |
       Per-instance, per-node log WebSocket. Emits a synthetic
-      `logMessage "Connected to <task_name>"` frame immediately on connect.
-      Task name is resolved from `WorkflowInstance.definition["tasks"][nodeId]["name"]`,
+      `logMessage "Connected to <task_name>"` frame immediately on connect
+      (with `seq: 0`, a sentinel — it is not a persisted line). Task name is
+      resolved from `WorkflowInstance.definition["tasks"][nodeId]["name"]`,
       falling back to `nodeId` when unavailable. Forwards only `LogMessage`
       events matching the given instance and node.
+
+      Historical replay (spec 074 B18): with no `since_seq` query param, the
+      default replay is the last 500 lines (`seq` ascending), not the full
+      history. Pass `since_seq=<N>` (the highest `seq` already seen, e.g. from
+      a prior connection) to instead replay every persisted line with
+      `seq > N`, for lossless resumption after a reconnect.
     parameters:
       instanceId:
         description: UUID of the workflow instance.
@@ -114,6 +139,15 @@ channels:
               type: string
             event_type:
               type: string
+            since_seq:
+              type: integer
+              format: int64
+              description: |
+                Resume replay from log lines with `seq` greater than this
+                value, instead of the default last-500-lines tail. Pass the
+                highest `seq` observed on a prior connection to this same
+                (instanceId, nodeId) pair to resume without gaps or
+                re-delivery.
     messages:
       connectConfirmation:
         $ref: '#/components/messages/LogMessage'
@@ -157,6 +191,14 @@ channels:
         $ref: '#/components/messages/PlanUpdate'
       executionUpdate:
         $ref: '#/components/messages/ExecutionUpdate'
+      findingUpdate:
+        $ref: '#/components/messages/FindingUpdate'
+      changeRequestUpdate:
+        $ref: '#/components/messages/ChangeRequestUpdate'
+      catalogUpdate:
+        $ref: '#/components/messages/CatalogUpdate'
+      optimizeRunUpdate:
+        $ref: '#/components/messages/OptimizeRunUpdate'
       lagged:
         $ref: '#/components/messages/Lagged'
 
@@ -222,6 +264,52 @@ components:
       payload:
         $ref: '#/components/schemas/ExecutionUpdatePayload'
 
+    FindingUpdate:
+      name: FindingUpdate
+      title: Finding Update
+      description: |
+        Emitted after a Finding is created, patched, or unblocked. Id-only,
+        same shape as PlanUpdate/ExecutionUpdate: clients re-fetch the
+        authoritative record from `GET /findings/{id}` on receipt.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/FindingUpdatePayload'
+
+    ChangeRequestUpdate:
+      name: ChangeRequestUpdate
+      title: Change Request Update
+      description: |
+        Emitted after a Change Request is created or patched. Id-only;
+        clients re-fetch from `GET /change-requests/{id}` on receipt.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ChangeRequestUpdatePayload'
+
+    CatalogUpdate:
+      name: CatalogUpdate
+      title: Catalog Update
+      description: |
+        Emitted after any catalog resource (product, component, repo, module,
+        module-dependency, kpi, eval-run, grade) is created, replaced,
+        patched, or deleted. `resource` names the kind so clients can route
+        `id` to the matching read endpoint.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CatalogUpdatePayload'
+
+    OptimizeRunUpdate:
+      name: OptimizeRunUpdate
+      title: Optimize Run Update
+      description: |
+        Emitted when an OptimizeRun's status changes or a Cycle is appended
+        (closes the ADR-0013 event commitment). `cycle` is present when the
+        update accompanies a Cycle append, absent for a bare Run status/field
+        change. Published by the in-process optimize driver via the same
+        `events_tx` Plans/HIL already use.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/OptimizeRunUpdatePayload'
+
     Lagged:
       name: Lagged
       title: Lagged
@@ -279,7 +367,7 @@ components:
 
     LogMessagePayload:
       type: object
-      required: [type, instance_id, node_id, message]
+      required: [type, instance_id, node_id, message, seq]
       properties:
         type:
           type: string
@@ -291,11 +379,22 @@ components:
           type: string
         message:
           type: string
+        seq:
+          type: integer
+          format: int64
+          description: |
+            The log line's persisted sequence number (spec 074 B18), unique
+            and monotonic per (instance_id, node_id), starting at 1. `0` is a
+            documented sentinel for synthetic, non-persisted lines (e.g. the
+            "Connected to <task_name>" frame sent on logs WS connect) — it is
+            never a real persisted seq. Track the highest `seq` seen to pass
+            as `since_seq` on a future reconnect.
       example:
         type: logMessage
         instance_id: 550e8400-e29b-41d4-a716-446655440000
         node_id: build-task
         message: Connected to build-task
+        seq: 0
 
     HilEventPayload:
       type: object
@@ -323,13 +422,27 @@ components:
           enum: [plan_update]
         plan_id:
           type: string
+        instance_id:
+          type: string
+          nullable: true
+          description: |
+            Owning workflow instance id, when this plan is currently linked
+            to one (e.g. immediately after approval, which creates the
+            ExecutionRecord that becomes the plan's running instance). Null
+            when no instance is linked (e.g. still awaiting approval, or
+            rejected without ever having run). Instance-scoped streams
+            (`/stream/workflow/{id}/ws`, `/stream/workflow/{id}/sse`) only
+            deliver this event when `instance_id` matches the stream's bound
+            instance; a null `instance_id` is dropped from every
+            instance-scoped stream.
       example:
         type: plan_update
         plan_id: plan-abc
+        instance_id: 550e8400-e29b-41d4-a716-446655440000
 
     ExecutionUpdatePayload:
       type: object
-      required: [type, execution_id, status, created_at]
+      required: [type, execution_id, status, created_at, instance_id]
       properties:
         type:
           type: string
@@ -344,12 +457,85 @@ components:
         created_at:
           type: string
           format: date-time
+        instance_id:
+          type: string
+          description: |
+            Owning workflow instance id. Every Execution has one: until a
+            real workflow instance attaches to the ExecutionRecord, this
+            falls back to the execution's own id. Instance-scoped streams
+            only deliver this event when `instance_id` matches the stream's
+            bound instance.
       example:
         type: execution_update
         execution_id: exec-001
         plan_id: null
         status: running
         created_at: "2026-01-01T00:00:00Z"
+        instance_id: exec-001
+
+    FindingUpdatePayload:
+      type: object
+      required: [type, finding_id]
+      properties:
+        type:
+          type: string
+          enum: [finding_update]
+        finding_id:
+          type: string
+      example:
+        type: finding_update
+        finding_id: finding-abc
+
+    ChangeRequestUpdatePayload:
+      type: object
+      required: [type, change_request_id]
+      properties:
+        type:
+          type: string
+          enum: [change_request_update]
+        change_request_id:
+          type: string
+      example:
+        type: change_request_update
+        change_request_id: cr-abc
+
+    CatalogUpdatePayload:
+      type: object
+      required: [type, resource, id]
+      properties:
+        type:
+          type: string
+          enum: [catalog_update]
+        resource:
+          type: string
+          description: |
+            Catalog resource kind: product | component | repo | module |
+            module-dependency | kpi | eval-run | grade.
+        id:
+          type: string
+      example:
+        type: catalog_update
+        resource: component
+        id: component-abc
+
+    OptimizeRunUpdatePayload:
+      type: object
+      required: [type, run_id]
+      properties:
+        type:
+          type: string
+          enum: [optimize_run_update]
+        run_id:
+          type: string
+        cycle:
+          type: integer
+          format: int64
+          nullable: true
+          description: Present (cycle number) when this update accompanies a Cycle append; null for a bare Run status/field change.
+      example:
+        type: optimize_run_update
+        run_id: run-001
+        cycle: 3
 
     LaggedPayload:
       type: object

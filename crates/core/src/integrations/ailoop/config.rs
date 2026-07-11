@@ -187,8 +187,12 @@ fn load_ailoop_config(workspace_root: &Path) -> Result<AiloopConfig> {
     };
 
     // Try environment variables first (highest precedence).
-    // NEWTON_AILOOP_HTTP_URL is accepted but ignored (transport is WebSocket-only).
-    let _ = env::var("NEWTON_AILOOP_HTTP_URL").ok();
+    // NEWTON_AILOOP_HTTP_URL is accepted but ignored (transport is
+    // WebSocket-only); warn loudly rather than silently discarding it
+    // (spec 074 P10) so operators don't assume it does something.
+    if let Some(msg) = ailoop_http_url_warning() {
+        tracing::warn!("{msg}");
+    }
     let ws_url_str = env::var("NEWTON_AILOOP_WS_URL").ok();
     let channel = env::var("NEWTON_AILOOP_CHANNEL").ok();
 
@@ -280,6 +284,21 @@ fn load_ailoop_config(workspace_root: &Path) -> Result<AiloopConfig> {
         enabled,
         fail_fast: false,
     })
+}
+
+/// Returns the startup warning to log when `NEWTON_AILOOP_HTTP_URL` is set
+/// but has no effect (ailoop transport is WebSocket-only). Returns `None`
+/// when the env var is unset or empty. Extracted as a pure function so the
+/// warning text is unit-testable without capturing `tracing` output
+/// (spec 074 P10; mirrors the `check_non_loopback_bind` pattern in
+/// `cli/commands/serve.rs`).
+fn ailoop_http_url_warning() -> Option<String> {
+    match env::var("NEWTON_AILOOP_HTTP_URL") {
+        Ok(val) if !val.is_empty() => {
+            Some("NEWTON_AILOOP_HTTP_URL is set but unsupported (WebSocket-only)".to_string())
+        }
+        _ => None,
+    }
 }
 
 /// Validate a URL string and return parsed URL.
@@ -458,6 +477,35 @@ mod tests {
         assert_eq!(pair1.ws_url.unwrap(), "ws://first");
         // Second value should fill in missing
         assert_eq!(pair1.channel.unwrap(), "channel2");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn ailoop_http_url_warning_none_when_unset() {
+        env::remove_var("NEWTON_AILOOP_HTTP_URL");
+        assert!(ailoop_http_url_warning().is_none());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn ailoop_http_url_warning_none_when_empty() {
+        env::set_var("NEWTON_AILOOP_HTTP_URL", "");
+        let result = ailoop_http_url_warning();
+        env::remove_var("NEWTON_AILOOP_HTTP_URL");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn ailoop_http_url_warning_fires_when_set() {
+        env::set_var("NEWTON_AILOOP_HTTP_URL", "http://localhost:9999");
+        let result = ailoop_http_url_warning();
+        env::remove_var("NEWTON_AILOOP_HTTP_URL");
+        let msg = result.expect("warning should fire when NEWTON_AILOOP_HTTP_URL is set");
+        assert!(
+            msg.contains("NEWTON_AILOOP_HTTP_URL is set but unsupported (WebSocket-only)"),
+            "unexpected message: {msg}"
+        );
     }
 
     #[test]

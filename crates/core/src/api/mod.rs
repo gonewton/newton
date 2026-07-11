@@ -51,9 +51,16 @@ pub(crate) fn created_json<T: Serialize>(r: Result<T, ApiError>) -> Response {
 }
 
 // lockstep: axum major version MUST match cli-framework (both 0.8)
-pub fn api_v1_router(state: AppState) -> Router {
+///
+/// `with_magic_tools` gates the `aikit_magictool` router (spec 074 P9): it
+/// currently registers only a `newton/ping` smoke-test tool, with real
+/// `ToolDef`s landing in a future Part B work item. Until then the router is
+/// mounted only when explicitly opted in (`newton serve --with-magic-tools`)
+/// so the surface isn't live-but-empty by default. Not part of the OpenAPI
+/// doc — that's Part B's job, once the tools are real.
+pub fn api_v1_router(state: AppState, with_magic_tools: bool) -> Router {
     let arc_state = Arc::new(state);
-    Router::new()
+    let mut router = Router::new()
         .merge(workflows::routes(arc_state.clone()))
         .merge(hil::routes(arc_state.clone()))
         .merge(streaming::routes(arc_state.clone()))
@@ -67,8 +74,11 @@ pub fn api_v1_router(state: AppState) -> Router {
         .merge(catalog::routes(arc_state.clone()))
         .merge(optimize_run::routes(arc_state.clone()))
         .merge(testing_reset::routes(arc_state.clone()))
-        .merge(workflow_files::routes(arc_state.clone()))
-        .merge(aikit_magictool::router(magic_tools::build_state()))
+        .merge(workflow_files::routes(arc_state.clone()));
+    if with_magic_tools {
+        router = router.merge(aikit_magictool::router(magic_tools::build_state()));
+    }
+    router
 }
 
 /// The Newton web UI, vendored as a single self-contained, gzip-compressed
@@ -135,6 +145,58 @@ pub fn embedded_web_router() -> Router {
 pub fn openapi_json() -> serde_json::Value {
     use utoipa::OpenApi;
     serde_json::to_value(openapi::ApiDoc::openapi()).expect("OpenAPI doc serialization failed")
+}
+
+#[cfg(test)]
+mod magic_tools_gate_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use newton_types::OperatorDescriptor;
+    use tower::ServiceExt;
+
+    async fn test_state() -> AppState {
+        let operators = vec![OperatorDescriptor {
+            operator_type: "noop".to_string(),
+            description: "No-operation operator".to_string(),
+            params_schema: serde_json::json!({}),
+        }];
+        let store = newton_backend::SqliteBackendStore::new_in_memory()
+            .await
+            .expect("in-memory backend init");
+        let backend: Arc<dyn newton_backend::BackendStore> = Arc::new(store);
+        AppState::new(operators, backend)
+    }
+
+    #[tokio::test]
+    async fn magic_tools_router_absent_by_default() {
+        let app = api_v1_router(test_state().await, false);
+        let req = Request::builder()
+            .uri("/aitools")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "/aitools should be unmounted when with_magic_tools=false"
+        );
+    }
+
+    #[tokio::test]
+    async fn magic_tools_router_present_when_enabled() {
+        let app = api_v1_router(test_state().await, true);
+        let req = Request::builder()
+            .uri("/aitools")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "/aitools should be mounted when with_magic_tools=true"
+        );
+    }
 }
 
 #[cfg(test)]

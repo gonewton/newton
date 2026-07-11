@@ -92,6 +92,11 @@ pub struct LogLine {
     pub level: String,
     pub message: String,
     pub timestamp: DateTime<Utc>,
+    /// Monotonic sequence number, unique per (instance_id, node_id), assigned
+    /// by `BackendStore::append_log_line` (`MAX(seq)+1`, starting at 1).
+    /// Clients reconnecting to the logs WS pass the highest `seq` they've
+    /// seen as `since_seq` to resume without a full replay (spec 074 B18).
+    pub seq: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -116,6 +121,12 @@ pub enum BroadcastEvent {
         instance_id: String,
         node_id: String,
         message: String,
+        /// The log line's persisted `seq` (spec 074 B18), or `0` for
+        /// synthetic, non-persisted lines (e.g. the "Connected to <task>"
+        /// frame sent on logs WS connect). Lets a client track the latest
+        /// seq it has seen across the live-forwarding portion of a logs WS
+        /// connection, to pass as `since_seq` on a future reconnect.
+        seq: i64,
     },
     #[serde(rename = "hilEvent")]
     HilEvent {
@@ -123,14 +134,53 @@ pub enum BroadcastEvent {
         event_id: String,
     },
     #[serde(rename = "plan_update")]
-    PlanUpdate { plan_id: String },
+    PlanUpdate {
+        plan_id: String,
+        /// Owning workflow instance id, when this plan is currently linked to
+        /// one (e.g. immediately after approval, which creates the
+        /// `ExecutionRecord` that becomes the plan's running instance).
+        /// `None` when no instance is linked (e.g. still awaiting approval,
+        /// or rejected without ever having run) — instance-scoped streams
+        /// treat `None` as "not addressable to any instance" and drop the
+        /// event rather than guessing (see `should_send_event`).
+        instance_id: Option<String>,
+    },
     #[serde(rename = "execution_update")]
     ExecutionUpdate {
         execution_id: String,
         plan_id: Option<String>,
         status: String,
         created_at: String,
+        /// Owning workflow instance id. Every Execution has one: until a real
+        /// workflow instance attaches to the `ExecutionRecord`, this falls
+        /// back to the execution's own id, mirroring
+        /// `ExecutionItem::instance_id`'s existing NULL-fallback convention
+        /// (see `list_executions_db`) so scoped streams can filter on it
+        /// unconditionally.
+        instance_id: String,
     },
+    /// Emitted after a Finding is created, patched, or unblocked. Id-only,
+    /// same shape as `PlanUpdate`/`ExecutionUpdate`: clients re-fetch the
+    /// authoritative record from `GET /findings/{id}` on receipt.
+    #[serde(rename = "finding_update")]
+    FindingUpdate { finding_id: String },
+    /// Emitted after a Change Request is created or patched. Id-only; clients
+    /// re-fetch from `GET /change-requests/{id}` on receipt.
+    #[serde(rename = "change_request_update")]
+    ChangeRequestUpdate { change_request_id: String },
+    /// Emitted after any catalog resource (Product, Component, Repo, Module,
+    /// ModuleDependency, Kpi, EvalRun, Grade) is created, replaced, patched,
+    /// or deleted. `resource` names the kind (e.g. `"product"`, `"module"`)
+    /// so clients can route the id to the right re-fetch endpoint.
+    #[serde(rename = "catalog_update")]
+    CatalogUpdate { resource: String, id: String },
+    /// Emitted when an `OptimizeRun`'s status changes or a `Cycle` is
+    /// appended, closing the ADR-0013 event commitment. `cycle` is `Some`
+    /// when the update accompanies a Cycle append, `None` for a bare Run
+    /// status/field change. Published by the in-process optimize driver
+    /// (spec 073) via the same `events_tx` Plans/HIL already use.
+    #[serde(rename = "optimize_run_update")]
+    OptimizeRunUpdate { run_id: String, cycle: Option<i64> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

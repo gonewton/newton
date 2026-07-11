@@ -356,6 +356,41 @@ impl super::SqliteBackendStore {
                     level: r.level,
                     message: r.message,
                     timestamp: parse_dt(&r.ts)?,
+                    seq: r.seq,
+                })
+            })
+            .collect()
+    }
+
+    pub(super) async fn list_log_lines_tail_db(
+        &self,
+        instance_id: &str,
+        node_id: &str,
+        limit: i64,
+    ) -> Result<Vec<newton_types::LogLine>, ApiError> {
+        // Fetch the last `limit` rows in seq DESC order, then reverse in Rust
+        // to hand back ascending order (matching list_log_lines_db).
+        let mut rows: Vec<WorkflowLogRow> = sqlx::query_as::<_, WorkflowLogRow>(
+            "SELECT seq, instanceId, nodeId, ts, level, message FROM WorkflowLog WHERE instanceId = ? AND nodeId = ? ORDER BY seq DESC LIMIT ?"
+        )
+        .bind(instance_id)
+        .bind(node_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(query_err)?;
+
+        rows.reverse();
+
+        rows.into_iter()
+            .map(|r| {
+                Ok(newton_types::LogLine {
+                    instance_id: r.instance_id,
+                    node_id: r.node_id,
+                    level: r.level,
+                    message: r.message,
+                    timestamp: parse_dt(&r.ts)?,
+                    seq: r.seq,
                 })
             })
             .collect()

@@ -166,6 +166,144 @@ def sub_workflow(
     return OperatorCall("WorkflowOperator", params)
 
 
+def barrier(*, expected: list[str] | None = None) -> OperatorCall:
+    """barrier — waits for multiple tasks to complete before proceeding."""
+    params: dict[str, Any] = {}
+    if expected is not None:
+        params["expected"] = expected
+    return OperatorCall("barrier", params)
+
+
+def set_context(patch: dict[str, Any]) -> OperatorCall:
+    """SetContextOperator — applies a JSON-merge patch to the workflow context."""
+    return OperatorCall("SetContextOperator", {"patch": patch})
+
+
+def noop() -> OperatorCall:
+    """NoOpOperator — does nothing; useful as a graph placeholder/join point."""
+    return OperatorCall("NoOpOperator", {})
+
+
+def grader_command(
+    cmd: str,
+    grader: str,
+    scope: Any,
+    scope_id: Any,
+    *,
+    shell: str | None = None,
+    cwd: str | None = None,
+    timeout_seconds: int | None = None,
+    env: dict[str, Any] | None = None,
+    state: dict[str, Any] | None = None,
+) -> OperatorCall:
+    """GraderCommandOperator constructor — spec 062. Runs a shell command Grader."""
+    params: dict[str, Any] = {
+        "cmd": cmd,
+        "grader": grader,
+        "scope": scope,
+        "scope_id": scope_id,
+    }
+    if shell is not None:
+        params["shell"] = shell
+    if cwd is not None:
+        params["cwd"] = cwd
+    if timeout_seconds is not None:
+        params["timeout_seconds"] = timeout_seconds
+    if env is not None:
+        params["env"] = env
+    if state is not None:
+        params["state"] = state
+    return OperatorCall("GraderCommandOperator", params)
+
+
+def reconcile(
+    scope: Any,
+    scope_id: Any,
+    assessment: Any,
+    *,
+    grader: str | None = None,
+    engine: Any = None,
+    model: Any = None,
+    adjudication_timeout_seconds: int | None = None,
+) -> OperatorCall:
+    """ReconcileOperator constructor — spec 063 + 067.
+
+    Reconciles Observations from `assessment` (typically bound to a prior
+    grader task's output) with stored Findings for the given scope.
+    """
+    params: dict[str, Any] = {
+        "scope": scope,
+        "scope_id": scope_id,
+        "assessment": assessment,
+    }
+    if grader is not None:
+        params["grader"] = grader
+    if engine is not None:
+        params["engine"] = engine
+    if model is not None:
+        params["model"] = model
+    if adjudication_timeout_seconds is not None:
+        params["adjudication_timeout_seconds"] = adjudication_timeout_seconds
+    return OperatorCall("ReconcileOperator", params)
+
+
+def change_request(
+    scope: Any,
+    scope_id: Any,
+    *,
+    max_findings: int | None = None,
+    min_severity: str | None = None,
+    engine: Any = None,
+    model: Any = None,
+    synthesis_timeout_seconds: int | None = None,
+) -> OperatorCall:
+    """ChangeRequestOperator constructor — spec 064 + 067.
+
+    Synthesizes a ChangeRequest from open Findings for the given scope.
+    """
+    params: dict[str, Any] = {
+        "scope": scope,
+        "scope_id": scope_id,
+    }
+    if max_findings is not None:
+        params["max_findings"] = max_findings
+    if min_severity is not None:
+        params["min_severity"] = min_severity
+    if engine is not None:
+        params["engine"] = engine
+    if model is not None:
+        params["model"] = model
+    if synthesis_timeout_seconds is not None:
+        params["synthesis_timeout_seconds"] = synthesis_timeout_seconds
+    return OperatorCall("ChangeRequestOperator", params)
+
+
+def grader_agent(
+    grader: str,
+    scope: Any,
+    scope_id: Any,
+    rubric: Any,
+    *,
+    model: Any = None,
+    engine: Any = None,
+    timeout_seconds: int | None = None,
+) -> OperatorCall:
+    """GraderAgentOperator constructor — spec 065 + 067. Rubric-based AI grader."""
+    params: dict[str, Any] = {
+        "grader": grader,
+        "scope": scope,
+        "scope_id": scope_id,
+        "rubric": rubric,
+    }
+    if model is not None:
+        params["model"] = model
+    if engine is not None:
+        params["engine"] = engine
+    if timeout_seconds is not None:
+        params["timeout_seconds"] = timeout_seconds
+    return OperatorCall("GraderAgentOperator", params)
+
+
 class gh:
     """GitHub operator sub-constructors — one per operation (ADR 0006)."""
 

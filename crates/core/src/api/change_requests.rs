@@ -8,6 +8,7 @@ use axum::{
     Router,
 };
 use newton_types::ApiError;
+use newton_types::BroadcastEvent;
 use newton_types::{CreateChangeRequestBody, PatchChangeRequestBody};
 use serde::Deserialize;
 use std::sync::Arc;
@@ -64,7 +65,13 @@ pub(crate) async fn create_change_request(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateChangeRequestBody>,
 ) -> Response {
-    created_json(state.backend.create_change_request(body).await)
+    let result = state.backend.create_change_request(body).await;
+    if let Ok(ref item) = result {
+        let _ = state.events_tx.send(BroadcastEvent::ChangeRequestUpdate {
+            change_request_id: item.id.clone(),
+        });
+    }
+    created_json(result)
 }
 
 #[utoipa::path(
@@ -103,5 +110,11 @@ pub(crate) async fn patch_change_request(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PatchChangeRequestBody>,
 ) -> Response {
-    ok_json(state.backend.patch_change_request(&id, body).await)
+    let result = state.backend.patch_change_request(&id, body).await;
+    if result.is_ok() {
+        let _ = state.events_tx.send(BroadcastEvent::ChangeRequestUpdate {
+            change_request_id: id,
+        });
+    }
+    ok_json(result)
 }

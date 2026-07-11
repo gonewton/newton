@@ -24,7 +24,7 @@ async fn create_test_state() -> AppState {
 #[tokio::test]
 async fn test_list_aitools_returns_200() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, true);
     let req = Request::builder()
         .uri("/aitools")
         .body(Body::empty())
@@ -46,7 +46,7 @@ async fn test_list_aitools_returns_200() {
 #[tokio::test]
 async fn test_ping_schema_returns_200() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, true);
     let req = Request::builder()
         .uri("/aitools/newton/ping/schema")
         .body(Body::empty())
@@ -77,7 +77,7 @@ async fn test_ping_invoke_returns_200() {
         return;
     }
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, true);
     let req = Request::builder()
         .method("POST")
         .uri("/aitools/newton/ping")
@@ -97,7 +97,7 @@ async fn test_ping_invoke_returns_200() {
 #[tokio::test]
 async fn test_ping_sessions_messages_sse_content_type() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, true);
     let req = Request::builder()
         .method("POST")
         .uri("/aitools/newton/ping/sessions/test-session/messages")

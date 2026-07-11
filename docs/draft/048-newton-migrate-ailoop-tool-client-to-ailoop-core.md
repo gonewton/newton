@@ -1,5 +1,12 @@
 # 048 - Migrate Newton ailoop integration from HTTP `ToolClient` to `ailoop-core` crate
 
+> **Status: COMPLETE.** This migration landed in commit `60a53cb4` ("fix(core):
+> migrate ailoop integration to ailoop-core WebSocket transport"); the HTTP
+> `ToolClient` (`tool_client.rs`) described below no longer exists. Ailoop
+> transport is WebSocket-only. `NEWTON_AILOOP_HTTP_URL` is read and ignored
+> (with a startup warning, spec 074 P10) — the "Recent revert" trailing-slash
+> guidance below no longer applies. Kept for historical context only.
+
 ## Purpose
 
 Newton's human-in-the-loop and tooling integration today uses an in-tree **HTTP REST** client (`crates/core/src/integrations/ailoop/tool_client.rs`, `reqwest`) against paths such as `/questions/{channel}`, `/authorization/{channel}`, and `/notifications/{channel}`.

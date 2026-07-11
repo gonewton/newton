@@ -13,12 +13,43 @@ import pytest
 import yaml
 
 
+def _is_truthy(value: str | None) -> bool:
+    """
+    Truthy check for env-var flags in this suite: unset, "", and "0" are
+    falsy; everything else (e.g. "1", "true") is truthy.
+    """
+    return value is not None and value != "" and value != "0"
+
+
+def _resolve_newton_bin() -> Path:
+    """
+    Resolve the path to the newton binary under the debug profile.
+
+    Honors CARGO_TARGET_DIR so this matches whatever cargo/nextest actually
+    produced: scripts/run-tests.sh overrides CARGO_TARGET_DIR (to
+    /tmp/newton-target by default) to keep cargo artifacts on one
+    filesystem, so a hardcoded repo-relative "target/debug" path would miss
+    the binary entirely when tests are invoked through that script (or by
+    any developer with CARGO_TARGET_DIR set in their shell).
+    """
+    cargo_target_dir = os.environ.get("CARGO_TARGET_DIR")
+    if cargo_target_dir:
+        return Path(cargo_target_dir) / "debug" / "newton"
+    # tests/roundtrip/conftest.py -> tests/roundtrip -> tests -> newton-dsl-py -> packages -> repo_root
+    return Path(__file__).parents[4] / "target" / "debug" / "newton"
+
+
 # Path to the newton binary
-# tests/roundtrip/conftest.py -> tests/roundtrip -> tests -> newton-dsl-py -> packages -> repo_root
-NEWTON_BIN = Path(__file__).parents[4] / "target" / "debug" / "newton"
+NEWTON_BIN = _resolve_newton_bin()
 # Path to conformance fixtures
 # tests/roundtrip -> tests -> newton-dsl-py -> packages -> workflow-schema
 CONFORMANCE_DIR = Path(__file__).parents[3] / "workflow-schema" / "conformance"
+
+# Count of roundtrip validations skipped because the newton binary was
+# missing (and NEWTON_REQUIRE_BINARY was not set) — surfaced as a prominent
+# banner at the end of the run via pytest_terminal_summary below, so a
+# fully-skipped roundtrip suite can't quietly look like a passing run.
+_skipped_missing_binary_count = 0
 
 
 def normalize_yaml(doc: Any) -> Any:
@@ -52,7 +83,14 @@ def validate_with_newton(yaml_content: str) -> tuple[bool, str]:
     Write yaml_content to a temp file and run `newton workflow validate`.
     Returns (success, output).
     """
+    global _skipped_missing_binary_count
     if not NEWTON_BIN.exists():
+        if _is_truthy(os.environ.get("NEWTON_REQUIRE_BINARY")):
+            pytest.fail(
+                f"NEWTON_REQUIRE_BINARY is set but newton binary not found "
+                f"at {NEWTON_BIN}"
+            )
+        _skipped_missing_binary_count += 1
         pytest.skip(f"newton binary not found at {NEWTON_BIN}")
 
     with tempfile.NamedTemporaryFile(
@@ -157,3 +195,31 @@ def tasks_semantic_equal(
     if diffs:
         return False, "\n".join(diffs)
     return True, ""
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """
+    Pytest hook (auto-discovered from conftest.py): print a prominent,
+    impossible-to-miss banner at the very end of the run if any roundtrip
+    tests skipped because the newton binary was missing. Per-test skip
+    reasons scroll past in normal output; this hook runs after pytest's own
+    summary so it's always the last thing printed.
+
+    Set NEWTON_REQUIRE_BINARY=1 (as CI does) to turn these into hard
+    failures instead of skips.
+    """
+    if _skipped_missing_binary_count:
+        terminalreporter.write_sep("=", "ROUNDTRIP SUITE SKIPPED", red=True, bold=True)
+        terminalreporter.write_line(
+            f"{_skipped_missing_binary_count} roundtrip validation(s) SKIPPED: "
+            f"newton binary not found at {NEWTON_BIN}",
+            red=True,
+            bold=True,
+        )
+        terminalreporter.write_line(
+            "Build it first (e.g. `cargo build -p newton` from the repo root, "
+            "or via scripts/run-tests.sh), or set NEWTON_REQUIRE_BINARY=1 to "
+            "fail instead of skip (this is what CI does).",
+            yellow=True,
+        )
+        terminalreporter.write_sep("=", red=True, bold=True)

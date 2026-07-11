@@ -112,7 +112,13 @@ pub(super) const DATA_GET_LONG_ABOUT: &str =
      newton data get grades\n  \
      newton data get grades --run-id <runId>\n  \
      newton data get grades --kpi-id <kpiId>\n  \
-     newton data get grade <id>";
+     newton data get grade <id>\n  \
+     newton data get findings --status triaged\n  \
+     newton data get findings --scope component --scope-id auth-service\n  \
+     newton data get change-requests --status proposed\n  \
+     newton data get plans --status ready\n  \
+     newton data get optimize-cycles --run-id <runId>\n  \
+     newton data get optimize-cycle <cycleId> --run-id <runId>";
 
 pub(super) const DATA_POST_LONG_ABOUT: &str =
     "Create a new catalog entity. For EvalRun and Grade, the caller MUST provide a stable `id`.\n\n\
@@ -133,5 +139,17 @@ pub(super) const DATA_PATCH_LONG_ABOUT: &str =
      newton data patch product <id> --body '{\"name\":\"X\"}'";
 
 pub(super) const DATA_DELETE_LONG_ABOUT: &str = "Delete a catalog entity by id.\n\n\
+     DELETE is only implemented for: product, component, repo, module, \
+     module-dependency. The remaining resources are lifecycle-managed \
+     (retired via `newton data patch <resource> <id> --body '{\"status\":...}'`) \
+     or append-only historical records, and reject DELETE with a message \
+     naming the correct operation instead of a generic error:\n  \
+     - finding: PATCH status to `rejected`/`deferred` (or let it auto-resolve/auto-block)\n  \
+     - change-request: PATCH status to `rejected`\n  \
+     - plan: PATCH status to `abandoned`\n  \
+     - optimize-run: PATCH status if it needs to be force-closed\n  \
+     - optimize-cycle: immutable Trajectory entry, never deletable\n  \
+     - kpi, eval-run, grade: append-only catalog/history, never deletable\n\n\
      EXAMPLES:\n  \
-     newton data delete product <id>";
+     newton data delete product <id>\n  \
+     newton data patch finding <id> --body '{\"status\":\"rejected\"}'";

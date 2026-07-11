@@ -261,7 +261,7 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     );
     let state = state.with_workflow_files(std::sync::Arc::new(file_store));
 
-    let v1 = api::api_v1_router(state);
+    let v1 = api::api_v1_router(state, args.with_magic_tools);
 
     let openapi_value = api::openapi_json();
 

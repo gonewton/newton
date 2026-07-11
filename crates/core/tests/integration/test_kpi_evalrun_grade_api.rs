@@ -24,7 +24,7 @@ async fn create_test_state() -> AppState {
 #[tokio::test]
 async fn test_grade_roundtrip_get_by_id() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     let run_id = "evalrun.dk-review.repo.repo-1.2026-05-26T00:00:00Z";
     let eval_run_body = json!({
@@ -85,7 +85,7 @@ async fn test_grade_roundtrip_get_by_id() {
 #[tokio::test]
 async fn test_list_grades_filters_by_run_id() {
     let state = create_test_state().await;
-    let app = newton_core::api::api_v1_router(state);
+    let app = newton_core::api::api_v1_router(state, false);
 
     // Two runs for the same repo (fixtures include repo-1).
     for (run_id, dimension, evaluated_at) in [

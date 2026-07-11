@@ -162,6 +162,160 @@ export function subWorkflow(opts: SubWorkflowOpts): OperatorCall {
 }
 
 // --------------------------------------------------------------------------
+// barrier
+// --------------------------------------------------------------------------
+
+export interface BarrierOpts {
+  /** Task ids that must all complete before this barrier passes. */
+  expected?: string[];
+}
+
+export function barrier(opts: BarrierOpts = {}): OperatorCall {
+  const params: Record<string, AnyValue> = {};
+  if (opts.expected != null) params.expected = opts.expected;
+  return new OperatorCall("barrier", params);
+}
+
+// --------------------------------------------------------------------------
+// SetContextOperator
+// --------------------------------------------------------------------------
+
+export interface SetContextOpts {
+  /** JSON-merge patch applied to the workflow context. */
+  patch: Record<string, AnyValue>;
+}
+
+export function setContext(opts: SetContextOpts): OperatorCall {
+  return new OperatorCall("SetContextOperator", { patch: opts.patch });
+}
+
+// --------------------------------------------------------------------------
+// NoOpOperator
+// --------------------------------------------------------------------------
+
+export function noop(): OperatorCall {
+  return new OperatorCall("NoOpOperator", {});
+}
+
+// --------------------------------------------------------------------------
+// GraderCommandOperator — spec 062. Runs a shell command Grader.
+// --------------------------------------------------------------------------
+
+export interface GraderCommandOpts {
+  cmd: string;
+  grader: string;
+  scope: AnyValue;
+  scopeId: AnyValue;
+  shell?: string;
+  cwd?: string | Ref;
+  timeoutSeconds?: number;
+  env?: Record<string, string | Ref | Guard>;
+  state?: Record<string, string | Ref | Guard>;
+}
+
+export function graderCommand(opts: GraderCommandOpts): OperatorCall {
+  const params: Record<string, AnyValue> = {
+    cmd: opts.cmd,
+    grader: opts.grader,
+    scope: opts.scope,
+    scope_id: opts.scopeId,
+  };
+  if (opts.shell != null) params.shell = opts.shell;
+  if (opts.cwd != null) params.cwd = opts.cwd;
+  if (opts.timeoutSeconds != null) params.timeout_seconds = opts.timeoutSeconds;
+  if (opts.env != null) params.env = opts.env;
+  if (opts.state != null) params.state = opts.state;
+  return new OperatorCall("GraderCommandOperator", params);
+}
+
+// --------------------------------------------------------------------------
+// ReconcileOperator — spec 063 + 067. Reconciles Observations into Findings.
+// --------------------------------------------------------------------------
+
+export interface ReconcileOpts {
+  scope: AnyValue;
+  scopeId: AnyValue;
+  /** Assessment JSON — typically bound via a prior grader task's output. */
+  assessment: AnyValue;
+  grader?: string;
+  engine?: AnyValue;
+  model?: AnyValue;
+  adjudicationTimeoutSeconds?: number;
+}
+
+export function reconcile(opts: ReconcileOpts): OperatorCall {
+  const params: Record<string, AnyValue> = {
+    scope: opts.scope,
+    scope_id: opts.scopeId,
+    assessment: opts.assessment,
+  };
+  if (opts.grader != null) params.grader = opts.grader;
+  if (opts.engine != null) params.engine = opts.engine;
+  if (opts.model != null) params.model = opts.model;
+  if (opts.adjudicationTimeoutSeconds != null) {
+    params.adjudication_timeout_seconds = opts.adjudicationTimeoutSeconds;
+  }
+  return new OperatorCall("ReconcileOperator", params);
+}
+
+// --------------------------------------------------------------------------
+// ChangeRequestOperator — spec 064 + 067. Synthesizes a ChangeRequest from
+// open Findings.
+// --------------------------------------------------------------------------
+
+export interface ChangeRequestOpts {
+  scope: AnyValue;
+  scopeId: AnyValue;
+  maxFindings?: number;
+  minSeverity?: string;
+  engine?: AnyValue;
+  model?: AnyValue;
+  synthesisTimeoutSeconds?: number;
+}
+
+export function changeRequest(opts: ChangeRequestOpts): OperatorCall {
+  const params: Record<string, AnyValue> = {
+    scope: opts.scope,
+    scope_id: opts.scopeId,
+  };
+  if (opts.maxFindings != null) params.max_findings = opts.maxFindings;
+  if (opts.minSeverity != null) params.min_severity = opts.minSeverity;
+  if (opts.engine != null) params.engine = opts.engine;
+  if (opts.model != null) params.model = opts.model;
+  if (opts.synthesisTimeoutSeconds != null) {
+    params.synthesis_timeout_seconds = opts.synthesisTimeoutSeconds;
+  }
+  return new OperatorCall("ChangeRequestOperator", params);
+}
+
+// --------------------------------------------------------------------------
+// GraderAgentOperator — spec 065 + 067. Rubric-based AI grader.
+// --------------------------------------------------------------------------
+
+export interface GraderAgentOpts {
+  grader: string;
+  scope: AnyValue;
+  scopeId: AnyValue;
+  rubric: AnyValue;
+  model?: AnyValue;
+  engine?: AnyValue;
+  timeoutSeconds?: number;
+}
+
+export function graderAgent(opts: GraderAgentOpts): OperatorCall {
+  const params: Record<string, AnyValue> = {
+    grader: opts.grader,
+    scope: opts.scope,
+    scope_id: opts.scopeId,
+    rubric: opts.rubric,
+  };
+  if (opts.model != null) params.model = opts.model;
+  if (opts.engine != null) params.engine = opts.engine;
+  if (opts.timeoutSeconds != null) params.timeout_seconds = opts.timeoutSeconds;
+  return new OperatorCall("GraderAgentOperator", params);
+}
+
+// --------------------------------------------------------------------------
 // GhOperator sub-constructors
 // --------------------------------------------------------------------------
 

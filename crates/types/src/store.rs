@@ -300,4 +300,15 @@ pub trait BackendStore: Send + Sync {
         node_id: &str,
         since_seq: i64,
     ) -> Result<Vec<LogLine>, ApiError>;
+
+    /// Returns the last `limit` log lines (by seq), ordered ascending by seq
+    /// (i.e. oldest-of-the-tail first, matching `list_log_lines`'s ordering).
+    /// Used as the logs WS default replay (spec 074 B18): a fresh connection
+    /// with no `since_seq` gets the tail instead of the full history.
+    async fn list_log_lines_tail(
+        &self,
+        instance_id: &str,
+        node_id: &str,
+        limit: i64,
+    ) -> Result<Vec<LogLine>, ApiError>;
 }
