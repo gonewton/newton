@@ -69,3 +69,37 @@ pub(super) fn open_stdout_artifact_file(stdout_path: &Path) -> Result<std::fs::F
             )
         })
 }
+
+/// Best-effort append of a `[capture truncated: <reason>]` marker line to an
+/// on-disk capture artifact after some of its writes were skipped (hit
+/// `OUTPUT_CAPTURE_LIMIT_BYTES`) or failed (I/O error) — see spec 074 S15.
+///
+/// This is itself diagnostic, not load-bearing: if the append also fails
+/// (e.g. the same disk-full condition that caused the original truncation),
+/// log and move on rather than propagating another error out of an
+/// already-degraded capture path.
+pub(super) fn append_capture_truncation_marker(path: &Path, reason: &str) {
+    use std::io::Write as _;
+    let mut file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        Ok(f) => f,
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %err,
+                "AgentOperator: failed to open capture artifact to append truncation marker"
+            );
+            return;
+        }
+    };
+    if let Err(err) = writeln!(file, "[capture truncated: {reason}]") {
+        tracing::warn!(
+            path = %path.display(),
+            error = %err,
+            "AgentOperator: failed to append capture-truncation marker to artifact"
+        );
+    }
+}

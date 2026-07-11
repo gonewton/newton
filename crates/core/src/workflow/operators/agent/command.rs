@@ -42,6 +42,12 @@ pub(super) struct SingleExecResult {
     /// `None` when the child was killed after a signal match (no exit code
     /// to report); `Some(_)` on a genuine process exit.
     pub(super) exit_code: Option<i32>,
+    /// `Some(reason)` when a stdout/stderr capture write was dropped or
+    /// skipped during this execution — surfaced on the task result so a
+    /// truncated artifact isn't silently mistaken for the whole output. See
+    /// spec 074 S15.
+    pub(super) stdout_capture_warning: Option<String>,
+    pub(super) stderr_capture_warning: Option<String>,
 }
 
 /// Bundled paths for an execution run.
@@ -66,6 +72,10 @@ pub(super) struct ExecParams<'a> {
 struct StreamingResult {
     signal: Option<String>,
     signal_data: HashMap<String, String>,
+    /// `Some(reason)` when a stdout capture write to the artifact file was
+    /// dropped (I/O failure) or skipped (`OUTPUT_CAPTURE_LIMIT_BYTES`
+    /// exceeded) at some point during this streaming pass. See spec 074 S15.
+    stdout_capture_warning: Option<String>,
 }
 
 /// Interpolate template expressions in env values.
@@ -101,7 +111,7 @@ async fn spawn_engine_process(
     (
         tokio::process::Child,
         tokio::process::ChildStdout,
-        tokio::task::JoinHandle<()>,
+        tokio::task::JoinHandle<Option<String>>,
         ProcessGroupKillGuard,
     ),
     AppError,
@@ -146,18 +156,52 @@ async fn spawn_engine_process(
     let kill_guard =
         ProcessGroupKillGuard::new(child.id().expect("freshly spawned child must have a pid"));
 
-    let stdout = child.stdout.take().expect("stdout must be piped");
-    let stderr = child.stderr.take().expect("stderr must be piped");
+    let stdout = child.stdout.take().ok_or_else(|| {
+        AppError::new(
+            ErrorCategory::InternalError,
+            "engine process stdout was not piped (Stdio::piped() misconfigured before spawn)",
+        )
+        .with_code("WFG-AGENT-006")
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        AppError::new(
+            ErrorCategory::InternalError,
+            "engine process stderr was not piped (Stdio::piped() misconfigured before spawn)",
+        )
+        .with_code("WFG-AGENT-010")
+    })?;
 
+    // Returns `Some(reason)` when the stderr capture was truncated (either a
+    // genuine write failure or hitting `OUTPUT_CAPTURE_LIMIT_BYTES`), so the
+    // caller can surface it on the task result instead of it silently
+    // vanishing. See spec 074 S15.
     let stderr_path_owned = params.paths.stderr_path.to_owned();
-    let stderr_task = tokio::spawn(async move {
+    let stderr_task: tokio::task::JoinHandle<Option<String>> = tokio::spawn(async move {
         let mut reader = BufReader::new(stderr);
         let mut buf = Vec::new();
         let _ = reader.read_to_end(&mut buf).await;
-        if !buf.is_empty() {
-            let limited = &buf[..buf.len().min(OUTPUT_CAPTURE_LIMIT_BYTES)];
-            let _ = std::fs::write(&stderr_path_owned, limited);
+        if buf.is_empty() {
+            return None;
         }
+        let exceeded_cap = buf.len() > OUTPUT_CAPTURE_LIMIT_BYTES;
+        let limited = &buf[..buf.len().min(OUTPUT_CAPTURE_LIMIT_BYTES)];
+        let mut truncation_reason: Option<String> = None;
+        if let Err(err) = std::fs::write(&stderr_path_owned, limited) {
+            tracing::warn!(
+                path = %stderr_path_owned.display(),
+                error = %err,
+                "AgentOperator: failed to write stderr capture artifact"
+            );
+            truncation_reason = Some(format!("write error: {err}"));
+        } else if exceeded_cap {
+            truncation_reason = Some(format!(
+                "output exceeded {OUTPUT_CAPTURE_LIMIT_BYTES} byte capture limit"
+            ));
+        }
+        if let Some(reason) = &truncation_reason {
+            super::artifacts::append_capture_truncation_marker(&stderr_path_owned, reason);
+        }
+        truncation_reason
     });
 
     Ok((child, stdout, stderr_task, kill_guard))
@@ -176,6 +220,12 @@ async fn stream_and_process_output(
     let mut stdout_bytes_written: usize = 0;
     let mut signal: Option<String> = None;
     let mut signal_data: HashMap<String, String> = HashMap::new();
+    // Tracks whether/why a stdout capture write was dropped or skipped during
+    // this pass (I/O failure vs. hitting `OUTPUT_CAPTURE_LIMIT_BYTES`). The
+    // first cause encountered wins; once the cap is hit it stays hit for the
+    // rest of the pass, so a later I/O error (if any) wouldn't add new
+    // information. See spec 074 S15.
+    let mut stdout_capture_warning: Option<String> = None;
     let output_format = params.invocation.output_format.clone();
 
     let mut lines = BufReader::new(stdout).lines();
@@ -195,9 +245,24 @@ async fn stream_and_process_output(
                     Some(t) => t,
                     None => {
                         if stdout_bytes_written + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
-                            let _ = stdout_file.write_all(text.as_bytes());
-                            let _ = stdout_file.write_all(b"\n");
+                            if let Err(err) = stdout_file
+                                .write_all(text.as_bytes())
+                                .and_then(|()| stdout_file.write_all(b"\n"))
+                            {
+                                tracing::warn!(
+                                    path = %params.paths.stdout_path.display(),
+                                    error = %err,
+                                    "AgentOperator: failed to write stdout capture artifact"
+                                );
+                                if stdout_capture_warning.is_none() {
+                                    stdout_capture_warning = Some(format!("write error: {err}"));
+                                }
+                            }
                             stdout_bytes_written += text.len() + 1;
+                        } else if stdout_capture_warning.is_none() {
+                            stdout_capture_warning = Some(format!(
+                                "output exceeded {OUTPUT_CAPTURE_LIMIT_BYTES} byte capture limit"
+                            ));
                         }
                         continue;
                     }
@@ -207,9 +272,24 @@ async fn stream_and_process_output(
             };
 
             if stdout_bytes_written + text_for_matching.len() < OUTPUT_CAPTURE_LIMIT_BYTES {
-                let _ = stdout_file.write_all(text_for_matching.as_bytes());
-                let _ = stdout_file.write_all(b"\n");
+                if let Err(err) = stdout_file
+                    .write_all(text_for_matching.as_bytes())
+                    .and_then(|()| stdout_file.write_all(b"\n"))
+                {
+                    tracing::warn!(
+                        path = %params.paths.stdout_path.display(),
+                        error = %err,
+                        "AgentOperator: failed to write stdout capture artifact"
+                    );
+                    if stdout_capture_warning.is_none() {
+                        stdout_capture_warning = Some(format!("write error: {err}"));
+                    }
+                }
                 stdout_bytes_written += text_for_matching.len() + 1;
+            } else if stdout_capture_warning.is_none() {
+                stdout_capture_warning = Some(format!(
+                    "output exceeded {OUTPUT_CAPTURE_LIMIT_BYTES} byte capture limit"
+                ));
             }
 
             if params.stream_to_terminal {
@@ -233,6 +313,10 @@ async fn stream_and_process_output(
     })
     .await;
 
+    if let Some(reason) = &stdout_capture_warning {
+        super::artifacts::append_capture_truncation_marker(params.paths.stdout_path, reason);
+    }
+
     if stream_result.is_err() {
         let _ = child.kill().await;
         return Err(AppError::new(
@@ -245,6 +329,7 @@ async fn stream_and_process_output(
     Ok(StreamingResult {
         signal,
         signal_data,
+        stdout_capture_warning,
     })
 }
 
@@ -278,9 +363,9 @@ async fn stream_and_process_output(
 /// guard is deliberately left armed — its `Drop` remains the safety net.
 async fn wait_for_process_completion(
     mut child: tokio::process::Child,
-    stderr_task: tokio::task::JoinHandle<()>,
+    stderr_task: tokio::task::JoinHandle<Option<String>>,
     kill_guard: &mut ProcessGroupKillGuard,
-) -> Result<Option<i32>, AppError> {
+) -> Result<(Option<i32>, Option<String>), AppError> {
     let exit_status = child.wait().await.map_err(|err| {
         AppError::new(
             ErrorCategory::IoError,
@@ -292,9 +377,21 @@ async fn wait_for_process_completion(
     // stderr await below so a drop during that await is a no-op.
     kill_guard.disarm();
 
-    let _ = stderr_task.await;
+    let stderr_capture_warning = match stderr_task.await {
+        Ok(reason) => reason,
+        Err(join_err) => {
+            // The stderr-capture task panicked or was cancelled — treat as
+            // its own truncation cause rather than silently losing the
+            // signal. See spec 074 S15.
+            tracing::warn!(
+                error = %join_err,
+                "AgentOperator: stderr capture task did not complete cleanly"
+            );
+            Some(format!("stderr capture task failed: {join_err}"))
+        }
+    };
 
-    Ok(exit_status.code())
+    Ok((exit_status.code(), stderr_capture_warning))
 }
 
 /// Execute a single engine invocation and stream output.
@@ -315,25 +412,47 @@ pub(super) async fn execute_single(params: &ExecParams<'_>) -> Result<SingleExec
     // its internal `child.wait()` succeeds and before it awaits
     // `stderr_task` — see that function's doc comment for why the disarm
     // can't be deferred to here.
-    let exit_code = wait_for_process_completion(child, stderr_task, &mut kill_guard).await?;
+    let (exit_code, stderr_capture_warning) =
+        wait_for_process_completion(child, stderr_task, &mut kill_guard).await?;
 
     Ok(SingleExecResult {
         signal: streaming_result.signal,
         signal_data: streaming_result.signal_data,
         exit_code,
+        stdout_capture_warning: streaming_result.stdout_capture_warning,
+        stderr_capture_warning,
     })
+}
+
+/// Result from `execute_loop`: same shape as [`SingleExecResult`] plus the
+/// iteration count, since loop mode can run [`execute_single`] more than
+/// once before stopping.
+pub(super) struct LoopExecResult {
+    pub(super) signal: Option<String>,
+    pub(super) signal_data: HashMap<String, String>,
+    pub(super) exit_code: Option<i32>,
+    pub(super) iteration: u32,
+    pub(super) stdout_capture_warning: Option<String>,
+    pub(super) stderr_capture_warning: Option<String>,
 }
 
 /// Execute in loop mode.
 pub(super) async fn execute_loop(
     config: &AgentOperatorConfig,
     params: &ExecParams<'_>,
-) -> Result<(Option<String>, HashMap<String, String>, Option<i32>, u32), AppError> {
+) -> Result<LoopExecResult, AppError> {
     let max_iters = config.max_iterations.unwrap_or(u32::MAX);
     let mut iteration: u32 = 0;
     let mut last_exit_code: Option<i32>;
     let mut last_signal: Option<String>;
     let mut last_signal_data: HashMap<String, String>;
+    // stdout/stderr artifact paths are shared across loop iterations
+    // (`execute_single` opens them in append mode each time), so a
+    // truncation on any iteration is relevant to the whole loop run; the
+    // most recent cause is kept once truncation has occurred. See spec 074
+    // S15.
+    let mut stdout_capture_warning: Option<String> = None;
+    let mut stderr_capture_warning: Option<String> = None;
 
     loop {
         iteration += 1;
@@ -351,6 +470,12 @@ pub(super) async fn execute_loop(
         let result = execute_single(params).await?;
 
         last_exit_code = result.exit_code;
+        if result.stdout_capture_warning.is_some() {
+            stdout_capture_warning = result.stdout_capture_warning;
+        }
+        if result.stderr_capture_warning.is_some() {
+            stderr_capture_warning = result.stderr_capture_warning;
+        }
 
         if let Some(sig) = result.signal {
             last_signal = Some(sig);
@@ -366,7 +491,14 @@ pub(super) async fn execute_loop(
         }
     }
 
-    Ok((last_signal, last_signal_data, last_exit_code, iteration))
+    Ok(LoopExecResult {
+        signal: last_signal,
+        signal_data: last_signal_data,
+        exit_code: last_exit_code,
+        iteration,
+        stdout_capture_warning,
+        stderr_capture_warning,
+    })
 }
 
 /// Build a tokio Command from the invocation.
@@ -723,6 +855,53 @@ fi"#,
         });
         let result = op.execute(params, ctx).await.unwrap();
         assert!(result["stderr_artifact"].is_string());
+    }
+
+    // ── S15: capture-write failures/truncation must not be silent ─────────
+    //
+    // `stream_and_process_output`'s byte-cap guard
+    // (`stdout_bytes_written + text.len() < OUTPUT_CAPTURE_LIMIT_BYTES`)
+    // used to skip the write and drop the rest of the stream with zero trace
+    // in the artifact. This drives a real subprocess that emits well over
+    // `OUTPUT_CAPTURE_LIMIT_BYTES` (1 MiB) of stdout so the guard trips for
+    // real, then asserts the artifact file ends up carrying a
+    // `[capture truncated: ...]` marker and that the same reason is
+    // surfaced on the task result (not just buried in the artifact).
+    #[tokio::test]
+    async fn execute_stdout_capture_truncation_marker_written_when_cap_exceeded() {
+        let tmp = TempDir::new().unwrap();
+        let settings = WorkflowSettings::default();
+        let op = AgentOperator::with_default_registry(tmp.path().to_path_buf(), settings);
+        let ctx = make_ctx(&tmp);
+        // 20,000 lines of 74 chars + newline = ~1.5MB, comfortably over the
+        // 1 MiB (`OUTPUT_CAPTURE_LIMIT_BYTES`) capture cap.
+        let params = json!({
+            "engine": "command",
+            "engine_command": [
+                "bash", "-c",
+                "yes '01234567890123456789012345678901234567890123456789012345678901234567890123' | head -n 20000"
+            ]
+        });
+        let result = op.execute(params, ctx).await.unwrap();
+
+        let stdout_artifact = result["stdout_artifact"]
+            .as_str()
+            .expect("stdout_artifact must be a string");
+        let stdout_abs = tmp.path().join(stdout_artifact);
+        let contents = std::fs::read_to_string(&stdout_abs).expect("read stdout artifact");
+        assert!(
+            contents.contains("[capture truncated:"),
+            "expected a capture-truncation marker in the stdout artifact, got tail: {:?}",
+            &contents[contents.len().saturating_sub(200)..]
+        );
+
+        let warning = result["stdout_capture_warning"]
+            .as_str()
+            .expect("stdout_capture_warning must be set on the task result");
+        assert!(
+            warning.contains("byte capture limit"),
+            "unexpected stdout_capture_warning reason: {warning}"
+        );
     }
 
     #[tokio::test]
