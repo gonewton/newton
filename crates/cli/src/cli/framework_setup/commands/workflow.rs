@@ -168,6 +168,7 @@ pub(crate) fn workflow_command() -> Command {
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
                     help: "Limit list to N most recent executions (runs list)",
+                    min: Some(1),
                     ..Default::default()
                 },
                 ArgSpec {
@@ -205,6 +206,7 @@ pub(crate) fn workflow_command() -> Command {
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
                     help: "Runtime override for bounded task concurrency (workflow run)",
+                    min: Some(1),
                     ..Default::default()
                 },
                 ArgSpec {
@@ -214,6 +216,7 @@ pub(crate) fn workflow_command() -> Command {
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
                     help: "Runtime wall-clock limit override in seconds (workflow run)",
+                    min: Some(1),
                     ..Default::default()
                 },
                 ArgSpec {
@@ -270,7 +273,7 @@ pub(crate) fn workflow_command() -> Command {
                         })?;
                         commands::lint(LintArgs {
                             workflow,
-                            format: parse_output_format(&args),
+                            format: parse_output_format(&args)?,
                         })
                         .map_err(anyhow::Error::from)
                     }
@@ -288,7 +291,7 @@ pub(crate) fn workflow_command() -> Command {
                             workspace: get_opt_path(&args, "workspace"),
                             context,
                             trigger,
-                            format: parse_output_format(&args),
+                            format: parse_output_format(&args)?,
                             parameters_json: get_opt_path(&args, "parameters-json"),
                         })
                         .map_err(anyhow::Error::from)
@@ -392,14 +395,9 @@ pub(crate) fn workflow_command() -> Command {
                             .unwrap_or_default();
                         match subcmd2.as_str() {
                             "list" => {
+                                // framework enforces min=1, so the value is >= 1 and the cast is safe
                                 let last = if let Some(ArgValue::Int(n)) = args.get("last") {
-                                    let n = *n as usize;
-                                    if n == 0 {
-                                        return Err(anyhow!(
-                                            "LOG-003: runs list --last must be a positive integer"
-                                        ));
-                                    }
-                                    Some(n)
+                                    Some(*n as usize)
                                 } else {
                                     None
                                 };
