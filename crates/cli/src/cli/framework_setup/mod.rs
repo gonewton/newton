@@ -97,11 +97,16 @@ pub(crate) fn get_opt_str(map: &HashMap<String, ArgValue>, key: &str) -> Option<
     }
 }
 
-pub(crate) fn parse_output_format(map: &HashMap<String, ArgValue>) -> OutputFormat {
+pub(crate) fn parse_output_format(map: &HashMap<String, ArgValue>) -> anyhow::Result<OutputFormat> {
     match get_opt_str(map, "format").as_deref() {
-        Some("json") => OutputFormat::Json,
-        Some("prose") => OutputFormat::Prose,
-        _ => OutputFormat::Text,
+        Some("text") | None => Ok(OutputFormat::Text),
+        Some("json") => Ok(OutputFormat::Json),
+        Some("prose") => Ok(OutputFormat::Prose),
+        Some(other) => Err(anyhow!(
+            "{}: unknown format '{}' (supported: text, json, prose)",
+            error_codes::CLI_MIG_002,
+            other
+        )),
     }
 }
 
@@ -255,11 +260,13 @@ impl RunArgs {
         let parameters_json = get_opt_path(map, "parameters-json");
         let emit_completion_json = get_bool(map, "emit-completion-json");
         let parallel_limit = if let Some(ArgValue::Int(n)) = map.get("parallel-limit") {
+            // framework enforces min=1, so the value is >= 1 and the cast is safe
             Some(*n as usize)
         } else {
             None
         };
         let timeout_seconds = if let Some(ArgValue::Int(n)) = map.get("timeout") {
+            // framework enforces min=1, so the value is >= 1 and the cast is safe
             Some(*n as u64)
         } else {
             None
@@ -305,6 +312,7 @@ impl FromArgValueMap for OptimizeArgs {
         let project_id = get_opt_str(map, "project-id")
             .unwrap_or_else(|| panic!("fw bug: project-id is required"));
         let poll_interval_seconds = if let Some(ArgValue::Int(n)) = map.get("poll-interval") {
+            // framework enforces min=1, so the value is >= 1 and the cast is safe
             *n as u64
         } else {
             60
@@ -322,7 +330,8 @@ impl FromArgValueMap for ServeArgs {
     fn from_arg_value_map(map: &HashMap<String, ArgValue>) -> Self {
         let host = get_opt_str(map, "host").unwrap_or_else(|| "127.0.0.1".to_string());
         let port = if let Some(ArgValue::Int(n)) = map.get("port") {
-            u16::try_from(*n).unwrap_or(8080)
+            // framework enforces min=1/max=65535, so the value always fits u16
+            u16::try_from(*n).expect("port ArgSpec enforces 1..=65535")
         } else {
             8080
         };

@@ -41,6 +41,8 @@ pub(crate) fn serve_command() -> Command {
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
                     help: "Port to listen on (default: 8080)",
+                    min: Some(1),
+                    max: Some(65535),
                     ..Default::default()
                 },
                 ArgSpec {

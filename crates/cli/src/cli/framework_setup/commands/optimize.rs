@@ -58,6 +58,7 @@ pub(crate) fn optimize_command() -> Command {
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
                     help: "Seconds to wait when the Plan queue is empty (default: 60)",
+                    min: Some(1),
                     ..Default::default()
                 },
             ],

@@ -261,3 +261,7 @@ path = "tests/integration/test_run_input_file_verbose.rs"
 [[test]]
 name = "doctor_workspace_resolution"
 path = "tests/integration/doctor_workspace_resolution.rs"
+
+[[test]]
+name = "arg_validation_bounds"
+path = "tests/integration/arg_validation_bounds.rs"
