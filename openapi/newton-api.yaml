@@ -523,6 +523,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /executions/{id}/logs:
+    get:
+      tags:
+      - executions
+      operationId: list_execution_logs
+      parameters:
+      - name: id
+        in: path
+        description: Execution id (ExecutionRecord.id or WorkflowInstance.instanceId)
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Execution log entries, chronologically ordered
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExecutionLogEntry'
+        '404':
+          description: Execution not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /findings:
     get:
       tags:
@@ -3192,6 +3225,36 @@ components:
           type:
           - string
           - 'null'
+    ExecutionLogEntry:
+      type: object
+      description: |-
+        A single chronologically-orderable log entry for `GET /executions/{id}/logs`.
+
+        Every entry is a faithful rendering of a persisted row — either a
+        `NodeState` transition (source = "node_state") or a `WorkflowLog` row
+        (source = "log"). Nothing here is synthesized content; see
+        `list_execution_logs` in `newton-backend` for how each source is mapped.
+      required:
+      - timestamp
+      - level
+      - message
+      - source
+      properties:
+        level:
+          type: string
+          description: '"info" | "warn" | "error"'
+        message:
+          type: string
+        nodeId:
+          type:
+          - string
+          - 'null'
+        source:
+          type: string
+          description: '"node_state" | "log"'
+        timestamp:
+          type: string
+          description: RFC3339 timestamp.
     FindingItem:
       type: object
       required:
