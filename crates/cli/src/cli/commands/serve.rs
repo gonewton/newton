@@ -300,8 +300,8 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
 
     if args.with_mcp {
         let ctx = crate::cli::context::NewtonContext::new();
-        let mcp_router = crate::cli::framework_setup::build_mcp_router_for_serve(ctx, "/mcp")
-            .map_err(|err| {
+        let mcp_router =
+            crate::cli::framework_setup::build_mcp_router_for_serve(ctx).map_err(|err| {
                 AppError::new(
                     ErrorCategory::IoError,
                     format!("NEWTON-SERVE-MCP-004: failed to build MCP router: {err}"),

@@ -505,12 +505,12 @@ workflow:
     entry_task: enrich_spec
     max_time_seconds: 30
     continue_on_error: false
-    default_engine: agent
+    default_engine: cursor
   tasks:
     - id: enrich_spec
       operator: "AgentOperator"
       params:
-        engine: agent
+        engine: cursor
         prompt: "quota-check"
       terminal: success
 "#;
@@ -558,12 +558,12 @@ workflow:
     entry_task: enrich_spec
     max_time_seconds: 30
     continue_on_error: false
-    default_engine: agent
+    default_engine: cursor
   tasks:
     - id: enrich_spec
       operator: "AgentOperator"
       params:
-        engine: agent
+        engine: cursor
         prompt: "quota-check"
       terminal: success
 "#;

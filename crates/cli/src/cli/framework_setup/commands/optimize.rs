@@ -73,5 +73,7 @@ pub(crate) fn optimize_command() -> Command {
         }),
         expose_mcp: false,
         expose_chat: false,
+        meta: None,
+        visibility: None,
     }
 }
