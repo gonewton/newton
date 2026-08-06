@@ -53,30 +53,161 @@ fn is_loopback_host(host: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Checks whether `host` is a non-loopback bind target and, if so, emits the
-/// `unauthenticated_exposure` warning event. Returns `true` when the bind is
-/// non-loopback (the caller uses this to also print the louder startup-banner
-/// warning). Extracted from `serve()`'s body so the check/warn decision is
-/// unit-testable without starting a real HTTP listener (spec 074 PR-6 / B5).
-fn check_non_loopback_bind(host: &str, port: u16) -> bool {
-    let non_loopback_bind = !is_loopback_host(host);
-    if non_loopback_bind {
-        tracing::warn!(
-            event = "unauthenticated_exposure",
-            host = %host,
-            port = port,
-            "newton serve is binding a non-loopback host; the Newton HTTP API is UNAUTHENTICATED and will be reachable from other hosts on this interface"
-        );
+/// Effective OIDC configuration for `newton serve`, resolved from
+/// `--oidc-issuer` / `--oidc-audience` (env-var fallback: `NEWTON_OIDC_ISSUER`
+/// / `NEWTON_OIDC_AUDIENCE`, comma-separated). A bare struct rather than the
+/// framework's `OidcValidationConfig` so `resolve_oidc_config_from` stays a
+/// pure, dependency-free function that's trivial to unit test (audit finding
+/// C5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedOidcConfig {
+    issuer: String,
+    audiences: Vec<String>,
+}
+
+/// Pure resolution/validation logic behind [`resolve_oidc_config`]. Split out
+/// so tests can exercise flag/env precedence and the "half configured" error
+/// cases without touching real process env vars.
+///
+/// Precedence per field: flag wins over env var. `Ok(None)` means OIDC is not
+/// configured at all (loopback-only unauthenticated serving stays legal).
+/// `Err` means OIDC was *partially* configured (an issuer with no audience,
+/// or vice versa) -- that's always a mistake, regardless of bind host.
+fn resolve_oidc_config_from(
+    flag_issuer: Option<&str>,
+    flag_audiences: &[String],
+    env_issuer: Option<&str>,
+    env_audience: Option<&str>,
+) -> StdResult<Option<ResolvedOidcConfig>, AppError> {
+    let issuer = flag_issuer
+        .map(str::to_string)
+        .or_else(|| env_issuer.map(str::to_string))
+        .filter(|s| !s.trim().is_empty());
+
+    let audiences: Vec<String> = if !flag_audiences.is_empty() {
+        flag_audiences
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    } else {
+        env_audience
+            .map(|raw| {
+                raw.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    };
+
+    match (issuer, audiences.is_empty()) {
+        (None, true) => Ok(None),
+        (Some(issuer), false) => Ok(Some(ResolvedOidcConfig { issuer, audiences })),
+        (Some(_), true) => Err(AppError::new(
+            ErrorCategory::ValidationError,
+            "NEWTON-SERVE-AUTH-003: --oidc-issuer (or NEWTON_OIDC_ISSUER) was set but no \
+             --oidc-audience (or NEWTON_OIDC_AUDIENCE) was provided; OIDC requires at least one \
+             accepted audience value"
+                .to_string(),
+        )
+        .with_code("NEWTON-SERVE-AUTH-003")),
+        (None, false) => Err(AppError::new(
+            ErrorCategory::ValidationError,
+            "NEWTON-SERVE-AUTH-003: --oidc-audience (or NEWTON_OIDC_AUDIENCE) was provided but \
+             no --oidc-issuer (or NEWTON_OIDC_ISSUER) was set; OIDC requires an issuer URL"
+                .to_string(),
+        )
+        .with_code("NEWTON-SERVE-AUTH-003")),
     }
-    non_loopback_bind
+}
+
+/// Resolves the effective OIDC config for this `newton serve` invocation,
+/// reading `NEWTON_OIDC_ISSUER` / `NEWTON_OIDC_AUDIENCE` as the env-var
+/// fallback for the corresponding flags. See [`resolve_oidc_config_from`] for
+/// the (unit-tested) precedence and validation logic.
+fn resolve_oidc_config(args: &ServeArgs) -> StdResult<Option<ResolvedOidcConfig>, AppError> {
+    let env_issuer = std::env::var("NEWTON_OIDC_ISSUER").ok();
+    let env_audience = std::env::var("NEWTON_OIDC_AUDIENCE").ok();
+    resolve_oidc_config_from(
+        args.oidc_issuer.as_deref(),
+        &args.oidc_audience,
+        env_issuer.as_deref(),
+        env_audience.as_deref(),
+    )
+}
+
+/// Enforces the fail-closed exposure rule (audit finding C5): a non-loopback
+/// `--host` bind is the operator's explicit opt-in to remote exposure, and
+/// from this point on that opt-in is only legal when OIDC is configured --
+/// `newton serve` must refuse to start otherwise, rather than boot wide open
+/// behind a warning banner. A loopback bind stays optionally-authenticated
+/// (friction-free local tool default); a loopback bind with no OIDC
+/// configured still emits a low-severity tracing event so the unauthenticated
+/// state is observable, without alarming operators for the (expected) common
+/// case. Extracted from `serve()`'s body so the decision is unit-testable
+/// without starting a real HTTP listener (spec 074 PR-6 / B5; extended here).
+fn check_non_loopback_bind(
+    host: &str,
+    port: u16,
+    oidc_configured: bool,
+) -> StdResult<(), AppError> {
+    let non_loopback_bind = !is_loopback_host(host);
+    match (non_loopback_bind, oidc_configured) {
+        (true, false) => Err(AppError::new(
+            ErrorCategory::ValidationError,
+            format!(
+                "NEWTON-SERVE-AUTH-001: refusing to bind non-loopback host {host:?}:{port} \
+                 without authentication configured. newton serve requires OIDC whenever --host \
+                 is not a loopback address (127.0.0.1, ::1, or localhost): set --oidc-issuer (or \
+                 the NEWTON_OIDC_ISSUER env var) and at least one --oidc-audience (or the \
+                 comma-separated NEWTON_OIDC_AUDIENCE env var), or bind 127.0.0.1 for \
+                 unauthenticated local-only use."
+            ),
+        )
+        .with_code("NEWTON-SERVE-AUTH-001")),
+        (true, true) => {
+            tracing::info!(
+                event = "non_loopback_bind_authenticated",
+                host = %host,
+                port = port,
+                "newton serve is binding a non-loopback host; OIDC authentication is configured and enforced on the API"
+            );
+            Ok(())
+        }
+        (false, true) => {
+            tracing::info!(
+                event = "loopback_bind_authenticated",
+                host = %host,
+                port = port,
+                "newton serve is binding a loopback host with OIDC authentication configured and enforced on the API"
+            );
+            Ok(())
+        }
+        (false, false) => {
+            tracing::debug!(
+                event = "unauthenticated_loopback",
+                host = %host,
+                port = port,
+                "newton serve is binding a loopback host with no OIDC configured; the Newton HTTP API is unauthenticated (local-only default)"
+            );
+            Ok(())
+        }
+    }
 }
 
 /// Builds the human-readable startup banner lines. Newton's `info!` startup
 /// logs are silenced in the serve (Server) console context, and
 /// cli-framework's `serve()` prints nothing, so without this `newton serve`
 /// looks like it hangs with no output. Pure so the banner text — including
-/// the non-loopback exposure warning block — can be unit tested without
-/// starting a real HTTP listener.
+/// the auth status line and the non-loopback exposure note — can be unit
+/// tested without starting a real HTTP listener.
+///
+/// `oidc_issuer` being `Some` means OIDC is configured and enforced;
+/// `non_loopback_bind` being `true` implies `oidc_issuer.is_some()` by the
+/// time this is called, because `check_non_loopback_bind` already refused to
+/// start otherwise (audit finding C5) -- so there is no "unauthenticated and
+/// exposed" state left to warn about here.
 #[allow(clippy::too_many_arguments)]
 fn startup_banner_lines(
     host: &str,
@@ -86,6 +217,7 @@ fn startup_banner_lines(
     with_embedded_ailoop: bool,
     ailoop_base_path: &str,
     non_loopback_bind: bool,
+    oidc_issuer: Option<&str>,
 ) -> Vec<String> {
     // 0.0.0.0 / :: aren't browsable; point the user at a loopback address.
     let browse_host = match host {
@@ -102,6 +234,12 @@ fn startup_banner_lines(
     lines.push(format!("    REST API   {base}/api/v1/"));
     lines.push(format!("    Health     {base}/healthz"));
     lines.push(format!("    API docs   {base}/api/docs"));
+    match oidc_issuer {
+        Some(issuer) => lines.push(format!("    Auth       OIDC required (issuer: {issuer})")),
+        None => lines.push(
+            "    Auth       disabled (no OIDC configured; loopback-only default)".to_string(),
+        ),
+    }
     if with_mcp {
         lines.push(format!("    MCP        {base}/mcp"));
     }
@@ -113,24 +251,12 @@ fn startup_banner_lines(
     }
     if non_loopback_bind {
         lines.push(String::new());
-        lines.push(
-            "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!".to_string(),
-        );
         lines.push(format!(
-            "  !! WARNING: bound to non-loopback host \"{}\" — the Newton API is    !!",
-            host
+            "  Bound to non-loopback host \"{host}\" — reachable from other hosts on this interface."
         ));
         lines.push(
-            "  !! UNAUTHENTICATED and exposed to any host that can reach this    !!".to_string(),
-        );
-        lines.push(
-            "  !! interface. --host is your explicit opt-in; real authentication  !!".to_string(),
-        );
-        lines.push(
-            "  !! is not yet implemented (deferred to a future spec).             !!".to_string(),
-        );
-        lines.push(
-            "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!".to_string(),
+            "  OIDC authentication is REQUIRED and enforced on the API (see \"Auth\" above)."
+                .to_string(),
         );
     }
     lines.push("  Press Ctrl+C to stop.".to_string());
@@ -161,6 +287,7 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     use cli_framework::api::{
         ApiServerBuilder, ApiVersion, ApiVersionName, DefaultVersion, Stability,
     };
+    use cli_framework_oidc::server::{oidc_validation_layer, AudiencePolicy, OidcValidationConfig};
     use newton_core::api::{self, state::AppState};
     use std::net::SocketAddr;
     use tower_http::cors::CorsLayer;
@@ -181,7 +308,9 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
 
     info!("Starting Newton API server on {}: {}", args.host, args.port);
 
-    let non_loopback_bind = check_non_loopback_bind(&args.host, args.port);
+    let oidc_config = resolve_oidc_config(&args)?;
+    check_non_loopback_bind(&args.host, args.port, oidc_config.is_some())?;
+    let non_loopback_bind = !is_loopback_host(&args.host);
 
     let workspace_paths = WorkspacePaths::from_cwd().map_err(|e| {
         AppError::new(
@@ -283,6 +412,34 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         .default_version(DefaultVersion::Pinned(version_name))
         .cors(CorsLayer::permissive())
         .health_version(env!("CARGO_PKG_VERSION"));
+
+    // OIDC auth (audit finding C5): gates the `/api/{version}` mounts,
+    // non-primary `mount()`s (e.g. the embedded ailoop router), and `/mcp`.
+    // It deliberately does NOT wrap `root_fallback` (the embedded SPA) or
+    // `/healthz`/`/readyz` (we never call `.protect_health(true)`), so the
+    // web UI keeps loading without a token while the API itself is gated.
+    if let Some(ref oidc) = oidc_config {
+        let audience_policy = if oidc.audiences.len() == 1 {
+            AudiencePolicy::Require(oidc.audiences[0].clone())
+        } else {
+            AudiencePolicy::RequireAny(oidc.audiences.clone())
+        };
+        let oidc_cfg = OidcValidationConfig::new(oidc.issuer.clone(), audience_policy);
+        let auth_layer = oidc_validation_layer(oidc_cfg).map_err(|e| {
+            AppError::new(
+                ErrorCategory::ValidationError,
+                format!("NEWTON-SERVE-AUTH-004: invalid OIDC configuration: {e}"),
+            )
+            .with_code("NEWTON-SERVE-AUTH-004")
+        })?;
+        builder = builder.auth(auth_layer);
+        info!(
+            event = "oidc_auth_enabled",
+            issuer = %oidc.issuer,
+            audience_count = oidc.audiences.len(),
+            "OIDC authentication enforced on the Newton API"
+        );
+    }
 
     // Web UI: the embedded bundle is served at all non-API paths by default;
     // `--no-web` opts out (API only).
@@ -389,6 +546,7 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         args.with_embedded_ailoop,
         &args.ailoop_base_path,
         non_loopback_bind,
+        oidc_config.as_ref().map(|c| c.issuer.as_str()),
     ) {
         eprintln!("{line}");
     }
@@ -567,19 +725,193 @@ mod is_loopback_host_tests {
 }
 
 #[cfg(test)]
-mod non_loopback_warn_tests {
+mod check_non_loopback_bind_tests {
+    use super::*;
+
+    // loopback + no OIDC -> allowed, runs unauthenticated (today's default).
+    #[test]
+    fn loopback_without_oidc_is_allowed() {
+        assert!(check_non_loopback_bind("127.0.0.1", 3000, false).is_ok());
+        assert!(check_non_loopback_bind("localhost", 3000, false).is_ok());
+        assert!(check_non_loopback_bind("::1", 3000, false).is_ok());
+    }
+
+    // loopback + OIDC configured -> allowed, auth enforced anyway.
+    #[test]
+    fn loopback_with_oidc_is_allowed() {
+        assert!(check_non_loopback_bind("127.0.0.1", 3000, true).is_ok());
+        assert!(check_non_loopback_bind("localhost", 3000, true).is_ok());
+    }
+
+    // non-loopback + OIDC configured -> allowed (the only way to expose the API).
+    #[test]
+    fn non_loopback_with_oidc_is_allowed() {
+        assert!(check_non_loopback_bind("0.0.0.0", 3000, true).is_ok());
+        assert!(check_non_loopback_bind("203.0.113.5", 8080, true).is_ok());
+    }
+
+    // non-loopback + no OIDC -> refused, with an actionable error naming the
+    // exact flags/env vars the operator needs to set (audit finding C5).
+    #[test]
+    fn non_loopback_without_oidc_is_refused() {
+        let err = check_non_loopback_bind("0.0.0.0", 3000, false).unwrap_err();
+        assert!(
+            err.message.contains("NEWTON-SERVE-AUTH-001"),
+            "err={}",
+            err.message
+        );
+        assert!(err.message.contains("--oidc-issuer"), "err={}", err.message);
+        assert!(
+            err.message.contains("NEWTON_OIDC_ISSUER"),
+            "err={}",
+            err.message
+        );
+        assert!(
+            err.message.contains("--oidc-audience"),
+            "err={}",
+            err.message
+        );
+        assert!(
+            err.message.contains("NEWTON_OIDC_AUDIENCE"),
+            "err={}",
+            err.message
+        );
+        assert!(err.message.contains("0.0.0.0"), "err={}", err.message);
+
+        let err2 = check_non_loopback_bind("203.0.113.5", 8080, false).unwrap_err();
+        assert!(
+            err2.message.contains("NEWTON-SERVE-AUTH-001"),
+            "err={}",
+            err2.message
+        );
+    }
+}
+
+#[cfg(test)]
+mod resolve_oidc_config_tests {
     use super::*;
 
     #[test]
-    fn loopback_host_does_not_warn() {
-        assert!(!check_non_loopback_bind("127.0.0.1", 3000));
-        assert!(!check_non_loopback_bind("localhost", 3000));
+    fn nothing_configured_is_none() {
+        let cfg = resolve_oidc_config_from(None, &[], None, None).unwrap();
+        assert!(cfg.is_none());
     }
 
     #[test]
-    fn non_loopback_host_warns_and_returns_true() {
-        assert!(check_non_loopback_bind("0.0.0.0", 3000));
-        assert!(check_non_loopback_bind("203.0.113.5", 8080));
+    fn flag_issuer_and_single_flag_audience_configures_require() {
+        let cfg = resolve_oidc_config_from(
+            Some("https://issuer.example.com"),
+            &["newton-api".to_string()],
+            None,
+            None,
+        )
+        .unwrap()
+        .expect("configured");
+        assert_eq!(cfg.issuer, "https://issuer.example.com");
+        assert_eq!(cfg.audiences, vec!["newton-api".to_string()]);
+    }
+
+    #[test]
+    fn multiple_flag_audiences_are_all_kept_for_require_any() {
+        let cfg = resolve_oidc_config_from(
+            Some("https://issuer.example.com"),
+            &["aud-a".to_string(), "aud-b".to_string()],
+            None,
+            None,
+        )
+        .unwrap()
+        .expect("configured");
+        assert_eq!(
+            cfg.audiences,
+            vec!["aud-a".to_string(), "aud-b".to_string()]
+        );
+    }
+
+    #[test]
+    fn env_vars_are_used_when_flags_absent() {
+        let cfg = resolve_oidc_config_from(
+            None,
+            &[],
+            Some("https://issuer.example.com"),
+            Some("aud-a,aud-b"),
+        )
+        .unwrap()
+        .expect("configured");
+        assert_eq!(cfg.issuer, "https://issuer.example.com");
+        assert_eq!(
+            cfg.audiences,
+            vec!["aud-a".to_string(), "aud-b".to_string()]
+        );
+    }
+
+    #[test]
+    fn env_audience_list_trims_whitespace_and_drops_empties() {
+        let cfg = resolve_oidc_config_from(
+            None,
+            &[],
+            Some("https://issuer.example.com"),
+            Some(" aud-a , aud-b ,,"),
+        )
+        .unwrap()
+        .expect("configured");
+        assert_eq!(
+            cfg.audiences,
+            vec!["aud-a".to_string(), "aud-b".to_string()]
+        );
+    }
+
+    #[test]
+    fn flag_takes_precedence_over_env_for_issuer() {
+        let cfg = resolve_oidc_config_from(
+            Some("https://flag-issuer.example.com"),
+            &["aud".to_string()],
+            Some("https://env-issuer.example.com"),
+            Some("env-aud"),
+        )
+        .unwrap()
+        .expect("configured");
+        assert_eq!(cfg.issuer, "https://flag-issuer.example.com");
+        assert_eq!(cfg.audiences, vec!["aud".to_string()]);
+    }
+
+    #[test]
+    fn flag_audience_takes_precedence_over_env_audience() {
+        let cfg = resolve_oidc_config_from(
+            Some("https://issuer.example.com"),
+            &["flag-aud".to_string()],
+            None,
+            Some("env-aud"),
+        )
+        .unwrap()
+        .expect("configured");
+        assert_eq!(cfg.audiences, vec!["flag-aud".to_string()]);
+    }
+
+    #[test]
+    fn issuer_without_audience_is_rejected() {
+        let err = resolve_oidc_config_from(Some("https://issuer.example.com"), &[], None, None)
+            .unwrap_err();
+        assert!(
+            err.message.contains("NEWTON-SERVE-AUTH-003"),
+            "err={}",
+            err.message
+        );
+        assert!(
+            err.message.contains("--oidc-audience"),
+            "err={}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn audience_without_issuer_is_rejected() {
+        let err = resolve_oidc_config_from(None, &["aud".to_string()], None, None).unwrap_err();
+        assert!(
+            err.message.contains("NEWTON-SERVE-AUTH-003"),
+            "err={}",
+            err.message
+        );
+        assert!(err.message.contains("--oidc-issuer"), "err={}", err.message);
     }
 }
 
@@ -588,7 +920,7 @@ mod startup_banner_tests {
     use super::*;
 
     #[test]
-    fn loopback_bind_has_no_warning_banner() {
+    fn loopback_bind_without_oidc_shows_auth_disabled_and_no_exposure_note() {
         let lines = startup_banner_lines(
             "127.0.0.1",
             3000,
@@ -597,35 +929,74 @@ mod startup_banner_tests {
             false,
             "/ailoop",
             false,
+            None,
         );
         let joined = lines.join("\n");
         assert!(joined.contains("Newton serving on http://127.0.0.1:3000"));
         assert!(joined.contains("Web UI     http://127.0.0.1:3000/"));
-        assert!(!joined.contains("WARNING"));
+        assert!(joined.contains("Auth       disabled"));
+        assert!(!joined.contains("is not yet implemented"));
+        assert!(!joined.contains("REQUIRED"));
     }
 
     #[test]
-    fn non_loopback_bind_includes_warning_banner() {
-        let lines =
-            startup_banner_lines("0.0.0.0", 3000, "embedded", false, false, "/ailoop", true);
+    fn loopback_bind_with_oidc_shows_auth_required_line() {
+        let lines = startup_banner_lines(
+            "127.0.0.1",
+            3000,
+            "embedded",
+            false,
+            false,
+            "/ailoop",
+            false,
+            Some("https://issuer.example.com"),
+        );
         let joined = lines.join("\n");
         assert!(
-            joined.contains("WARNING: bound to non-loopback host \"0.0.0.0\""),
+            joined.contains("Auth       OIDC required (issuer: https://issuer.example.com)"),
             "{joined}"
         );
-        assert!(joined.contains("UNAUTHENTICATED and exposed"));
+        assert!(!joined.contains("is not yet implemented"));
+    }
+
+    #[test]
+    fn non_loopback_bind_notes_exposure_and_enforced_auth_without_lying() {
+        let lines = startup_banner_lines(
+            "0.0.0.0",
+            3000,
+            "embedded",
+            false,
+            false,
+            "/ailoop",
+            true,
+            Some("https://issuer.example.com"),
+        );
+        let joined = lines.join("\n");
+        assert!(
+            joined.contains("Bound to non-loopback host \"0.0.0.0\""),
+            "{joined}"
+        );
+        assert!(joined.contains("REQUIRED and enforced"), "{joined}");
+        // The old "authentication is not yet implemented" lie must be gone.
+        assert!(!joined.contains("is not yet implemented"));
+        assert!(!joined.contains("deferred to a future spec"));
+        assert!(!joined.contains("UNAUTHENTICATED"));
     }
 
     #[test]
     fn unspecified_bind_addresses_map_to_browsable_loopback() {
+        let lines = startup_banner_lines(
+            "0.0.0.0", 3000, "embedded", false, false, "/ailoop", false, None,
+        );
+        assert!(lines.iter().any(|l| l.contains("http://127.0.0.1:3000")));
+
         let lines =
-            startup_banner_lines("0.0.0.0", 3000, "embedded", false, false, "/ailoop", false);
+            startup_banner_lines("::", 3000, "embedded", false, false, "/ailoop", false, None);
         assert!(lines.iter().any(|l| l.contains("http://127.0.0.1:3000")));
 
-        let lines = startup_banner_lines("::", 3000, "embedded", false, false, "/ailoop", false);
-        assert!(lines.iter().any(|l| l.contains("http://127.0.0.1:3000")));
-
-        let lines = startup_banner_lines("[::]", 3000, "embedded", false, false, "/ailoop", false);
+        let lines = startup_banner_lines(
+            "[::]", 3000, "embedded", false, false, "/ailoop", false, None,
+        );
         assert!(lines.iter().any(|l| l.contains("http://127.0.0.1:3000")));
     }
 
@@ -639,6 +1010,7 @@ mod startup_banner_tests {
             false,
             "/ailoop",
             false,
+            None,
         );
         let joined = lines.join("\n");
         assert!(!joined.contains("Web UI"));
@@ -647,8 +1019,16 @@ mod startup_banner_tests {
 
     #[test]
     fn mcp_enabled_adds_mcp_line() {
-        let lines =
-            startup_banner_lines("127.0.0.1", 3000, "embedded", true, false, "/ailoop", false);
+        let lines = startup_banner_lines(
+            "127.0.0.1",
+            3000,
+            "embedded",
+            true,
+            false,
+            "/ailoop",
+            false,
+            None,
+        );
         assert!(lines
             .iter()
             .any(|l| l.contains("MCP        http://127.0.0.1:3000/mcp")));
@@ -656,7 +1036,16 @@ mod startup_banner_tests {
 
     #[test]
     fn ailoop_enabled_adds_ailoop_line_with_base_path() {
-        let lines = startup_banner_lines("127.0.0.1", 3000, "embedded", false, true, "/hil", false);
+        let lines = startup_banner_lines(
+            "127.0.0.1",
+            3000,
+            "embedded",
+            false,
+            true,
+            "/hil",
+            false,
+            None,
+        );
         assert!(lines
             .iter()
             .any(|l| l.contains("ailoop     http://127.0.0.1:3000/hil")));
@@ -672,6 +1061,7 @@ mod startup_banner_tests {
             false,
             "/ailoop",
             false,
+            None,
         );
         assert!(lines.iter().any(|l| l.contains("Press Ctrl+C to stop.")));
     }

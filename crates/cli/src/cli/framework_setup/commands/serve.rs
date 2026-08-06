@@ -108,6 +108,24 @@ pub(crate) fn serve_command() -> Command {
                     help: "Mount the magic-tool router (/aitools/...). Off by default: only a newton/ping smoke-test tool is registered until real tool definitions land",
                     ..Default::default()
                 },
+                ArgSpec {
+                    name: "oidc-issuer",
+                    kind: ArgKind::Option,
+                    long: Some("oidc-issuer"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    help: "OIDC issuer URL used to validate bearer tokens on the Newton API (falls back to NEWTON_OIDC_ISSUER). Required (with --oidc-audience) to bind a non-loopback --host; optional on loopback.",
+                    ..Default::default()
+                },
+                ArgSpec {
+                    name: "oidc-audience",
+                    kind: ArgKind::Option,
+                    long: Some("oidc-audience"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Repeated,
+                    help: "Accepted JWT audience value; may be repeated (falls back to comma-separated NEWTON_OIDC_AUDIENCE). Required alongside --oidc-issuer.",
+                    ..Default::default()
+                },
             ],
             ..Default::default()
         }),

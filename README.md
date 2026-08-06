@@ -129,6 +129,30 @@ newton serve --no-web      # API only (no web UI); pair with the Vite dev server
 
 REST routes are versioned under `/api/v1/`. Run `newton serve --help` for the full route list.
 
+#### Authentication (OIDC)
+
+`newton serve` binds `127.0.0.1` by default and stays a friction-free local tool: with no OIDC configured, a loopback bind serves the API unauthenticated, exactly as before. Binding a non-loopback `--host` is the explicit act of exposing the API to other hosts, so from that point authentication is **required**, not optional — `newton serve` refuses to start if OIDC isn't configured:
+
+```bash
+# Local, unauthenticated (default) — unchanged.
+newton serve
+
+# Loopback + OIDC: auth enforced even though nothing forces it.
+newton serve --oidc-issuer https://keycloak.example.com/realms/newton --oidc-audience newton-api
+
+# Non-loopback: OIDC is mandatory. Omitting it refuses to start with an
+# actionable error naming the flags/env vars below.
+newton serve --host 0.0.0.0 \
+  --oidc-issuer https://keycloak.example.com/realms/newton \
+  --oidc-audience newton-api
+```
+
+- `--oidc-issuer <url>` / `NEWTON_OIDC_ISSUER` — the OIDC issuer URL (flag wins over env var). Must be `https://`, except `http://127.0.0.1`, `http://localhost`, or `http://[::1]` for local dev.
+- `--oidc-audience <value>` / `NEWTON_OIDC_AUDIENCE` — accepted JWT `aud` value. Repeat `--oidc-audience` for multiple values (mapped to "any of these"), or set `NEWTON_OIDC_AUDIENCE` to a comma-separated list.
+- Both must be set together — an issuer with no audience (or vice versa) is a startup error.
+- When configured, bearer tokens are validated (signature, issuer, audience, expiry) against the issuer's JWKS on every request to the REST API (`/api/{version}` mounts), the MCP router (`/mcp`), and any additional `--with-embedded-ailoop` mount. The embedded web UI (`/`, SPA routes) and `/healthz` / `/readyz` stay public regardless of auth config, so the UI keeps loading without a token while the API itself is gated.
+- A request with no/invalid token gets `401` with a `WWW-Authenticate: Bearer` challenge; if the issuer's JWKS is temporarily unreachable, requests get `503` with `Retry-After`.
+
 ### MCP mode
 
 Expose Newton commands as MCP tools:

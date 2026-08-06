@@ -310,6 +310,20 @@ pub struct ServeArgs {
     /// definitions landing in a future release (spec 074 P9). Not reflected
     /// in the OpenAPI doc until then.
     pub with_magic_tools: bool,
+
+    /// OIDC issuer URL used to validate bearer tokens on the Newton HTTP API
+    /// (e.g. `https://keycloak.example.com/realms/newton`). Falls back to
+    /// `NEWTON_OIDC_ISSUER` when unset. Must be paired with at least one
+    /// `--oidc-audience` / `NEWTON_OIDC_AUDIENCE`. When set, auth is enforced
+    /// even on a loopback bind; when unset AND `--host` is non-loopback,
+    /// `newton serve` refuses to start (audit finding C5).
+    pub oidc_issuer: Option<String>,
+
+    /// Accepted JWT `aud` value(s). May be repeated; a single value maps to
+    /// `AudiencePolicy::Require`, multiple values to `AudiencePolicy::RequireAny`.
+    /// Falls back to the comma-separated `NEWTON_OIDC_AUDIENCE` env var when
+    /// no `--oidc-audience` flags are given.
+    pub oidc_audience: Vec<String>,
 }
 
 // ── Data ─────────────────────────────────────────────────────────────────────

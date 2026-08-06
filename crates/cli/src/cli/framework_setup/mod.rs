@@ -97,6 +97,26 @@ pub(crate) fn get_opt_str(map: &HashMap<String, ArgValue>, key: &str) -> Option<
     }
 }
 
+/// Extract a `Cardinality::Repeated` plain-string option from an ArgValue map
+/// (e.g. `--oidc-audience foo --oidc-audience bar`). Prefers `List` (spec-based
+/// parsing) but also accepts a bare `Str`/`Enum` for a single occurrence, so
+/// callers that build the map by hand (tests) don't need to wrap a lone value.
+pub(crate) fn get_str_list(map: &HashMap<String, ArgValue>, key: &str) -> Vec<String> {
+    match map.get(key) {
+        Some(ArgValue::List(items)) => items
+            .iter()
+            .filter_map(|v| match v {
+                ArgValue::Str(s) => Some(s.clone()),
+                ArgValue::Enum(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect(),
+        Some(ArgValue::Str(s)) => vec![s.clone()],
+        Some(ArgValue::Enum(s)) => vec![s.clone()],
+        _ => vec![],
+    }
+}
+
 pub(crate) fn parse_output_format(map: &HashMap<String, ArgValue>) -> anyhow::Result<OutputFormat> {
     match get_opt_str(map, "format").as_deref() {
         Some("text") | None => Ok(OutputFormat::Text),
@@ -349,6 +369,8 @@ impl FromArgValueMap for ServeArgs {
             state_dir: get_opt_path(map, "state-dir"),
             import_existing: get_bool(map, "import-existing"),
             with_magic_tools: get_bool(map, "with-magic-tools"),
+            oidc_issuer: get_opt_str(map, "oidc-issuer"),
+            oidc_audience: get_str_list(map, "oidc-audience"),
         }
     }
 }
