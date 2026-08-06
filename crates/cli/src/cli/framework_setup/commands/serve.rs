@@ -126,6 +126,15 @@ pub(crate) fn serve_command() -> Command {
                     help: "Accepted JWT audience value; may be repeated (falls back to comma-separated NEWTON_OIDC_AUDIENCE). Required alongside --oidc-issuer.",
                     ..Default::default()
                 },
+                ArgSpec {
+                    name: "oidc-client-id",
+                    kind: ArgKind::Option,
+                    long: Some("oidc-client-id"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    help: "Public OAuth client id the embedded SPA uses for its PKCE login flow (falls back to NEWTON_OIDC_CLIENT_ID). Optional even when --oidc-issuer/--oidc-audience are set; exposed via GET /auth-config.",
+                    ..Default::default()
+                },
             ],
             ..Default::default()
         }),

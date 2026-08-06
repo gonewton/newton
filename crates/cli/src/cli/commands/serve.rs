@@ -63,6 +63,11 @@ fn is_loopback_host(host: &str) -> bool {
 struct ResolvedOidcConfig {
     issuer: String,
     audiences: Vec<String>,
+    /// Public OAuth client id for the SPA's PKCE flow (`--oidc-client-id` /
+    /// `NEWTON_OIDC_CLIENT_ID`). Unlike `issuer`/`audiences`, this is always
+    /// optional -- the backend never needs it to validate tokens, so its
+    /// absence never turns OIDC on/off or fails resolution.
+    client_id: Option<String>,
 }
 
 /// Pure resolution/validation logic behind [`resolve_oidc_config`]. Split out
@@ -78,6 +83,8 @@ fn resolve_oidc_config_from(
     flag_audiences: &[String],
     env_issuer: Option<&str>,
     env_audience: Option<&str>,
+    flag_client_id: Option<&str>,
+    env_client_id: Option<&str>,
 ) -> StdResult<Option<ResolvedOidcConfig>, AppError> {
     let issuer = flag_issuer
         .map(str::to_string)
@@ -101,9 +108,21 @@ fn resolve_oidc_config_from(
             .unwrap_or_default()
     };
 
+    // Optional even when OIDC is configured (see `ResolvedOidcConfig::client_id`
+    // doc): flag wins over env, same precedence as issuer/audience, but never
+    // participates in the "half configured" validation below.
+    let client_id = flag_client_id
+        .map(str::to_string)
+        .or_else(|| env_client_id.map(str::to_string))
+        .filter(|s| !s.trim().is_empty());
+
     match (issuer, audiences.is_empty()) {
         (None, true) => Ok(None),
-        (Some(issuer), false) => Ok(Some(ResolvedOidcConfig { issuer, audiences })),
+        (Some(issuer), false) => Ok(Some(ResolvedOidcConfig {
+            issuer,
+            audiences,
+            client_id,
+        })),
         (Some(_), true) => Err(AppError::new(
             ErrorCategory::ValidationError,
             "NEWTON-SERVE-AUTH-003: --oidc-issuer (or NEWTON_OIDC_ISSUER) was set but no \
@@ -129,11 +148,14 @@ fn resolve_oidc_config_from(
 fn resolve_oidc_config(args: &ServeArgs) -> StdResult<Option<ResolvedOidcConfig>, AppError> {
     let env_issuer = std::env::var("NEWTON_OIDC_ISSUER").ok();
     let env_audience = std::env::var("NEWTON_OIDC_AUDIENCE").ok();
+    let env_client_id = std::env::var("NEWTON_OIDC_CLIENT_ID").ok();
     resolve_oidc_config_from(
         args.oidc_issuer.as_deref(),
         &args.oidc_audience,
         env_issuer.as_deref(),
         env_audience.as_deref(),
+        args.oidc_client_id.as_deref(),
+        env_client_id.as_deref(),
     )
 }
 
@@ -442,11 +464,21 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     }
 
     // Web UI: the embedded bundle is served at all non-API paths by default;
-    // `--no-web` opts out (API only).
+    // `--no-web` opts out (API only). The SPA can't reach `/api/**` before it
+    // has a token, so the public `/auth-config` route (mounted alongside the
+    // SPA fallback, NOT under `/api`) hands it the non-secret OIDC metadata
+    // it needs to self-configure a login.
     let web_ui_mode: &str = if args.no_web {
         "disabled"
     } else {
-        builder = builder.root_fallback(api::embedded_web_router());
+        let public_auth_config = api::PublicAuthConfig {
+            oidc: oidc_config.as_ref().map(|oidc| api::PublicOidcConfig {
+                issuer: oidc.issuer.clone(),
+                audience: oidc.audiences[0].clone(),
+                client_id: oidc.client_id.clone(),
+            }),
+        };
+        builder = builder.root_fallback(api::embedded_web_router(public_auth_config));
         "embedded"
     };
     info!(
@@ -793,7 +825,7 @@ mod resolve_oidc_config_tests {
 
     #[test]
     fn nothing_configured_is_none() {
-        let cfg = resolve_oidc_config_from(None, &[], None, None).unwrap();
+        let cfg = resolve_oidc_config_from(None, &[], None, None, None, None).unwrap();
         assert!(cfg.is_none());
     }
 
@@ -804,11 +836,14 @@ mod resolve_oidc_config_tests {
             &["newton-api".to_string()],
             None,
             None,
+            None,
+            None,
         )
         .unwrap()
         .expect("configured");
         assert_eq!(cfg.issuer, "https://issuer.example.com");
         assert_eq!(cfg.audiences, vec!["newton-api".to_string()]);
+        assert_eq!(cfg.client_id, None);
     }
 
     #[test]
@@ -816,6 +851,8 @@ mod resolve_oidc_config_tests {
         let cfg = resolve_oidc_config_from(
             Some("https://issuer.example.com"),
             &["aud-a".to_string(), "aud-b".to_string()],
+            None,
+            None,
             None,
             None,
         )
@@ -834,6 +871,8 @@ mod resolve_oidc_config_tests {
             &[],
             Some("https://issuer.example.com"),
             Some("aud-a,aud-b"),
+            None,
+            None,
         )
         .unwrap()
         .expect("configured");
@@ -851,6 +890,8 @@ mod resolve_oidc_config_tests {
             &[],
             Some("https://issuer.example.com"),
             Some(" aud-a , aud-b ,,"),
+            None,
+            None,
         )
         .unwrap()
         .expect("configured");
@@ -867,6 +908,8 @@ mod resolve_oidc_config_tests {
             &["aud".to_string()],
             Some("https://env-issuer.example.com"),
             Some("env-aud"),
+            None,
+            None,
         )
         .unwrap()
         .expect("configured");
@@ -881,6 +924,8 @@ mod resolve_oidc_config_tests {
             &["flag-aud".to_string()],
             None,
             Some("env-aud"),
+            None,
+            None,
         )
         .unwrap()
         .expect("configured");
@@ -889,8 +934,15 @@ mod resolve_oidc_config_tests {
 
     #[test]
     fn issuer_without_audience_is_rejected() {
-        let err = resolve_oidc_config_from(Some("https://issuer.example.com"), &[], None, None)
-            .unwrap_err();
+        let err = resolve_oidc_config_from(
+            Some("https://issuer.example.com"),
+            &[],
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(
             err.message.contains("NEWTON-SERVE-AUTH-003"),
             "err={}",
@@ -905,13 +957,83 @@ mod resolve_oidc_config_tests {
 
     #[test]
     fn audience_without_issuer_is_rejected() {
-        let err = resolve_oidc_config_from(None, &["aud".to_string()], None, None).unwrap_err();
+        let err = resolve_oidc_config_from(None, &["aud".to_string()], None, None, None, None)
+            .unwrap_err();
         assert!(
             err.message.contains("NEWTON-SERVE-AUTH-003"),
             "err={}",
             err.message
         );
         assert!(err.message.contains("--oidc-issuer"), "err={}", err.message);
+    }
+
+    #[test]
+    fn client_id_is_none_when_not_configured() {
+        let cfg = resolve_oidc_config_from(
+            Some("https://issuer.example.com"),
+            &["newton-api".to_string()],
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .expect("configured");
+        assert_eq!(cfg.client_id, None);
+    }
+
+    #[test]
+    fn flag_client_id_is_captured() {
+        let cfg = resolve_oidc_config_from(
+            Some("https://issuer.example.com"),
+            &["newton-api".to_string()],
+            None,
+            None,
+            Some("newton-spa"),
+            None,
+        )
+        .unwrap()
+        .expect("configured");
+        assert_eq!(cfg.client_id, Some("newton-spa".to_string()));
+    }
+
+    #[test]
+    fn env_client_id_is_used_when_flag_absent() {
+        let cfg = resolve_oidc_config_from(
+            Some("https://issuer.example.com"),
+            &["newton-api".to_string()],
+            None,
+            None,
+            None,
+            Some("env-spa"),
+        )
+        .unwrap()
+        .expect("configured");
+        assert_eq!(cfg.client_id, Some("env-spa".to_string()));
+    }
+
+    #[test]
+    fn flag_client_id_takes_precedence_over_env() {
+        let cfg = resolve_oidc_config_from(
+            Some("https://issuer.example.com"),
+            &["newton-api".to_string()],
+            None,
+            None,
+            Some("flag-spa"),
+            Some("env-spa"),
+        )
+        .unwrap()
+        .expect("configured");
+        assert_eq!(cfg.client_id, Some("flag-spa".to_string()));
+    }
+
+    #[test]
+    fn client_id_without_issuer_or_audience_does_not_enable_oidc() {
+        // --oidc-client-id is meaningless on its own; OIDC stays off, and it
+        // must never be required (that would break API-only deployments).
+        let cfg =
+            resolve_oidc_config_from(None, &[], None, None, Some("orphan-spa"), None).unwrap();
+        assert!(cfg.is_none());
     }
 }
 

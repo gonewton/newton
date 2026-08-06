@@ -371,6 +371,7 @@ impl FromArgValueMap for ServeArgs {
             with_magic_tools: get_bool(map, "with-magic-tools"),
             oidc_issuer: get_opt_str(map, "oidc-issuer"),
             oidc_audience: get_str_list(map, "oidc-audience"),
+            oidc_client_id: get_opt_str(map, "oidc-client-id"),
         }
     }
 }

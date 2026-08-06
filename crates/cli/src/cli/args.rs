@@ -324,6 +324,16 @@ pub struct ServeArgs {
     /// Falls back to the comma-separated `NEWTON_OIDC_AUDIENCE` env var when
     /// no `--oidc-audience` flags are given.
     pub oidc_audience: Vec<String>,
+
+    /// Public OAuth client id the embedded SPA uses for its PKCE login flow.
+    /// Falls back to `NEWTON_OIDC_CLIENT_ID` when unset. Unlike
+    /// `--oidc-issuer`/`--oidc-audience` this is OPTIONAL even when OIDC is
+    /// otherwise configured: the backend doesn't need it to validate tokens,
+    /// only the SPA does to self-configure a login. When absent, `newton
+    /// serve` still enforces OIDC on the API as normal; only the SPA's
+    /// ability to auto-configure a login is affected (reported via
+    /// `GET /auth-config`).
+    pub oidc_client_id: Option<String>,
 }
 
 // ── Data ─────────────────────────────────────────────────────────────────────
