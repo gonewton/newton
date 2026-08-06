@@ -107,6 +107,12 @@ parity_test!(
     StatusCode::OK
 );
 parity_test!(
+    test_get_execution_logs_unknown_id_404,
+    Method::GET,
+    "/executions/no-such-execution/logs",
+    StatusCode::NOT_FOUND
+);
+parity_test!(
     test_list_workflows_parity,
     Method::GET,
     "/workflows",

@@ -259,6 +259,9 @@ impl BackendStore for SqliteBackendStore {
     ) -> Result<Vec<ExecutionItem>, ApiError> {
         self.list_executions_db(plan_id).await
     }
+    async fn list_execution_logs(&self, id: &str) -> Result<Vec<ExecutionLogEntry>, ApiError> {
+        self.list_execution_logs_db(id).await
+    }
     async fn list_operators(&self) -> Result<Vec<OperatorItem>, ApiError> {
         self.list_operators_db().await
     }
@@ -703,6 +706,106 @@ mod store_tests {
         assert_eq!(full.len(), 10);
         assert_eq!(full[0].message, "line-0");
         assert_eq!(full[9].message, "line-9");
+    }
+
+    #[tokio::test]
+    async fn list_execution_logs_orders_by_timestamp_and_derives_levels() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let inst = make_instance("inst-logs-1");
+        store.upsert_workflow_instance(&inst).await.unwrap();
+
+        let mut node_a = make_node("node-a");
+        node_a.status = NodeStatus::Succeeded;
+        node_a.started_at = Some("2026-01-01T00:00:00Z".parse().unwrap());
+        node_a.ended_at = Some("2026-01-01T00:01:00Z".parse().unwrap());
+        store
+            .upsert_node_state("inst-logs-1", &node_a)
+            .await
+            .unwrap();
+
+        let mut node_b = make_node("node-b");
+        node_b.status = NodeStatus::Failed;
+        node_b.started_at = Some("2026-01-01T00:02:00Z".parse().unwrap());
+        node_b.ended_at = Some("2026-01-01T00:03:00Z".parse().unwrap());
+        store
+            .upsert_node_state("inst-logs-1", &node_b)
+            .await
+            .unwrap();
+
+        let mut node_c = make_node("node-c");
+        node_c.status = NodeStatus::Cancelled;
+        node_c.started_at = Some("2026-01-01T00:04:00Z".parse().unwrap());
+        node_c.ended_at = None;
+        store
+            .upsert_node_state("inst-logs-1", &node_c)
+            .await
+            .unwrap();
+
+        let entries = store.list_execution_logs("inst-logs-1").await.unwrap();
+        assert_eq!(entries.len(), 3, "one entry per NodeState row");
+        assert_eq!(entries[0].node_id.as_deref(), Some("node-a"));
+        assert_eq!(entries[0].level, "info");
+        assert_eq!(entries[1].node_id.as_deref(), Some("node-b"));
+        assert_eq!(entries[1].level, "error");
+        assert_eq!(entries[2].node_id.as_deref(), Some("node-c"));
+        assert_eq!(entries[2].level, "warn");
+        assert!(
+            entries.windows(2).all(|w| w[0].timestamp <= w[1].timestamp),
+            "entries must be chronologically ordered"
+        );
+        assert!(entries.iter().all(|e| e.source == "node_state"));
+    }
+
+    #[tokio::test]
+    async fn list_execution_logs_unknown_id_is_not_found() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let err = store
+            .list_execution_logs("no-such-execution")
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "ERR_NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn list_execution_logs_known_instance_with_no_events_is_empty() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+        let inst = make_instance("inst-logs-empty");
+        store.upsert_workflow_instance(&inst).await.unwrap();
+
+        let entries = store.list_execution_logs("inst-logs-empty").await.unwrap();
+        assert!(
+            entries.is_empty(),
+            "a known execution with no NodeState/WorkflowLog rows returns an empty array, not an error"
+        );
+    }
+
+    /// Mirrors `list_executions_db`'s `ExecutionItem::instance_id` fallback:
+    /// an `ExecutionRecord` with a NULL `instanceId` column means callers
+    /// pass the `ExecutionRecord.id` itself as the execution id, which must
+    /// resolve to the `WorkflowInstance` of the same id.
+    #[tokio::test]
+    async fn list_execution_logs_resolves_via_execution_record_id_fallback() {
+        let store = SqliteBackendStore::new_in_memory().await.unwrap();
+
+        let now = SqliteBackendStore::now_iso();
+        sqlx::query("INSERT INTO ExecutionRecord (id, status, createdAt) VALUES (?, 'running', ?)")
+            .bind("exec-fallback-1")
+            .bind(&now)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let inst = make_instance("exec-fallback-1");
+        store.upsert_workflow_instance(&inst).await.unwrap();
+        let node = make_node("node-fb");
+        store
+            .upsert_node_state("exec-fallback-1", &node)
+            .await
+            .unwrap();
+
+        let entries = store.list_execution_logs("exec-fallback-1").await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].node_id.as_deref(), Some("node-fb"));
     }
 }
 
