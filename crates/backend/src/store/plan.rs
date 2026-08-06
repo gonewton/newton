@@ -1,4 +1,4 @@
-use super::helpers::{query_err, tx_err};
+use super::helpers::{parse_node_status, query_err, tx_err};
 
 const PLAN_STATUSES: &[&str] = &[
     "draft",
@@ -551,6 +551,110 @@ impl super::SqliteBackendStore {
                 started: r.started,
             })
             .collect())
+    }
+
+    /// Resolves an id from `GET /executions/{id}/logs` to a
+    /// `WorkflowInstance.instanceId` to query `NodeState`/`WorkflowLog`
+    /// against, accepting either an `ExecutionRecord.id` or a real
+    /// `WorkflowInstance.instanceId` — same fallback convention as
+    /// `list_executions_db`'s `ExecutionItem::instance_id` mapping.
+    /// Returns `ERR_NOT_FOUND` if `id` matches neither table.
+    async fn resolve_execution_instance_id(&self, id: &str) -> Result<String, ApiError> {
+        let exec_row: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT instanceId FROM ExecutionRecord WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(query_err)?;
+
+        if let Some((instance_id_opt,)) = exec_row {
+            return Ok(instance_id_opt.unwrap_or_else(|| id.to_string()));
+        }
+
+        let wi_row: Option<(String,)> =
+            sqlx::query_as("SELECT instanceId FROM WorkflowInstance WHERE instanceId = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(query_err)?;
+
+        wi_row
+            .map(|(instance_id,)| instance_id)
+            .ok_or_else(|| err_not_found("Execution not found"))
+    }
+
+    /// Real per-execution log entries: a chronologically-sorted merge of
+    /// `NodeState` transitions (populated in production today) and
+    /// `WorkflowLog` rows (currently written only by tests — see
+    /// `crates/core/src/api/streaming.rs`, nothing in production appends to
+    /// this table yet, so this half is empty until that changes).
+    pub(super) async fn list_execution_logs_db(
+        &self,
+        id: &str,
+    ) -> Result<Vec<ExecutionLogEntry>, ApiError> {
+        let instance_id = self.resolve_execution_instance_id(id).await?;
+
+        let node_rows: Vec<NodeStateRow> = sqlx::query_as::<_, NodeStateRow>(
+            "SELECT instanceId, nodeId, status, startedAt, endedAt, operatorType FROM NodeState WHERE instanceId = ? ORDER BY rowid ASC"
+        )
+        .bind(&instance_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(query_err)?;
+
+        let mut entries: Vec<ExecutionLogEntry> = Vec::with_capacity(node_rows.len());
+        for row in node_rows {
+            // A NodeState row's timestamp is whichever of ended_at/started_at
+            // is set — prefer ended_at (the row's most-recently-true field).
+            // A node with neither (e.g. still Pending) has no honest
+            // timestamp to report, so it's dropped rather than guessed.
+            let Some(ts) = row.ended_at.clone().or_else(|| row.started_at.clone()) else {
+                continue;
+            };
+            let status = parse_node_status(&row.status);
+            let level = match status {
+                NodeStatus::Failed | NodeStatus::Timeout => "error",
+                NodeStatus::Cancelled => "warn",
+                NodeStatus::Pending | NodeStatus::Running | NodeStatus::Succeeded => "info",
+            };
+            let operator_suffix = row
+                .operator_type
+                .as_deref()
+                .map(|op| format!(" (operator: {op})"))
+                .unwrap_or_default();
+            let message = format!(
+                "node \"{}\"{operator_suffix} entered status {:?}",
+                row.node_id, status
+            );
+            entries.push(ExecutionLogEntry {
+                timestamp: ts,
+                level: level.to_string(),
+                message,
+                node_id: Some(row.node_id),
+                source: "node_state".to_string(),
+            });
+        }
+
+        let log_rows: Vec<WorkflowLogRow> = sqlx::query_as::<_, WorkflowLogRow>(
+            "SELECT seq, instanceId, nodeId, ts, level, message FROM WorkflowLog WHERE instanceId = ? ORDER BY seq ASC"
+        )
+        .bind(&instance_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(query_err)?;
+
+        for row in log_rows {
+            entries.push(ExecutionLogEntry {
+                timestamp: row.ts,
+                level: row.level,
+                message: row.message,
+                node_id: Some(row.node_id),
+                source: "log".to_string(),
+            });
+        }
+
+        entries.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        Ok(entries)
     }
 
     pub(super) async fn list_operators_db(&self) -> Result<Vec<OperatorItem>, ApiError> {

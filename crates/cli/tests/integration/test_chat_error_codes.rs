@@ -36,6 +36,8 @@ fn make_ok_command(id: &'static str, category: Option<&'static str>) -> Command 
         validator: None,
         expose_mcp: true,
         expose_chat: true,
+        meta: None,
+        visibility: None,
         execute: Arc::new(|_ctx, _args| Box::pin(async { Ok(()) })),
     }
 }
@@ -51,6 +53,8 @@ fn make_err_command(id: &'static str, category: Option<&'static str>) -> Command
         validator: None,
         expose_mcp: true,
         expose_chat: true,
+        meta: None,
+        visibility: None,
         execute: Arc::new(|_ctx, _args| Box::pin(async { Err(anyhow::anyhow!("boom")) })),
     }
 }
@@ -74,6 +78,8 @@ fn make_needs_arg_command() -> Command {
         validator: None,
         expose_mcp: true,
         expose_chat: true,
+        meta: None,
+        visibility: None,
         execute: Arc::new(|_ctx, _args| Box::pin(async { Ok(()) })),
     }
 }

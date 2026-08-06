@@ -50,6 +50,8 @@ pub(crate) fn doctor_command() -> Command {
         }),
         expose_mcp: false,
         expose_chat: true,
+        meta: None,
+        visibility: None,
     }
 }
 
@@ -108,5 +110,7 @@ pub(crate) fn config_command() -> Command {
         }),
         expose_mcp: true,
         expose_chat: true,
+        meta: None,
+        visibility: None,
     }
 }

@@ -274,8 +274,9 @@ fn serve_prints_startup_banner_with_urls() {
 #[test]
 fn default_serve_binds_loopback_without_exposure_warning() {
     use std::io::Read;
-    // Default `--host` (127.0.0.1) must NOT print the unauthenticated-exposure
-    // warning; only an explicit non-loopback `--host` is the opt-in for that.
+    // Default `--host` (127.0.0.1) with no OIDC configured must start
+    // unauthenticated with no exposure warning; the "Auth disabled" banner
+    // line is the friction-free local-tool default.
     let port = pick_free_port();
     let dir = tempdir().unwrap();
     let errpath = dir.path().join("stderr.log");
@@ -305,14 +306,21 @@ fn default_serve_binds_loopback_without_exposure_warning() {
         !stderr.contains("UNAUTHENTICATED"),
         "default loopback bind must not print the unauthenticated-exposure warning; stderr=\n{stderr}"
     );
+    assert!(
+        stderr.contains("Auth       disabled"),
+        "default loopback bind should show the auth-disabled banner line; stderr=\n{stderr}"
+    );
 }
 
 #[test]
-fn non_loopback_host_prints_unauthenticated_exposure_warning() {
+fn non_loopback_host_without_oidc_refuses_to_start() {
     use std::io::Read;
     // `--host` itself is the explicit opt-in to non-loopback exposure (spec 074
-    // PR-6 / B5) — no separate flag. Binding non-loopback must print a loud
-    // stderr warning that the API is unauthenticated.
+    // PR-6 / B5) — no separate flag. Since audit finding C5, binding
+    // non-loopback WITHOUT OIDC configured must fail closed: the process must
+    // refuse to start (never bind the listener) and print an actionable error
+    // naming the exact flags/env vars needed, rather than booting wide open
+    // behind a warning banner.
     let port = pick_free_port();
     let dir = tempdir().unwrap();
     let errpath = dir.path().join("stderr.log");
@@ -327,12 +335,16 @@ fn non_loopback_host_prints_unauthenticated_exposure_warning() {
         .expect("spawn newton serve");
 
     let ready = wait_ready(port);
-    // The warning banner is printed just before the listener binds; give it a
-    // beat to flush, matching `serve_prints_startup_banner_with_urls`.
-    std::thread::sleep(Duration::from_millis(250));
-    let _ = child.kill();
-    let _ = child.wait();
-    assert!(ready, "server did not become ready");
+    let status = child.wait().expect("wait for newton serve to exit");
+
+    assert!(
+        !ready,
+        "non-loopback bind without OIDC must never become ready (must not bind the listener)"
+    );
+    assert!(
+        !status.success(),
+        "non-loopback bind without OIDC must exit non-zero, got {status:?}"
+    );
 
     let mut stderr = String::new();
     std::fs::File::open(&errpath)
@@ -340,10 +352,154 @@ fn non_loopback_host_prints_unauthenticated_exposure_warning() {
         .read_to_string(&mut stderr)
         .unwrap();
 
-    // Keep this assertion to a stable substring so banner rewording doesn't
-    // break the test.
     assert!(
-        stderr.contains("UNAUTHENTICATED"),
-        "non-loopback --host must print an unauthenticated-exposure warning; stderr=\n{stderr}"
+        stderr.contains("NEWTON-SERVE-AUTH-001"),
+        "expected the fail-closed error code in stderr; stderr=\n{stderr}"
+    );
+    assert!(
+        stderr.contains("--oidc-issuer") && stderr.contains("--oidc-audience"),
+        "error must name the flags needed to unblock; stderr=\n{stderr}"
+    );
+}
+
+#[test]
+fn auth_config_disabled_reports_enabled_false_and_no_issuer() {
+    // No OIDC configured: `/auth-config` is public (no auth layer at all in
+    // this mode) and must report `{"enabled":false}` with nothing else
+    // leaked.
+    let port = pick_free_port();
+    let (mut child, _dir) = start_serve(port);
+
+    if !wait_ready(port) {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("server did not become ready within 30s");
+    }
+
+    let client = make_no_redirect_client();
+    let resp = client
+        .get(format!("http://127.0.0.1:{}/auth-config", port))
+        .send()
+        .expect("/auth-config request");
+    let status = resp.status().as_u16();
+    let body: serde_json::Value = resp.json().expect("JSON body");
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert_eq!(
+        status, 200,
+        "/auth-config must be reachable without a token"
+    );
+    assert_eq!(
+        body,
+        serde_json::json!({ "enabled": false }),
+        "body: {body}"
+    );
+    assert!(body.get("issuer").is_none(), "must not leak issuer: {body}");
+}
+
+#[test]
+fn non_loopback_host_with_oidc_starts_and_gates_the_api() {
+    use std::io::Read;
+    // With OIDC configured, a non-loopback bind is allowed to start (the only
+    // way it's allowed to start), and the REST API is gated: an
+    // unauthenticated request to a protected route gets 401 with a
+    // `WWW-Authenticate: Bearer` challenge, while `/healthz` stays public.
+    // `/auth-config` (also public, not under `/api`) must report the
+    // resolved issuer/audience/clientId so the SPA can self-configure login.
+    let port = pick_free_port();
+    let dir = tempdir().unwrap();
+    let errpath = dir.path().join("stderr.log");
+    let errfile = std::fs::File::create(&errpath).unwrap();
+    let bin = assert_cmd::cargo::cargo_bin("newton");
+    let mut child = Command::new(bin)
+        .current_dir(dir.path())
+        .args([
+            "serve",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            &port.to_string(),
+            "--oidc-issuer",
+            "https://issuer.example.invalid/realms/newton",
+            "--oidc-audience",
+            "newton-api",
+            "--oidc-client-id",
+            "newton-spa",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(errfile))
+        .spawn()
+        .expect("spawn newton serve");
+
+    let ready = wait_ready(port);
+    if !ready {
+        let _ = child.kill();
+        let _ = child.wait();
+        let mut stderr = String::new();
+        let _ = std::fs::File::open(&errpath).and_then(|mut f| f.read_to_string(&mut stderr));
+        panic!("server did not become ready within 30s; stderr=\n{stderr}");
+    }
+
+    let client = make_no_redirect_client();
+
+    // Public: /healthz is never wrapped by the auth layer.
+    let healthz_status = client
+        .get(format!("http://127.0.0.1:{}/healthz", port))
+        .send()
+        .expect("/healthz request")
+        .status()
+        .as_u16();
+
+    // Gated: an unauthenticated request to the REST API must be rejected.
+    let api_resp = client
+        .get(format!("http://127.0.0.1:{}/api/v1/operators", port))
+        .send()
+        .expect("/api/v1/operators request");
+    let api_status = api_resp.status().as_u16();
+    let www_authenticate = api_resp
+        .headers()
+        .get("www-authenticate")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+
+    // Public: `/auth-config` must be reachable WITHOUT a bearer token even
+    // though the auth layer wraps `/api/**` -- it's mounted alongside the SPA
+    // fallback (root_fallback), never behind `.auth(...)`.
+    let auth_config_resp = client
+        .get(format!("http://127.0.0.1:{}/auth-config", port))
+        .send()
+        .expect("/auth-config request");
+    let auth_config_status = auth_config_resp.status().as_u16();
+    let auth_config_body: serde_json::Value =
+        auth_config_resp.json().expect("/auth-config JSON body");
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert_eq!(healthz_status, 200, "/healthz must stay public");
+    assert_eq!(
+        api_status, 401,
+        "unauthenticated REST API request must be rejected once OIDC is configured"
+    );
+    assert!(
+        www_authenticate.to_lowercase().contains("bearer"),
+        "401 must carry a WWW-Authenticate: Bearer challenge, got {www_authenticate:?}"
+    );
+    assert_eq!(
+        auth_config_status, 200,
+        "/auth-config must be reachable without a token even though /api/** is gated"
+    );
+    assert_eq!(
+        auth_config_body,
+        serde_json::json!({
+            "enabled": true,
+            "issuer": "https://issuer.example.invalid/realms/newton",
+            "audience": "newton-api",
+            "clientId": "newton-spa",
+        }),
+        "auth_config_body: {auth_config_body}"
     );
 }

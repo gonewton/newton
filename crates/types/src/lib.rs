@@ -99,6 +99,25 @@ pub struct LogLine {
     pub seq: i64,
 }
 
+/// A single chronologically-orderable log entry for `GET /executions/{id}/logs`.
+///
+/// Every entry is a faithful rendering of a persisted row — either a
+/// `NodeState` transition (source = "node_state") or a `WorkflowLog` row
+/// (source = "log"). Nothing here is synthesized content; see
+/// `list_execution_logs` in `newton-backend` for how each source is mapped.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionLogEntry {
+    /// RFC3339 timestamp.
+    pub timestamp: String,
+    /// "info" | "warn" | "error"
+    pub level: String,
+    pub message: String,
+    pub node_id: Option<String>,
+    /// "node_state" | "log"
+    pub source: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OperatorDescriptor {
     pub operator_type: String,

@@ -7,7 +7,10 @@
 //! `newton-backend`/sqlx directly.
 
 use crate::models::*;
-use crate::{ApiError, HilEvent, HilStatus, LogLine, NodeState, WorkflowInstance, WorkflowStatus};
+use crate::{
+    ApiError, ExecutionLogEntry, HilEvent, HilStatus, LogLine, NodeState, WorkflowInstance,
+    WorkflowStatus,
+};
 use chrono::{DateTime, Utc};
 
 pub fn err_not_found(message: &str) -> ApiError {
@@ -139,6 +142,13 @@ pub trait BackendStore: Send + Sync {
         &self,
         plan_id: Option<String>,
     ) -> Result<Vec<ExecutionItem>, ApiError>;
+
+    /// Returns a chronologically-sorted merge of `NodeState` transitions and
+    /// `WorkflowLog` rows for the given execution, accepting either an
+    /// `ExecutionRecord.id` or a `WorkflowInstance.instanceId` (same
+    /// fallback convention as `ExecutionItem::instance_id` in
+    /// `list_executions`). Returns `ERR_NOT_FOUND` if neither resolves.
+    async fn list_execution_logs(&self, id: &str) -> Result<Vec<ExecutionLogEntry>, ApiError>;
 
     async fn list_operators(&self) -> Result<Vec<OperatorItem>, ApiError>;
 

@@ -310,6 +310,30 @@ pub struct ServeArgs {
     /// definitions landing in a future release (spec 074 P9). Not reflected
     /// in the OpenAPI doc until then.
     pub with_magic_tools: bool,
+
+    /// OIDC issuer URL used to validate bearer tokens on the Newton HTTP API
+    /// (e.g. `https://keycloak.example.com/realms/newton`). Falls back to
+    /// `NEWTON_OIDC_ISSUER` when unset. Must be paired with at least one
+    /// `--oidc-audience` / `NEWTON_OIDC_AUDIENCE`. When set, auth is enforced
+    /// even on a loopback bind; when unset AND `--host` is non-loopback,
+    /// `newton serve` refuses to start (audit finding C5).
+    pub oidc_issuer: Option<String>,
+
+    /// Accepted JWT `aud` value(s). May be repeated; a single value maps to
+    /// `AudiencePolicy::Require`, multiple values to `AudiencePolicy::RequireAny`.
+    /// Falls back to the comma-separated `NEWTON_OIDC_AUDIENCE` env var when
+    /// no `--oidc-audience` flags are given.
+    pub oidc_audience: Vec<String>,
+
+    /// Public OAuth client id the embedded SPA uses for its PKCE login flow.
+    /// Falls back to `NEWTON_OIDC_CLIENT_ID` when unset. Unlike
+    /// `--oidc-issuer`/`--oidc-audience` this is OPTIONAL even when OIDC is
+    /// otherwise configured: the backend doesn't need it to validate tokens,
+    /// only the SPA does to self-configure a login. When absent, `newton
+    /// serve` still enforces OIDC on the API as normal; only the SPA's
+    /// ability to auto-configure a login is affected (reported via
+    /// `GET /auth-config`).
+    pub oidc_client_id: Option<String>,
 }
 
 // ── Data ─────────────────────────────────────────────────────────────────────

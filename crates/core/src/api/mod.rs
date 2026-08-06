@@ -21,6 +21,7 @@ use axum::{
     extract::{rejection::JsonRejection, FromRequest, Request},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Json, Response},
+    routing::get,
     Router,
 };
 use newton_types::ApiError;
@@ -181,10 +182,99 @@ async fn serve_embedded_web(method: axum::http::Method, headers: HeaderMap) -> R
     }
 }
 
-/// Router serving the embedded UI bundle for every unmatched path.
-/// Mounted as the host `root_fallback`, so real API/MCP/ailoop routes win.
-pub fn embedded_web_router() -> Router {
-    Router::new().fallback(serve_embedded_web)
+/// Public, non-secret OIDC metadata the embedded SPA needs to drive its own
+/// PKCE login flow. `newton serve` puts everything under `/api/**` behind the
+/// OIDC auth layer (see `commands/serve.rs`), so a config endpoint under
+/// `/api` would be unreachable before the SPA has a token -- a
+/// chicken-and-egg problem. This struct is instead handed to
+/// [`embedded_web_router`], which exposes it at the public `/auth-config`
+/// route (deliberately *not* under `/api`).
+///
+/// Issuer, audience and client id are all public-by-design OIDC metadata (the
+/// same values a `.well-known/openid-configuration` document or any OIDC
+/// client-side app would need); nothing else from the server config is
+/// exposed here.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PublicAuthConfig {
+    /// `None` means OIDC is not configured for this `newton serve` process
+    /// (the API is unauthenticated); `Some` means it is enforced.
+    pub oidc: Option<PublicOidcConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicOidcConfig {
+    pub issuer: String,
+    /// The first configured `--oidc-audience` value. The backend may accept
+    /// several (`AudiencePolicy::RequireAny`), but the SPA's PKCE flow only
+    /// ever needs one `audience` parameter to request a token for, so we
+    /// report the first rather than the full list.
+    pub audience: String,
+    /// The public OAuth client id the SPA uses for its PKCE flow. Optional:
+    /// the backend doesn't need it to validate tokens, so an operator can run
+    /// OIDC-gated API-only deployments (or SPA deployments configured another
+    /// way) without setting `--oidc-client-id`. When absent the SPA cannot
+    /// self-configure a login and this is reported as `null`.
+    pub client_id: Option<String>,
+}
+
+/// `GET /auth-config` response body. Two shapes rather than one struct with
+/// `skip_serializing_if` throughout: when auth is disabled the body is just
+/// `{"enabled":false}` (no `issuer`/`audience`/`clientId` keys at all), but
+/// when enabled `clientId` must still appear as an explicit `null` if unset
+/// -- those are different "absent vs. present-but-null" semantics that a
+/// single flat struct can't express with static per-field attributes.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum AuthConfigResponse {
+    Disabled {
+        enabled: bool,
+    },
+    // `rename_all` on the enum only renames variant *names* (irrelevant here
+    // since this is `untagged`); it must be repeated per-variant to rename
+    // this variant's fields (`client_id` -> `clientId`).
+    #[serde(rename_all = "camelCase")]
+    Enabled {
+        enabled: bool,
+        issuer: String,
+        audience: String,
+        client_id: Option<String>,
+    },
+}
+
+impl From<&PublicAuthConfig> for AuthConfigResponse {
+    fn from(cfg: &PublicAuthConfig) -> Self {
+        match &cfg.oidc {
+            None => AuthConfigResponse::Disabled { enabled: false },
+            Some(oidc) => AuthConfigResponse::Enabled {
+                enabled: true,
+                issuer: oidc.issuer.clone(),
+                audience: oidc.audience.clone(),
+                client_id: oidc.client_id.clone(),
+            },
+        }
+    }
+}
+
+async fn auth_config_handler(auth_config: Arc<PublicAuthConfig>) -> Json<AuthConfigResponse> {
+    Json(AuthConfigResponse::from(auth_config.as_ref()))
+}
+
+/// Router serving the embedded UI bundle for every unmatched path, plus the
+/// public `/auth-config` endpoint the SPA reads before login. Mounted as the
+/// host `root_fallback`, so real API/MCP/ailoop routes win; unlike those, the
+/// caller (`commands/serve.rs`) must NOT wrap this router in the OIDC auth
+/// layer -- `/auth-config` has to answer without a bearer token.
+pub fn embedded_web_router(auth_config: PublicAuthConfig) -> Router {
+    let auth_config = Arc::new(auth_config);
+    Router::new()
+        .route(
+            "/auth-config",
+            get({
+                let auth_config = auth_config.clone();
+                move || auth_config_handler(auth_config)
+            }),
+        )
+        .fallback(serve_embedded_web)
 }
 
 pub fn openapi_json() -> serde_json::Value {
@@ -287,7 +377,10 @@ mod web_ui_tests {
                 .header(header::ACCEPT_ENCODING, "gzip")
                 .body(Body::empty())
                 .unwrap();
-            let resp = embedded_web_router().oneshot(req).await.unwrap();
+            let resp = embedded_web_router(PublicAuthConfig::default())
+                .oneshot(req)
+                .await
+                .unwrap();
             assert_eq!(resp.status(), StatusCode::OK, "path {path} should be 200");
             assert_eq!(
                 resp.headers().get(header::CONTENT_ENCODING).unwrap(),
@@ -315,7 +408,10 @@ mod web_ui_tests {
             .uri("/optimize")
             .body(Body::empty())
             .unwrap();
-        let resp = embedded_web_router().oneshot(req).await.unwrap();
+        let resp = embedded_web_router(PublicAuthConfig::default())
+            .oneshot(req)
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         assert!(resp.headers().get(header::CONTENT_ENCODING).is_none());
         let body = body_bytes(resp).await;
@@ -325,7 +421,10 @@ mod web_ui_tests {
 
     #[tokio::test]
     async fn embedded_router_returns_bundle_for_gzip_accept() {
-        let resp = embedded_web_router().oneshot(gz_accept()).await.unwrap();
+        let resp = embedded_web_router(PublicAuthConfig::default())
+            .oneshot(gz_accept())
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
@@ -339,12 +438,135 @@ mod web_ui_tests {
                 .uri("/mcp")
                 .body(Body::empty())
                 .unwrap();
-            let resp = embedded_web_router().oneshot(req).await.unwrap();
+            let resp = embedded_web_router(PublicAuthConfig::default())
+                .oneshot(req)
+                .await
+                .unwrap();
             assert_eq!(
                 resp.status(),
                 StatusCode::NOT_FOUND,
                 "{method} should 404, not serve the SPA"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod auth_config_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    async fn json_body(resp: Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn disabled_reports_enabled_false_and_leaks_nothing() {
+        let req = Request::builder()
+            .uri("/auth-config")
+            .body(Body::empty())
+            .unwrap();
+        let resp = embedded_web_router(PublicAuthConfig::default())
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = json_body(resp).await;
+        assert_eq!(body, serde_json::json!({ "enabled": false }));
+        assert!(body.get("issuer").is_none(), "must not leak issuer: {body}");
+        assert!(
+            body.get("audience").is_none(),
+            "must not leak audience: {body}"
+        );
+        assert!(
+            body.get("clientId").is_none(),
+            "must not leak clientId: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn enabled_reports_issuer_audience_and_client_id() {
+        let auth_config = PublicAuthConfig {
+            oidc: Some(PublicOidcConfig {
+                issuer: "https://issuer.example.com".to_string(),
+                audience: "newton-api".to_string(),
+                client_id: Some("newton-spa".to_string()),
+            }),
+        };
+        let req = Request::builder()
+            .uri("/auth-config")
+            .body(Body::empty())
+            .unwrap();
+        let resp = embedded_web_router(auth_config).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = json_body(resp).await;
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "enabled": true,
+                "issuer": "https://issuer.example.com",
+                "audience": "newton-api",
+                "clientId": "newton-spa",
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn enabled_without_client_id_reports_explicit_null() {
+        let auth_config = PublicAuthConfig {
+            oidc: Some(PublicOidcConfig {
+                issuer: "https://issuer.example.com".to_string(),
+                audience: "newton-api".to_string(),
+                client_id: None,
+            }),
+        };
+        let req = Request::builder()
+            .uri("/auth-config")
+            .body(Body::empty())
+            .unwrap();
+        let resp = embedded_web_router(auth_config).oneshot(req).await.unwrap();
+        let body = json_body(resp).await;
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "enabled": true,
+                "issuer": "https://issuer.example.com",
+                "audience": "newton-api",
+                "clientId": null,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_config_route_is_not_under_api() {
+        // The whole point of this endpoint is that it lives outside `/api`,
+        // since `/api/**` is behind the OIDC auth layer and unreachable
+        // before login. Prove `/api/auth-config` is NOT what's served --
+        // it falls through to the SPA fallback (text/html) rather than the
+        // JSON auth-config handler.
+        let req = Request::builder()
+            .uri("/api/auth-config")
+            .body(Body::empty())
+            .unwrap();
+        let resp = embedded_web_router(PublicAuthConfig::default())
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let content_type = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        assert!(
+            content_type.starts_with("text/html"),
+            "/api/auth-config must not be the JSON auth-config handler, got content-type {content_type:?}"
+        );
     }
 }

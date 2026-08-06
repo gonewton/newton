@@ -17,6 +17,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/plans/{id}/approve", post(approve_plan))
         .route("/plans/{id}/reject", post(reject_plan))
         .route("/executions", get(list_executions))
+        .route("/executions/{id}/logs", get(list_execution_logs))
         .with_state(state)
 }
 
@@ -198,5 +199,32 @@ pub(crate) async fn list_executions(
     match state.backend.list_executions(query.plan_id).await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response(),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/executions/{id}/logs",
+    tag = "executions",
+    params(("id" = String, Path, description = "Execution id (ExecutionRecord.id or WorkflowInstance.instanceId)")),
+    responses(
+        (status = 200, description = "Execution log entries, chronologically ordered", body = [newton_types::ExecutionLogEntry]),
+        (status = 404, description = "Execution not found", body = ApiError),
+        (status = 500, description = "Internal error", body = ApiError)
+    )
+)]
+pub(crate) async fn list_execution_logs(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state.backend.list_execution_logs(&id).await {
+        Ok(entries) => (StatusCode::OK, Json(entries)).into_response(),
+        Err(e) => {
+            let status = match e.code.as_str() {
+                "ERR_NOT_FOUND" => StatusCode::NOT_FOUND,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            (status, Json(e)).into_response()
+        }
     }
 }

@@ -46,7 +46,7 @@ dependencies = [
 [[package]]
 name = "aikit-agent"
 version = "0.1.0"
-source = "git+https://github.com/goaikit/aikit.git?branch=main#a5eca636651625fbb5ab89d128c1d4884a61fc99"
+source = "git+https://github.com/goaikit/aikit.git?branch=main#a9d4e4d442df67aaa3ccec822a4c334bee77076f"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -72,7 +72,7 @@ dependencies = [
 [[package]]
 name = "aikit-magictool"
 version = "0.1.0"
-source = "git+https://github.com/goaikit/aikit.git?branch=main#a5eca636651625fbb5ab89d128c1d4884a61fc99"
+source = "git+https://github.com/goaikit/aikit.git?branch=main#a9d4e4d442df67aaa3ccec822a4c334bee77076f"
 dependencies = [
  "aikit-sdk 0.3.0 (git+https://github.com/goaikit/aikit.git?branch=main)",
  "axum",
@@ -87,15 +87,18 @@ dependencies = [
 [[package]]
 name = "aikit-sdk"
 version = "0.3.0"
-source = "git+https://github.com/goaikit/aikit.git?branch=main#a5eca636651625fbb5ab89d128c1d4884a61fc99"
+source = "git+https://github.com/goaikit/aikit.git?branch=main#a9d4e4d442df67aaa3ccec822a4c334bee77076f"
 dependencies = [
  "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?branch=main)",
+ "claude-agent-sdk",
  "dirs 6.0.0",
  "glob",
  "jsonschema 0.46.5",
+ "nix",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "toml 1.1.2+spec-1.1.0",
  "tracing",
@@ -126,8 +129,8 @@ dependencies = [
 
 [[package]]
 name = "ailoop-core"
-version = "1.0.5"
-source = "git+https://github.com/goailoop/ailoop.git?rev=dd186c055dbfcbf5c32c8e58b251eaf0bf07343b#dd186c055dbfcbf5c32c8e58b251eaf0bf07343b"
+version = "1.0.9"
+source = "git+https://github.com/goailoop/ailoop.git?rev=596cff9303c7e56615cdb53babc95a03170cf790#596cff9303c7e56615cdb53babc95a03170cf790"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -151,8 +154,8 @@ dependencies = [
 
 [[package]]
 name = "ailoop-core"
-version = "1.0.9"
-source = "git+https://github.com/goailoop/ailoop.git?rev=596cff9303c7e56615cdb53babc95a03170cf790#596cff9303c7e56615cdb53babc95a03170cf790"
+version = "1.0.13"
+source = "git+https://github.com/goailoop/ailoop.git?rev=c9b70bcc0bd659823dc8ddf71d8571a8e011113b#c9b70bcc0bd659823dc8ddf71d8571a8e011113b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -161,13 +164,13 @@ dependencies = [
  "dashmap 5.5.3",
  "dirs 5.0.1",
  "futures-util",
- "reqwest 0.11.27",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.21.0",
- "toml 0.8.23",
+ "toml 1.1.2+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -679,13 +682,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
+name = "claude-agent-sdk"
+version = "0.1.0"
+source = "git+https://github.com/aroff/claude-agent-sdk-rust?rev=717eacf#717eacf7cc54ec8e01b2f5e00c4107d16f3ecf16"
+dependencies = [
+ "async-trait",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+ "which",
+]
+
+[[package]]
 name = "cli-framework"
-version = "0.4.2"
-source = "git+https://github.com/aroff/cli-framework?rev=268de6e7b2a490c7345941b961487165a8e840bb#268de6e7b2a490c7345941b961487165a8e840bb"
+version = "0.5.8"
+source = "git+https://github.com/aroff/cli-framework?rev=f6b77aebc6518c5e819f685942ed8257442717d0#f6b77aebc6518c5e819f685942ed8257442717d0"
 dependencies = [
  "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?rev=435a1132859bbfaf2977c0fb0ce070c795525132)",
  "aikit-sdk 0.3.0 (git+https://github.com/goaikit/aikit.git?rev=435a1132859bbfaf2977c0fb0ce070c795525132)",
- "ailoop-core 1.0.5",
+ "ailoop-core 1.0.13",
  "anyhow",
  "async-trait",
  "axum",
@@ -693,7 +712,9 @@ dependencies = [
  "clap",
  "crossterm 0.28.1",
  "dirs 5.0.1",
+ "http 1.4.0",
  "httpdate",
+ "opentelemetry",
  "regex",
  "reqwest 0.12.28",
  "rmcp",
@@ -709,6 +730,26 @@ dependencies = [
  "tracing",
  "utoipa-swagger-ui",
  "uuid",
+]
+
+[[package]]
+name = "cli-framework-oidc"
+version = "0.1.0"
+source = "git+https://github.com/aroff/cli-framework?rev=f6b77aebc6518c5e819f685942ed8257442717d0#f6b77aebc6518c5e819f685942ed8257442717d0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "cli-framework",
+ "jsonwebtoken",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+ "url",
 ]
 
 [[package]]
@@ -1046,6 +1087,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 dependencies = [
  "powerfmt",
+ "serde_core",
 ]
 
 [[package]]
@@ -1846,22 +1888,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hyper-tls"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0"
-dependencies = [
- "bytes",
- "http-body-util",
- "hyper 1.9.0",
- "hyper-util",
- "native-tls",
- "tokio",
- "tokio-native-tls",
- "tower-service",
-]
-
-[[package]]
 name = "hyper-util"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1879,11 +1905,9 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "socket2 0.6.3",
- "system-configuration 0.7.0",
  "tokio",
  "tower-service",
  "tracing",
- "windows-registry",
 ]
 
 [[package]]
@@ -2226,6 +2250,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonwebtoken"
+version = "9.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a87cc7a48537badeae96744432de36f4be2b4a34a05a5ef32e9dd8a1c169dde"
+dependencies = [
+ "base64 0.22.1",
+ "js-sys",
+ "pem",
+ "ring",
+ "serde",
+ "serde_json",
+ "simple_asn1",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2423,23 +2462,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "native-tls"
-version = "0.2.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "465500e14ea162429d264d44189adc38b199b62b1c21eea9f69e4b73cb03bbf2"
-dependencies = [
- "libc",
- "log",
- "openssl",
- "openssl-probe",
- "openssl-sys",
- "schannel",
- "security-framework",
- "security-framework-sys",
- "tempfile",
-]
-
-[[package]]
 name = "newton-backend"
 version = "0.1.0"
 dependencies = [
@@ -2469,6 +2491,7 @@ dependencies = [
  "axum",
  "chrono",
  "cli-framework",
+ "cli-framework-oidc",
  "dirs-next",
  "futures",
  "humantime",
@@ -2581,6 +2604,18 @@ dependencies = [
  "serde_json",
  "utoipa",
  "uuid",
+]
+
+[[package]]
+name = "nix"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.11.1",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]
@@ -2925,6 +2960,16 @@ checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
 dependencies = [
  "digest",
  "hmac",
+]
+
+[[package]]
+name = "pem"
+version = "3.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be"
+dependencies = [
+ "base64 0.22.1",
+ "serde_core",
 ]
 
 [[package]]
@@ -3453,7 +3498,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "sync_wrapper 0.1.2",
- "system-configuration 0.5.1",
+ "system-configuration",
  "tokio",
  "tokio-rustls 0.24.1",
  "tower-service",
@@ -3473,22 +3518,17 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "encoding_rs",
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.4.14",
  "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
  "hyper 1.9.0",
  "hyper-rustls 0.27.9",
- "hyper-tls",
  "hyper-util",
  "js-sys",
  "log",
- "mime",
- "native-tls",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
@@ -3499,7 +3539,6 @@ dependencies = [
  "serde_urlencoded",
  "sync_wrapper 1.0.2",
  "tokio",
- "tokio-native-tls",
  "tokio-rustls 0.26.4",
  "tokio-util",
  "tower",
@@ -4201,6 +4240,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
+name = "simple_asn1"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d585997b0ac10be3c5ee635f1bab02d512760d14b7c468801ac8a01d9ae5f1d"
+dependencies = [
+ "num-bigint",
+ "num-traits",
+ "thiserror 2.0.18",
+ "time",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4566,18 +4617,7 @@ checksum = "ba3a3adc5c275d719af8cb4272ea1c4a6d668a777f37e115f6d11ddbc1c8e0e7"
 dependencies = [
  "bitflags 1.3.2",
  "core-foundation 0.9.4",
- "system-configuration-sys 0.5.0",
-]
-
-[[package]]
-name = "system-configuration"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a13f3d0daba03132c0aa9767f98351b3488edc2c100cda2d2ec2b04f3d8d3c8b"
-dependencies = [
- "bitflags 2.11.1",
- "core-foundation 0.9.4",
- "system-configuration-sys 0.6.0",
+ "system-configuration-sys",
 ]
 
 [[package]]
@@ -4585,16 +4625,6 @@ name = "system-configuration-sys"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a75fb188eb626b924683e3b95e3a48e63551fcfb51949de2f06a9d91dbee93c9"
-dependencies = [
- "core-foundation-sys",
- "libc",
-]
-
-[[package]]
-name = "system-configuration-sys"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
 dependencies = [
  "core-foundation-sys",
  "libc",
@@ -4765,16 +4795,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "tokio-native-tls"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2"
-dependencies = [
- "native-tls",
- "tokio",
 ]
 
 [[package]]
@@ -5583,6 +5603,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "which"
+version = "6.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4ee928febd44d98f2f459a4a79bd4d928591333a494a10a868418ac1b39cf1f"
+dependencies = [
+ "either",
+ "home",
+ "rustix 0.38.44",
+ "winsafe",
+]
+
+[[package]]
 name = "whoami"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5663,17 +5695,6 @@ name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
-
-[[package]]
-name = "windows-registry"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02752bf7fbdcce7f2a27a742f798510f3e5ad88dbe84871e5168e2120c3d5720"
-dependencies = [
- "windows-link",
- "windows-result",
- "windows-strings",
-]
 
 [[package]]
 name = "windows-result"
@@ -5874,6 +5895,12 @@ dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
 ]
+
+[[package]]
+name = "winsafe"
+version = "0.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
 
 [[package]]
 name = "wiremock"

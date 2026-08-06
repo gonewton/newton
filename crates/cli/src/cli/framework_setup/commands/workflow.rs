@@ -474,5 +474,7 @@ pub(crate) fn workflow_command() -> Command {
         }),
         expose_mcp: true,
         expose_chat: true,
+        meta: None,
+        visibility: None,
     }
 }

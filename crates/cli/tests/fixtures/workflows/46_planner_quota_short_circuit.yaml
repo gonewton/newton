@@ -6,14 +6,14 @@ workflow:
     max_time_seconds: 60
     parallel_limit: 1
     continue_on_error: false
-    default_engine: agent
+    default_engine: cursor
     max_task_iterations: 3
     max_workflow_iterations: 10
   tasks:
     - id: enrich_spec
       operator: AgentOperator
       params:
-        engine: agent
+        engine: cursor
         prompt: "planner enrichment request"
       transitions:
         - to: update_board_body

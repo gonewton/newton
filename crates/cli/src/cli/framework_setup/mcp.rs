@@ -16,8 +16,15 @@ use crate::cli::context::NewtonContext;
 use super::commands;
 use super::error_codes;
 
-/// Build an `axum::Router` that mounts the cli-framework MCP HTTP transport
-/// under `mcp_path` on the caller-owned listener (issue #294).
+/// Build an `axum::Router` that exposes the cli-framework MCP HTTP transport
+/// with flat routes at `"/"` / `"/{*path}"` (issue #294).
+///
+/// Per cli-framework's `ApiServerBuilder::mcp_router()` contract (see
+/// `cli_framework::mcp::transport_http::mcp_axum_router`), the router handed
+/// to `.mcp_router()` must carry NO path prefix of its own — `build()` nests
+/// it at the fixed `/mcp` host path itself (via `nest_service`, so it wins
+/// over the SPA `fallback_service` under axum 0.8). Baking a prefix in here
+/// too would double-nest to `/mcp/mcp` and 404 the real `/mcp` path.
 ///
 /// This is the Newton-side adapter for what `aroff/cli-framework#29` aims to
 /// expose upstream. Until the upstream `App::into_mcp_router(...)` lands,
@@ -31,10 +38,7 @@ use super::error_codes;
 ///   in the linked cli-framework version.
 /// * `NEWTON-SERVE-MCP-004` — cli-framework returned an error while building
 ///   the registry, the tool registry, or the HTTP service.
-pub fn build_mcp_router_for_serve(
-    _ctx: NewtonContext,
-    mcp_path: &str,
-) -> anyhow::Result<axum::Router> {
+pub fn build_mcp_router_for_serve(_ctx: NewtonContext) -> anyhow::Result<axum::Router> {
     let registry = build_mcp_command_registry()
         .map_err(|e| anyhow!("{}: {e}", error_codes::NEWTON_SERVE_MCP_004))?;
 
@@ -66,7 +70,11 @@ pub fn build_mcp_router_for_serve(
         config,
     );
 
-    Ok(axum::Router::new().nest_service(mcp_path, service))
+    // Flat routes — no prefix baked in. `ApiServerBuilder::mcp_router()` nests
+    // this at the fixed `/mcp` host path (see doc comment above).
+    Ok(axum::Router::new()
+        .route_service("/", service.clone())
+        .route_service("/{*path}", service))
 }
 
 /// Build the full tree `CommandRegistry` used for MCP tool registration and
