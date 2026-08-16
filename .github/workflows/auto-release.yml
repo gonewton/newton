@@ -2,11 +2,24 @@ name: Auto Release
 
 # Triggers on every push to main (excluding pure doc/workflow changes) and
 # cuts a new patch release by:
-#   1. Computing the next patch version from the last git tag (not from
-#      Cargo.toml), so releases fire on every merge without requiring a
-#      manual version bump.
-#   2. Creating an auto-release branch, bumping Cargo.toml, tagging, and
-#      pushing — which triggers the Release workflow via the v*.*.* tag.
+#   1. Computing the next UNUSED patch version — derived from the last tag,
+#      never below Cargo.toml, and advanced past any tag that already exists —
+#      so releases fire on every merge without a manual bump and a published
+#      version is never re-cut or force-moved (tags are immutable).
+#   2. Creating an auto-release branch, bumping Cargo.toml, and opening a PR.
+#   3. Squash-merging that PR itself (0 approvals / no required checks on main),
+#      so the bump actually lands on main and the version advances. The merge
+#      commit carries "[skip release]" so bringing the bump home does NOT
+#      re-trigger this workflow (which would cascade into endless releases).
+#   4. Tagging the merged commit on main and pushing the tag — reachable from
+#      main (keeps `git describe` honest) and immutable — which triggers the
+#      Release workflow via the v*.*.* tag.
+#
+# History note: this workflow was previously stuck — the release PR was a
+# DRAFT that never merged, so main's Cargo.toml froze, `git describe` never
+# advanced past the last reachable tag, and the guard re-derived the same
+# version on every merge and force-moved its tag. Steps 3 + the tag-immutability
+# logic in step 1 fix that.
 #
 # Escape hatch: include "[skip release]" in the commit message to suppress.
 #
@@ -75,6 +88,16 @@ jobs:
             echo "Cargo.toml already at $CARGO_VERSION — advancing to $NEXT_VERSION"
           fi
 
+          # Tag immutability: never re-cut or force-move a version that already
+          # has a tag. Advance to the next unused patch. This also self-heals
+          # past any orphaned tag left by the previous (stuck) workflow, whose
+          # tags could point at commits never merged to main.
+          while git rev-parse "v$NEXT_VERSION" >/dev/null 2>&1; do
+            echo "Tag v$NEXT_VERSION already exists — advancing to the next unused version"
+            NEXT_PATCH=$((NEXT_PATCH + 1))
+            NEXT_VERSION="$major.$minor.$NEXT_PATCH"
+          done
+
           echo "last_tag=$LAST_TAG"
           echo "cargo_version=$CARGO_VERSION"
           echo "next_version=$NEXT_VERSION"
@@ -129,12 +152,13 @@ jobs:
         run: |
           git push --force-with-lease origin "${{ steps.next-version.outputs.branch_name }}"
 
-      - name: Create or update Pull Request
+      - name: Create and merge release PR
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           COMMIT_SHA: ${{ github.sha }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
+          set -e
           NEXT_VERSION="${{ steps.next-version.outputs.next_version }}"
           BRANCH_NAME="${{ steps.next-version.outputs.branch_name }}"
           PR_TITLE="chore: release v$NEXT_VERSION"
@@ -142,13 +166,14 @@ jobs:
           # Write body to a file so that COMMIT_MSG (which may contain backticks,
           # dollar signs, or other shell metacharacters from a prior squash-merge)
           # is never re-interpreted by bash.
-          printf 'Automated release for version %s\n\nThis PR was created by the auto-release workflow. Merging it brings\nthe bumped version back into `main`.\n\n**What triggered this release:**\nCommit: %s\nMessage: %s\n' \
+          printf 'Automated release for version %s\n\nCreated and squash-merged by the auto-release workflow to bring the\nversion bump into `main`.\n\n**What triggered this release:**\nCommit: %s\nMessage: %s\n' \
             "$NEXT_VERSION" "$COMMIT_SHA" "$COMMIT_MSG" > /tmp/pr_body.md
 
           EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number' || echo "")
           if [ -n "$EXISTING_PR" ]; then
             echo "Updating existing PR #$EXISTING_PR..."
             gh pr edit "$EXISTING_PR" --title "$PR_TITLE" --body-file /tmp/pr_body.md
+            PR_NUMBER="$EXISTING_PR"
           else
             echo "Creating PR for $BRANCH_NAME..."
             gh pr create \
@@ -156,11 +181,35 @@ jobs:
               --body-file /tmp/pr_body.md \
               --base main \
               --head "$BRANCH_NAME" \
-              --label "auto-release" \
-              --draft
+              --label "auto-release"
+            PR_NUMBER=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number')
           fi
 
-      - name: Tag and push (triggers Release workflow)
+          echo "pr_number=$PR_NUMBER"
+
+          # Squash-merge the PR ourselves. main requires a PR but 0 approvals and
+          # no required status checks, so the app token can merge immediately.
+          # The "[skip release]" in the squash subject is load-bearing: without it
+          # this merge (which changes Cargo.toml on main) would re-trigger the
+          # workflow and cascade into an endless chain of releases. GitHub may
+          # need a moment to compute mergeability after the branch push, so retry.
+          MERGE_SUBJECT="$PR_TITLE (#$PR_NUMBER) [skip release]"
+          MERGE_BODY="Automated version bump for v$NEXT_VERSION. Triggered by $COMMIT_SHA."
+          for attempt in 1 2 3 4 5 6; do
+            if gh pr merge "$PR_NUMBER" --squash --delete-branch \
+                 --subject "$MERGE_SUBJECT" --body "$MERGE_BODY"; then
+              echo "Merged PR #$PR_NUMBER"
+              break
+            fi
+            if [ "$attempt" = "6" ]; then
+              echo "::error::Failed to merge release PR #$PR_NUMBER after retries"
+              exit 1
+            fi
+            echo "Merge not ready yet (attempt $attempt) — retrying in 10s..."
+            sleep 10
+          done
+
+      - name: Tag merged release commit (triggers Release workflow)
         env:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
@@ -168,18 +217,19 @@ jobs:
           NEXT_VERSION="${{ steps.next-version.outputs.next_version }}"
           TAG="v$NEXT_VERSION"
           git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${{ github.repository }}.git"
-          HEAD_SHA=$(git rev-parse HEAD)
+
+          # Tag the squash commit that just landed on main, so the tag is always
+          # reachable from main. The version was chosen to be unused (see the
+          # compute step), so the tag must not already exist — never force-move.
+          git fetch origin main
+          MAIN_SHA=$(git rev-parse origin/main)
           if git rev-parse "$TAG" >/dev/null 2>&1; then
-            if [ "$(git rev-parse "$TAG^{commit}")" = "$HEAD_SHA" ]; then
-              git push origin "$TAG"
-            else
-              git tag -f "$TAG"
-              git push -f origin "$TAG"
-            fi
-          else
-            git tag "$TAG"
-            git push origin "$TAG"
+            echo "::error::Tag $TAG unexpectedly already exists — refusing to move a published tag. Investigate version drift."
+            exit 1
           fi
+          git tag "$TAG" "$MAIN_SHA"
+          git push origin "$TAG"
+          echo "Tagged $TAG at $MAIN_SHA (reachable from main)"
 
   cleanup-old-releases:
     name: Cleanup Old Release Branches
