@@ -119,6 +119,23 @@ struct ShellOutput {
     exit_code: i32,
 }
 
+/// Git environment variables that pin the repository / index / object store and
+/// override `current_dir`. If newton runs inside another git invocation (a hook,
+/// a CI step, a parent `git` that exported these), an inherited value would make
+/// every `run_git` call here silently target the *outer* repo instead of `cwd`
+/// — `GIT_DIR` takes precedence over `current_dir`. Clearing them makes `cwd`
+/// authoritative.
+const GIT_LOCATION_ENV_VARS: &[&str] = &[
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+];
+
 async fn run_git(args: &[&str], cwd: &Path) -> Result<ShellOutput, AppError> {
     let mut cmd = Command::new("git");
     for arg in args {
@@ -128,6 +145,9 @@ async fn run_git(args: &[&str], cwd: &Path) -> Result<ShellOutput, AppError> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
+    for var in GIT_LOCATION_ENV_VARS {
+        cmd.env_remove(var);
+    }
 
     // `run_guarded` spawns `cmd` as the leader of its own process group with
     // `kill_on_drop(true)` and guards it with `ProcessGroupKillGuard`, so an
