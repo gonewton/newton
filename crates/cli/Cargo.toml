@@ -18,8 +18,8 @@ name = "logging_integration_helper"
 path = "tests/bin/logging_integration_helper.rs"
 
 [dependencies]
-cli-framework = { git = "https://github.com/aroff/cli-framework", rev = "f6b77aebc6518c5e819f685942ed8257442717d0", default-features = false, features = ["mcp-server", "mcp-install", "api-server", "api-swagger"] }
-cli-framework-oidc = { git = "https://github.com/aroff/cli-framework", rev = "f6b77aebc6518c5e819f685942ed8257442717d0", package = "cli-framework-oidc", default-features = false, features = ["server"] }
+cli-framework = { git = "https://github.com/aroff/cli-framework", rev = "95368d120e2182fd50616d0a974d7afa740b71a3", default-features = false, features = ["mcp-server", "mcp-install", "api-server", "api-swagger"] }
+cli-framework-oidc = { git = "https://github.com/aroff/cli-framework", rev = "95368d120e2182fd50616d0a974d7afa740b71a3", package = "cli-framework-oidc", default-features = false, features = ["server"] }
 rmcp = { version = "1.6", features = ["server", "transport-streamable-http-server"] }
 utoipa-swagger-ui = { version = "9.0.2", default-features = false, features = ["vendored", "url"] }
 newton-core = { path = "../core" }
