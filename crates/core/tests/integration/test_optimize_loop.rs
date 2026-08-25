@@ -37,6 +37,31 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Git-location env vars that override `current_dir`. Cleared on every
+/// subprocess spawn in this suite so the temp fixture repo stays hermetic even
+/// when the tests run inside another git invocation (e.g. the pre-push hook,
+/// which exports GIT_DIR/GIT_INDEX_FILE). Otherwise a poisoned `git commit` here
+/// runs against the *outer* newton repo and trips its hooks. Mirrors
+/// `GitOperator::run_git`'s `GIT_LOCATION_ENV_VARS`.
+const GIT_LOCATION_ENV_VARS: &[&str] = &[
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+];
+
+/// Clear the git-location env vars on `cmd` so `current_dir` is authoritative.
+fn hermetic_git_env(cmd: &mut Command) -> &mut Command {
+    for var in GIT_LOCATION_ENV_VARS {
+        cmd.env_remove(var);
+    }
+    cmd
+}
+
 fn fixture_dir() -> PathBuf {
     workspace_root().join("tests/fixtures/repos/widgets-cli")
 }
@@ -72,17 +97,16 @@ fn setup_repo(tmp: &Path, env_path: &str) {
     copy_dir_all(&src, tmp).expect("copy fixture");
 
     let git = |args: &[&str]| {
-        let status = Command::new("git")
-            .args(args)
+        let mut cmd = Command::new("git");
+        cmd.args(args)
             .current_dir(tmp)
             .env("GIT_AUTHOR_NAME", "Test")
             .env("GIT_AUTHOR_EMAIL", "test@test.test")
             .env("GIT_COMMITTER_NAME", "Test")
             .env("GIT_COMMITTER_EMAIL", "test@test.test")
             .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("PATH", env_path)
-            .status()
-            .expect("git");
+            .env("PATH", env_path);
+        let status = hermetic_git_env(&mut cmd).status().expect("git");
         assert!(status.success(), "git {:?} failed", args);
     };
     git(&["init", "-b", "main"]);
@@ -150,13 +174,12 @@ async fn seed_repo_id(store: &SqliteBackendStore) -> String {
 /// Run the seed grader and return the Assessment as a JSON value.
 fn run_seed_grader(repo_id: &str, repo_path: &Path, env_path: &str) -> serde_json::Value {
     let script = grader_script();
-    let out = Command::new("bash")
-        .arg(script)
+    let mut cmd = Command::new("bash");
+    cmd.arg(script)
         .arg(repo_id)
         .arg(repo_path)
-        .env("PATH", env_path)
-        .output()
-        .expect("seed-grader.sh");
+        .env("PATH", env_path);
+    let out = hermetic_git_env(&mut cmd).output().expect("seed-grader.sh");
     assert!(
         out.status.success(),
         "seed-grader.sh failed: {}",
@@ -167,11 +190,12 @@ fn run_seed_grader(repo_id: &str, repo_path: &Path, env_path: &str) -> serde_jso
 
 /// Run pytest in the repo dir; returns true if all tests passed.
 fn run_pytest(repo_path: &Path, env_path: &str) -> bool {
-    Command::new("python3")
-        .args(["-m", "pytest", "-q", "--tb=short"])
+    let mut cmd = Command::new("python3");
+    cmd.args(["-m", "pytest", "-q", "--tb=short"])
         .current_dir(repo_path)
         .env("PYTHONPATH", repo_path.join("src"))
-        .env("PATH", env_path)
+        .env("PATH", env_path);
+    hermetic_git_env(&mut cmd)
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
@@ -179,11 +203,12 @@ fn run_pytest(repo_path: &Path, env_path: &str) -> bool {
 
 /// Apply a patch file with `git apply`. Returns true on success.
 fn apply_patch(repo_path: &Path, patch_file: &Path, env_path: &str) -> bool {
-    Command::new("git")
-        .args(["apply", patch_file.to_str().unwrap()])
+    let mut cmd = Command::new("git");
+    cmd.args(["apply", patch_file.to_str().unwrap()])
         .current_dir(repo_path)
         .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("PATH", env_path)
+        .env("PATH", env_path);
+    hermetic_git_env(&mut cmd)
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
@@ -192,17 +217,16 @@ fn apply_patch(repo_path: &Path, patch_file: &Path, env_path: &str) -> bool {
 /// Commit everything staged in the repo.
 fn git_commit(repo_path: &Path, message: &str, env_path: &str) {
     let git = |args: &[&str]| {
-        let status = Command::new("git")
-            .args(args)
+        let mut cmd = Command::new("git");
+        cmd.args(args)
             .current_dir(repo_path)
             .env("GIT_AUTHOR_NAME", "Test")
             .env("GIT_AUTHOR_EMAIL", "test@test.test")
             .env("GIT_COMMITTER_NAME", "Test")
             .env("GIT_COMMITTER_EMAIL", "test@test.test")
             .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("PATH", env_path)
-            .status()
-            .expect("git");
+            .env("PATH", env_path);
+        let status = hermetic_git_env(&mut cmd).status().expect("git");
         assert!(status.success(), "git {:?} failed", args);
     };
     git(&["add", "."]);
