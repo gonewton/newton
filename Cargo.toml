@@ -20,8 +20,8 @@ tokio = { version = "1.49", features = ["full"] }
 anyhow = "1.0"
 aikit-sdk = { version = "0.3.0", git = "https://github.com/goaikit/aikit.git", branch = "main" }
 aikit-magictool = { git = "https://github.com/goaikit/aikit.git", branch = "main", features = ["agent"] }
-ailoop-core = { git = "https://github.com/goailoop/ailoop.git", rev = "596cff9303c7e56615cdb53babc95a03170cf790", default-features = false } # pinned: Axum 0.8 upgrade (goailoop/ailoop#59), exports ask_decision, DecisionOption, DecisionRecommendation, MessageContent::Decision
-ailoop-server = { git = "https://github.com/goailoop/ailoop.git", rev = "596cff9303c7e56615cdb53babc95a03170cf790", default-features = false } # pinned: Axum 0.8 upgrade (goailoop/ailoop#59)
+ailoop-core = { git = "https://github.com/goailoop/ailoop.git", rev = "83ed0e89ac2f5dcff03d1223fcb85fa6456756ac", default-features = false } # 1.0.14: reqwest 0.11->0.12 (drops vulnerable h2 0.3, RUSTSEC-2026-0258); still Axum 0.8 (goailoop/ailoop#59) + exports ask_decision, DecisionOption, DecisionRecommendation, MessageContent::Decision
+ailoop-server = { git = "https://github.com/goailoop/ailoop.git", rev = "83ed0e89ac2f5dcff03d1223fcb85fa6456756ac", default-features = false } # 1.0.14: reqwest 0.11->0.12 (drops vulnerable h2 0.3, RUSTSEC-2026-0258); still Axum 0.8 (goailoop/ailoop#59)
 tokio-util = "0.7"
 thiserror = "1.0"
 tracing = "0.1"
