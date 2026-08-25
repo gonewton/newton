@@ -152,10 +152,32 @@ fn git_operator_validate_rejects_invalid_remote() {
 /// Run a `git` subcommand synchronously against `repo`, panicking with
 /// stdout+stderr on failure. Used only for fixture setup, not for the
 /// behavior under test.
-fn run_git_sync(repo: &Path, args: &[&str]) {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(repo)
+/// Git-location env vars that override `current_dir`. Cleared on every git spawn
+/// in these tests so the temp-repo fixture stays hermetic even when the suite
+/// runs inside another git invocation (e.g. a pre-push hook that exports
+/// GIT_DIR/GIT_INDEX_FILE) — otherwise those retarget the outer newton repo.
+/// Mirrors `GitOperator::run_git`'s `GIT_LOCATION_ENV_VARS`.
+const GIT_HERMETIC_ENV: &[&str] = &[
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+];
+
+/// Run `git` against `repo` with a hermetic env, returning captured stdout.
+/// Panics (with stdout+stderr) on a non-zero exit. Use for both fixture setup
+/// and result assertions so no git call in this suite can leak to the outer repo.
+fn git_capture(repo: &Path, args: &[&str]) -> String {
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(args).current_dir(repo);
+    for var in GIT_HERMETIC_ENV {
+        cmd.env_remove(var);
+    }
+    let output = cmd
         .output()
         .unwrap_or_else(|e| panic!("failed to spawn git {args:?}: {e}"));
     assert!(
@@ -164,6 +186,11 @@ fn run_git_sync(repo: &Path, args: &[&str]) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn run_git_sync(repo: &Path, args: &[&str]) {
+    let _ = git_capture(repo, args);
 }
 
 /// Initialize a throwaway git repo with a local identity configured (so
@@ -259,12 +286,7 @@ async fn git_commit_rejected_by_precommit_hook_reports_precommit_failed() {
     assert_eq!(result["precommit_failed"], Value::Bool(true));
 
     // Confirm nothing was actually committed.
-    let log = std::process::Command::new("git")
-        .args(["log", "--oneline"])
-        .current_dir(repo.path())
-        .output()
-        .unwrap();
-    let log_text = String::from_utf8_lossy(&log.stdout);
+    let log_text = git_capture(repo.path(), &["log", "--oneline"]);
     assert_eq!(
         log_text.lines().count(),
         1,
@@ -398,12 +420,7 @@ async fn git_commit_empty_message_after_cleanup_strip_is_hard_err() {
     assert_eq!(err.code, "WFG-GIT-003");
 
     // Confirm nothing was actually committed.
-    let log = std::process::Command::new("git")
-        .args(["log", "--oneline"])
-        .current_dir(repo.path())
-        .output()
-        .unwrap();
-    let log_text = String::from_utf8_lossy(&log.stdout);
+    let log_text = git_capture(repo.path(), &["log", "--oneline"]);
     assert_eq!(
         log_text.lines().count(),
         1,
@@ -432,12 +449,7 @@ async fn git_stage_with_glob_exclude_unstages_matching_files() {
     let result = op.execute(params, ctx).await.expect("stage must succeed");
     assert_eq!(result["has_staged"], Value::Bool(true));
 
-    let staged = std::process::Command::new("git")
-        .args(["diff", "--cached", "--name-only"])
-        .current_dir(repo.path())
-        .output()
-        .unwrap();
-    let staged_text = String::from_utf8_lossy(&staged.stdout);
+    let staged_text = git_capture(repo.path(), &["diff", "--cached", "--name-only"]);
     assert!(
         staged_text.lines().any(|l| l == "kept.txt"),
         "kept.txt should remain staged, got: {staged_text}"
