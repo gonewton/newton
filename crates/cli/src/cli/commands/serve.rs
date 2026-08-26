@@ -42,7 +42,7 @@ fn validate_ailoop_path(p: &str) -> StdResult<(), AppError> {
 /// the `localhost` hostname. `--host` defaults to `127.0.0.1`; passing
 /// anything else is the operator's explicit opt-in to wider exposure (see
 /// spec 074 PR-6 / B5 — no separate `--allow-remote`-style flag is added).
-fn is_loopback_host(host: &str) -> bool {
+pub(crate) fn is_loopback_host(host: &str) -> bool {
     let trimmed = host.trim_start_matches('[').trim_end_matches(']');
     if trimmed.eq_ignore_ascii_case("localhost") {
         return true;
@@ -216,6 +216,21 @@ fn check_non_loopback_bind(
             Ok(())
         }
     }
+}
+
+/// Whether the REST API should advertise permissive cross-origin access
+/// (`Access-Control-Allow-Origin: *`). Permissive CORS is only sound once the
+/// API is authenticated (bearer-token OIDC): a separate-origin, token-bearing
+/// frontend is a legitimate deployment, and an un-tokened cross-origin request
+/// is rejected by the auth layer before it can read anything. On the default
+/// *unauthenticated* (loopback) serve it must be OFF — otherwise any web page
+/// could read API responses and drive state-changing endpoints (e.g. approving
+/// a pending Human-in-the-Loop gate) cross-origin. The embedded SPA is served
+/// same-origin from this listener, so it never needs a CORS grant. Pure so the
+/// decision is unit-testable without starting a real HTTP listener (audit
+/// finding newton-06).
+fn permissive_cors_allowed(oidc_configured: bool) -> bool {
+    oidc_configured
 }
 
 /// Builds the human-readable startup banner lines. Newton's `info!` startup
@@ -432,8 +447,15 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
             openapi: Some(openapi_value),
         })
         .default_version(DefaultVersion::Pinned(version_name))
-        .cors(CorsLayer::permissive())
         .health_version(env!("CARGO_PKG_VERSION"));
+
+    // CORS (audit finding newton-06): only advertise permissive cross-origin
+    // access once the API is authenticated. The unauthenticated default serves
+    // the embedded SPA same-origin and must not grant any web page read/drive
+    // access to the API.
+    if permissive_cors_allowed(oidc_config.is_some()) {
+        builder = builder.cors(CorsLayer::permissive());
+    }
 
     // OIDC auth (audit finding C5): gates the `/api/{version}` mounts,
     // non-primary `mount()`s (e.g. the embedded ailoop router), and `/mcp`.
@@ -816,6 +838,25 @@ mod check_non_loopback_bind_tests {
             "err={}",
             err2.message
         );
+    }
+}
+
+#[cfg(test)]
+mod permissive_cors_allowed_tests {
+    use super::*;
+
+    #[test]
+    fn permissive_cors_off_when_unauthenticated() {
+        // newton-06: the default unauthenticated serve must not advertise
+        // permissive cross-origin access.
+        assert!(!permissive_cors_allowed(false));
+    }
+
+    #[test]
+    fn permissive_cors_on_when_oidc_configured() {
+        // Retained for authenticated (bearer-token) deployments with a
+        // separate-origin frontend.
+        assert!(permissive_cors_allowed(true));
     }
 }
 

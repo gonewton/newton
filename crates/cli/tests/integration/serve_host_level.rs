@@ -503,3 +503,50 @@ fn non_loopback_host_with_oidc_starts_and_gates_the_api() {
         "auth_config_body: {auth_config_body}"
     );
 }
+
+#[test]
+fn default_unauthenticated_serve_does_not_expose_permissive_cors() {
+    // newton-06: on the default (unauthenticated, loopback) serve the REST API
+    // must NOT advertise permissive cross-origin access. With `Access-Control-
+    // Allow-Origin: *` and no auth, a drive-by web page can read API responses
+    // and drive state-changing endpoints (e.g. approving a pending
+    // Human-in-the-Loop gate) cross-origin. The embedded SPA is same-origin, so
+    // it needs no CORS grant. `/api/v1/workflows` is an unauthenticated GET that
+    // the CORS layer wraps (host-level `/healthz` is not), so it's the faithful
+    // probe for the exposure.
+    let port = pick_free_port();
+    let (mut child, _dir) = start_serve(port);
+
+    if !wait_ready(port) {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("server did not become ready within 30s");
+    }
+
+    let client = make_no_redirect_client();
+    let resp = client
+        .get(format!("http://127.0.0.1:{}/api/v1/workflows", port))
+        .header("Origin", "http://evil.example")
+        .send()
+        .expect("/api/v1/workflows request");
+
+    let acao = resp
+        .headers()
+        .get("access-control-allow-origin")
+        .map(|v| v.to_str().unwrap_or("<binary>").to_string());
+    let status = resp.status().as_u16();
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    // Sanity: this must be the CORS-wrapped, unauthenticated surface (a 200),
+    // otherwise an absent ACAO header would be a vacuous pass.
+    assert_eq!(
+        status, 200,
+        "/api/v1/workflows should be reachable unauthenticated for this probe"
+    );
+    assert!(
+        acao.is_none(),
+        "unauthenticated serve must not send Access-Control-Allow-Origin, got {acao:?}"
+    );
+}

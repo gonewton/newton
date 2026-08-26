@@ -170,8 +170,8 @@ Serve reads/writes through this store for portfolio, workflow instances, grades,
 
 Two topologies:
 
-1. **Combined**: `newton serve --with-mcp` mounts MCP at `/mcp` on the serve port.
-2. **Dedicated**: `newton mcp serve` on a separate port (default 8730).
+1. **Combined**: `newton serve --with-mcp` mounts MCP at `/mcp` on the serve port. This path can be authenticated: when OIDC is configured, `/mcp` is gated behind the same bearer-token layer as the REST API, so it is the way to expose MCP to a non-loopback interface.
+2. **Dedicated**: `newton mcp serve` on a separate port (default 8730). This path has **no** authentication layer, so it is **loopback-only** and refuses a non-loopback `--host` (`NEWTON-MCP-003`). For authenticated remote MCP, use the combined topology above.
 
 Implementation: `crates/cli/src/cli/mcp.rs` and `framework_setup/mcp.rs`. Export policy `ExposeMcpOnly` limits which commands become MCP tools (`MCP_EXPOSED_COMMAND_IDS` in `framework_setup/mod.rs`).
 
