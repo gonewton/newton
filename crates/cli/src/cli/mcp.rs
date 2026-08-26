@@ -120,6 +120,31 @@ pub fn argv_with_newton_defaults(argv: &[String], flags: &McpFlags) -> Vec<Strin
     out
 }
 
+/// Enforce that standalone `newton mcp serve` binds a loopback host only.
+///
+/// Unlike `newton serve` (whose `check_non_loopback_bind` *permits* a
+/// non-loopback bind once OIDC is configured), the standalone `mcp serve` path
+/// hands the listener off to cli-framework's own MCP server and has **no**
+/// authentication layer wired — OIDC enforcement only exists on
+/// `newton serve --with-mcp`, which builds the router itself and mounts it
+/// behind the OIDC-gated `ApiServerBuilder`. A non-loopback bind here would
+/// therefore expose every MCP-wrapped Newton command (including data-catalog
+/// CRUD) to the network with zero authentication, so this path fails closed:
+/// loopback only. Returns the `NEWTON-MCP-003` error message on refusal.
+pub fn check_mcp_loopback_only(host: &str) -> Result<(), String> {
+    if crate::cli::commands::serve::is_loopback_host(host) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{}: refusing to bind MCP server to non-loopback host {host:?}. Standalone \
+             `newton mcp serve` is loopback-only because it has no authentication: bind a \
+             loopback address (127.0.0.1, ::1, or localhost), or use `newton serve --with-mcp` \
+             with --oidc-issuer/--oidc-audience for authenticated remote MCP.",
+            error_codes::NEWTON_MCP_003
+        ))
+    }
+}
+
 /// Probe-bind `host:port` to fail-fast on conflicts before the framework
 /// starts up. The listener is dropped immediately; cli-framework will rebind
 /// when it owns the runtime. The TOCTOU window is acceptable for the
@@ -137,6 +162,13 @@ pub async fn probe_bind(flags: &McpFlags) -> Result<(), std::io::Error> {
 pub async fn run(argv: Vec<String>, ctx: crate::cli::context::NewtonContext) -> i32 {
     let flags = parse_mcp_flags(&argv);
     let bind_address = format!("{}:{}", flags.host, flags.port);
+
+    // newton-01: fail closed before binding — the standalone MCP path is
+    // unauthenticated, so it must never expose a non-loopback interface.
+    if let Err(msg) = check_mcp_loopback_only(&flags.host) {
+        eprintln!("{msg}");
+        return 1;
+    }
 
     if let Err(e) = probe_bind(&flags).await {
         eprintln!(
@@ -203,6 +235,41 @@ pub async fn run(argv: Vec<String>, ctx: crate::cli::context::NewtonContext) -> 
                 );
             }
             1
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loopback_hosts_are_allowed() {
+        for host in ["127.0.0.1", "::1", "[::1]", "localhost", "127.0.0.5"] {
+            assert!(
+                check_mcp_loopback_only(host).is_ok(),
+                "loopback host {host:?} should be permitted"
+            );
+        }
+    }
+
+    #[test]
+    fn non_loopback_hosts_are_refused_with_newton_mcp_003() {
+        for host in ["0.0.0.0", "::", "192.168.1.10", "10.0.0.1", "example.com"] {
+            let err = check_mcp_loopback_only(host)
+                .expect_err(&format!("non-loopback host {host:?} must be refused"));
+            assert!(
+                err.contains("NEWTON-MCP-003"),
+                "refusal for {host:?} must carry NEWTON-MCP-003: {err}"
+            );
+            assert!(
+                err.contains(host),
+                "refusal for {host:?} must name the host: {err}"
+            );
+            assert!(
+                err.contains("newton serve --with-mcp"),
+                "refusal for {host:?} should point to the authenticated remote path: {err}"
+            );
         }
     }
 }

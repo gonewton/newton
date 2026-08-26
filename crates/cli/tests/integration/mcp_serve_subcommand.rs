@@ -96,6 +96,72 @@ fn mcp_serve_subcommand_tool_count_matches_exposed_ids() {
 }
 
 #[test]
+fn mcp_serve_subcommand_non_loopback_host_refused() {
+    // newton-01: the standalone `newton mcp serve` path hands off to
+    // cli-framework's MCP server with NO authentication wired (OIDC only
+    // exists on `newton serve --with-mcp`). Binding a non-loopback host would
+    // therefore expose unauthenticated data-catalog CRUD to the network, so it
+    // must fail CLOSED — refuse the bind before the server ever starts.
+    let port = pick_free_port();
+    let bin = assert_cmd::cargo::cargo_bin("newton");
+    let mut child = Command::new(bin)
+        .arg("mcp")
+        .arg("serve")
+        .arg("--host")
+        .arg("0.0.0.0")
+        .arg("--port")
+        .arg(port.to_string())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn newton mcp serve");
+
+    let stderr = child.stderr.take().expect("stderr pipe");
+    let mut reader = BufReader::new(stderr);
+
+    // The refusal exits immediately; guard against a regression that lets the
+    // server boot by capping the read at a deadline and then killing.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut refused = false;
+    let mut started = false;
+    let mut collected = String::new();
+    while Instant::now() < deadline {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => {
+                collected.push_str(&line);
+                if line.contains("NEWTON-MCP-003") {
+                    refused = true;
+                    break;
+                }
+                if line.contains("\"event\":\"mcp_serve_started\"") {
+                    started = true;
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(
+        !started,
+        "server must NOT start on a non-loopback bind (newton-01): {collected}"
+    );
+    assert!(
+        refused,
+        "expected NEWTON-MCP-003 refusal on stderr, got: {collected}"
+    );
+    assert!(
+        collected.contains("0.0.0.0"),
+        "refusal should name the rejected host: {collected}"
+    );
+}
+
+#[test]
 fn mcp_serve_subcommand_port_conflict_emits_newton_mcp_001() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().unwrap().port();
