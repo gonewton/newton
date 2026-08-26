@@ -5,6 +5,10 @@ pub const CLI_MIG_004: &str = "CLI-MIG-004";
 pub const CLI_MIG_005: &str = "CLI-MIG-005";
 pub const NEWTON_MCP_001: &str = "NEWTON-MCP-001";
 pub const NEWTON_MCP_002: &str = "NEWTON-MCP-002";
+/// Refused a non-loopback `newton mcp serve` bind: the standalone MCP path has
+/// no authentication wired (OIDC only exists on `newton serve --with-mcp`), so
+/// it is loopback-only and fails closed on wider exposure.
+pub const NEWTON_MCP_003: &str = "NEWTON-MCP-003";
 pub const NEWTON_SERVE_MCP_001: &str = "NEWTON-SERVE-MCP-001";
 pub const NEWTON_SERVE_MCP_002: &str = "NEWTON-SERVE-MCP-002";
 pub const NEWTON_SERVE_MCP_003: &str = "NEWTON-SERVE-MCP-003";
