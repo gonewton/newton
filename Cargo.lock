@@ -59,7 +59,7 @@ dependencies = [
 [[package]]
 name = "aikit-agent"
 version = "0.1.0"
-source = "git+https://github.com/goaikit/aikit.git?rev=a34e1e476a5616e4c66b8a89fd8a73915d9f6783#a34e1e476a5616e4c66b8a89fd8a73915d9f6783"
+source = "git+https://github.com/goaikit/aikit.git?rev=14b02dbb90acf00ab12f9417153c8c027c5c47b1#14b02dbb90acf00ab12f9417153c8c027c5c47b1"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -94,7 +94,7 @@ dependencies = [
  "dirs 6.0.0",
  "glob",
  "jsonschema 0.46.5",
- "nix 0.31.3",
+ "nix",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -110,14 +110,14 @@ dependencies = [
 [[package]]
 name = "aikit-sdk"
 version = "0.3.0"
-source = "git+https://github.com/goaikit/aikit.git?rev=a34e1e476a5616e4c66b8a89fd8a73915d9f6783#a34e1e476a5616e4c66b8a89fd8a73915d9f6783"
+source = "git+https://github.com/goaikit/aikit.git?rev=14b02dbb90acf00ab12f9417153c8c027c5c47b1#14b02dbb90acf00ab12f9417153c8c027c5c47b1"
 dependencies = [
- "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?rev=a34e1e476a5616e4c66b8a89fd8a73915d9f6783)",
+ "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?rev=14b02dbb90acf00ab12f9417153c8c027c5c47b1)",
  "claude-agent-sdk",
  "dirs 6.0.0",
  "glob",
  "jsonschema 0.46.5",
- "nix 0.29.0",
+ "nix",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -691,10 +691,10 @@ dependencies = [
 [[package]]
 name = "cli-framework"
 version = "0.5.8"
-source = "git+https://github.com/aroff/cli-framework?rev=95368d120e2182fd50616d0a974d7afa740b71a3#95368d120e2182fd50616d0a974d7afa740b71a3"
+source = "git+https://github.com/aroff/cli-framework?rev=74cde5b0d02c12dc657486b2839bed29b32934ab#74cde5b0d02c12dc657486b2839bed29b32934ab"
 dependencies = [
- "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?rev=a34e1e476a5616e4c66b8a89fd8a73915d9f6783)",
- "aikit-sdk 0.3.0 (git+https://github.com/goaikit/aikit.git?rev=a34e1e476a5616e4c66b8a89fd8a73915d9f6783)",
+ "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?rev=14b02dbb90acf00ab12f9417153c8c027c5c47b1)",
+ "aikit-sdk 0.3.0 (git+https://github.com/goaikit/aikit.git?rev=14b02dbb90acf00ab12f9417153c8c027c5c47b1)",
  "ailoop-core 1.0.13",
  "anyhow",
  "async-trait",
@@ -726,7 +726,7 @@ dependencies = [
 [[package]]
 name = "cli-framework-oidc"
 version = "0.1.0"
-source = "git+https://github.com/aroff/cli-framework?rev=95368d120e2182fd50616d0a974d7afa740b71a3#95368d120e2182fd50616d0a974d7afa740b71a3"
+source = "git+https://github.com/aroff/cli-framework?rev=74cde5b0d02c12dc657486b2839bed29b32934ab#74cde5b0d02c12dc657486b2839bed29b32934ab"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2497,18 +2497,6 @@ dependencies = [
  "serde_json",
  "utoipa",
  "uuid",
-]
-
-[[package]]
-name = "nix"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
-dependencies = [
- "bitflags",
- "cfg-if",
- "cfg_aliases",
- "libc",
 ]
 
 [[package]]
