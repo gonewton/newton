@@ -1,0 +1,16 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: invalid_command
+    io:
+      result_map:
+        decision: none
+  tasks:
+    - id: invalid_command
+      operator: CommandOperator
+      params:
+        cmd: printf ran
+        write_stdout: command-ran
+        args: [unsupported]
+      terminal: success

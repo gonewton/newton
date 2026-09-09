@@ -3,12 +3,17 @@
 Usage: python3 scripts/test-optimize-live.py WORKSPACE PROJECT [NEWTON_BINARY]
        [--evidence-dir PATH] [--expected-model MODEL]
        [--route {local-gateway,configured-provider,unverified}]
+       [--pi-models-file PATH]
 
 Supply an explicitly authorized disposable Rust repository with a remediable
-Cargo.lock finding and the shipped software-security definition. The route value
-is an operator assertion about the existing Pi configuration; it is recorded but
-does not reconfigure or inspect credentials. The harness preserves every command
-result and never retries a failed trial.
+Cargo.lock finding and the shipped software-security definition. A local-gateway
+trial requires Pi's existing active models.json and an exact provider/model on
+a private endpoint. No configuration or credentials are changed. The harness
+preserves every command result and never retries a failed trial.
+
+Success requires correlated runtime Pi SDK tool and terminal events. Because Pi
+does not expose its selected endpoint in those events, local configuration alone
+cannot pass the local-gateway route gate.
 """
 
 import argparse
@@ -18,6 +23,13 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+
+from optimize_live_evidence import (
+    collect_agent_evidence,
+    read_object,
+    require_pi_execution,
+)
+from optimize_live_route import verify_local_route
 
 
 def objects(value):
@@ -43,59 +55,17 @@ def parse_args():
     parser.add_argument("--evidence-dir", type=Path)
     parser.add_argument("--expected-model")
     parser.add_argument(
+        "--pi-models-file",
+        type=Path,
+        help="existing active Pi models.json; required to verify local-gateway configuration",
+    )
+    parser.add_argument(
         "--route",
         choices=("local-gateway", "configured-provider", "unverified"),
         default="unverified",
-        help="record the operator-verified route used by the existing Pi configuration",
+        help="local-gateway requires verified private configuration; other values make no local-route claim",
     )
     return parser.parse_args()
-
-
-def collect_agent_evidence(state_dir, artifact_dir, run_id):
-    """Collect redacted engine traces and reported token usage for this run."""
-    records = []
-    workflows = state_dir / "workflows"
-    if not workflows.is_dir():
-        return records
-
-    def token_usage(value):
-        found = []
-        if isinstance(value, dict):
-            if isinstance(value.get("token_usage"), dict):
-                found.append(value["token_usage"])
-            for child in value.values():
-                found.extend(token_usage(child))
-        elif isinstance(value, list):
-            for child in value:
-                found.extend(token_usage(child))
-        return found
-
-    for workflow in sorted(workflows.iterdir()):
-        definition_path = workflow / "workflow_definition.json"
-        checkpoint_path = workflow / "checkpoint.json"
-        if not definition_path.is_file() or not checkpoint_path.is_file():
-            continue
-        definition = json.loads(definition_path.read_text())
-        payload = definition.get("triggers", {}).get("payload", {})
-        if payload.get("run_id") != run_id or payload.get("parameters", {}).get(
-            "agent", {}
-        ).get("value") != "pi":
-            continue
-        checkpoint = json.loads(checkpoint_path.read_text())
-        traces = sorted(
-            str(path)
-            for path in (artifact_dir / "workflows" / workflow.name).glob(
-                "task/*/*/events.ndjson"
-            )
-        )
-        records.append(
-            {
-                "workflow_id": workflow.name,
-                "token_usage": token_usage(checkpoint),
-                "redacted_event_traces": traces,
-            }
-        )
-    return records
 
 
 def main():
@@ -108,17 +78,66 @@ def main():
         artifacts = Path(tempfile.mkdtemp(prefix="newton-live-optimization-"))
     report_path = artifacts / "report.json"
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "running",
         "started_at": datetime.now(timezone.utc).isoformat(),
         "route_assertion": args.route,
+        "route_verification": "unverified",
+        "local_gateway_gate": "not_exercised",
         "workspace": str(workspace),
         "project": args.project,
         "commands": [],
+        "agent_evidence": [],
     }
+    root = None
+    previous_runs = set()
+    attempted = False
 
     def save_report():
         report_path.write_text(json.dumps(report, indent=2) + "\n")
+
+    def retain_trial_evidence():
+        if root is None or not attempted:
+            return
+        state = root / ".newton" / "state"
+        new_runs = {
+            path.parent.name for path in (state / "optimize").glob("*/journal.json")
+        } - previous_runs
+        reported_run = report.get("outcome", {}).get("run_id")
+        if reported_run:
+            if reported_run in previous_runs:
+                raise RuntimeError(
+                    "Newton returned a pre-existing Run as live-trial evidence"
+                )
+            new_runs.add(reported_run)
+        records = []
+        report["run_evidence"] = []
+        for run_id in sorted(new_runs):
+            journal_path = state / "optimize" / run_id / "journal.json"
+            try:
+                journal = read_object(journal_path)
+                report["run_evidence"].append(
+                    {
+                        "run_id": run_id,
+                        "phase": journal.get("phase"),
+                        "execution_id": journal.get("execution_id"),
+                        "requires_reconciliation": journal.get(
+                            "requires_reconciliation"
+                        ),
+                        "journal_path": str(journal_path),
+                    }
+                )
+            except (OSError, ValueError):
+                report["run_evidence"].append(
+                    {"run_id": run_id, "journal_error": "unreadable journal"}
+                )
+            records.extend(
+                collect_agent_evidence(
+                    state, root / ".newton" / "artifacts", run_id, artifacts
+                )
+            )
+        report["agent_evidence"] = records
+        save_report()
 
     def invoke(stage, *extra):
         command = [
@@ -132,7 +151,9 @@ def main():
             *extra,
         ]
         try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=3700)
+            result = subprocess.run(
+                command, capture_output=True, text=True, timeout=3700
+            )
         except subprocess.TimeoutExpired as error:
             stdout = (
                 error.stdout.decode(errors="replace")
@@ -156,6 +177,10 @@ def main():
         report["commands"].append(
             {"stage": stage, "exit_code": result.returncode, "timed_out": False}
         )
+        if stage == "once":
+            for value in objects(result.stdout):
+                if "stop_reason" in value and "accepted_result" in value:
+                    report["outcome"] = value
         save_report()
         if result.returncode:
             raise RuntimeError(f"Newton failed during {stage}")
@@ -185,12 +210,25 @@ def main():
                 f"configured model {parameters.get('model')!r} does not match "
                 f"--expected-model {args.expected_model!r}"
             )
+        if args.route == "local-gateway":
+            report["route_evidence"] = verify_local_route(
+                args.pi_models_file, parameters.get("model")
+            )
+            report["route_verification"] = "verified_private_configuration"
+            report["local_gateway_gate"] = "configuration_verified_transport_unobserved"
+        elif args.route == "configured-provider":
+            report["route_verification"] = "configuration_only"
         root = Path(inspection["context"]["root"])
         head = subprocess.check_output(
             ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
         ).strip()
         report["original_head"] = head
         invoke("preflight", "--preflight")
+        previous_runs = {
+            path.parent.name
+            for path in (root / ".newton" / "state" / "optimize").glob("*/journal.json")
+        }
+        attempted = True
         output = invoke("once", "--once")
         outcome = next(
             value
@@ -199,10 +237,9 @@ def main():
         )
         (artifacts / "outcome.json").write_text(json.dumps(outcome, indent=2) + "\n")
         report["outcome"] = outcome
-        report["agent_evidence"] = collect_agent_evidence(
-            root / ".newton" / "state",
-            root / ".newton" / "artifacts",
-            outcome["run_id"],
+        retain_trial_evidence()
+        report["verified_agent_execution"] = require_pi_execution(
+            report["agent_evidence"], outcome, parameters.get("model")
         )
         report["cost_accounting"] = {
             "status": "unavailable",
@@ -225,17 +262,33 @@ def main():
             raise RuntimeError(
                 "the original project HEAD changed; this definition must not promote"
             )
+        if args.route == "local-gateway":
+            after_route = verify_local_route(
+                args.pi_models_file, parameters.get("model")
+            )
+            if after_route != report["route_evidence"]:
+                raise RuntimeError(
+                    "Pi gateway configuration or address resolution changed during the trial"
+                )
+            raise RuntimeError(
+                "local gateway transport was not observed; private configuration "
+                "alone cannot satisfy the route gate"
+            )
         report["status"] = "passed"
         report["finished_at"] = datetime.now(timezone.utc).isoformat()
         save_report()
         print(f"Real Pi/aikit candidate accepted; evidence: {report_path}")
         print(
             "This demonstrates the declared dependency-audit workflow, "
-            "not comprehensive security or compliance."
+            "not comprehensive security, compliance, or verified local-gateway routing."
         )
     except Exception as error:
         report["status"] = "failed"
         report["error"] = str(error)
+        try:
+            retain_trial_evidence()
+        except Exception as evidence_error:
+            report["evidence_collection_error"] = str(evidence_error)
         report["finished_at"] = datetime.now(timezone.utc).isoformat()
         save_report()
         print(

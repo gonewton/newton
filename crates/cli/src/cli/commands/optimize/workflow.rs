@@ -11,6 +11,7 @@ use newton_types::{
 };
 use serde_json::Value;
 use std::{
+    collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -55,6 +56,7 @@ impl WorkflowExecutor {
             }
             .into());
         }
+        validate_resource_metering(&document)?;
         validate_authority(&document, authority)?;
         document.triggers = Some(WorkflowTrigger::manual(triggers.clone()));
         let settings = &document.workflow.settings;
@@ -85,6 +87,7 @@ impl WorkflowExecutor {
             settings,
             hil,
             Some(self.store.clone()),
+            Some(0),
         );
         // Enforce the deadline around the entire step, including agent calls and
         // retries. A global workflow deadline alone is checked between ticks.
@@ -109,6 +112,125 @@ impl WorkflowExecutor {
         }
         Ok(summary)
     }
+}
+
+/// Reject Newton-controlled repetition that cannot be charged separately to the
+/// optimization work/evaluation counters.
+pub(super) fn validate_resource_metering(document: &WorkflowDocument) -> anyhow::Result<()> {
+    for task in document.workflow.tasks() {
+        if let Some(retry) = task.retry.as_ref().filter(|retry| retry.max_attempts > 1) {
+            anyhow::bail!(
+                "optimization task '{}' declares retry.max_attempts={}; this host cannot meter internal task retries against work/evaluation limits; omit retry or set max_attempts: 1 and use driver-managed retries",
+                task.id,
+                retry.max_attempts
+            );
+        }
+        if task.operator == "AgentOperator"
+            && task
+                .params
+                .get("loop")
+                .is_some_and(|value| value != &Value::Bool(false))
+        {
+            anyhow::bail!(
+                "optimization task '{}' enables or dynamically selects AgentOperator loop mode; this host cannot meter internal agent-loop iterations; omit loop or set loop: false and use driver-managed retries",
+                task.id
+            );
+        }
+        validate_operator_retries(task)?;
+    }
+    if let Some(task) = cyclic_task(document) {
+        anyhow::bail!(
+            "optimization workflow contains a transition cycle involving task '{task}'; this host cannot meter repeated graph executions against work/evaluation limits; use an acyclic role workflow and driver-managed retries"
+        );
+    }
+    Ok(())
+}
+
+fn validate_operator_retries(
+    task: &newton_core::workflow::schema::WorkflowTask,
+) -> anyhow::Result<()> {
+    let operation = task.params.get("operation");
+    match task.operator.as_str() {
+        "GitOperator" => match operation.and_then(Value::as_str) {
+            Some("push") if task.params.get("retry_count").and_then(Value::as_u64) != Some(1) => {
+                anyhow::bail!(
+                    "optimization task '{}' uses GitOperator push without retry_count: 1; operator-internal retries are not separately metered",
+                    task.id
+                );
+            }
+            Some(_) => {}
+            None => anyhow::bail!(
+                "optimization task '{}' must use a literal GitOperator operation so internal retry behavior is known before dispatch",
+                task.id
+            ),
+        },
+        "GhOperator" => match operation.and_then(Value::as_str) {
+            Some("pr_create" | "branch_push")
+                if task.params.get("retry_count").and_then(Value::as_u64) != Some(1) =>
+            {
+                anyhow::bail!(
+                    "optimization task '{}' uses a retrying GhOperator operation without retry_count: 1; operator-internal retries are not separately metered",
+                    task.id
+                );
+            }
+            Some("project_item_set_status") => anyhow::bail!(
+                "optimization task '{}' uses GhOperator project_item_set_status, whose internal retry is not separately metered",
+                task.id
+            ),
+            Some(_) => {}
+            None => anyhow::bail!(
+                "optimization task '{}' must use a literal GhOperator operation so internal retry behavior is known before dispatch",
+                task.id
+            ),
+        },
+        _ => {}
+    }
+    Ok(())
+}
+
+fn cyclic_task(document: &WorkflowDocument) -> Option<String> {
+    let tasks = document.workflow.tasks().collect::<Vec<_>>();
+    let mut indegree = tasks
+        .iter()
+        .map(|task| (task.id.clone(), 0_usize))
+        .collect::<HashMap<_, _>>();
+    let mut edges = HashMap::<String, Vec<String>>::new();
+    for task in &tasks {
+        for transition in &task.transitions {
+            if let Some(value) = indegree.get_mut(&transition.to) {
+                *value += 1;
+                edges
+                    .entry(task.id.clone())
+                    .or_default()
+                    .push(transition.to.clone());
+            }
+        }
+    }
+    let mut ready = indegree
+        .iter()
+        .filter(|(_, count)| **count == 0)
+        .map(|(id, _)| id.clone())
+        .collect::<VecDeque<_>>();
+    let mut visited = 0_usize;
+    while let Some(id) = ready.pop_front() {
+        visited += 1;
+        for target in edges.get(&id).into_iter().flatten() {
+            let count = indegree
+                .get_mut(target)
+                .expect("known transition target was inserted above");
+            *count -= 1;
+            if *count == 0 {
+                ready.push_back(target.clone());
+            }
+        }
+    }
+    (visited != tasks.len()).then(|| {
+        indegree
+            .into_iter()
+            .find(|(_, count)| *count > 0)
+            .map(|(id, _)| id)
+            .unwrap_or_else(|| "unknown".to_string())
+    })
 }
 
 pub(super) fn validate_authority(

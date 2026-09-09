@@ -2,6 +2,9 @@ use crate::workflow::operator::OperatorRegistry;
 use crate::workflow::schema::WorkflowDocument;
 use schemars::{schema_for, Schema};
 
+mod params;
+pub use params::validate_authored_params;
+
 /// Compose a single JSON Schema that validates a complete workflow document,
 /// including per-operator params via operator-discriminated if/then branches.
 ///

@@ -7,6 +7,12 @@ mod release;
 #[path = "optimization_live_control.rs"]
 mod live_control;
 
+#[path = "optimization_resource_limits.rs"]
+mod resource_limits;
+
+#[path = "optimization_preflight.rs"]
+mod preflight;
+
 use serde_json::Value;
 use std::{fs, path::Path};
 use support::newton;

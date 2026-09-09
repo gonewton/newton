@@ -66,6 +66,18 @@ pub fn register_builtins_with_deps(
     settings: GraphSettings,
     deps: BuiltinOperatorDeps,
 ) {
+    register_builtins_with_deps_and_llm_retries(builder, workspace, settings, deps, None);
+}
+
+/// Register built-ins while optionally overriding retries performed inside
+/// LLM-backed operator pipelines. `None` preserves ordinary workflow defaults.
+pub fn register_builtins_with_deps_and_llm_retries(
+    builder: &mut OperatorRegistryBuilder,
+    workspace: PathBuf,
+    settings: GraphSettings,
+    deps: BuiltinOperatorDeps,
+    llm_pipeline_max_retries: Option<u32>,
+) {
     let interviewer_provider: InterviewerProvider = deps.interviewer.unwrap_or_else(|| {
         // Default provider: every invocation returns HIL-AILOOP-001 because
         // no ailoop context was wired in. Workflows with no human task
@@ -147,23 +159,45 @@ pub fn register_builtins_with_deps(
     if let Some(store) = deps.backend_store {
         let grading_engine = AikitEngineManager::new(workspace.clone())
             .expect("AikitEngineManager::new should not fail");
+        let reconcile = llm_pipeline_max_retries.map_or_else(
+            || reconcile::ReconcileOperator::new(workspace.clone(), store.clone()),
+            |retries| {
+                reconcile::ReconcileOperator::new_with_max_retries(
+                    workspace.clone(),
+                    store.clone(),
+                    retries,
+                )
+            },
+        );
+        let change_request = llm_pipeline_max_retries.map_or_else(
+            || change_request_op::ChangeRequestOperator::new(workspace.clone(), store.clone()),
+            |retries| {
+                change_request_op::ChangeRequestOperator::new_with_max_retries(
+                    workspace.clone(),
+                    store.clone(),
+                    retries,
+                )
+            },
+        );
+        let grader_agent = match llm_pipeline_max_retries {
+            Some(retries) => grader_agent::GraderAgentOperator::new_with_max_retries(
+                workspace.clone(),
+                store.clone(),
+                retries,
+            ),
+            None => grader_agent::GraderAgentOperator::new(
+                workspace.clone(),
+                store.clone(),
+                grading_engine,
+            ),
+        };
         builder
             .register_executable_only(grader_command::GraderCommandOperator::new(
                 workspace.clone(),
                 store.clone(),
             ))
-            .register_executable_only(reconcile::ReconcileOperator::new(
-                workspace.clone(),
-                store.clone(),
-            ))
-            .register_executable_only(change_request_op::ChangeRequestOperator::new(
-                workspace.clone(),
-                store.clone(),
-            ))
-            .register_executable_only(grader_agent::GraderAgentOperator::new(
-                workspace,
-                store,
-                grading_engine,
-            ));
+            .register_executable_only(reconcile)
+            .register_executable_only(change_request)
+            .register_executable_only(grader_agent);
     }
 }

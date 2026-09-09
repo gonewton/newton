@@ -27,13 +27,34 @@ newton optimize default --inspect
 
 The embedded `software-security` definition targets committed Rust Cargo.lock
 advisory matches, not comprehensive security. Configure an existing Pi/Claude/Codex
-agent/model, Python 3, Cargo/cargo-audit, a prepared advisory database and its Git
+agent/model, Python 3.11 or newer, Cargo/cargo-audit, a prepared advisory database and its Git
 revision in `.newton/configs/default.conf`. See `newton optimize --help` for the
 current unsandboxed-host authority requirement; detached worktrees are not a sandbox.
+Accepted security candidates may change Cargo lockfiles and dependency-resolution
+tables. Cargo test targets, features, workspace selection, profiles, and other
+manifest settings must remain identical to the candidate base. Cargo manifests,
+lockfiles, and project `.cargo/config[.toml]` inputs must be committed regular
+files. Authoritative evaluation uses an isolated checkout and fresh `CARGO_HOME`;
+the configured executables, inherited environment, and operating system remain
+trusted host prerequisites.
+Optimization role workflows must be acyclic and single-attempt: task retries,
+agent loop mode, and operator-internal retries that Newton cannot meter are
+rejected before a run starts.
 
 ```sh
 newton optimize default --preflight
 newton optimize default --once --param 'model="configured-model"'
+```
+
+For an opt-in real Pi trial, use the repository harness. The local-gateway mode
+validates Pi's active custom-model registry and private endpoint, then remains
+failed because current Pi SDK traces do not expose transport evidence. Labels or
+configuration alone cannot pass:
+
+```sh
+python3 scripts/test-optimize-live.py /path/to/workspace default ./target/debug/newton \
+  --route local-gateway --expected-model local-provider/model-id \
+  --pi-models-file /path/to/active/pi/agent/models.json
 ```
 
 `--inspect` shows resolved non-secret values. Repeated `--param NAME=JSON` overrides

@@ -75,8 +75,11 @@ an existing workspace, reference a previously installed definition through
 `--definition /path/to/definition.yaml` or `definition_file`; do not remove the
 workspace. Multiple project configs may reference the same unchanged definition.
 
-The bundle supports a committed root `Cargo.toml` and `Cargo.lock`. Its objective
-is the number of affected-package/advisory entries reported by `cargo audit`.
+The bundle supports committed, regular-file Cargo manifests and lockfiles, with
+a root `Cargo.toml` and `Cargo.lock`. Project `.cargo/config[.toml]` files must
+also be committed regular files; symlinked or untracked Cargo control inputs are
+rejected. Its objective is the number of affected-package/advisory entries
+reported by `cargo audit`.
 It does not cover application flaws, secrets, infrastructure, unsupported package
 ecosystems, or compliance. Zero matches is not proof that the product is secure.
 
@@ -91,7 +94,7 @@ parameter.advisory_db_revision=full-git-commit-id
 parameter.test_command=["cargo","test","--locked"]
 ```
 
-Prerequisites are Python 3, Cargo, cargo-audit, a prepared RustSec advisory
+Prerequisites are Python 3.11 or newer, Cargo, cargo-audit, a prepared RustSec advisory
 database at the specified clean Git revision, and an installed/configured Pi,
 Claude, or Codex agent. Database fetching and gateway configuration are not
 performed by Newton. The scanner uses `--no-fetch` and `--no-yanked`; it validates
@@ -116,8 +119,22 @@ newton optimize default --once
 ```
 
 Inspection creates no run or candidate and does not test credentials. Preflight
-loads/lints workflows, verifies authority and runs bounded prerequisite checks;
-it does not dispatch agents, create candidates, or mutate project configuration.
+loads/lints workflows, verifies authority and runs bounded prerequisite checks.
+Fully static task parameters pass through the normal operator validators,
+including store-backed operators via an isolated in-memory store. Invalid static
+parameters fail before workspace state, a run or a claim is created. Mixed static
+and expression parameters also receive descriptor-schema checks: expressions
+cannot hide unknown keys, missing required fields or invalid literal siblings.
+Operators can additionally implement the side-effect-free
+`Operator::validate_partial_params` hook for semantic rules decidable from literal
+fields. CommandOperator shares its full and partial checks for a non-empty `cmd`
+and relative `cwd`, `write_stdout` and `write_stderr` paths. A dynamic field does
+not suppress these checks on its literal siblings. The default hook performs no
+additional semantic checks; other operators currently defer those rules.
+Expression result types, union exclusivity and unresolved semantic checks remain
+validated after runtime resolution. Partial success never establishes full
+validity. Preflight never evaluates expressions or substitutes placeholder values.
+Preflight does not dispatch agents, create candidates, or mutate project configuration.
 Logging and temporary diagnostic files remain ordinary CLI side effects.
 Every new run performs preflight before claiming work or consuming its budget.
 Prerequisite execution is currently provided for the shipped security adapter;
@@ -150,16 +167,29 @@ embedded version. This provenance boundary prevents workflow-driven file swaps;
 the unsandboxed host is not a security boundary against a process that can alter
 Newton's memory or journal.
 
-The adapter audits immutable commits in detached evaluation worktrees. It runs
-the configured tests and permits only Cargo manifests/lockfile changes in accepted
-candidates. Agent development occurs in a separate detached worktree; snapshot
-commits are retained under `refs/newton/candidates/`. Agents may leave changes in
-the worktree or create descendant commits; rewritten history is rejected. The
-original HEAD and tracked files are not changed by the adapter. Untracked input
-files are not evaluated.
-Evidence and worktrees remain under `.newton/optimize-artifacts/<RUN_ID>/security/`
-for review; cleanup is explicit, not automatic. Inspect the accepted commit before
+The adapter audits immutable commits in detached evaluation worktrees. The
+authoritative evaluation checkout is created outside the source repository only
+after agent work returns and uses a fresh `CARGO_HOME`. This prevents ignored or
+untracked Cargo configuration in the original repository from changing its test
+runner. Cargo manifests, lockfiles, and project Cargo configuration must be
+committed regular files; those inputs are checked before and after evaluation.
+The adapter runs the configured tests and permits only Cargo lockfile and
+dependency-resolution table changes in accepted candidates. Target declarations,
+feature definitions, workspace selection, profiles, and other manifest settings
+remain identical to the candidate base, so a dependency repair cannot disable
+tests through Cargo metadata. Agent development occurs in a separate detached
+worktree; snapshot commits are retained under `refs/newton/candidates/`. Agents
+may leave changes in the worktree or create descendant commits; rewritten history
+is rejected. The original HEAD and tracked files are not changed by the adapter.
+Candidate worktrees, logs, and evidence remain under
+`.newton/optimize-artifacts/<RUN_ID>/security/`; their cleanup is explicit, not
+automatic. Isolated evaluation checkouts use the host temporary directory and
+are removed after durable evidence is written. Inspect the accepted commit before
 integrating it through your normal review process.
+
+This is still a trusted-host adapter, not a sandbox. The configured test/scanner
+executables, inherited process environment, operating system, and advisory
+database remain owner-controlled prerequisites.
 
 The bundle uses the `direct-search` strategy and a fixed dependency-remediation
 plan, without Findings/Change-Request synthesis. The deterministic CI
@@ -301,6 +331,10 @@ target-specific promotion boundary. That boundary must verify the exact
 artifact and integration base against the evaluation, perform an atomic
 integration check, and require re-evaluation when either has changed.
 Successful development tests alone do not establish acceptance or promotion.
+The distributed general-purpose `develop.yaml` follows the same boundary: it
+stops after creating a local candidate commit and contains no push, pull-request,
+approval, merge, or deployment task. Promotion belongs to a separately authorized
+target-specific process that consumes Newton's accepted artifact evidence.
 
 ## Local revisions and outcomes
 
@@ -347,15 +381,25 @@ The local driver distinguishes a limit reached between phases from a deadline
 expired during work. Both report `resource_limit`; uncertain external effects
 retain an ownership marker and require reconciliation. SIGINT reports `cancelled`,
 never completion. In-flight cancellation has the same reconciliation requirement.
-Counters currently measure workflow-role dispatches, including repeated grading,
-not every nested operator/tool retry. Token, cost, and nested retry limits are not
-hard enforcement guarantees of this adapter.
+Counters measure workflow-role dispatches, including driver-managed retries and
+repeated grading. Newton-controlled repetition inside one role dispatch cannot be
+metered by this host, so optimization role workflows must be acyclic, must omit
+AgentOperator loop mode, and must omit task retries or set `max_attempts: 1`.
+Retry-capable Git/GitHub operations require a literal operation and an explicit
+single attempt; operations with a fixed internal retry are rejected. Shared
+agent-backed grader, reconciliation, and change-request pipelines are configured
+for one attempt. Preflight applies these rules to every declared role and active
+evaluator before creating a run, and the dispatch boundary repeats them for
+resumed work. General `workflow run` graph and task retry behavior is unchanged.
+Third-party agent/tool internals, command logic, token usage, and monetary cost
+are not separately metered hard ceilings.
 
 The outcome reports active requirements, completion evidence, the qualifying
 accepted result if present, historical result identities, blocked work, known
 resource usage, and diagnostics. If none qualifies it reports `no acceptable
-result found`, not impossibility. Resource counters include retries and repeated
-evaluation. Token and monetary values are not advertised as hard ceilings.
+result found`, not impossibility. Resource counters include driver-managed
+retries and repeated evaluation. Token and monetary values are not advertised as
+hard ceilings.
 
 ## Library integration
 
@@ -400,19 +444,45 @@ configuration. Then run:
 
 ```sh
 python3 scripts/test-optimize-live.py /path/to/workspace default ./target/debug/newton \
-  --route local-gateway --expected-model your-configured-local-model
+  --route local-gateway --expected-model local-provider/model-id \
+  --pi-models-file /path/to/active/pi/agent/models.json
 ```
 
 The harness uses Newton's existing AgentOperator → aikit → Pi path. It checks
-preflight, the inspected model, actual development/regrading, a qualifying changed
-commit, and an unchanged original HEAD. `--route` records the operator-verified
-existing Pi route; it does not configure or discover credentials. Every command's
-exit status, stdout, and stderr are retained with a terminal `report.json`, and the
-harness never retries a failed trial. It rejects a clean-baseline run as
-insufficient evidence of agent execution. Credentials are neither collected nor
-injected. This tier is opt-in and must be reported as **not exercised** when its
-configuration is absent; another provider route does not satisfy the local-gateway
-gate.
+preflight, actual development/regrading, a qualifying changed commit, and an
+unchanged original HEAD. Passing also requires the accepted candidate's develop
+workflow to contain a successful AgentOperator task with resolved `engine=pi`,
+the inspected model, and a linked SDK trace containing correlated tool calls and
+results, final assistant output, and a terminal result. Configured labels,
+unrelated traces, command substitutes, and clean-baseline runs cannot pass.
+
+`--route local-gateway` requires `--pi-models-file` to identify Pi's active
+`models.json` (its default agent directory or the existing inherited Pi directory
+override). The exact `provider/model` must be explicitly listed there. Its
+provider `baseUrl` must resolve exclusively to loopback, RFC1918, IPv6 unique-local,
+or tailnet addresses. Public, link-local, mixed-address, ambiguous-model, and
+unsupported endpoint-override configurations fail closed. Configuration digest
+and resolved addresses must remain unchanged through the trial. This is only
+**configuration evidence**, not observed traffic, binary attestation, or proof
+that the gateway's upstream model runs locally. Pi's current SDK trace does not
+expose the selected endpoint, so `--route local-gateway` finishes with a failed
+gate after retaining the real trial evidence. It cannot report success until the
+runtime supplies transport evidence. `--route configured-provider` remains valid
+for a real Pi trial but makes no local-gateway claim.
+
+Every command's exit status, stdout, and stderr are retained with `report.json`.
+Successful and failed trials retain correlated Run/task identities, error codes,
+and redacted SDK metadata traces, including partial timeout evidence when present.
+Trace copies omit prompts, messages, tool arguments/results, and credential/header
+values; existing raw artifact paths and hashes support local investigation. The
+harness never retries a failed trial or changes Pi configuration. This tier is
+opt-in and must be reported as **not exercised** when configuration is absent.
+
+Run deterministic harness controls without a model or provider:
+
+```sh
+python3 -B scripts/test_optimize_live_evidence.py
+```
 
 ## Optional status projection
 

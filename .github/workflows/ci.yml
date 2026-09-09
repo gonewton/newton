@@ -68,6 +68,9 @@ jobs:
        - name: Install pytest
          run: python3 -m pip install pytest
 
+       - name: Test live optimization evidence gate
+         run: python3 -B scripts/test_optimize_live_evidence.py
+
        - name: Run tests
          run: cargo test --workspace --all-features
 
@@ -114,13 +117,8 @@ jobs:
       - name: Run security audit
         run: |
           cargo audit \
-            --ignore RUSTSEC-2023-0071 \
-            --ignore RUSTSEC-2026-0098 \
-            --ignore RUSTSEC-2026-0099 \
-            --ignore RUSTSEC-2026-0104
+            --ignore RUSTSEC-2023-0071
           # RUSTSEC-2023-0071: rsa 0.9.10 (Marvin attack) — no upstream fix available
-          # RUSTSEC-2026-0098/0099/0104: rustls-webpki 0.101.7 — locked in by ailoop-core
-          #   reqwest 0.11 dep; unfixable until ailoop upgrades to reqwest 0.12
   newton-dsl-py:
     name: newton-dsl-py
     runs-on: ubuntu-latest

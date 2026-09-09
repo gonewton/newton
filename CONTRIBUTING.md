@@ -187,6 +187,7 @@ Do not force-push to `main`. Avoid amending published commits unless you own the
 | `cargo clippy --all-targets --all-features` | Lint (warnings denied via `RUSTFLAGS=-D warnings`) |
 | `cargo build --workspace --release` | Release build |
 | `cargo test --workspace --all-features` | Tests |
+| `python3 -B scripts/test_optimize_live_evidence.py` | Deterministic negative controls for the opt-in Pi/live-gateway evidence gate |
 | `cargo tree -p newton-core` | No CLI/TUI deps in core |
 | Security audit job | `cargo audit` with documented ignores |
 | Coverage job | `cargo llvm-cov` with 50% line threshold |

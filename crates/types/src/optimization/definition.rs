@@ -217,9 +217,11 @@ pub struct ResourceLimits {
     pub elapsed_seconds: u64,
     /// Maximum cycles, including unsuccessful attempts.
     pub max_cycles: u64,
-    /// Maximum work dispatches, including retries.
+    /// Maximum work dispatches, including driver-managed retries. Hosts must
+    /// meter internal task retries against this limit or reject their use.
     pub max_work: u64,
-    /// Maximum evaluator dispatches, including repeats/retries.
+    /// Maximum evaluator dispatches, including repeats and driver-managed retries.
+    /// Hosts must meter internal task retries against this limit or reject them.
     pub max_evaluations: u64,
 }
 

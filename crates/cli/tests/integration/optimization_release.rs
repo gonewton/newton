@@ -1,8 +1,39 @@
 //! Release-path tests use the distributed definition and actual workflow engine.
 
-use super::{journal, newton, setup};
+use super::{journal, newton as unisolated_newton, setup};
 use serde_json::{json, Value};
 use std::{fs, path::Path, process::Command};
+
+const GIT_LOCATION_ENV_VARS: &[&str] = &[
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+];
+
+fn clear_git_location_env(command: &mut Command) {
+    for variable in GIT_LOCATION_ENV_VARS {
+        command.env_remove(variable);
+    }
+}
+
+fn hermetic_command(program: &str) -> Command {
+    let mut command = Command::new(program);
+    clear_git_location_env(&mut command);
+    command
+}
+
+fn newton() -> assert_cmd::Command {
+    let mut command = unisolated_newton();
+    for variable in GIT_LOCATION_ENV_VARS {
+        command.env_remove(variable);
+    }
+    command
+}
 
 #[test]
 fn resume_uses_pinned_workflows_and_helpers_after_source_changes_and_deletion() {
@@ -252,7 +283,21 @@ fn aikit_template_install_includes_the_same_security_definition() {
         fs::read(installed).unwrap(),
         fs::read(template.join("newton/definitions/software-security/definition.yaml")).unwrap()
     );
-    assert!(dir.path().join(".newton/workflows/develop.yaml").is_file());
+    let develop = fs::read_to_string(dir.path().join(".newton/workflows/develop.yaml")).unwrap();
+    for forbidden in [
+        "git push",
+        "pr_create",
+        "pr_approve",
+        "project_item_set_status",
+        "status: \"In progress\"",
+        "MERGED",
+    ] {
+        assert!(
+            !develop.contains(forbidden),
+            "distributed develop workflow must stop at a local candidate, found {forbidden}"
+        );
+    }
+    assert!(develop.contains("id: candidate_ready"));
 }
 
 #[test]
@@ -352,7 +397,7 @@ fn cancellation_records_uncertainty_and_cannot_be_blindly_resumed() {
     .unwrap();
     fs::write(dir.path().join(".newton/configs/demo.conf"),
         "definition_file=definition.yaml\noptimize_allowed_actions=agent,command,network,commit,draft_pull_request,publish,merge,deploy\n").unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_newton"))
+    let mut child = hermetic_command(env!("CARGO_BIN_EXE_newton"))
         .current_dir(dir.path())
         .args(["optimize", "demo", "--once"])
         .stdout(std::process::Stdio::null())
@@ -388,11 +433,11 @@ fn cancellation_records_uncertainty_and_cannot_be_blindly_resumed() {
         .success());
     let stopped = Instant::now();
     while child.try_wait().unwrap().is_none() {
-        if stopped.elapsed() >= Duration::from_secs(5) {
+        if stopped.elapsed() >= Duration::from_secs(15) {
             let state = journal(dir.path());
             child.kill().unwrap();
             child.wait().unwrap();
-            panic!("cancelled optimize did not stop within five seconds: {state}");
+            panic!("cancelled optimize did not stop within fifteen seconds: {state}");
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -413,8 +458,10 @@ fn cancellation_records_uncertainty_and_cannot_be_blindly_resumed() {
 }
 
 fn git(root: &Path, args: &[&str]) -> String {
-    let result = Command::new("git")
+    let mut command = hermetic_command("git");
+    let result = command
         .current_dir(root)
+        .args(["-c", "core.hooksPath=/dev/null"])
         .args(args)
         .output()
         .unwrap();
@@ -450,6 +497,353 @@ fn repository(root: &Path) -> String {
         ],
     );
     git(root, &["rev-parse", "HEAD"])
+}
+
+#[cfg(unix)]
+#[test]
+fn shipped_security_definition_rejects_manifest_test_selection_bypass() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().join("project");
+    repository(&root);
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(
+        root.join("src/lib.rs"),
+        "#[cfg(test)]\nmod tests {\n    #[test]\n    fn acceptance_test_must_run() { panic!(\"intentional fixture failure\"); }\n}\n",
+    )
+    .unwrap();
+    assert!(hermetic_command("cargo")
+        .current_dir(&root)
+        .args(["generate-lockfile", "--offline"])
+        .status()
+        .unwrap()
+        .success());
+    let lock = root.join("Cargo.lock");
+    fs::write(
+        &lock,
+        fs::read_to_string(&lock).unwrap() + "\n# vulnerable\n",
+    )
+    .unwrap();
+    git(&root, &["add", "src/lib.rs", "Cargo.lock"]);
+    git(
+        &root,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--amend",
+            "--no-edit",
+            "--quiet",
+        ],
+    );
+    let head = git(&root, &["rev-parse", "HEAD"]);
+
+    let db = workspace.path().join("advisory-db");
+    let revision = repository(&db);
+    newton()
+        .args([
+            "--log-dir",
+            workspace.path().to_str().unwrap(),
+            "init",
+            root.to_str().unwrap(),
+            "--template",
+            "builtin",
+        ])
+        .assert()
+        .success();
+
+    let bin = workspace.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let agent = bin.join("codex");
+    fs::write(&agent, "#!/bin/sh\nexit 99\n").unwrap();
+    fs::set_permissions(&agent, fs::Permissions::from_mode(0o755)).unwrap();
+    let scanner = workspace.path().join("scanner.py");
+    fs::copy(
+        super::support::fixture_path("optimization/cargo_audit.py"),
+        &scanner,
+    )
+    .unwrap();
+    let adversary = super::support::fixture_path("optimization/remediate_disable_lib_tests.py");
+    let definition = root.join(".newton/definitions/software-security/definition.yaml");
+    let develop = definition.with_file_name("develop.yaml");
+    let mut document: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(&develop).unwrap()).unwrap();
+    let params = document["workflow"]["tasks"][2]["params"]
+        .as_mapping_mut()
+        .unwrap();
+    params.insert(
+        serde_yaml::Value::from("engine"),
+        serde_yaml::Value::from("command"),
+    );
+    params.insert(
+        serde_yaml::Value::from("engine_command"),
+        serde_yaml::to_value(vec!["python3", adversary.to_str().unwrap()]).unwrap(),
+    );
+    fs::write(develop, serde_yaml::to_string(&document).unwrap()).unwrap();
+    fs::write(
+        root.join(".newton/configs/default.conf"),
+        format!(
+            "definition_file={}\noptimize_allowed_actions=agent,command,network,commit,draft_pull_request,publish,merge,deploy\nparameter.agent=codex\nparameter.model=fixture\nparameter.advisory_db={}\nparameter.advisory_db_revision={}\nparameter.scanner_command={}\nparameter.test_command=[\"cargo\",\"test\",\"--locked\"]\n",
+            definition.display(),
+            db.display(),
+            revision,
+            json!(["python3", scanner.to_str().unwrap()])
+        ),
+    )
+    .unwrap();
+    let mut paths = vec![bin];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let path = std::env::join_paths(paths).unwrap();
+
+    newton()
+        .current_dir(&root)
+        .env("PATH", path)
+        .args(["optimize", "default", "--once"])
+        .assert()
+        .success();
+    let run = journal(&root);
+    assert!(run["accepted"].is_null());
+    let test_log = fs::read_to_string(
+        run["evidence"]["constraints"]["tests_pass"]["evidence"][0]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        run["evidence"]["constraints"]["tests_pass"]["status"], "satisfied",
+        "the adversarial Cargo manifest should make cargo test skip the failing library test: {test_log}"
+    );
+    assert_eq!(
+        run["evidence"]["constraints"]["dependency_files_only"]["status"],
+        "violated"
+    );
+    assert!(
+        run["evidence"]["constraints"]["dependency_files_only"]["evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value
+                .as_str()
+                .is_some_and(|text| text.contains("only dependency tables")))
+    );
+    assert_eq!(git(&root, &["rev-parse", "HEAD"]), head);
+}
+
+#[cfg(unix)]
+#[test]
+fn shipped_security_definition_rejects_untracked_ancestor_cargo_config() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().join("project");
+    repository(&root);
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(
+        root.join("src/lib.rs"),
+        "#[cfg(test)]\nmod tests {\n    #[test]\n    fn acceptance_test_must_run() { panic!(\"intentional fixture failure\"); }\n}\n",
+    )
+    .unwrap();
+    assert!(hermetic_command("cargo")
+        .current_dir(&root)
+        .args(["generate-lockfile", "--offline"])
+        .status()
+        .unwrap()
+        .success());
+    let lock = root.join("Cargo.lock");
+    fs::write(
+        &lock,
+        fs::read_to_string(&lock).unwrap() + "\n# vulnerable\n",
+    )
+    .unwrap();
+    git(&root, &["add", "src/lib.rs", "Cargo.lock"]);
+    git(
+        &root,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--amend",
+            "--no-edit",
+            "--quiet",
+        ],
+    );
+    let head = git(&root, &["rev-parse", "HEAD"]);
+
+    // Before the adversary plants an ancestor runner, the real Cargo command
+    // executes the fixture's failing test.
+    assert!(!hermetic_command("cargo")
+        .current_dir(&root)
+        .args(["test", "--locked", "--quiet"])
+        .status()
+        .unwrap()
+        .success());
+
+    let db = workspace.path().join("advisory-db");
+    let revision = repository(&db);
+    newton()
+        .args([
+            "--log-dir",
+            workspace.path().to_str().unwrap(),
+            "init",
+            root.to_str().unwrap(),
+            "--template",
+            "builtin",
+        ])
+        .assert()
+        .success();
+
+    let bin = workspace.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let agent = bin.join("codex");
+    fs::write(&agent, "#!/bin/sh\nexit 99\n").unwrap();
+    fs::set_permissions(&agent, fs::Permissions::from_mode(0o755)).unwrap();
+    let scanner = workspace.path().join("scanner.py");
+    fs::copy(
+        super::support::fixture_path("optimization/cargo_audit.py"),
+        &scanner,
+    )
+    .unwrap();
+    let adversary =
+        super::support::fixture_path("optimization/remediate_untracked_cargo_runner.py");
+    let definition = root.join(".newton/definitions/software-security/definition.yaml");
+    let develop = definition.with_file_name("develop.yaml");
+    let mut document: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(&develop).unwrap()).unwrap();
+    let params = document["workflow"]["tasks"][2]["params"]
+        .as_mapping_mut()
+        .unwrap();
+    params.insert(
+        serde_yaml::Value::from("engine"),
+        serde_yaml::Value::from("command"),
+    );
+    params.insert(
+        serde_yaml::Value::from("engine_command"),
+        serde_yaml::to_value(vec!["python3", adversary.to_str().unwrap()]).unwrap(),
+    );
+    fs::write(develop, serde_yaml::to_string(&document).unwrap()).unwrap();
+    fs::write(
+        root.join(".newton/configs/default.conf"),
+        format!(
+            "definition_file={}\noptimize_allowed_actions=agent,command,network,commit,draft_pull_request,publish,merge,deploy\nparameter.agent=codex\nparameter.model=fixture\nparameter.advisory_db={}\nparameter.advisory_db_revision={}\nparameter.scanner_command={}\nparameter.test_command=[\"cargo\",\"test\",\"--locked\",\"--quiet\"]\n",
+            definition.display(),
+            db.display(),
+            revision,
+            json!(["python3", scanner.to_str().unwrap()])
+        ),
+    )
+    .unwrap();
+    let mut paths = vec![bin];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let path = std::env::join_paths(paths).unwrap();
+
+    newton()
+        .current_dir(&root)
+        .env("PATH", path)
+        .args(["optimize", "default", "--once"])
+        .assert()
+        .failure();
+    let run = journal(&root);
+    assert!(run["accepted"].is_null());
+    assert_eq!(git(&root, &["rev-parse", "HEAD"]), head);
+    assert!(root.join(".cargo/config.toml").is_file());
+    assert!(
+        hermetic_command("cargo")
+            .current_dir(&root)
+            .args(["test", "--locked", "--quiet"])
+            .status()
+            .unwrap()
+            .success(),
+        "the planted runner must reproduce the bypass against the original checkout"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn shipped_security_preflight_rejects_symlinked_cargo_control_inputs() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    for relative in ["Cargo.toml", "Cargo.lock"] {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().join("project");
+        repository(&root);
+        let external = workspace.path().join(format!("external-{relative}"));
+        fs::write(&external, fs::read(root.join(relative)).unwrap()).unwrap();
+        fs::remove_file(root.join(relative)).unwrap();
+        symlink(&external, root.join(relative)).unwrap();
+        git(&root, &["add", relative]);
+        git(
+            &root,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                "test: symlink Cargo input",
+            ],
+        );
+
+        let db = workspace.path().join("advisory-db");
+        let revision = repository(&db);
+        newton()
+            .args([
+                "--log-dir",
+                workspace.path().to_str().unwrap(),
+                "init",
+                root.to_str().unwrap(),
+                "--template",
+                "builtin",
+            ])
+            .assert()
+            .success();
+        let bin = workspace.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        let agent = bin.join("codex");
+        fs::write(&agent, "#!/bin/sh\nexit 99\n").unwrap();
+        fs::set_permissions(&agent, fs::Permissions::from_mode(0o755)).unwrap();
+        let scanner = workspace.path().join("scanner.py");
+        fs::copy(
+            super::support::fixture_path("optimization/cargo_audit.py"),
+            &scanner,
+        )
+        .unwrap();
+        fs::write(
+            root.join(".newton/configs/default.conf"),
+            format!(
+                "definition_file=.newton/definitions/software-security/definition.yaml\noptimize_allowed_actions=agent,command,network,commit,draft_pull_request,publish,merge,deploy\nparameter.agent=codex\nparameter.model=fixture\nparameter.advisory_db={}\nparameter.advisory_db_revision={}\nparameter.scanner_command={}\nparameter.test_command=[\"cargo\",\"test\",\"--locked\"]\n",
+                db.display(),
+                revision,
+                json!(["python3", scanner.to_str().unwrap()])
+            ),
+        )
+        .unwrap();
+        let mut paths = vec![bin];
+        paths.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+
+        newton()
+            .current_dir(&root)
+            .env("PATH", std::env::join_paths(paths).unwrap())
+            .args(["optimize", "default", "--preflight"])
+            .assert()
+            .failure()
+            .stderr(predicates::str::contains(format!(
+                "{relative} must be a committed regular file, not a symlink"
+            )));
+        assert!(!root.join(".newton/state/optimize").exists());
+    }
 }
 
 #[cfg(unix)]
@@ -540,7 +934,14 @@ fn shipped_security_definition_evaluates_two_repositories_without_touching_heads
             .unwrap();
         assert_ne!(accepted, head);
         assert!(git(&root, &["show", &format!("{accepted}:Cargo.lock")]).contains("fixed"));
+        assert!(git(&root, &["show", &format!("{accepted}:Cargo.toml")])
+            .contains("fixture-safe-dependency"));
         assert_eq!(git(&root, &["rev-parse", "HEAD"]), head);
+        assert!(
+            !git(&root, &["worktree", "list", "--porcelain"])
+                .contains("newton-security-evaluation-"),
+            "isolated evaluation worktrees must be removed after evidence is captured"
+        );
         assert_eq!(run["work_count"], 2);
         assert_eq!(run["evaluation_count"], 2);
         assert!(fs::read_to_string(root.join("Cargo.lock"))

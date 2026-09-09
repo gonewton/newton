@@ -3,7 +3,7 @@ mode: workflow_graph
 
 metadata:
   name: "develop-workflow"
-  description: "Implement from repo-local spec. Prefer raw_spec_path + board_issue_number + board_item_title (develop.sh)."
+  description: "Implement and commit a local candidate from a repo-local spec. Evaluation and promotion are separate."
 
 triggers:
   type: manual
@@ -62,30 +62,6 @@ workflow:
           git checkout main
           git pull --rebase origin main
         capture_stdout: false
-      transitions:
-        - to: resolve_board_ids
-
-    - id: resolve_board_ids
-      operator: GhOperator
-      params:
-        operation: project_resolve_board
-        owner:
-          $expr: 'env("GH_PROJECT_OWNER")'
-        project_number:
-          $expr: 'env("GH_PROJECT_NUMBER")'
-      transitions:
-        - to: move_to_in_progress
-
-    - id: move_to_in_progress
-      operator: GhOperator
-      params:
-        operation: project_item_set_status
-        item_id:
-          $expr: 'triggers.board_item_id'
-        board:
-          $expr: 'tasks.resolve_board_ids.output'
-        status: "In progress"
-        on_error: warn
       transitions:
         - to: prepare_spec_paths
 
@@ -355,7 +331,7 @@ workflow:
         - to: no_changes_done
           priority: 0
           when: { "$expr": "contains(tasks.git_stage.output.stdout, \"NO_CHANGES\")" }
-        - to: git_push
+        - to: candidate_ready
           priority: 5
           when: { "$expr": "contains(tasks.git_stage.output.stdout, \"COMMITTED_ONLY\")" }
         - to: git_commit
@@ -391,7 +367,7 @@ workflow:
         capture_stdout: true
         capture_stderr: true
       transitions:
-        - to: git_push
+        - to: candidate_ready
           priority: 0
           when: { "$expr": "contains(tasks.git_commit.output.stdout, \"COMMIT_STATUS: success\") || contains(tasks.git_commit.output.stdout, \"COMMIT_STATUS: skipped\")" }
         - to: fix_final_precommit
@@ -408,164 +384,12 @@ workflow:
       transitions:
         - to: git_commit
 
-    - id: git_push
+    - id: candidate_ready
       operator: CommandOperator
       params:
         shell: true
-        cmd: |
-          for i in 1 2 3; do
-            git push -u origin HEAD && exit 0
-            sleep 5
-          done
-          echo "git push failed after 3 attempts"; exit 1
+        cmd: 'echo "Candidate committed locally. Evaluate and authorize it before any push, PR, merge, or deployment."'
         capture_stdout: true
-        capture_stderr: true
-      transitions:
-        - to: gh_create_pr
-
-    - id: gh_create_pr
-      operator: GhOperator
-      params:
-        operation: pr_create
-        base: main
-        title:
-          $expr: '"feat: implement " + file_stem(tasks.read_develop_spec_path.output.stdout)'
-        body: "Implements spec. Merge with squash."
-        retry_count: 3
-        retry_delay_ms: 5000
-      transitions:
-        - to: move_to_in_review
-
-    - id: move_to_in_review
-      operator: GhOperator
-      params:
-        operation: project_item_set_status
-        item_id:
-          $expr: 'triggers.board_item_id'
-        board:
-          $expr: 'tasks.resolve_board_ids.output'
-        status: "In review"
-        on_error: warn
-      transitions:
-        - to: gh_approve_pr
-
-    - id: gh_approve_pr
-      operator: GhOperator
-      params:
-        operation: pr_approve
-        pr_number:
-          $expr: 'tasks.gh_create_pr.output.pr_number'
-      transitions:
-        - to: poll_pr
-
-    - id: poll_pr
-      operator: GhOperator
-      max_iterations: 15000
-      timeout_ms: 120000
-      retry:
-        max_attempts: 5
-        backoff_ms: 2000
-        backoff_multiplier: 2.0
-        jitter_ms: 500
-      params:
-        operation: pr_view
-        pr:
-          $expr: 'tasks.gh_create_pr.output.pr_number'
-      transitions:
-        - to: merge_git_cleanup
-          priority: 0
-          when: { "$expr": 'tasks.poll_pr.output.state == "MERGED"' }
-        - to: move_to_ready_on_close
-          priority: 1
-          when: { "$expr": 'tasks.poll_pr.output.state == "CLOSED"' }
-        - to: sleep_merge_wait
-          priority: 5
-          when: { "$expr": 'tasks.poll_pr.output.state == "OPEN"' }
-        - to: sleep_merge_unknown
-          priority: 10
-          when: { "$expr": 'tasks.poll_pr.output.state != "OPEN" && tasks.poll_pr.output.state != "MERGED" && tasks.poll_pr.output.state != "CLOSED"' }
-
-    - id: sleep_merge_wait
-      operator: CommandOperator
-      max_iterations: 15000
-      params:
-        shell: true
-        cmd: "sleep 60"
-        capture_stdout: false
-      transitions:
-        - to: poll_pr
-
-    - id: sleep_merge_unknown
-      operator: CommandOperator
-      max_iterations: 15000
-      params:
-        shell: true
-        cmd: 'echo "Unexpected PR state; waiting 30s"; sleep 30'
-        capture_stdout: false
-      transitions:
-        - to: poll_pr
-
-    - id: move_to_ready_on_close
-      operator: GhOperator
-      params:
-        operation: project_item_set_status
-        item_id:
-          $expr: 'triggers.board_item_id'
-        board:
-          $expr: 'tasks.resolve_board_ids.output'
-        status: "Ready"
-        on_error: warn
-      transitions:
-        - to: fail_pr_closed
-
-    - id: fail_pr_closed
-      operator: CommandOperator
-      params:
-        shell: true
-        cmd: 'echo "PR closed without merge" >&2; exit 1'
-        capture_stdout: false
-      terminal: failure
-
-    - id: merge_git_cleanup
-      operator: CommandOperator
-      timeout_ms: 600000
-      params:
-        shell: true
-        cmd: |
-          set -e
-          if [ -f .git/MERGE_HEAD ] || [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ] || [ -f .git/CHERRY_PICK_HEAD ]; then
-            echo "merge_git_cleanup: unfinished merge/rebase/cherry-pick (cannot checkout main). Resolve conflicts or abort, then rerun." >&2
-            git status >&2 || true
-            exit 1
-          fi
-          BRANCH=$(git branch --show-current)
-          git checkout main
-          git pull --rebase origin main
-          git branch -d "$BRANCH" 2>/dev/null || true
-          git push origin --delete "$BRANCH" 2>/dev/null || true
-        capture_stdout: false
-      transitions:
-        - to: move_to_done
-
-    - id: move_to_done
-      operator: GhOperator
-      params:
-        operation: project_item_set_status
-        item_id:
-          $expr: 'triggers.board_item_id'
-        board:
-          $expr: 'tasks.resolve_board_ids.output'
-        status: "Done"
-        on_error: warn
-      transitions:
-        - to: success
-
-    - id: success
-      operator: CommandOperator
-      params:
-        shell: true
-        cmd: 'echo "Job is completed based on opencode output" | tee /dev/tty'
-        capture_stdout: false
       terminal: success
 
     - id: retry_implementation

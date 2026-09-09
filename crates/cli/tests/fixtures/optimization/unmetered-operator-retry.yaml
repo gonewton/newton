@@ -1,0 +1,15 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: retrying_push
+    io:
+      result_map:
+        decision: none
+  tasks:
+    - id: retrying_push
+      operator: GitOperator
+      params:
+        operation: push
+        retry_count: 3
+      terminal: success

@@ -4,7 +4,11 @@ import subprocess
 
 lock = Path("Cargo.lock")
 lock.write_text(lock.read_text().replace("vulnerable", "fixed"))
-subprocess.run(["git", "add", "Cargo.lock"], check=True)
+manifest = Path("Cargo.toml")
+manifest.write_text(
+    manifest.read_text() + "\n[dependencies]\nfixture-safe-dependency = \"1\"\n"
+)
+subprocess.run(["git", "add", "Cargo.toml", "Cargo.lock"], check=True)
 subprocess.run([
     "git", "-c", "user.name=Fixture Agent", "-c",
     "user.email=fixture-agent@example.invalid", "commit", "-m",

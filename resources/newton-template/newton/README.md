@@ -14,8 +14,14 @@ newton optimize default --inspect
 
 The definition at `.newton/definitions/software-security/definition.yaml` audits
 committed Rust `Cargo.lock` dependencies with cargo-audit. It checks tests and
-limits accepted changes to dependency manifests/lockfiles. This is not a
-comprehensive security or compliance assessment.
+limits accepted changes to Cargo lockfiles and dependency-resolution tables;
+test targets, features, workspace selection, profiles, and other manifest
+settings must remain identical to the candidate base. Cargo manifests,
+lockfiles, and project `.cargo/config[.toml]` inputs must be committed regular
+files. Authoritative tests run from an isolated checkout with a fresh
+`CARGO_HOME`, so ignored configuration in the source repository cannot replace
+the test runner. The checkout is removed after durable evidence is written. This
+is not a comprehensive security or compliance assessment.
 
 Set these ordinary bindings in `.newton/configs/default.conf`:
 
@@ -27,7 +33,7 @@ parameter.advisory_db_revision=full-git-commit-id
 parameter.test_command=["cargo","test","--locked"]
 ```
 
-Install Python 3, Cargo/cargo-audit and Pi, Claude, or Codex. Prepare the RustSec
+Install Python 3.11 or newer, Cargo/cargo-audit and Pi, Claude, or Codex. Prepare the RustSec
 database yourself; the definition does not fetch it. Existing agent authentication
 and gateway configuration are reused.
 
@@ -59,7 +65,7 @@ not an embedded substitute.
 ## Layout
 
 - **`.newton/workflows/`**  
-  - `develop.yaml`, `planner.yaml`, `documenter.yaml`, `vulnerability.yaml` (example workflow graphs you can run or customize).
+  - `develop.yaml`, `planner.yaml`, `documenter.yaml`, `vulnerability.yaml` (example workflow graphs you can run or customize). `develop.yaml` stops at a local candidate commit; it does not change the board, push, open or approve a PR, merge, or deploy.
 
 - **`.newton/scripts/`**  
   - `newton-project-root.sh` – shared helpers (config dir, `project_root` resolution).  
@@ -72,7 +78,7 @@ not an embedded substitute.
 ## After `newton init`
 
 1. Run a workflow directly:
-   - `newton run .newton/workflows/develop.yaml --workspace .`
+   - `newton run .newton/workflows/develop.yaml --workspace .` creates a local candidate. Evaluate it and use a separately authorized promotion process before publishing or merging it.
 2. Use the helper scripts from your workspace root if you prefer (they expect a matching `<project_id>.conf` under `.newton/configs/`).
 3. For a custom optimization problem, point a project config at its definition:
 

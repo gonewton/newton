@@ -2491,7 +2491,7 @@ dependencies = [
 
 [[package]]
 name = "newton-dependencies"
-version = "0.5.123"
+version = "0.5.127"
 dependencies = [
  "hex",
  "petgraph",
@@ -2500,12 +2500,12 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror 1.0.69",
- "toml 1.1.2+spec-1.1.0",
+ "toml",
 ]
 
 [[package]]
 name = "newton-projections"
-version = "0.5.123"
+version = "0.5.127"
 dependencies = [
  "async-trait",
  "hex",

@@ -1,10 +1,10 @@
 //! No agent dispatch, run creation, or candidate mutation during prerequisite checks.
 
-use super::workflow::validate_authority;
+use super::workflow::{validate_authority, validate_resource_metering};
 use anyhow::{Context, Result};
-use newton_types::optimization::BoundOptimizationDefinition;
-use serde_json::json;
-use std::{fs, time::Duration};
+use newton_types::{optimization::BoundOptimizationDefinition, BackendStore};
+use serde_json::{json, Value};
+use std::{fs, sync::Arc, time::Duration};
 
 pub(super) async fn check(
     binding: &BoundOptimizationDefinition,
@@ -21,6 +21,18 @@ pub(super) async fn check(
         );
     }
     let grade = super::workflow::grade_reference(&binding.requirements.requirements)?;
+    // Store-gated operators need an instance to expose their normal validators.
+    // Never open the workspace database or execute an operator during preflight.
+    let validation_store: Arc<dyn BackendStore> = Arc::new(
+        newton_backend::SqliteBackendStore::new_in_memory()
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!(
+                    "initialize transient operator validation: {}",
+                    error.message
+                )
+            })?,
+    );
     for (role, reference) in binding
         .definition
         .workflows
@@ -30,6 +42,8 @@ pub(super) async fn check(
     {
         let document = runtime
             .workflow(reference)
+            .with_context(|| format!("{role} workflow {reference}"))?;
+        validate_resource_metering(&document)
             .with_context(|| format!("{role} workflow {reference}"))?;
         if document
             .workflow
@@ -42,6 +56,38 @@ pub(super) async fn check(
             anyhow::bail!("{role} workflow must declare io.result_map before a run starts");
         }
         validate_authority(&document, &binding.requirements.authority)?;
+        let registry = super::super::build_operator_registry_with_backend(
+            binding.context.root.clone().into(),
+            &document.workflow.settings,
+            None,
+            Some(validation_store.clone()),
+            Some(0),
+        );
+        for task in document.workflow.tasks() {
+            let operator = registry.get(&task.operator).with_context(|| {
+                format!(
+                    "{role} workflow {reference}, task '{}': operator '{}' is not registered",
+                    task.id, task.operator
+                )
+            })?;
+            let validation = if contains_expression(&task.params) {
+                newton_core::workflow::schema_export::validate_authored_params(
+                    &operator.params_schema(),
+                    &task.params,
+                )
+                .and_then(|()| operator.validate_partial_params(&task.params))
+            } else {
+                operator.validate_params(&task.params)
+            };
+            validation.map_err(|error| {
+                anyhow::anyhow!(
+                    "{role} workflow {reference}, task '{}': {}: {}",
+                    task.id,
+                    error.code,
+                    error.message
+                )
+            })?;
+        }
     }
     if binding.definition.id == "software-security" {
         let temporary = tempfile::tempdir()?;
@@ -83,4 +129,16 @@ pub(super) async fn check(
     }
     eprintln!("Preflight passed: workflows and declared prerequisites checked; no agent or candidate was started. Authentication and remote availability are checked by the configured agent when it runs.");
     Ok(())
+}
+
+// Match the canonical expression objects consumed by resolve_value.
+fn contains_expression(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            (map.len() == 1 && map.get("$expr").is_some_and(Value::is_string))
+                || map.values().any(contains_expression)
+        }
+        Value::Array(values) => values.iter().any(contains_expression),
+        _ => false,
+    }
 }

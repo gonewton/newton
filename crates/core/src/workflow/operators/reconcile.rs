@@ -23,13 +23,29 @@ pub struct ReconcileOperator {
     workspace_root: PathBuf,
     store: Arc<dyn BackendStore>,
     adjudicator: Arc<dyn LlmAdjudicator>,
+    max_retries: u32,
 }
 
 impl ReconcileOperator {
     pub const NAME: &'static str = "ReconcileOperator";
 
     pub fn new(workspace_root: PathBuf, store: Arc<dyn BackendStore>) -> Self {
-        Self::with_adjudicator(workspace_root, store, Arc::new(RealLlmAdjudicator))
+        Self::new_with_max_retries(workspace_root, store, 1)
+    }
+
+    /// Construct with a host-selected adjudication retry ceiling. Optimization
+    /// uses zero because its resource counters meter role dispatches.
+    pub fn new_with_max_retries(
+        workspace_root: PathBuf,
+        store: Arc<dyn BackendStore>,
+        max_retries: u32,
+    ) -> Self {
+        Self {
+            workspace_root,
+            store,
+            adjudicator: Arc::new(RealLlmAdjudicator),
+            max_retries,
+        }
     }
 
     /// Test/injection seam (spec 074 S8): construct with a stubbed
@@ -45,6 +61,7 @@ impl ReconcileOperator {
             workspace_root,
             store,
             adjudicator,
+            max_retries: 1,
         }
     }
 
@@ -469,6 +486,7 @@ impl Operator for ReconcileOperator {
                         model.as_deref(),
                         &workspace_root,
                         std::time::Duration::from_secs(timeout_secs),
+                        self.max_retries,
                     )
                     .await
                     .map_err(|msg| {
@@ -719,6 +737,21 @@ mod tests {
     use newton_backend::SqliteBackendStore;
     use newton_types::{BackendStore, PatchFindingBody};
     use serde_json::json;
+
+    #[tokio::test]
+    async fn ordinary_and_host_overridden_retry_ceilings_are_distinct() {
+        let store: Arc<dyn BackendStore> =
+            Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
+        assert_eq!(
+            ReconcileOperator::new(std::path::PathBuf::from("/tmp"), store.clone()).max_retries,
+            1
+        );
+        assert_eq!(
+            ReconcileOperator::new_with_max_retries(std::path::PathBuf::from("/tmp"), store, 0,)
+                .max_retries,
+            0
+        );
+    }
 
     fn make_ctx() -> crate::workflow::operator::ExecutionContext {
         crate::workflow::operator::ExecutionContext {
@@ -1109,6 +1142,7 @@ mod tests {
             _model: Option<&str>,
             _workspace_root: &std::path::Path,
             _timeout: std::time::Duration,
+            _max_retries: u32,
         ) -> Result<AdjudicationPlan, String> {
             Err("stub: adjudicator intentionally failing".to_string())
         }
@@ -1134,6 +1168,7 @@ mod tests {
             _model: Option<&str>,
             _workspace_root: &std::path::Path,
             _timeout: std::time::Duration,
+            _max_retries: u32,
         ) -> Result<AdjudicationPlan, String> {
             Ok(AdjudicationPlan {
                 matched: self

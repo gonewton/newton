@@ -65,6 +65,18 @@ pub trait Operator: Send + Sync + 'static {
     /// Validate params ahead of execution.
     fn validate_params(&self, params: &Value) -> Result<(), AppError>;
 
+    /// Check semantic contradictions decidable from literal authored fields after
+    /// expression-aware schema validation. This hook must be side-effect-free and
+    /// must not evaluate expressions or substitute values for unresolved inputs.
+    ///
+    /// Success is partial, not proof that the eventual parameters are valid.
+    /// The default performs no semantic checks; implementations may check known
+    /// fields while deferring rules that depend on unknown values. Full
+    /// [`Operator::validate_params`] remains required after runtime resolution.
+    fn validate_partial_params(&self, _params: &Value) -> Result<(), AppError> {
+        Ok(())
+    }
+
     /// Execute the operator with resolved params.
     async fn execute(&self, params: Value, ctx: ExecutionContext) -> Result<Value, AppError>;
 
