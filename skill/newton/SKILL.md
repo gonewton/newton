@@ -1,6 +1,6 @@
 ---
 name: newton
-description: Newton CLI for workflow YAML graphs (operators, checkpoints, goal gates) and versioned Optimization Definitions. `optimize` runs durable baseline-grade → plan → candidate-develop → candidate-grade → accept → optional-promote cycles with explicit constraints and requirements revisions. Use when running/resuming workflows, binding an optimization definition, observing a run, validating YAML, or managing checkpoints/artifacts.
+description: Newton CLI for workflow YAML graphs (operators, checkpoints, goal gates) and versioned Optimization Definitions. `optimize` runs durable baseline-grade → plan → candidate-develop → candidate-grade → accept cycles with explicit constraints and requirements revisions. Use when running/resuming workflows, binding an optimization definition, observing a run, validating YAML, or managing checkpoints/artifacts.
 license: Apache-2.0
 compatibility: Requires the newton binary on PATH. newton init requires aikit on PATH for templates.
 ---
@@ -49,9 +49,10 @@ These subcommands match the current CLI (confirm with `newton --help` on your bu
 | --- | --- |
 | `run` | Execute a workflow graph from YAML |
 | `init` | Create `.newton/` and install the default template |
-| `optimize` | Run a durable, definition-bound native loop. The software strategy requires `grade`, `plan`, and `develop` roles; it evaluates a Candidate before optional `promote`. Legacy Plan queues are not consumed. |
+| `optimize` | Run a durable, definition-bound native loop. The software strategy requires `grade`, `plan`, and `develop` roles and retains qualified candidates for review. Legacy Plan queues are not consumed. |
 | `serve` | HTTP/WebSocket API for workflow state, streaming, and loop observation |
 | `data` | Catalog CRUD over HTTP-style verbs (`get`/`post`/`patch`/`put`/`delete`) for entities incl. `finding`, `change-request`, `plan`, `optimize-run`, `optimize-cycle`, `eval-run`, `grade` |
+| `dependency discover\|inspect\|approve\|impact` | Discover Cargo facts, package human-reviewed Baselines, and query deterministic target-scoped Impact Sequences; see [dependency planning](references/dependency.md). |
 | `doctor` | Environment readiness diagnostics (replaces the removed `health` command) |
 | `workflow validate` | Validate workflow YAML before run |
 | `workflow graph` | Emit Graphviz DOT for the workflow graph (`--format dot --output <PATH>`) |
@@ -107,7 +108,7 @@ grade ─→ reconcile ─→ change-request ─→ (approve) ─→ plan ─→
 - **`blocked` Finding + un-block** — when a Plan fails develop after `optimize_max_failed_attempts`, its Findings are **quarantined** (`blocked`) and a human is escalated to; the loop keeps optimizing the rest. Clear with `POST /api/v1/findings/{id}/unblock`.
 - **Multi-grader** — `optimize_graders` is a space list; Findings pool into one Change Request per cycle; targets/regression are per-grader.
 
-**Native driver:** `newton optimize` requires `--definition <file>` or `definition_file` in its project config. It persists a definition binding, requirements revisions, Candidate evidence, a Cycle journal, and the final outcome. A Candidate is promoted only after correlated current evidence satisfies every Acceptance Constraint and the Comparison Policy. A legacy shell script MAY remain as a development scaffold but is not the production loop contract.
+**Native driver:** `newton optimize` requires `--definition <file>` or `definition_file` in its project config. It persists a definition binding, requirements revisions, Candidate evidence, a Cycle journal, and the final outcome. A Candidate is accepted only after correlated current evidence satisfies every Acceptance Constraint and the Comparison Policy. The generic host rejects `workflows.promote` because it cannot verify or atomically update an arbitrary target; use a target-specific external promotion boundary. A legacy shell script MAY remain as a development scaffold but is not the production loop contract.
 
 **Observe over `serve`** (read-only — the loop is self-driving, ADR 0004):
 
@@ -173,7 +174,7 @@ newton mcp install --agent codex --stdio --scope global --overwrite
 
 `newton mcp register` is an alias for `newton mcp install`.
 
-After running `mcp install`, reload the agent (restart or re-open the workspace). Newton's exposed MCP tools (`config`, `health`, `run`, `workflow`) will be callable over the registered stdio transport.
+After running `mcp install`, reload the agent (restart or re-open the workspace). Newton's explicitly exposed MCP tools will be callable over the registered stdio transport; see the tool surface below.
 
 | Agent flag | Project-scope config file | Global-scope config file |
 | --- | --- | --- |
@@ -186,7 +187,7 @@ After running `mcp install`, reload the agent (restart or re-open the workspace)
 
 ## MCP Server Mode
 
-Newton exposes every registered command as an MCP (Model Context Protocol) tool. Two deployment topologies are supported.
+Newton exposes explicitly selected commands as MCP (Model Context Protocol) tools. Two deployment topologies are supported.
 
 ### Option A — Single-port (`newton serve --with-mcp`) _(recommended)_
 
@@ -253,7 +254,13 @@ newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
 
 ### Tool surface
 
-Newton uses `McpToolExportPolicy::ExposeMcpOnly`; only commands in `MCP_EXPOSED_COMMAND_IDS` become MCP tools. The four exposed tools are: `config`, `health`, `run`, `workflow`. `resume` and `runs` were removed from the MCP tool list in issue #305 — they are now subcommands of `workflow`. `checkpoint` and `artifact` were never MCP-exposed. Adding a new Newton command does **not** automatically expose it as an MCP tool — it must have `expose_mcp: true` and appear in `MCP_EXPOSED_COMMAND_IDS`.
+Newton uses `McpToolExportPolicy::ExposeMcpOnly`; the exposed commands are `config`,
+`workflow`, `data.get`, `data.post`, `data.put`, `data.patch`, `data.delete`,
+`dependency.inspect`, and `dependency.impact`. Tool names use underscores, for
+example `newton_dependency_impact`. `dependency.approve` is not an agent tool:
+agents MUST NOT invent a human review record or approve their own dependency map.
+Adding a command does not automatically expose it; its `expose_mcp` flag and
+`MCP_EXPOSED_COMMAND_IDS` must agree.
 
 ### Port-conflict policy
 
@@ -273,6 +280,7 @@ A successful bind emits one structured `tracing::info!` event with fields `event
 - [references/init.md](references/init.md)
 - [references/run.md](references/run.md)
 - [references/optimize.md](references/optimize.md) — the `optimize` command + the closed optimization loop, entities, break conditions, and `serve` endpoints (supersedes the old `batch.md`)
+- [references/dependency.md](references/dependency.md) — approved local Baselines and deterministic planner queries
 
 **Canonical skill:** agent instructions for Newton CLI are maintained in [gonewton/skill](https://github.com/gonewton/skill) (`newton/`). Prefer `newton <cmd> --help` when behavior differs by version.
 

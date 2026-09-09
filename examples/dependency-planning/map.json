@@ -1,0 +1,22 @@
+{
+  "artifacts": [
+    { "kind": "product", "id": "product", "version": { "scheme": "opaque", "value": "current" } },
+    { "kind": "component", "id": "component", "version": { "scheme": "opaque", "value": "current" } },
+    { "kind": "repo", "id": "app-repo", "version": { "scheme": "opaque", "value": "current" } },
+    { "kind": "module", "id": "app", "version": { "scheme": "semver", "value": "1.0.0" } },
+    { "kind": "module", "id": "middle", "version": { "scheme": "semver", "value": "1.0.0" } },
+    { "kind": "module", "id": "base", "version": { "scheme": "semver", "value": "1.0.0" } },
+    { "kind": "module", "id": "unrelated", "version": { "scheme": "semver", "value": "1.0.0" } }
+  ],
+  "memberships": [
+    { "parent": "product", "child": "component" },
+    { "parent": "component", "child": "app-repo" },
+    { "parent": "app-repo", "child": "app" }
+  ],
+  "dependencies": [
+    { "from": "app", "to": "middle", "kind": "runtime", "constraint": { "kind": "range", "value": "^1" }, "discovery": { "kind": "declared", "by": "example-maintainer" } },
+    { "from": "middle", "to": "base", "kind": "runtime", "constraint": { "kind": "range", "value": "^1" }, "discovery": { "kind": "declared", "by": "example-maintainer" } },
+    { "from": "unrelated", "to": "base", "kind": "runtime", "constraint": { "kind": "any" }, "discovery": { "kind": "declared", "by": "example-maintainer" } }
+  ],
+  "issues": []
+}

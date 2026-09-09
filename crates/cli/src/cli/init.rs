@@ -47,14 +47,17 @@ pub fn run(args: InitArgs) -> Result<()> {
     let template_source = args
         .template
         .unwrap_or_else(|| DEFAULT_TEMPLATE_SOURCE.to_string());
-    install_template(&path, &template_source)?;
+    if template_source != "builtin" {
+        install_template(&path, &template_source)?;
+    }
+    crate::cli::commands::optimize::assets::install(&newton_dir)?;
 
     // Write .newton/configs/default.conf
     write_default_config(&newton_dir, &path)?;
 
     println!("Initialized Newton workspace at {}", path.display());
     println!(
-        "Set workflow_file in .newton/configs/default.conf to your workflow YAML, then run newton run with that file and --workspace {}",
+        "Inspect the shipped dependency-security definition with newton optimize default --inspect --workspace {}; configure its prerequisites, then use --preflight before --once",
         path.display()
     );
 
@@ -116,9 +119,14 @@ fn write_default_config(newton_dir: &Path, project_root: &Path) -> Result<()> {
     writeln!(config_file)?;
     writeln!(
         config_file,
-        "# Required for newton optimize <project_id>: path to a workflow YAML (relative to project_root or workspace)"
+        "# Reusable Rust/Cargo.lock dependency-security definition (trusted host; no auto-promotion)"
     )?;
-    writeln!(config_file, "# workflow_file=path/to/workflow.yaml")?;
+    writeln!(
+        config_file,
+        "definition_file=.newton/definitions/software-security/definition.yaml"
+    )?;
+    writeln!(config_file, "# parameter.agent=pi\n# parameter.model=your-configured-model\n# parameter.advisory_db=/absolute/path/to/rustsec-advisory-db\n# parameter.advisory_db_revision=full-git-commit-id")?;
+    writeln!(config_file, "# Unsandboxed agents require explicit trusted-host authority; review optimize --help before granting.")?;
 
     Ok(())
 }

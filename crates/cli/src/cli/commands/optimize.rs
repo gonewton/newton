@@ -12,11 +12,19 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub(crate) mod assets;
 mod control;
 mod envelopes;
 mod lifecycle;
 mod native;
+pub mod observation;
 mod ownership;
+mod preflight;
+mod projection;
+mod snapshot;
+mod software_work;
+mod stop;
+mod thresholds;
 mod workflow;
 
 /// Run or inspect/resume a durable, definition-bound native optimization loop.
@@ -27,12 +35,15 @@ pub async fn optimize(args: OptimizeArgs) -> crate::Result<()> {
         .unwrap_or(std::env::current_dir()?)
         .canonicalize()?;
     let state_dir = crate::cli::workspace_paths::resolve_state_dir(&workspace, None);
+    if (args.inspect || args.preflight) && args.requirements_update.is_some() {
+        anyhow::bail!("inspection/preflight cannot submit a requirements update");
+    }
     if args.requirements_update.is_some() && args.resume.is_none() {
         anyhow::bail!("--requirements-update requires --resume <RUN_ID>");
     }
     if let Some(run_id) = &args.resume {
         uuid::Uuid::parse_str(run_id).context("resume requires an Optimize Run UUID")?;
-        if args.definition.is_some() {
+        if args.definition.is_some() || !args.parameters.is_empty() {
             anyhow::bail!("resume uses the persisted definition; do not pass --definition");
         }
         let mut journal: lifecycle::Journal = serde_json::from_slice(&fs::read(
@@ -41,6 +52,20 @@ pub async fn optimize(args: OptimizeArgs) -> crate::Result<()> {
         .context("load durable Optimize Run journal")?;
         if journal.run_id != *run_id {
             anyhow::bail!("Optimize Run journal identity mismatch");
+        }
+        snapshot::verify_journal(&journal, &state_dir)?;
+        if args.inspect || args.preflight {
+            let binding: BoundOptimizationDefinition =
+                serde_json::from_value(journal.binding.clone())?;
+            let mut inspection = inspect_binding(&binding);
+            inspection["definition_root"] = serde_json::json!(journal.definition_root);
+            inspection["definition_snapshot"] = serde_json::json!(journal.definition_snapshot);
+            println!("{}", serde_json::to_string_pretty(&inspection)?);
+            if args.preflight {
+                let runtime = snapshot::runtime_from_journal(&journal, &state_dir)?;
+                preflight::check(&binding, &runtime).await?;
+            }
+            return Ok(());
         }
         if !control::apply_update(
             &mut journal,
@@ -53,6 +78,16 @@ pub async fn optimize(args: OptimizeArgs) -> crate::Result<()> {
             return Ok(());
         }
         if journal.phase == lifecycle::Phase::Finished {
+            let binding: BoundOptimizationDefinition =
+                serde_json::from_value(journal.binding.clone())?;
+            let report = projection::retry_finished(
+                &journal,
+                Path::new(&binding.context.root),
+                &state_dir,
+                &binding.requirements.authority,
+            )
+            .await;
+            projection::report(&report);
             println!("{}", serde_json::to_string_pretty(&journal.outcome)?);
             return Ok(());
         }
@@ -121,24 +156,55 @@ pub async fn optimize(args: OptimizeArgs) -> crate::Result<()> {
                 root: context_root.display().to_string(),
             },
             project_parameters,
-            run_overrides: BTreeMap::new(),
+            run_overrides: args
+                .parameters
+                .iter()
+                .map(|entry| {
+                    let (name, value) =
+                        entry.split_once('=').context("--param expects NAME=JSON")?;
+                    if name.trim().is_empty() {
+                        anyhow::bail!("--param name cannot be empty");
+                    }
+                    Ok((
+                        name.trim().to_owned(),
+                        ParameterValue::Literal {
+                            value: serde_json::from_str(value)
+                                .context("--param values must be valid JSON; quote strings")?,
+                        },
+                    ))
+                })
+                .collect::<anyhow::Result<BTreeMap<_, _>>>()?,
             project_authority: authority.clone(),
             environment_authority: authority,
             enforcement: EnforcementCapabilities::default(),
         },
     )?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&inspect_binding(&binding))?
-    );
+    let definition_root = definition_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .to_path_buf();
+    let prepared = snapshot::Prepared::read(&binding, &definition_root)?;
+    let runtime = prepared.runtime(&binding)?;
+    let mut inspection = inspect_binding(&binding);
+    inspection["definition_root"] = serde_json::json!(definition_root);
+    inspection["definition_source_manifest"] = serde_json::json!(prepared.manifest);
+    println!("{}", serde_json::to_string_pretty(&inspection)?);
+    if args.inspect && !args.preflight {
+        return Ok(());
+    }
+    preflight::check(&binding, &runtime).await?;
+    prepared.verify_source(&binding, &definition_root)?;
+    if args.preflight {
+        return Ok(());
+    }
     fs::create_dir_all(&state_dir)?;
+    let definition_root = prepared.persist(&state_dir, &binding.run_id)?;
     let (events, _) = tokio::sync::broadcast::channel(128);
     let outcome = native::NativeDriver::start(
         binding,
-        definition_path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .to_path_buf(),
+        definition_root,
+        runtime,
+        prepared.manifest,
         state_dir,
         events,
     )

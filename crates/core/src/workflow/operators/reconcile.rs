@@ -159,15 +159,33 @@ fn normalize_location(v: &Value) -> String {
     }
 }
 
-fn parse_observations(assessment: &Value) -> Vec<Observation> {
+fn invalid_observation(message: impl Into<String>) -> AppError {
+    AppError::new(ErrorCategory::ValidationError, message).with_code("RECONCILE-002")
+}
+
+fn parse_observations(assessment: &Value) -> Result<Vec<Observation>, AppError> {
     let Some(arr) = assessment.get("observations").and_then(|v| v.as_array()) else {
-        return vec![];
+        return Err(invalid_observation(
+            "assessment observations must be an array",
+        ));
     };
     arr.iter()
-        .filter_map(|item| {
-            let dimension = item.get("dimension")?.as_str()?.to_string();
-            let observation = item.get("observation")?.as_str()?.to_string();
-            Some(Observation {
+        .enumerate()
+        .map(|(index, item)| {
+            let required_text = |field| {
+                item.get(field)
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| {
+                        invalid_observation(format!(
+                            "assessment observation {index} requires non-empty {field}"
+                        ))
+                    })
+            };
+            let dimension = required_text("dimension")?;
+            let observation = required_text("observation")?;
+            Ok(Observation {
                 dimension,
                 severity: item
                     .get("severity")
@@ -311,7 +329,7 @@ impl Operator for ReconcileOperator {
         let grader = &parsed.grader;
 
         // Parse observations from the assessment JSON.
-        let observations = parse_observations(&parsed.assessment);
+        let observations = parse_observations(&parsed.assessment)?;
 
         // R1 + R3: list only this grader's findings for this scope.
         let all_scope_findings = self
@@ -750,6 +768,35 @@ mod tests {
             v["location"] = json!({"file": loc});
         }
         v
+    }
+
+    #[tokio::test]
+    async fn malformed_observations_fail_before_any_finding_mutation() {
+        let store: Arc<dyn BackendStore> =
+            Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
+        let operator = ReconcileOperator::new(std::path::PathBuf::from("/tmp"), store.clone());
+        operator.execute(json!({"scope":"module", "scope_id":"fixture", "grader":"fixture", "assessment": make_assessment(vec![make_obs("tests", "existing problem", Some("lib.rs"))])}), make_ctx()).await.unwrap();
+        let before = store
+            .list_findings(None, Some("module".into()), Some("fixture".into()))
+            .await
+            .unwrap();
+        for assessment in [
+            json!({}),
+            json!({"observations":"invalid"}),
+            json!({"observations":[{"dimension":"tests"}]}),
+            json!({"observations":[{"dimension":"", "observation":"problem"}]}),
+        ] {
+            let error = operator.execute(json!({"scope":"module", "scope_id":"fixture", "grader":"fixture", "assessment":assessment}), make_ctx()).await.expect_err("malformed assessment cannot mean no findings");
+            assert_eq!(error.code, "RECONCILE-002");
+            let after = store
+                .list_findings(None, Some("module".into()), Some("fixture".into()))
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(&after).unwrap(),
+                serde_json::to_value(&before).unwrap()
+            );
+        }
     }
 
     #[tokio::test]

@@ -6,6 +6,11 @@ Embedding applications own catalog loading, durable persistence, human
 authentication/authorization, and planner-tool exposure. This crate does not
 execute releases or prove that a change reached production.
 
+Newton's `dependency discover|inspect|approve|impact` CLI supplies the local-file
+boundary and exposes inspect/impact through its existing MCP registry. See the
+[user guide](../../docs/dependency-planning.md). It persists reviewed Baseline
+documents, not SQL portfolio catalog rows.
+
 ## Public planner path
 
 1. Construct a `DependencyGraph` from a `DependencyMap`. Invalid identities,

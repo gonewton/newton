@@ -271,6 +271,15 @@ pub struct OptimizeArgs {
     /// Declarative requirements revision, submitted only with --resume.
     pub requirements_update: Option<PathBuf>,
 
+    /// Print the bound definition without executing workflows.
+    pub inspect: bool,
+
+    /// Check workflows and declared prerequisites without starting a run.
+    pub preflight: bool,
+
+    /// Explicit non-secret parameter overrides in NAME=JSON form.
+    pub parameters: Vec<String>,
+
     /// Execute one complete candidate/evaluation cycle and stop.
     pub once: bool,
 

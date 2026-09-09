@@ -24,6 +24,7 @@ Workspace:
 Other:
   completion  Emit a shell completion stub for top-level subcommands
   data        Catalog CRUD via HTTP-style verbs (get/post/put/patch/delete)
+  dependency  Discover, review, and query approved dependency maps
   mcp         MCP server management
   spec        Export the CLI command surface as JSON, YAML, or Markdown
 Options:

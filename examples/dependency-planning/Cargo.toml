@@ -1,0 +1,7 @@
+# Data fixture, not a workspace member. Newton parses it without running Cargo.
+[package]
+name = "example-app"
+version = "1.0.0"
+
+[dependencies]
+middle = { package = "middle-lib", version = "^1.0" }

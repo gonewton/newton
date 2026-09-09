@@ -10,6 +10,8 @@ pub(super) struct GradeOutput {
     pub evaluation: CandidateEvaluation,
     #[serde(default)]
     pub change_request_id: Option<String>,
+    #[serde(default)]
+    pub open_findings: Option<std::collections::BTreeMap<String, u64>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -26,12 +28,8 @@ pub(super) enum PlanOutput {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct DevelopOutput {
-    pub candidate: Candidate,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct PromoteOutput {
-    pub artifact_id: String,
-    pub base_artifact_id: String,
+    #[serde(default)]
+    pub candidate: Option<Candidate>,
+    #[serde(default)]
+    pub failure: Option<super::software_work::ReconciledFailure>,
 }

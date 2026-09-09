@@ -9,7 +9,10 @@ or journal.
 The embedding application supplies canonical entity IDs, monotonically increasing
 entity revisions, derived statuses, and authorization for the configured writes.
 This library does not derive statuses from external data or grant write authority.
-The native optimizer and backend entity store are not wired to this library yet.
+`RunProjectionService` supplies bounded delivery for immutable native Run
+snapshots. The CLI integration freezes optional configuration in the Run journal
+before work and reads only the durably recorded internal terminal status when
+projecting it. It does not patch the backend Run, Cycle, Plan, or Change Request.
 
 ## Durable identity and delivery
 
@@ -61,9 +64,56 @@ Tests inject the same command seam with a deterministic fake tracker.
 Initial external resource creation is deliberately unsupported: a non-idempotent
 GitHub create can succeed before the response is lost, so automatic retry could
 create duplicates without a server-supported idempotency mechanism. An authorized
-operator must supply an existing item identity. Automatic issue creation, backend
-on-entity link fields, native lifecycle dispatch, configuration/help, and retry
-scheduling are remaining integration work, not delivered by this crate.
+operator must supply an existing item identity. Automatic issue creation and
+backend on-entity link fields remain unsupported. The initial native hook
+projects terminal Optimize Run status, not every intermediate Plan/CR transition.
+
+## Native Run integration
+
+The optional `.newton/projections.json` file declares version `1`, existing
+destinations, `max_delivery_attempts` (default 8), and a shared outbound
+`timeout_seconds` budget (default 5). At most 64 destinations and 64 attempts are
+accepted; timeout values must be 1–60 seconds. Configuration is declarative JSON.
+See [the user contract](../../docs/optimization-contract.md#optional-status-projection)
+for a complete example.
+
+The native integration stores the selected configuration, including the absence
+of configuration, in the existing Run journal before agent work. Resume uses that
+snapshot rather than reloading the source. No-tracker operation needs no
+projection journal, network transport, credentials, or publication authority.
+Configured GitHub writes require the host's existing `command`, `network`, and
+`publish` authority. A publication grant cannot bypass a command/network denial;
+a source file does not grant any of these permissions.
+
+After the optimizer persists a terminal outcome, the adapter reads that Run from
+Newton's store and reflects its status. Terminal snapshot revision is
+`cycle + 1`; repeating the terminal hook reuses that revision. Conflicting final
+statuses in the same Cycle fail projection rather than silently overwrite one
+another. The hook cannot be used for arbitrary intermediate phase updates without
+introducing a corresponding durable event revision.
+
+Native budget exhaustion uses the `resource_limit` status for cycle, work,
+evaluation, and elapsed-time limits. Status-option bindings must map that key,
+not the historical `max_cycles` label. It remains separate from `converged`;
+projecting a stop never asserts completion or changes the saved stopping reason.
+
+Delivery bindings and write-ahead assignments live under the resolved state
+root's `projections/delivery` directory. The separate `projection-report.json`
+beside the Run journal records delivered, duplicate, deferred, or locally failed
+projection results. These results do not alter optimization acceptance or completion.
+Only pre-execution configuration diagnostics are frozen in the journal itself.
+Repeating terminal synchronization retries a deferred assignment safely.
+The finished-run retry shim reopens the same store, reads the frozen journal
+configuration, and writes only delivery metadata and `projection-report.json`
+beside the journal. It does not acquire, release, or change optimization ownership
+or mutate the saved Run journal/outcome. A standalone scheduler/daemon is not
+required or supplied.
+
+The shared timeout bounds outbound calls. Targets beyond the attempt/time budget
+still receive durable pending assignments, without a remote call. A later retry
+continues them; already delivered/idle targets do not consume transport attempts.
+Local filesystem durability is required independently and is not advertised as a
+hard real-time operation.
 
 ## Validation
 
@@ -74,3 +124,9 @@ locking, path-safe identities, and failed local completion persistence.
 
 `cargo check -p newton-projections --features existing-gh` checks the production
 transport wiring without contacting GitHub. No test creates real external items.
+
+The service tests additionally cover finite timeout/attempt budgets and pending
+delivery progress. CLI integration tests use the real SQLite backend and native
+Run lifecycle, with only the existing `gh` boundary replaced by a fake. They
+verify absent and frozen configuration across resume, outage recovery, duplicate
+delivery, ignored board edits, and unchanged authoritative Run/Cycle records.

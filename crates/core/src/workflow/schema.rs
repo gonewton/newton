@@ -605,6 +605,16 @@ pub struct BarrierParams {
 }
 
 impl WorkflowDocument {
+    /// Parse workflow YAML already held by the trusted caller.
+    pub fn parse_from_source(text: &str, display_path: &Path) -> Result<Self, AppError> {
+        serde_yaml::from_str(text).map_err(|err| {
+            AppError::new(
+                ErrorCategory::ValidationError,
+                format!("failed to parse {}: {}", display_path.display(), err),
+            )
+        })
+    }
+
     /// Parse a workflow document from a YAML file without semantic validation.
     pub fn parse_from_file(path: &Path) -> Result<Self, AppError> {
         let text = fs::read_to_string(path).map_err(|err| {
@@ -613,12 +623,7 @@ impl WorkflowDocument {
                 format!("failed to read {}: {}", path.display(), err),
             )
         })?;
-        serde_yaml::from_str(&text).map_err(|err| {
-            AppError::new(
-                ErrorCategory::ValidationError,
-                format!("failed to parse {}: {}", path.display(), err),
-            )
-        })
+        Self::parse_from_source(&text, path)
     }
 
     /// Load and validate a workflow document from a YAML file.

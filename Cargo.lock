@@ -2392,6 +2392,8 @@ dependencies = [
  "insta",
  "newton-backend",
  "newton-core",
+ "newton-dependencies",
+ "newton-projections",
  "newton-types",
  "openssl",
  "percent-encoding",

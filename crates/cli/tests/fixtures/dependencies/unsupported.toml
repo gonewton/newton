@@ -1,0 +1,7 @@
+[package]
+name = "example-app"
+version = "1.0.0"
+
+[dependencies]
+missing-client = "3"
+workspace-client = { workspace = true }

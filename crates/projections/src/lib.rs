@@ -8,6 +8,7 @@ mod error;
 mod github;
 mod model;
 mod port;
+mod service;
 mod store;
 
 pub use dispatcher::ProjectionDispatcher;
@@ -18,4 +19,8 @@ pub use model::{
     ProjectionUpdate,
 };
 pub use port::{NoTracker, ProjectionPort};
+pub use service::{
+    RunProjectionConfiguration, RunProjectionDestination, RunProjectionReport,
+    RunProjectionService, RunProjectionSnapshot, TargetProjectionReport,
+};
 pub use store::{FileProjectionStore, ProjectionLease, ProjectionStore};

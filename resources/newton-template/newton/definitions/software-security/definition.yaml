@@ -1,0 +1,33 @@
+schema_version: 1
+id: software-security
+revision: rust-cargo-audit-v1
+strategy: direct-search
+assets: [security.py]
+workflows:
+  grade: grade.yaml
+  plan: plan.yaml
+  develop: develop.yaml
+defaults:
+  agent: {kind: literal, value: pi}
+  model: {kind: literal, value: ''}
+  advisory_db: {kind: literal, value: ''}
+  advisory_db_revision: {kind: literal, value: ''}
+  scanner_command: {kind: literal, value: [cargo, audit]}
+  test_command: {kind: literal, value: [cargo, test, --locked]}
+requirements:
+  objective:
+    mode: primary
+    objective:
+      id: vulnerabilities
+      evaluator: cargo-audit
+      measurement: {kind: numeric, unit: affected_package_advisories, direction: minimize}
+  evaluators:
+    cargo-audit: {workflow: grade.yaml, revision: rust-cargo-audit-v1}
+  comparison: {kind: exact}
+  acceptance_constraints:
+    - {id: tests_pass, evaluator: cargo-audit}
+    - {id: dependency_files_only, evaluator: cargo-audit}
+  execution_restrictions: {denied_actions: [], protected_paths: []}
+  resource_limits: {elapsed_seconds: 3600, max_cycles: 3, max_work: 9, max_evaluations: 6}
+  completion:
+    - {kind: objective_target, objective: vulnerabilities, target: 0}

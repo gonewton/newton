@@ -1,4 +1,5 @@
 pub(crate) mod data;
+pub(crate) mod dependency;
 pub(crate) mod init;
 pub(crate) mod ops;
 pub(crate) mod optimize;

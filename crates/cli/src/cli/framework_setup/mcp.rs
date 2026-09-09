@@ -112,5 +112,23 @@ pub fn build_mcp_command_registry() -> anyhow::Result<CommandRegistry> {
             .map_err(|e| anyhow!("{e}"))?;
     }
 
+    let dependency_path =
+        CommandPath::new(&["dependency"]).map_err(|e| anyhow!("CLI-PATH-001: {e}"))?;
+    registry
+        .register_group(
+            &dependency_path,
+            GroupMetadata {
+                summary: commands::dependency::GROUP_SUMMARY,
+                hidden: false,
+            },
+        )
+        .map_err(|e| anyhow!("{e}"))?;
+    for (verb, command) in commands::dependency::commands() {
+        let path =
+            CommandPath::new(&["dependency", verb]).map_err(|e| anyhow!("CLI-PATH-001: {e}"))?;
+        registry
+            .register_at(&path, command)
+            .map_err(|e| anyhow!("{e}"))?;
+    }
     Ok(registry)
 }

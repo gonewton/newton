@@ -18,6 +18,10 @@ pub struct OptimizationDefinition {
     pub strategy: String,
     /// Role to workflow path, interpreted by the selected strategy.
     pub workflows: BTreeMap<String, String>,
+    /// Relative local helper/input files copied with workflows into a run snapshot.
+    /// Include transitive local imports; external executables are host prerequisites.
+    #[serde(default)]
+    pub assets: Vec<String>,
     /// Initial policy copied into the first Requirements Revision.
     pub requirements: OptimizationRequirements,
     /// Ordinary values overridden by project values, then explicit run values.

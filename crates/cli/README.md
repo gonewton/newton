@@ -43,6 +43,10 @@ Operational and diagnostic commands route to
 
 ## See also
 
+- [Dependency planning](../../docs/dependency-planning.md): `newton dependency`
+  discovers Cargo facts, persists human-reviewed Baselines, and returns deterministic
+  Impact Sequences. Read-only inspect/impact operations are also planner MCP tools.
+
 - The `cli-framework` skill for the upstream framework's CommandSpec
   and ArgSpec contracts.
 - `tmp/231-migrate-newton-cli-to-cli-framework.md` for the full

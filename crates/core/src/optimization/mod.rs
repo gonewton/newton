@@ -1,11 +1,14 @@
-//! Declarative optimization policy, independent of agents and concrete storage.
+//! Declarative optimization policy and read-only observation, independent of
+//! agents and concrete storage.
 //!
 //! The native driver persists bound definitions/revisions and enforces the
-//! capabilities supplied here. These pure helpers do not sandbox executables,
+//! capabilities supplied here. Policy helpers do not sandbox executables,
 //! dispatch work, merge changes, or claim durable acknowledgment on their own.
+//! Observation reads the supplied store and follows the existing event publisher.
 
 mod binding;
 mod decision;
+mod observation;
 mod outcome;
 mod revisions;
 mod schema;
@@ -13,6 +16,7 @@ mod validation;
 
 pub use binding::*;
 pub use decision::*;
+pub use observation::*;
 pub use outcome::*;
 pub use revisions::*;
 pub use schema::*;

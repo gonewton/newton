@@ -140,10 +140,22 @@ pub(super) struct Journal {
     pub run_id: String,
     pub cycle: u64,
     pub phase: Phase,
+    #[serde(default)]
+    pub requires_reconciliation: bool,
     pub binding: Value,
     pub definition_root: PathBuf,
+    #[serde(default)]
+    pub definition_snapshot: Option<super::snapshot::Manifest>,
     pub candidate: Option<Value>,
     pub plan_id: Option<String>,
+    #[serde(default)]
+    pub change_request_id: Option<String>,
+    #[serde(default)]
+    pub software_work: super::software_work::Ledger,
+    #[serde(default)]
+    pub threshold_history: super::thresholds::History,
+    #[serde(default)]
+    pub open_findings: Option<std::collections::BTreeMap<String, u64>>,
     pub execution_id: Option<String>,
     pub evidence: Option<Value>,
     pub accepted: Option<Value>,
@@ -152,6 +164,12 @@ pub(super) struct Journal {
     #[serde(default)]
     pub revisions: Vec<newton_types::optimization::RequirementsRevision>,
     pub outcome: Option<Value>,
+    #[serde(default)]
+    pub projection_prepared: bool,
+    #[serde(default)]
+    pub projection_configuration: Option<newton_projections::RunProjectionConfiguration>,
+    #[serde(default)]
+    pub projection_report: Option<newton_projections::RunProjectionReport>,
     pub work_count: u64,
     pub evaluation_count: u64,
     pub started_at: String,
@@ -189,16 +207,25 @@ impl Lifecycle {
             run_id: run_id.into(),
             cycle: 0,
             phase: Phase::Ready,
+            requires_reconciliation: false,
             binding,
             definition_root: PathBuf::new(),
+            definition_snapshot: None,
             candidate: None,
             plan_id: None,
+            change_request_id: None,
+            software_work: Default::default(),
+            threshold_history: Default::default(),
+            open_findings: None,
             execution_id: None,
             evidence: None,
             accepted: None,
             accepted_history: Vec::new(),
             revisions: Vec::new(),
             outcome: None,
+            projection_prepared: false,
+            projection_configuration: None,
+            projection_report: None,
             work_count: 0,
             evaluation_count: 0,
             started_at: chrono::Utc::now().to_rfc3339(),
@@ -234,10 +261,12 @@ impl Lifecycle {
         state_dir: &Path,
         context_root: &Path,
     ) -> Result<Self> {
-        if !matches!(
-            journal.phase,
-            Phase::Ready | Phase::CycleComplete | Phase::Evaluated
-        ) {
+        if journal.requires_reconciliation
+            || !matches!(
+                journal.phase,
+                Phase::Ready | Phase::CycleComplete | Phase::Evaluated
+            )
+        {
             anyhow::bail!("Optimize Run {} stopped during {:?}; external effects may have occurred. Reconcile the recorded work before resuming; it will not be replayed", journal.run_id, journal.phase);
         }
         let claim = RunClaim::resume(
@@ -313,7 +342,7 @@ impl Lifecycle {
                 grades: self.journal.evidence.clone().unwrap_or(Value::Null),
                 grade_min: None,
                 decision: decision.into(),
-                change_request_id: None,
+                change_request_id: self.journal.change_request_id.clone(),
                 plan_id: self.journal.plan_id.clone(),
                 execution_id: execution_id.or_else(|| self.journal.execution_id.clone()),
                 develop_status: Some(decision.into()),
@@ -331,10 +360,14 @@ impl Lifecycle {
         outcome: Value,
         safe_to_release: bool,
     ) -> Result<()> {
+        if !safe_to_release {
+            self.journal.requires_reconciliation = true;
+            self.save()?;
+        }
         if self.journal.cycle > 0 && self.journal.phase != Phase::CycleComplete {
             self.complete_cycle(status, None).await?;
         }
-        self.journal.phase = if status == "failed" {
+        self.journal.phase = if status == "failed" || !safe_to_release {
             Phase::Failed
         } else {
             Phase::Finished

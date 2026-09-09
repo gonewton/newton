@@ -1,0 +1,4 @@
+[
+  { "artifact": { "kind": "module", "id": "app", "version": { "scheme": "semver", "value": "1.0.0" } }, "package": "example-app", "source": { "kind": "registry", "registry": "crates-io" } },
+  { "artifact": { "kind": "module", "id": "middle", "version": { "scheme": "semver", "value": "1.0.0" } }, "package": "middle-lib", "source": { "kind": "registry", "registry": "crates-io" } }
+]

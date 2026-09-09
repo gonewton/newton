@@ -27,6 +27,24 @@ pub(crate) fn optimize_command() -> Command {
             ],
             args: vec![
                 ArgSpec {
+                    name: "param", kind: ArgKind::Option, long: Some("param"),
+                    value_type: ArgValueType::String, cardinality: Cardinality::Repeated,
+                    help: "Non-secret NAME=JSON override; repeat for multiple values (defaults < project < run)",
+                    ..Default::default()
+                },
+                ArgSpec {
+                    name: "inspect", kind: ArgKind::Flag, long: Some("inspect"),
+                    value_type: ArgValueType::Bool, cardinality: Cardinality::Optional,
+                    help: "Print resolved requirements without executing workflows or creating a run",
+                    ..Default::default()
+                },
+                ArgSpec {
+                    name: "preflight", kind: ArgKind::Flag, long: Some("preflight"),
+                    value_type: ArgValueType::Bool, cardinality: Cardinality::Optional,
+                    help: "Check workflow and evaluator prerequisites without starting a run",
+                    ..Default::default()
+                },
+                ArgSpec {
                     name: "project-id",
                     kind: ArgKind::Positional,
                     value_type: ArgValueType::String,
@@ -67,7 +85,7 @@ pub(crate) fn optimize_command() -> Command {
                     long: Some("requirements-update"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    help: "RequirementsUpdate YAML (requires --resume); live or uncertain work retains Pending, never claims activation",
+                    help: "RequirementsUpdate YAML (requires --resume); owner activates at a safe evaluation boundary and regrades before acceptance",
                     ..Default::default()
                 },
                 ArgSpec {

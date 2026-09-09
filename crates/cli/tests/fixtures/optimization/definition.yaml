@@ -1,12 +1,11 @@
 schema_version: 1
 id: native-lifecycle-fixture
 revision: '1'
-strategy: software-improvement
+strategy: direct-search
 workflows:
   grade: grade.yaml
   plan: plan.yaml
   develop: develop.yaml
-  promote: promote.yaml
 defaults:
   reject:
     kind: literal

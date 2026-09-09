@@ -3,8 +3,11 @@ use assert_cmd::Command;
 const BIN: &str = "newton";
 
 fn help_output(args: &[&str]) -> String {
+    let log_dir = tempfile::tempdir().expect("isolated help-test logs");
     let output = Command::cargo_bin(BIN)
         .expect("binary should build")
+        .arg("--log-dir")
+        .arg(log_dir.path())
         .args(args)
         .arg("--help")
         .output()

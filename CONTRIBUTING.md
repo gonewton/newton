@@ -147,6 +147,23 @@ Each command carries `CommandSpec` metadata (`summary`, `syntax`, `category`, `a
 
 See [crates/cli/README.md](crates/cli/README.md) for the metadata contract and operational commands (`health`, `doctor`, `config show`, `completion`).
 
+### Dependency planning boundary
+
+The `dependency` CLI group calls `newton-dependencies` directly. Local Baseline
+documents persist the reviewed facts and approval; they are not an adapter to the
+portfolio SQL catalog. Only inspect/impact are exported through the existing MCP
+registry. Keep approval out of MCP/chat, and do not turn Suggested edges or
+unresolved discovery into trusted planning facts.
+
+When changing this boundary, update command metadata, MCP allowlists, help
+snapshots, the [user guide](docs/dependency-planning.md), example files, and the
+[crate contract](crates/dependencies/CONTRACT.md). Validate the real binary path:
+
+```bash
+cargo test -p newton-dependencies
+cargo test -p newton-cli --test test_dependency_planning --test test_command_metadata --test mcp_expose_mcp_only
+```
+
 ## Pull request process
 
 1. **Branch** from `main` with a descriptive name (`feat/…`, `fix/…`, `refactor/…`).
@@ -197,6 +214,15 @@ Useful entry points:
 Domain terminology: [CONTEXT.md](CONTEXT.md) (and implementation/internal terms in [architecture.md](architecture.md)).
 
 ## Project skills
+
+Native software-work recovery is covered by `cargo test -p newton-cli --test
+test_optimization_work`. These tests execute real YAML through `optimize` and
+inspect outcomes and the existing `data` API: CR-linked retries across fresh
+Plans, Finding quarantine, unrelated work, malformed reconciliation/planning,
+and per-objective stopping. `cargo test -p newton-core --lib
+workflow::operators::reconcile::tests` checks fail-closed reconciliation before
+store mutation. The generic `direct-search` strategy must remain independent of
+Finding/CR/Plan persistence.
 
 Agent-oriented command and workflow documentation:
 

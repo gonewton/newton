@@ -74,12 +74,18 @@ For operator reference, see [docs/operators/](docs/operators/) and the [Newton s
 | `newton optimize <project_id> --definition <file>` | Run a definition-bound native optimization lifecycle |
 | `newton serve` | HTTP/WebSocket API for workflow state, loop observation, and integrations |
 | `newton data <verb> <entity>` | Catalog CRUD (`finding`, `change-request`, `plan`, `optimize-run`, …) |
+| `newton dependency discover\|inspect\|approve\|impact` | Review dependency facts and query a target-scoped release plan |
 | `newton doctor` | Environment readiness diagnostics |
 | `newton schema export` | Emit the workflow IR JSON Schema (operator-discriminated) |
 
 > `webhook` (external HTTP ingress) and `health` were removed: the optimizer is self-driving (ADR 0004), and `health` folded into `doctor`.
 
 Run `newton <command> --help` for flags and examples. The top-level `newton run` command is deprecated; use `newton workflow run`.
+
+For cross-repository planning, [dependency planning](docs/dependency-planning.md)
+walks through Cargo discovery, human approval, and deterministic JSON Impact
+Sequences. Compatible hops remain included, cycles are explicit, and unknown
+compatibility stays visible. Newton does not assign versions or execute releases.
 
 ### Workflow run (minimal example)
 
@@ -99,15 +105,18 @@ limits, completion criteria, and workflow roles. It can use a numeric objective
 with units (for example, bytes or verified vulnerabilities) or a Grade.
 
 ```
-baseline grade ─→ plan ─→ candidate develop ─→ candidate grade ─→ accept ─→ promote
+baseline grade ─→ plan ─→ candidate develop ─→ candidate grade ─→ accept
                                                                │
                                                      constraints + comparison
 ```
 
 The software-improvement strategy may use the durable `Finding → Change Request
 → Plan → Execution` spine, but unrelated strategies do not have to. A candidate
-is promoted only after its exact evaluated artifact qualifies under the active
-requirements. A passing development test alone is not acceptance.
+is accepted only after its exact evaluated artifact qualifies under the active
+requirements. A passing development test alone is not acceptance. The generic
+host rejects `workflows.promote`: it cannot inspect an arbitrary target or
+atomically compare-and-swap that target from the evaluated base. Use a
+target-specific external promotion boundary for a retained qualified candidate.
 
 ```bash
 # Definition path can also be definition_file in .newton/configs/<id>.conf.
@@ -117,8 +126,8 @@ newton optimize my-project --resume <RUN_ID>
 ```
 
 The definition roles `grade`, `plan`, and `develop` are required for the native
-software strategy; `promote` is optional. Each role emits a validated result
-envelope. See [the optimization contract](docs/optimization-contract.md) for a
+software strategy. Each role emits a validated result envelope. See [the
+optimization contract](docs/optimization-contract.md) for a
 definition example, permission boundaries, requirements revisions, and recovery
 semantics.
 

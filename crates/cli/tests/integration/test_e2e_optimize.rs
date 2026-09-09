@@ -1,6 +1,12 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+#[path = "optimization_release.rs"]
+mod release;
+
+#[path = "optimization_live_control.rs"]
+mod live_control;
+
 use serde_json::Value;
 use std::{fs, path::Path};
 use support::newton;
@@ -13,7 +19,11 @@ fn setup(root: &Path) {
         "grade.yaml",
         "plan.yaml",
         "develop.yaml",
-        "promote.yaml",
+        "promote-lie.yaml",
+        "promote-mutate.yaml",
+        "transient-swap.py",
+        "transient-swap-develop.yaml",
+        "forged-grade.yaml",
         "fail.yaml",
         "requirements-update.yaml",
     ] {
@@ -153,6 +163,14 @@ fn live_owner_retains_pending_request_without_claiming_activation() {
 fn revised_requirements_do_not_substitute_a_different_baseline_artifact() {
     let dir = tempfile::tempdir().unwrap();
     setup(dir.path());
+    // Declare the cycle policy before start: active workflows are content-pinned.
+    let plan_path = dir.path().join("plan.yaml");
+    let mut plan: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(&plan_path).unwrap()).unwrap();
+    plan["workflow"]["settings"]["io"]["result_map"]["decision"] = serde_yaml::Value::String(
+        "$expr: if triggers.cycle > 1 { \"none\" } else { \"propose\" }".into(),
+    );
+    fs::write(plan_path, serde_yaml::to_string(&plan).unwrap()).unwrap();
     newton()
         .current_dir(dir.path())
         .args(["optimize", "demo", "--once"])
@@ -160,12 +178,6 @@ fn revised_requirements_do_not_substitute_a_different_baseline_artifact() {
         .success();
     let before = journal(dir.path());
     let run_id = before["run_id"].as_str().unwrap();
-    let plan_path = dir.path().join("plan.yaml");
-    let mut plan: serde_yaml::Value =
-        serde_yaml::from_str(&fs::read_to_string(&plan_path).unwrap()).unwrap();
-    plan["workflow"]["settings"]["io"]["result_map"] =
-        serde_yaml::from_str("decision: none").unwrap();
-    fs::write(plan_path, serde_yaml::to_string(&plan).unwrap()).unwrap();
     newton()
         .current_dir(dir.path())
         .args([
@@ -228,8 +240,91 @@ fn journal(root: &Path) -> Value {
     serde_json::from_slice(&fs::read(run.join("journal.json")).unwrap()).unwrap()
 }
 
+fn configure_unsupported_promotion(root: &Path, workflow: &str) {
+    let definition = root.join("definition.yaml");
+    let source = fs::read_to_string(&definition).unwrap().replace(
+        "  develop: develop.yaml\n",
+        &format!("  develop: develop.yaml\n  promote: {workflow}\n"),
+    );
+    fs::write(definition, source).unwrap();
+}
+
 #[test]
-fn native_once_grades_before_plan_and_before_promotion() {
+fn lying_promotion_workflow_is_rejected_before_run_creation() {
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    configure_unsupported_promotion(dir.path(), "promote-lie.yaml");
+
+    newton()
+        .current_dir(dir.path())
+        .args(["optimize", "demo", "--once"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "generic workflow host cannot independently verify the promoted target state",
+        ));
+
+    assert!(!dir.path().join(".newton/state/optimize").exists());
+    assert!(!dir.path().join(".newton/state/workflows").exists());
+    assert!(!dir.path().join(".newton/optimize/claim").exists());
+}
+
+#[test]
+fn mutating_promotion_workflow_is_rejected_without_dispatch() {
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    configure_unsupported_promotion(dir.path(), "promote-mutate.yaml");
+
+    newton()
+        .current_dir(dir.path())
+        .args(["optimize", "demo", "--once"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("atomic compare-and-swap"));
+
+    assert!(!dir.path().join("promotion-was-invoked").exists());
+    assert!(!dir.path().join(".newton/state/optimize").exists());
+    assert!(!dir.path().join(".newton/state/workflows").exists());
+    assert!(!dir.path().join(".newton/optimize/claim").exists());
+}
+
+#[test]
+fn transient_snapshot_swap_cannot_forge_evaluator_execution() {
+    let dir = tempfile::tempdir().unwrap();
+    setup(dir.path());
+    let definition = dir.path().join("definition.yaml");
+    let source = fs::read_to_string(&definition).unwrap().replace(
+        "develop: develop.yaml",
+        "develop: transient-swap-develop.yaml",
+    ) + "\nassets: [transient-swap.py, forged-grade.yaml]\n";
+    fs::write(definition, source).unwrap();
+    fs::write(
+        dir.path().join(".newton/configs/demo.conf"),
+        "definition_file=definition.yaml\noptimize_allowed_actions=agent,command,network,commit,draft_pull_request,publish,merge,deploy\n",
+    )
+    .unwrap();
+
+    newton()
+        .current_dir(dir.path())
+        .args(["optimize", "demo", "--once"])
+        .assert()
+        .success();
+    std::thread::sleep(std::time::Duration::from_millis(600));
+
+    let run = journal(dir.path());
+    let run_dir = Path::new(run["definition_root"].as_str().unwrap())
+        .parent()
+        .unwrap();
+    assert!(run_dir.join("swap-observed").is_file());
+    assert!(!run_dir.join("forged-evaluator-ran").exists());
+    assert_eq!(
+        run["accepted"]["evaluation"]["measurements"]["size"]["samples"][0],
+        1.0
+    );
+}
+
+#[test]
+fn native_once_grades_before_plan_and_acceptance() {
     let dir = tempfile::tempdir().unwrap();
     setup(dir.path());
     newton()
@@ -240,7 +335,7 @@ fn native_once_grades_before_plan_and_before_promotion() {
     let j = journal(dir.path());
     assert_eq!(j["phase"], "finished");
     assert_eq!(j["evaluation_count"], 2);
-    assert_eq!(j["work_count"], 3);
+    assert_eq!(j["work_count"], 2);
     assert_eq!(j["outcome"]["stop_reason"], "completed");
     assert_eq!(
         j["outcome"]["accepted_result"]["candidate"]["artifact_id"],
@@ -251,17 +346,17 @@ fn native_once_grades_before_plan_and_before_promotion() {
         .join(".newton/optimize/claim/owner.json")
         .exists());
     let run_id = j["run_id"].as_str().unwrap();
-    // Completed resume returns the durable result and never repeats promotion.
+    // Completed resume returns the durable result and never repeats work.
     newton()
         .current_dir(dir.path())
         .args(["optimize", "demo", "--resume", run_id])
         .assert()
         .success();
-    assert_eq!(journal(dir.path())["work_count"], 3);
+    assert_eq!(journal(dir.path())["work_count"], 2);
 }
 
 #[test]
-fn constraint_failure_preserves_incumbent_and_skips_promotion() {
+fn constraint_failure_preserves_incumbent_and_skips_candidate_acceptance() {
     let dir = tempfile::tempdir().unwrap();
     setup(dir.path());
     fs::write(

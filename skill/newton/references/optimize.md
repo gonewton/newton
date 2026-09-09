@@ -7,13 +7,59 @@
 `newton optimize <project_id>` runs a durable native lifecycle. It requires a
 versioned Optimization Definition supplied by `--definition <path>` or the
 project config's `definition_file`. The software strategy invokes `grade`,
-`plan`, and `develop`, evaluates the exact Candidate under active requirements,
-then invokes optional `promote` only for a qualifying result. Legacy Plan queues
-and the shell driver are not the production contract.
+`plan`, and `develop`, then evaluates the exact Candidate under active
+requirements. Qualified candidates are retained for review. The generic host
+rejects `workflows.promote` because it cannot independently inspect and
+atomically compare-and-swap an arbitrary target; use a target-specific external
+promotion boundary. Legacy Plan queues and the shell driver are not the
+production contract.
 
 Use `--resume <RUN_ID>` for a known safe durable phase. A declarative local
 `--requirements-update <path>` is serialized with the run; an update that cannot
 be enforced while work is live remains Pending rather than becoming active.
+
+## Shipped first-use path
+
+```sh
+newton init . --template builtin
+newton optimize default --inspect
+```
+
+The embedded `software-security` definition targets committed Rust Cargo.lock
+advisory matches, not comprehensive security. Configure an existing Pi/Claude/Codex
+agent/model, Python 3, Cargo/cargo-audit, a prepared advisory database and its Git
+revision in `.newton/configs/default.conf`. See `newton optimize --help` for the
+current unsandboxed-host authority requirement; detached worktrees are not a sandbox.
+
+```sh
+newton optimize default --preflight
+newton optimize default --once --param 'model="configured-model"'
+```
+
+`--inspect` shows resolved non-secret values. Repeated `--param NAME=JSON` overrides
+project values, which override definition defaults. Preflight checks workflows
+and prerequisites without starting agents or candidates. The shipped graph retains
+detached candidate commits and does not promote them into the original HEAD.
+
+Declare local UTF-8 helpers and inputs in a definition's `assets` list and
+reference their retained content through `triggers.assets["name"]`. Newton
+compiles role workflows and retains assets in host memory before dispatch; it
+does not disclose or reload the persistent snapshot during a run. Runs pin the
+same bytes with SHA-256 hashes, and resume loads each verified copy once.
+`WorkflowOperator` is rejected in optimization roles until child workflows have
+the same provenance. `--resume <RUN_ID> --inspect` shows the persisted snapshot
+identity. Changing installed source affects new runs only.
+
+SIGINT and resource exhaustion have separate outcomes. Unknown in-flight effects
+require reconciliation before resume. Live revision requests remain Pending until
+the owner reaches its completed-evaluation boundary. It validates and persists
+activation, then regrades the same candidate before acceptance. Stopped runs use
+safe explicit resume. Unsupported restrictions and stale requests are rejected.
+The `software-improvement` strategy requires a correlated Change Request and
+stored linked ready Plan. Reconciled failures are retried up to the configured
+per-Change-Request limit, then exposed as blocked work to the next grade and
+planning steps. The `direct-search` strategy remains a generic loop without
+Change Requests.
 
 ## Legacy shell scaffold (not the native contract)
 

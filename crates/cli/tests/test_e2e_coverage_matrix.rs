@@ -27,6 +27,7 @@ const REQUIRED_SMOKE_IDS: &[&str] = &[
     "completion",
     "chat",
     "spec",
+    "dependency",
 ];
 
 fn cli_tests_dir() -> PathBuf {
