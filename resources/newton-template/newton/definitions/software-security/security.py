@@ -91,6 +91,8 @@ def main(role, input_path):
             "Improve dependency security in this detached candidate worktree. "
             "Change only Cargo.toml manifests and Cargo.lock. Do not edit tests, evaluator files, "
             "other worktrees, refs, or configuration. Do not publish, merge, or deploy. "
+            "You may leave changes uncommitted or create local commits in this detached worktree; "
+            "do not rewrite or discard the base history. "
             "Run the project's tests. Newton will independently audit the resulting immutable commit. "
             "The goal is fewer RustSec advisory matches in Cargo.lock. "
             f"Pinned advisory database: {db}; revision: {expected_db}. "
@@ -101,8 +103,8 @@ def main(role, input_path):
         return
 
     if role == "snapshot":
-        if git("rev-parse", "HEAD", cwd=candidate_dir) != base:
-            raise RuntimeError("agent changed candidate HEAD; reconcile it before snapshot")
+        candidate_head = git("rev-parse", "HEAD", cwd=candidate_dir)
+        run(["git", "merge-base", "--is-ancestor", base, candidate_head], cwd=candidate_dir)
         git("add", "--all", cwd=candidate_dir)
         tree = git("write-tree", cwd=candidate_dir)
         commit = git("-c", "user.name=Newton", "-c", "user.email=newton@localhost",
@@ -123,7 +125,7 @@ def main(role, input_path):
     evaluation_id = str(uuid.uuid4())
     evaluation_dir = artifacts / f"evaluation-{evaluation_id}"
     git("worktree", "add", "--detach", str(evaluation_dir), candidate["artifact_id"])
-    audit = run([*scanner, "--json", "--no-fetch", "--no-yanked", "--db", str(db),
+    audit = run([*scanner, "--json", "--no-fetch", "--db", str(db),
                  "--file", str(evaluation_dir / "Cargo.lock")], cwd=artifacts, allowed=(0, 1))
     report = json.loads(audit.stdout)
     vulnerabilities = report["vulnerabilities"]

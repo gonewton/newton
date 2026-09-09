@@ -153,8 +153,10 @@ Newton's memory or journal.
 The adapter audits immutable commits in detached evaluation worktrees. It runs
 the configured tests and permits only Cargo manifests/lockfile changes in accepted
 candidates. Agent development occurs in a separate detached worktree; snapshot
-commits are retained under `refs/newton/candidates/`. The original HEAD and tracked
-files are not changed by the adapter. Untracked input files are not evaluated.
+commits are retained under `refs/newton/candidates/`. Agents may leave changes in
+the worktree or create descendant commits; rewritten history is rejected. The
+original HEAD and tracked files are not changed by the adapter. Untracked input
+files are not evaluated.
 Evidence and worktrees remain under `.newton/optimize-artifacts/<RUN_ID>/security/`
 for review; cleanup is explicit, not automatic. Inspect the accepted commit before
 integrating it through your normal review process.
@@ -397,14 +399,20 @@ the shipped definition, using `parameter.agent=pi` and your existing Pi/gateway
 configuration. Then run:
 
 ```sh
-python3 scripts/test-optimize-live.py /path/to/workspace default ./target/debug/newton
+python3 scripts/test-optimize-live.py /path/to/workspace default ./target/debug/newton \
+  --route local-gateway --expected-model your-configured-local-model
 ```
 
 The harness uses Newton's existing AgentOperator → aikit → Pi path. It checks
-preflight, actual development/regrading, a qualifying changed commit, and an
-unchanged original HEAD. It rejects a clean-baseline run as insufficient evidence
-of agent execution. Credentials are neither collected nor injected by the harness.
-This tier is opt-in and must be reported as unrun when its configuration is absent.
+preflight, the inspected model, actual development/regrading, a qualifying changed
+commit, and an unchanged original HEAD. `--route` records the operator-verified
+existing Pi route; it does not configure or discover credentials. Every command's
+exit status, stdout, and stderr are retained with a terminal `report.json`, and the
+harness never retries a failed trial. It rejects a clean-baseline run as
+insufficient evidence of agent execution. Credentials are neither collected nor
+injected. This tier is opt-in and must be reported as **not exercised** when its
+configuration is absent; another provider route does not satisfy the local-gateway
+gate.
 
 ## Optional status projection
 

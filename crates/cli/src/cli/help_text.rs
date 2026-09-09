@@ -42,8 +42,8 @@ Optimize binds a versioned Optimization Definition and runs native, durable \
 grade/plan/develop/evaluate cycles. A definition is required through --definition \
 or definition_file in .newton/configs/<project_id>.conf. Legacy plan files are not consumed.
 
-The software-improvement strategy requires grade, plan and develop workflow roles; \
-promote is optional and runs only after qualifying evaluation. Each workflow must \
+The software-improvement strategy requires grade, plan and develop workflow roles. \
+The generic host rejects a promote role because it cannot verify the target. Each workflow must \
 declare io.result_map and the documented optimization result envelope. \
 Local ownership is not a distributed lock. Interrupted external effects require reconciliation.
 
