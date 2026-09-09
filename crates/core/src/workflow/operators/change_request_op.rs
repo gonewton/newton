@@ -19,16 +19,28 @@ pub struct ChangeRequestOperator {
     workspace_root: PathBuf,
     store: Arc<dyn BackendStore>,
     agent_client: Arc<dyn AgentClient>,
+    max_retries: u32,
 }
 
 impl ChangeRequestOperator {
     pub const NAME: &'static str = "ChangeRequestOperator";
 
     pub fn new(workspace_root: PathBuf, store: Arc<dyn BackendStore>) -> Self {
+        Self::new_with_max_retries(workspace_root, store, 1)
+    }
+
+    /// Construct with a host-selected pipeline retry ceiling. Optimization
+    /// uses zero because its resource counters meter role dispatches.
+    pub fn new_with_max_retries(
+        workspace_root: PathBuf,
+        store: Arc<dyn BackendStore>,
+        max_retries: u32,
+    ) -> Self {
         Self {
             workspace_root,
             store,
             agent_client: Arc::new(RealAgentClient),
+            max_retries,
         }
     }
 
@@ -45,6 +57,7 @@ impl ChangeRequestOperator {
             workspace_root,
             store,
             agent_client,
+            max_retries: 1,
         }
     }
 
@@ -310,7 +323,7 @@ impl Operator for ChangeRequestOperator {
                 model.as_deref(),
                 &workspace_root,
                 std::time::Duration::from_secs(timeout_secs),
-                1,
+                self.max_retries,
             )
             .await
         {
@@ -399,6 +412,25 @@ mod tests {
     use newton_backend::SqliteBackendStore;
     use newton_types::{CreateFindingBody, Origin};
     use serde_json::json;
+
+    #[tokio::test]
+    async fn ordinary_and_host_overridden_retry_ceilings_are_distinct() {
+        let store: Arc<dyn BackendStore> =
+            Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
+        assert_eq!(
+            ChangeRequestOperator::new(std::path::PathBuf::from("/tmp"), store.clone()).max_retries,
+            1
+        );
+        assert_eq!(
+            ChangeRequestOperator::new_with_max_retries(
+                std::path::PathBuf::from("/tmp"),
+                store,
+                0,
+            )
+            .max_retries,
+            0
+        );
+    }
 
     fn make_ctx() -> crate::workflow::operator::ExecutionContext {
         crate::workflow::operator::ExecutionContext {

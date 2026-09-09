@@ -1,0 +1,7 @@
+[package]
+name = "newton-template"
+version = "1.0.0"
+description = "Newton workflows and reusable optimization definitions"
+
+[artifacts]
+"newton/**" = ".newton"

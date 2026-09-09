@@ -1,0 +1,4 @@
+{
+  "base": { "version": { "scheme": "semver", "value": "1.1.0" }, "compatibility": null },
+  "middle": { "version": { "scheme": "semver", "value": "1.1.0" }, "compatibility": null }
+}

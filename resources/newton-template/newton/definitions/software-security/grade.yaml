@@ -1,0 +1,29 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: scan
+    io:
+      result_map:
+        candidate: '$expr: tasks.result.output.metadata.candidate'
+        evaluation: '$expr: tasks.result.output.metadata.evaluation'
+  tasks:
+    - id: scan
+      operator: AgentOperator
+      params:
+        engine: command
+        signals: {completed: '^NEWTON_HELPER_COMPLETED$'}
+        require_signal: true
+        engine_command:
+          - python3
+          - -c
+          - {$expr: 'triggers.assets["security.py"]'}
+          - grade
+          - {$expr: triggers.input_file}
+      transitions:
+        - to: result
+    - id: result
+      operator: ReadControlFileOperator
+      params:
+        path: {$expr: triggers.result_file}
+      terminal: success

@@ -21,6 +21,7 @@ pub struct GraderAgentOperator {
     workspace_root: PathBuf,
     store: Arc<dyn BackendStore>,
     agent_client: Arc<dyn AgentClient>,
+    max_retries: u32,
 }
 
 impl GraderAgentOperator {
@@ -31,10 +32,21 @@ impl GraderAgentOperator {
         store: Arc<dyn BackendStore>,
         _engine_manager: crate::workflow::operators::engine::AikitEngineManager,
     ) -> Self {
+        Self::new_with_max_retries(workspace_root, store, 2)
+    }
+
+    /// Construct with a host-selected pipeline retry ceiling. Optimization
+    /// uses zero because its resource counters meter role dispatches.
+    pub fn new_with_max_retries(
+        workspace_root: PathBuf,
+        store: Arc<dyn BackendStore>,
+        max_retries: u32,
+    ) -> Self {
         Self {
             workspace_root,
             store,
             agent_client: Arc::new(RealAgentClient),
+            max_retries,
         }
     }
 
@@ -50,6 +62,7 @@ impl GraderAgentOperator {
             workspace_root,
             store,
             agent_client,
+            max_retries: 2,
         }
     }
 
@@ -220,7 +233,7 @@ impl Operator for GraderAgentOperator {
         );
 
         // R2: run via the injected AgentClient (real impl: aikit Pipeline,
-        // schema-in → schema-out → validate → retry, wrapped in
+        // schema-in → schema-out → validate, wrapped in
         // spawn_blocking since Pipeline::run is blocking — see llm_client.rs).
         let mut assessment_json = self
             .agent_client
@@ -236,7 +249,7 @@ impl Operator for GraderAgentOperator {
                 model.as_deref(),
                 &workspace_root,
                 std::time::Duration::from_secs(timeout_secs),
-                2,
+                self.max_retries,
             )
             .await
             .map_err(|e| {
@@ -285,6 +298,26 @@ mod tests {
     use crate::workflow::operator::{OperatorRegistry, StateView};
     use newton_backend::SqliteBackendStore;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn ordinary_and_host_overridden_retry_ceilings_are_distinct() {
+        let store: Arc<dyn BackendStore> =
+            Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
+        let engine = crate::workflow::operators::engine::AikitEngineManager::new(
+            std::path::PathBuf::from("/tmp"),
+        )
+        .unwrap();
+        assert_eq!(
+            GraderAgentOperator::new(std::path::PathBuf::from("/tmp"), store.clone(), engine)
+                .max_retries,
+            2
+        );
+        assert_eq!(
+            GraderAgentOperator::new_with_max_retries(std::path::PathBuf::from("/tmp"), store, 0,)
+                .max_retries,
+            0
+        );
+    }
 
     fn make_ctx() -> crate::workflow::operator::ExecutionContext {
         crate::workflow::operator::ExecutionContext {

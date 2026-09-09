@@ -22,6 +22,9 @@ Required smoke rows: `init`, `optimize`, `serve`, `workflow`,
 `resume`, `checkpoint`, `artifact`, `runs`, `doctor`,
 `config`, `completion`, `chat`, `spec`.
 
+Dependency planning adds the `dependency` group with local discover/approve and
+read-only inspect/impact planner operations.
+
 ## Coverage matrix
 
 | Command path | Flag | Test name | Tier |
@@ -40,6 +43,10 @@ Required smoke rows: `init`, `optimize`, `serve`, `workflow`,
 | completion | --help | smoke_completion_help | smoke |
 | chat | --help | smoke_chat_help | smoke |
 | spec | --format json | smoke_spec_json | smoke |
+| dependency | --help | dependency_help_has_examples_and_read_only_planner_contract | smoke |
+| dependency impact | --baseline | dependency_cli_approved_baseline_scopes_impact_without_inventing_versions | integration |
+| dependency discover | --manifest | dependency_cli_real_manifest_rediscovery_preserves_declarations_and_is_idempotent | integration |
+| dependency approve | --review | dependency_cli_unresolved_inputs_require_explicit_human_acknowledgement | integration |
 | workflow validate |  | integ_workflow_validate_ok | integration |
 | workflow lint | --format json | integ_workflow_lint_json | integration |
 | workflow preview | --format text | integ_workflow_preview_text | integration |
@@ -52,7 +59,16 @@ Required smoke rows: `init`, `optimize`, `serve`, `workflow`,
 | checkpoint clean | --older-than | integ_checkpoint_clean_older_than | integration |
 | artifact clean | --older-than | integ_artifact_clean_removes_old | integration |
 | init |  | integ_init_creates_workspace | integration |
-| optimize | --once | integ_optimize_once_no_plans | integration |
+| optimize | --definition <file> --once | native_once_grades_before_plan_and_acceptance | integration |
+| optimize | software-improvement recovery | fresh_plans_share_cr_retry_budget_quarantine_findings_and_continue_unrelated_work | integration |
+| optimize | planner substitutes current change request | planner_cannot_discard_or_substitute_the_current_change_request | integration |
+| optimize | malformed reconciliation | malformed_reconciliation_fails_without_mutating_findings | integration |
+| optimize | threshold regression guard | threshold_regression_in_one_objective_stops_before_acceptance | integration |
+| optimize | threshold no-progress guard | per_objective_no_progress_stops_at_its_durable_cycle_limit | integration |
+| optimize | software finding progress guard | software_threshold_finding_progress_prevents_false_no_progress | integration |
+| optimize | workflows.promote (lying output) | lying_promotion_workflow_is_rejected_before_run_creation | integration |
+| optimize | workflows.promote (side effect) | mutating_promotion_workflow_is_rejected_without_dispatch | integration |
+| optimize | transient snapshot swap | transient_snapshot_swap_cannot_forge_evaluator_execution | integration |
 | doctor |  | integ_doctor_command | integration |
 | config show |  | integ_config_show | integration |
 | completion | bash | integ_completion_bash | integration |

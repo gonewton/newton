@@ -1,0 +1,13 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: develop
+    io:
+      result_map:
+        candidate: '$expr: if triggers.change_request_id == "cr-good" { #{id: triggers.candidate_id, artifact_id: "better", base_artifact_id: "original", created_under_revision: triggers.requirements_revision} } else { () }'
+        failure: '$expr: if triggers.change_request_id == "cr-bad" { #{change_request_id: triggers.change_request_id, plan_id: triggers.plan_id, reason: "deterministic test failure", reconciled: true, evidence: ["fixture confirms no external effects"]} } else { () }'
+  tasks:
+    - id: develop
+      operator: NoOpOperator
+      terminal: success

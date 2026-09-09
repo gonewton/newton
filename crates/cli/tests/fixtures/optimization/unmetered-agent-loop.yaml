@@ -1,0 +1,18 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: repeated_agent
+    io:
+      result_map:
+        decision: none
+  tasks:
+    - id: repeated_agent
+      operator: AgentOperator
+      params:
+        engine: command
+        engine_command: [sh, -c, 'printf done']
+        prompt: bounded fixture
+        loop: true
+        max_iterations: 5
+      terminal: success

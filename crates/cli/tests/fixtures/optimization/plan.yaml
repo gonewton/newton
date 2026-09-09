@@ -1,0 +1,13 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: plan
+    io:
+      result_map:
+        decision: propose
+        plan_id: '$expr: triggers.candidate_id + "-plan"'
+  tasks:
+    - id: plan
+      operator: NoOpOperator
+      terminal: success

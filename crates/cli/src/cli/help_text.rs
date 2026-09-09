@@ -19,7 +19,9 @@ EXAMPLES:
 
 pub(super) const INIT_LONG_ABOUT: &str = "\
 Init creates the .newton workspace layout, installs the Newton template with \
-aikit-sdk, and writes default configs so you can run immediately.
+aikit-sdk, and writes default configs. --template builtin installs the embedded \
+optimization definition without a network download. Agent and evaluator prerequisites \
+must be configured before optimization; existing .newton settings are not overwritten.
 
 EXAMPLES:
   Initialize current directory:
@@ -29,21 +31,65 @@ EXAMPLES:
     newton init ./workspace
 
   Initialize with custom template source:
-    newton init . --template gonewton/newton-templates";
+    newton init . --template gonewton/newton-templates
+
+  Install the shipped definition offline, then inspect it:
+    newton init . --template builtin
+    newton optimize default --inspect";
 
 pub(super) const OPTIMIZE_LONG_ABOUT: &str = "\
-Optimize reads Plans from .newton/plan/<project_id>/todo and drives the \
-autonomous optimization loop until the Plan queue is drained.
+Optimize binds a versioned Optimization Definition and runs native, durable \
+grade/plan/develop/evaluate cycles. A definition is required through --definition \
+or definition_file in .newton/configs/<project_id>.conf. Legacy plan files are not consumed.
+
+The software-improvement strategy requires grade, plan and develop workflow roles. \
+The generic host rejects a promote role because it cannot verify the target. Each workflow must \
+declare io.result_map and the documented optimization result envelope. \
+Local ownership is not a distributed lock. Interrupted external effects require reconciliation.
+
+--inspect prints resolved requirements without creating a run. --preflight validates \
+workflows and supported evaluator prerequisites without dispatching agents or creating \
+candidates. Normal runs perform the same checks first. Repeat --param NAME=JSON for \
+non-secret run overrides; strings must be JSON-quoted. Resume uses saved parameters.
+
+The shipped software-security definition covers Cargo.lock RustSec advisory matches \
+and tests, not comprehensive security/compliance. Candidates remain detached; no \
+promotion workflow is supplied. The current agent host is unsandboxed: external \
+execution requires explicit project grants for agent,command,network,commit,\
+draft_pull_request,publish,merge,deploy. Do not grant these on an untrusted host or \
+assume that a detached worktree enforces a permission restriction.
+
+--requirements-update accepts a full RequirementsUpdate YAML with base_revision \
+and requirements, only with --resume. A live owner retains the request in a local \
+Pending inbox; it becomes active only after the owner completes work/evaluation, \
+persists acknowledgment, and regrades the same candidate before acceptance. \
+Stopped runs activate at a safe boundary after resume acquires ownership. \
+Uncertain effects keep the revision Pending until reconciliation; stale requests are \
+recorded as Rejected. Local CLI access supplies update authority without widening \
+the persisted execution ceiling. Restrictions unsupported by this host are rejected.
 
 EXAMPLES:
   Drive the optimization loop for a project:
     newton optimize project-alpha
 
+  Inspect the offline-installed definition before configuring prerequisites:
+    newton init . --template builtin
+    newton optimize default --inspect --param 'agent=\"pi\"'
+
+  Check configured prerequisites without starting work:
+    newton optimize default --preflight
+
   With workspace override:
     newton optimize project-alpha --workspace ./workspace
 
-  Process one Plan and exit:
-    newton optimize project-alpha --once
+  Run one complete evaluated cycle:
+    newton optimize project-alpha --definition ./security.yaml --once
+
+  Resume using persisted requirements:
+    newton optimize project-alpha --resume <RUN_ID>
+
+  Submit a local revision and resume at a safe boundary:
+    newton optimize project-alpha --resume <RUN_ID> --requirements-update ./revision.yaml --once
 
   Custom poll interval (seconds):
     newton optimize project-alpha --poll-interval 30";

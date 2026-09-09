@@ -1,0 +1,40 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: grade
+    io:
+      result_map:
+        candidate: '$expr: tasks.grade.output.patch.candidate'
+        evaluation: '$expr: tasks.grade.output.patch.evaluation'
+  tasks:
+    - id: grade
+      operator: SetContextOperator
+      params:
+        patch:
+          candidate:
+            id: { $expr: triggers.candidate_id }
+            artifact_id: { $expr: 'if triggers.stage == "baseline" { "original" } else { triggers.candidate.artifact_id }' }
+            base_artifact_id: original
+            created_under_revision: { $expr: triggers.requirements_revision }
+          evaluation:
+            id: { $expr: 'triggers.candidate_id + "-eval"' }
+            run_id: { $expr: triggers.run_id }
+            cycle: { $expr: triggers.cycle }
+            candidate_id: { $expr: triggers.candidate_id }
+            artifact_id: { $expr: 'if triggers.stage == "baseline" { "original" } else { triggers.candidate.artifact_id }' }
+            base_artifact_id: original
+            requirements_revision: { $expr: triggers.requirements_revision }
+            evaluator_revisions: {fixture: '1'}
+            measurements:
+              size:
+                status: produced
+                measurement: {kind: numeric, unit: bytes, direction: minimize}
+                samples: { $expr: 'if triggers.stage == "baseline" { [10.0] } else { [1.0] }' }
+            constraints:
+              behavior:
+                evaluator: fixture
+                status: { $expr: 'if triggers.stage == "candidate" && triggers.parameters.reject.value { "violated" } else { "satisfied" }' }
+                evidence: [fixture-behavior-check]
+            completion_checks: {}
+      terminal: success

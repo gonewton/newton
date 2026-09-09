@@ -109,6 +109,7 @@ impl AgentClient for RealAgentClient {
 /// plus engine/model/timeout.
 #[async_trait]
 pub trait LlmAdjudicator: Send + Sync {
+    #[allow(clippy::too_many_arguments)]
     async fn adjudicate(
         &self,
         observations_json: &str,
@@ -117,6 +118,7 @@ pub trait LlmAdjudicator: Send + Sync {
         model: Option<&str>,
         workspace_root: &Path,
         timeout: Duration,
+        max_retries: u32,
     ) -> Result<super::reconcile::AdjudicationPlan, String>;
 }
 
@@ -137,6 +139,7 @@ impl LlmAdjudicator for RealLlmAdjudicator {
         model: Option<&str>,
         workspace_root: &Path,
         timeout: Duration,
+        max_retries: u32,
     ) -> Result<super::reconcile::AdjudicationPlan, String> {
         let obs_str = observations_json.to_string();
         let findings_str = findings_json.to_string();
@@ -159,7 +162,7 @@ impl LlmAdjudicator for RealLlmAdjudicator {
                 ADJUDICATION_TEMPLATE,
                 super::reconcile::RECONCILE_ADJUDICATION_SCHEMA,
             )
-            .max_retries(1);
+            .max_retries(max_retries);
 
             match pipeline.run(
                 &[("observations", &obs_str), ("findings", &findings_str)],
@@ -234,6 +237,7 @@ mod tests {
                 Some("test-model"),
                 tmp.path(),
                 Duration::from_secs(5),
+                1,
             )
             .await;
         let err = result.expect_err("non-runnable engine must fail, not hang");

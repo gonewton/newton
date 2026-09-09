@@ -15,7 +15,12 @@ use newton_core::workflow::{
     server_notifier::ServerNotifier,
     workflow_sink::{DbSink, FanoutSink, WorkflowSink},
 };
-use std::{fs, path::PathBuf, sync::Arc};
+use newton_types::BackendStore;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// Everything needed to call `execute_workflow` through the shared path.
 pub struct ExecutionSetup {
@@ -37,6 +42,48 @@ pub async fn build_execution_setup(
     timeout_seconds: Option<u64>,
     server_url: Option<&str>,
 ) -> Result<ExecutionSetup, AppError> {
+    prepare_state_directories(&state_dir)?;
+
+    let backend = SqliteBackendStore::new(&state_backend_sqlite_url(&state_dir))
+        .await
+        .map_err(|e| {
+            AppError::new(
+                ErrorCategory::IoError,
+                format!("STATE-DIR-003: backend store init failed: {}", e.message),
+            )
+            .with_code("STATE-DIR-003")
+        })?;
+
+    Ok(compose_execution_setup(
+        state_dir,
+        parallel_limit,
+        timeout_seconds,
+        server_url,
+        Arc::new(backend),
+    ))
+}
+
+/// Build execution overrides around an already initialized authoritative store.
+/// Native optimization uses this path so every workflow role shares the Run's
+/// pool instead of racing repeated SQLite schema migrations.
+pub fn build_execution_setup_with_backend(
+    state_dir: PathBuf,
+    parallel_limit: Option<usize>,
+    timeout_seconds: Option<u64>,
+    server_url: Option<&str>,
+    backend: Arc<dyn BackendStore>,
+) -> Result<ExecutionSetup, AppError> {
+    prepare_state_directories(&state_dir)?;
+    Ok(compose_execution_setup(
+        state_dir,
+        parallel_limit,
+        timeout_seconds,
+        server_url,
+        backend,
+    ))
+}
+
+fn prepare_state_directories(state_dir: &Path) -> Result<(), AppError> {
     if state_dir.exists() && !state_dir.is_dir() {
         return Err(AppError::new(
             ErrorCategory::ValidationError,
@@ -48,8 +95,8 @@ pub async fn build_execution_setup(
         .with_code("STATE-DIR-001"));
     }
 
-    let checkpoints = state_checkpoints_dir(&state_dir);
-    let artifacts = state_artifacts_dir(&state_dir);
+    let checkpoints = state_checkpoints_dir(state_dir);
+    let artifacts = state_artifacts_dir(state_dir);
 
     fs::create_dir_all(&checkpoints).map_err(|e| {
         AppError::new(
@@ -65,19 +112,19 @@ pub async fn build_execution_setup(
         )
         .with_code("STATE-DIR-002")
     })?;
+    Ok(())
+}
 
-    let backend = SqliteBackendStore::new(&state_backend_sqlite_url(&state_dir))
-        .await
-        .map_err(|e| {
-            AppError::new(
-                ErrorCategory::IoError,
-                format!("STATE-DIR-003: backend store init failed: {}", e.message),
-            )
-            .with_code("STATE-DIR-003")
-        })?;
-
-    let backend_arc: Arc<dyn newton_backend::BackendStore> = Arc::new(backend);
-    let db_sink = Arc::new(DbSink::new(backend_arc));
+fn compose_execution_setup(
+    state_dir: PathBuf,
+    parallel_limit: Option<usize>,
+    timeout_seconds: Option<u64>,
+    server_url: Option<&str>,
+    backend: Arc<dyn BackendStore>,
+) -> ExecutionSetup {
+    let checkpoints = state_checkpoints_dir(&state_dir);
+    let artifacts = state_artifacts_dir(&state_dir);
+    let db_sink = Arc::new(DbSink::new(backend));
 
     let sink: Option<Arc<dyn WorkflowSink>> = if let Some(url) = server_url {
         Some(Arc::new(FanoutSink(vec![
@@ -99,8 +146,8 @@ pub async fn build_execution_setup(
         ..Default::default()
     };
 
-    Ok(ExecutionSetup {
+    ExecutionSetup {
         state_dir,
         overrides,
-    })
+    }
 }

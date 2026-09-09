@@ -23,13 +23,29 @@ pub struct ReconcileOperator {
     workspace_root: PathBuf,
     store: Arc<dyn BackendStore>,
     adjudicator: Arc<dyn LlmAdjudicator>,
+    max_retries: u32,
 }
 
 impl ReconcileOperator {
     pub const NAME: &'static str = "ReconcileOperator";
 
     pub fn new(workspace_root: PathBuf, store: Arc<dyn BackendStore>) -> Self {
-        Self::with_adjudicator(workspace_root, store, Arc::new(RealLlmAdjudicator))
+        Self::new_with_max_retries(workspace_root, store, 1)
+    }
+
+    /// Construct with a host-selected adjudication retry ceiling. Optimization
+    /// uses zero because its resource counters meter role dispatches.
+    pub fn new_with_max_retries(
+        workspace_root: PathBuf,
+        store: Arc<dyn BackendStore>,
+        max_retries: u32,
+    ) -> Self {
+        Self {
+            workspace_root,
+            store,
+            adjudicator: Arc::new(RealLlmAdjudicator),
+            max_retries,
+        }
     }
 
     /// Test/injection seam (spec 074 S8): construct with a stubbed
@@ -45,6 +61,7 @@ impl ReconcileOperator {
             workspace_root,
             store,
             adjudicator,
+            max_retries: 1,
         }
     }
 
@@ -159,15 +176,33 @@ fn normalize_location(v: &Value) -> String {
     }
 }
 
-fn parse_observations(assessment: &Value) -> Vec<Observation> {
+fn invalid_observation(message: impl Into<String>) -> AppError {
+    AppError::new(ErrorCategory::ValidationError, message).with_code("RECONCILE-002")
+}
+
+fn parse_observations(assessment: &Value) -> Result<Vec<Observation>, AppError> {
     let Some(arr) = assessment.get("observations").and_then(|v| v.as_array()) else {
-        return vec![];
+        return Err(invalid_observation(
+            "assessment observations must be an array",
+        ));
     };
     arr.iter()
-        .filter_map(|item| {
-            let dimension = item.get("dimension")?.as_str()?.to_string();
-            let observation = item.get("observation")?.as_str()?.to_string();
-            Some(Observation {
+        .enumerate()
+        .map(|(index, item)| {
+            let required_text = |field| {
+                item.get(field)
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| {
+                        invalid_observation(format!(
+                            "assessment observation {index} requires non-empty {field}"
+                        ))
+                    })
+            };
+            let dimension = required_text("dimension")?;
+            let observation = required_text("observation")?;
+            Ok(Observation {
                 dimension,
                 severity: item
                     .get("severity")
@@ -311,7 +346,7 @@ impl Operator for ReconcileOperator {
         let grader = &parsed.grader;
 
         // Parse observations from the assessment JSON.
-        let observations = parse_observations(&parsed.assessment);
+        let observations = parse_observations(&parsed.assessment)?;
 
         // R1 + R3: list only this grader's findings for this scope.
         let all_scope_findings = self
@@ -451,6 +486,7 @@ impl Operator for ReconcileOperator {
                         model.as_deref(),
                         &workspace_root,
                         std::time::Duration::from_secs(timeout_secs),
+                        self.max_retries,
                     )
                     .await
                     .map_err(|msg| {
@@ -702,6 +738,21 @@ mod tests {
     use newton_types::{BackendStore, PatchFindingBody};
     use serde_json::json;
 
+    #[tokio::test]
+    async fn ordinary_and_host_overridden_retry_ceilings_are_distinct() {
+        let store: Arc<dyn BackendStore> =
+            Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
+        assert_eq!(
+            ReconcileOperator::new(std::path::PathBuf::from("/tmp"), store.clone()).max_retries,
+            1
+        );
+        assert_eq!(
+            ReconcileOperator::new_with_max_retries(std::path::PathBuf::from("/tmp"), store, 0,)
+                .max_retries,
+            0
+        );
+    }
+
     fn make_ctx() -> crate::workflow::operator::ExecutionContext {
         crate::workflow::operator::ExecutionContext {
             workspace_path: std::path::PathBuf::from("/tmp"),
@@ -750,6 +801,35 @@ mod tests {
             v["location"] = json!({"file": loc});
         }
         v
+    }
+
+    #[tokio::test]
+    async fn malformed_observations_fail_before_any_finding_mutation() {
+        let store: Arc<dyn BackendStore> =
+            Arc::new(SqliteBackendStore::new_in_memory().await.unwrap());
+        let operator = ReconcileOperator::new(std::path::PathBuf::from("/tmp"), store.clone());
+        operator.execute(json!({"scope":"module", "scope_id":"fixture", "grader":"fixture", "assessment": make_assessment(vec![make_obs("tests", "existing problem", Some("lib.rs"))])}), make_ctx()).await.unwrap();
+        let before = store
+            .list_findings(None, Some("module".into()), Some("fixture".into()))
+            .await
+            .unwrap();
+        for assessment in [
+            json!({}),
+            json!({"observations":"invalid"}),
+            json!({"observations":[{"dimension":"tests"}]}),
+            json!({"observations":[{"dimension":"", "observation":"problem"}]}),
+        ] {
+            let error = operator.execute(json!({"scope":"module", "scope_id":"fixture", "grader":"fixture", "assessment":assessment}), make_ctx()).await.expect_err("malformed assessment cannot mean no findings");
+            assert_eq!(error.code, "RECONCILE-002");
+            let after = store
+                .list_findings(None, Some("module".into()), Some("fixture".into()))
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(&after).unwrap(),
+                serde_json::to_value(&before).unwrap()
+            );
+        }
     }
 
     #[tokio::test]
@@ -1062,6 +1142,7 @@ mod tests {
             _model: Option<&str>,
             _workspace_root: &std::path::Path,
             _timeout: std::time::Duration,
+            _max_retries: u32,
         ) -> Result<AdjudicationPlan, String> {
             Err("stub: adjudicator intentionally failing".to_string())
         }
@@ -1087,6 +1168,7 @@ mod tests {
             _model: Option<&str>,
             _workspace_root: &std::path::Path,
             _timeout: std::time::Duration,
+            _max_retries: u32,
         ) -> Result<AdjudicationPlan, String> {
             Ok(AdjudicationPlan {
                 matched: self

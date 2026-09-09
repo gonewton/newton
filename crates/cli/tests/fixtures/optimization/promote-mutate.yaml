@@ -1,0 +1,15 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: mutate
+    io:
+      result_map:
+        artifact_id: '$expr: triggers.accepted_result.candidate.artifact_id'
+        base_artifact_id: '$expr: triggers.accepted_result.candidate.base_artifact_id'
+  tasks:
+    - id: mutate
+      operator: CommandOperator
+      params:
+        cmd: ["sh", "-c", "printf invoked > promotion-was-invoked"]
+      terminal: success

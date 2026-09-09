@@ -171,7 +171,7 @@ fn populate_command_registry(builder: AppBuilder) -> anyhow::Result<AppBuilder> 
         },
     )?;
 
-    [
+    let builder = [
         DataVerb::Get,
         DataVerb::Post,
         DataVerb::Put,
@@ -183,7 +183,24 @@ fn populate_command_registry(builder: AppBuilder) -> anyhow::Result<AppBuilder> 
         let path =
             CommandPath::new(&["data", verb.as_str()]).map_err(|e| anyhow!("CLI-PATH-001: {e}"))?;
         b.register_command_at(&path, commands::data::data_verb_command(verb))
-    })
+    })?;
+
+    let dependency_path =
+        CommandPath::new(&["dependency"]).map_err(|e| anyhow!("CLI-PATH-001: {e}"))?;
+    let builder = builder.register_group(
+        &dependency_path,
+        GroupMetadata {
+            summary: commands::dependency::GROUP_SUMMARY,
+            hidden: false,
+        },
+    )?;
+    commands::dependency::commands()
+        .into_iter()
+        .try_fold(builder, |builder, (verb, command)| {
+            let path = CommandPath::new(&["dependency", verb])
+                .map_err(|e| anyhow!("CLI-PATH-001: {e}"))?;
+            builder.register_command_at(&path, command)
+        })
 }
 
 // ── public entry points ──────────────────────────────────────────────────────
@@ -215,6 +232,10 @@ pub const REGISTERED_COMMAND_IDS: &[&str] = &[
     "data/put",
     "data/patch",
     "data/delete",
+    "dependency/discover",
+    "dependency/inspect",
+    "dependency/approve",
+    "dependency/impact",
 ];
 
 /// Commands exposed as MCP tools under the ExposeMcpOnly policy.
@@ -226,6 +247,8 @@ pub const MCP_EXPOSED_COMMAND_IDS: &[&str] = &[
     "data.patch",
     "data.delete",
     "workflow",
+    "dependency.inspect",
+    "dependency.impact",
 ];
 
 pub fn enumerate_commands() -> Vec<Command> {
@@ -340,6 +363,12 @@ impl FromArgValueMap for OptimizeArgs {
         OptimizeArgs {
             project_id,
             workspace: get_opt_path(map, "workspace"),
+            definition: get_opt_path(map, "definition"),
+            resume: get_opt_str(map, "resume"),
+            requirements_update: get_opt_path(map, "requirements-update"),
+            inspect: get_bool(map, "inspect"),
+            preflight: get_bool(map, "preflight"),
+            parameters: get_str_list(map, "param"),
             once: get_bool(map, "once"),
             poll_interval_seconds,
         }

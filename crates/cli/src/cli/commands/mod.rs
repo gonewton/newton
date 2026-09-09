@@ -3,6 +3,7 @@
 pub mod artifact;
 pub mod checkpoint;
 pub mod data;
+pub mod dependency;
 pub mod import;
 pub mod log;
 pub mod optimize;
@@ -56,11 +57,6 @@ async fn build_operator_registry(
     settings: &workflow_schema::WorkflowSettings,
     ailoop_ctx: Option<newton_core::integrations::ailoop::AiloopContext>,
 ) -> OperatorRegistry {
-    let mut builder = OperatorRegistry::builder();
-    let interviewer = newton_core::workflow::human::lazy_interviewer_provider(
-        ailoop_ctx,
-        Duration::from_secs(settings.human.default_timeout_seconds),
-    );
     // Wire the resolved-state-root backend store so the grading operators
     // (GraderCommandOperator, ReconcileOperator, ChangeRequestOperator,
     // GraderAgentOperator) register — they are only available when a store is
@@ -70,7 +66,22 @@ async fn build_operator_registry(
     // see WorkspacePaths::with_state_dir), never re-derived from `workspace`
     // alone, or grading operators split-brain against the executor's store.
     let backend_store = open_state_store(&workspace, state_dir).await;
-    workflow_operators::register_builtins_with_deps(
+    build_operator_registry_with_backend(workspace, settings, ailoop_ctx, backend_store, None)
+}
+
+fn build_operator_registry_with_backend(
+    workspace: PathBuf,
+    settings: &workflow_schema::WorkflowSettings,
+    ailoop_ctx: Option<newton_core::integrations::ailoop::AiloopContext>,
+    backend_store: Option<std::sync::Arc<dyn newton_types::BackendStore>>,
+    llm_pipeline_max_retries: Option<u32>,
+) -> OperatorRegistry {
+    let mut builder = OperatorRegistry::builder();
+    let interviewer = newton_core::workflow::human::lazy_interviewer_provider(
+        ailoop_ctx,
+        Duration::from_secs(settings.human.default_timeout_seconds),
+    );
+    workflow_operators::register_builtins_with_deps_and_llm_retries(
         &mut builder,
         workspace,
         settings.clone(),
@@ -79,6 +90,7 @@ async fn build_operator_registry(
             backend_store,
             ..Default::default()
         },
+        llm_pipeline_max_retries,
     );
     builder.build()
 }

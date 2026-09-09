@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# develop workflow (see workflow_path in project .conf): AgentOperator models are set in that YAML.
+# Candidate-only develop workflow (see workflow_path in project .conf). It stops
+# after a local commit; evaluation and authorized promotion are separate.
 # Convention: engine claude_code -> model sonnet; engine opencode -> model zai-coding-plan/glm-5.
 # Newton applies settings.model_stylesheet only when a task omits params.model (default there is sonnet).
 set -e

@@ -1,0 +1,16 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: reconcile
+    io:
+      result_map: {decision: none}
+  tasks:
+    - id: reconcile
+      operator: ReconcileOperator
+      params:
+        scope: module
+        scope_id: fixture-scope
+        grader: fixture
+        assessment: {observations: invalid}
+      terminal: success

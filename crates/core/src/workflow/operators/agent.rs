@@ -268,6 +268,11 @@ impl Operator for AgentOperator {
             }
         } else {
             let prompt = output::resolve_prompt(&config, &self.engine_manager.workspace_root)?;
+            // Both SDK and command engines honor the same explicit task context.
+            let sdk_manager = AikitEngineManager::new(sdk_working_directory(
+                &self.workspace_root,
+                config.working_dir.as_deref(),
+            )?)?;
             let timeout_duration = config.timeout_seconds.map_or_else(
                 || Duration::from_secs(self.settings.max_time_seconds),
                 Duration::from_secs,
@@ -275,7 +280,7 @@ impl Operator for AgentOperator {
             let events_ndjson_abs_path = paths.task_artifact_dir.join("events.ndjson");
 
             let sdk_result = sdk::execute_sdk_engine(
-                &self.engine_manager,
+                &sdk_manager,
                 &engine_name,
                 &prompt,
                 model.as_deref(),
@@ -340,5 +345,51 @@ impl Operator for AgentOperator {
             stdout_capture_warning,
             stderr_capture_warning,
         }))
+    }
+}
+
+fn sdk_working_directory(
+    workspace: &std::path::Path,
+    requested: Option<&str>,
+) -> Result<PathBuf, AppError> {
+    let invalid = |message: String| {
+        AppError::new(ErrorCategory::ValidationError, message).with_code("WFG-AGENT-011")
+    };
+    let root = workspace
+        .canonicalize()
+        .map_err(|e| invalid(format!("agent workspace: {e}")))?;
+    let candidate = requested.map_or_else(|| root.clone(), |path| root.join(path));
+    let candidate = candidate
+        .canonicalize()
+        .map_err(|e| invalid(format!("agent working_dir: {e}")))?;
+    if !candidate.is_dir() || !candidate.starts_with(&root) {
+        return Err(invalid(
+            "agent working_dir must remain inside the workflow workspace".into(),
+        ));
+    }
+    Ok(candidate)
+}
+
+#[cfg(test)]
+mod working_directory_tests {
+    use super::*;
+
+    #[test]
+    fn sdk_context_honors_nested_directory_but_rejects_escapes() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("workspace");
+        let nested = root.join("candidate");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(
+            sdk_working_directory(&root, Some("candidate")).unwrap(),
+            nested.canonicalize().unwrap()
+        );
+        assert!(sdk_working_directory(&root, Some("..")).is_err());
+        assert!(sdk_working_directory(&root, Some(parent.path().to_str().unwrap())).is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(parent.path(), root.join("escape")).unwrap();
+            assert!(sdk_working_directory(&root, Some("escape")).is_err());
+        }
     }
 }

@@ -1,0 +1,21 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: pinned_helper
+    io:
+      result_map:
+        decision: propose
+        plan_id: '$expr: triggers.candidate_id + "-plan"'
+  tasks:
+    - id: pinned_helper
+      operator: AgentOperator
+      params:
+        engine: command
+        signals: {completed: '^PINNED_HELPER_OK$'}
+        require_signal: true
+        engine_command:
+          - python3
+          - -c
+          - {$expr: 'triggers.assets["snapshot_guard.py"]'}
+      terminal: success

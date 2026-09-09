@@ -51,39 +51,21 @@ impl Operator for CommandOperator {
                 format!("CommandOperator params invalid: {e}"),
             )
         })?;
-        if parsed.cmd.trim().is_empty() {
-            return Err(AppError::new(
-                ErrorCategory::ValidationError,
-                "CommandOperator requires a non-empty cmd",
-            ));
-        }
-        if let Some(cwd_str) = &parsed.cwd {
-            if Path::new(cwd_str).is_absolute() {
-                return Err(
-                    AppError::new(ErrorCategory::ValidationError, "cwd must be relative")
-                        .with_code("WFG-CMD-001"),
-                );
-            }
-        }
-        if let Some(ref p) = parsed.write_stdout {
-            if Path::new(p).is_absolute() {
-                return Err(AppError::new(
-                    ErrorCategory::ValidationError,
-                    "write_stdout must be relative",
-                )
-                .with_code("WFG-CMD-003"));
-            }
-        }
-        if let Some(ref p) = parsed.write_stderr {
-            if Path::new(p).is_absolute() {
-                return Err(AppError::new(
-                    ErrorCategory::ValidationError,
-                    "write_stderr must be relative",
-                )
-                .with_code("WFG-CMD-003"));
-            }
-        }
-        Ok(())
+        validate_literal_semantics(
+            Some(&parsed.cmd),
+            parsed.cwd.as_deref(),
+            parsed.write_stdout.as_deref(),
+            parsed.write_stderr.as_deref(),
+        )
+    }
+
+    fn validate_partial_params(&self, params: &Value) -> Result<(), AppError> {
+        validate_literal_semantics(
+            params.get("cmd").and_then(Value::as_str),
+            params.get("cwd").and_then(Value::as_str),
+            params.get("write_stdout").and_then(Value::as_str),
+            params.get("write_stderr").and_then(Value::as_str),
+        )
     }
 
     fn params_schema(&self) -> schemars::Schema {
@@ -221,6 +203,36 @@ impl Operator for CommandOperator {
     }
 }
 
+// A missing literal is unresolved or absent, never a fabricated valid value.
+// These independent rules are shared by full and partial validation.
+fn validate_literal_semantics(
+    cmd: Option<&str>,
+    cwd: Option<&str>,
+    write_stdout: Option<&str>,
+    write_stderr: Option<&str>,
+) -> Result<(), AppError> {
+    if cmd.is_some_and(|cmd| cmd.trim().is_empty()) {
+        return Err(AppError::new(
+            ErrorCategory::ValidationError,
+            "CommandOperator requires a non-empty cmd",
+        ));
+    }
+    for (field, value, code) in [
+        ("cwd", cwd, "WFG-CMD-001"),
+        ("write_stdout", write_stdout, "WFG-CMD-003"),
+        ("write_stderr", write_stderr, "WFG-CMD-003"),
+    ] {
+        if value.is_some_and(|path| Path::new(path).is_absolute()) {
+            return Err(AppError::new(
+                ErrorCategory::ValidationError,
+                format!("{field} must be relative"),
+            )
+            .with_code(code));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
 pub struct CommandExecutionRequest {
     pub cmd: String,
@@ -347,6 +359,55 @@ mod tests {
     use crate::workflow::operator::{OperatorRegistry, StateView};
     use serde_json::json;
     use tempfile::TempDir;
+
+    #[test]
+    fn partial_validation_reuses_absolute_path_rules_without_resolving_cmd() {
+        let workspace = TempDir::new().unwrap();
+        let operator = CommandOperator::new(workspace.path().to_path_buf());
+        for (field, code) in [
+            ("cwd", "WFG-CMD-001"),
+            ("write_stdout", "WFG-CMD-003"),
+            ("write_stderr", "WFG-CMD-003"),
+        ] {
+            let mut params = json!({"cmd": "printf ok"});
+            params[field] = json!(workspace.path());
+            assert_eq!(operator.validate_params(&params).unwrap_err().code, code);
+            params["cmd"] = json!({"$expr": "unknown_function()"});
+            assert_eq!(
+                operator.validate_partial_params(&params).unwrap_err().code,
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn partial_validation_checks_empty_literal_cmd_with_dynamic_cwd() {
+        let workspace = TempDir::new().unwrap();
+        let operator = CommandOperator::new(workspace.path().to_path_buf());
+        let error = operator
+            .validate_partial_params(&json!({
+                "cmd": " ", "cwd": {"$expr": "unknown_function()"}
+            }))
+            .unwrap_err();
+        assert_eq!(error.message, "CommandOperator requires a non-empty cmd");
+    }
+
+    #[test]
+    fn partial_validation_defers_expression_values_without_claiming_full_validity() {
+        let workspace = TempDir::new().unwrap();
+        let operator = CommandOperator::new(workspace.path().to_path_buf());
+        for params in [
+            json!({"$expr": "unknown_function()"}),
+            json!({
+                "cmd": {"$expr": "unknown_function()"},
+                "cwd": {"$expr": "unknown_function()"},
+                "write_stdout": "output.txt"
+            }),
+        ] {
+            assert!(operator.validate_partial_params(&params).is_ok());
+            assert!(operator.validate_params(&params).is_err());
+        }
+    }
 
     fn make_ctx(state_dir: Option<PathBuf>, workspace: &TempDir) -> ExecutionContext {
         ExecutionContext {

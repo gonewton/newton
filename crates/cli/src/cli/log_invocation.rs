@@ -17,7 +17,7 @@ pub fn kind_for_command(name: &str) -> LogInvocationKind {
         "runs" => Runs,
         "checkpoint" => Checkpoint,
         "artifact" => Artifact,
-        "doctor" | "config" | "completion" | "chat" => Diagnostic,
+        "doctor" | "config" | "completion" | "chat" | "dependency" => Diagnostic,
         _ => Run,
     }
 }

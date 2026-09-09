@@ -1,0 +1,14 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: repeated_task
+    io:
+      result_map:
+        decision: none
+  tasks:
+    - id: repeated_task
+      operator: NoOpOperator
+      max_iterations: 5
+      transitions:
+        - to: repeated_task

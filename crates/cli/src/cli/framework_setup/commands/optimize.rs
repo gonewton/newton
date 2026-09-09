@@ -22,9 +22,28 @@ pub(crate) fn optimize_command() -> Command {
                 "newton optimize project-alpha",
                 "newton optimize project-alpha --workspace ./workspace",
                 "newton optimize project-alpha --once",
-                "newton optimize project-alpha --poll-interval 30",
+                "newton optimize project-alpha --definition ./security.yaml --once",
+                "newton optimize project-alpha --resume <RUN_ID>",
             ],
             args: vec![
+                ArgSpec {
+                    name: "param", kind: ArgKind::Option, long: Some("param"),
+                    value_type: ArgValueType::String, cardinality: Cardinality::Repeated,
+                    help: "Non-secret NAME=JSON override; repeat for multiple values (defaults < project < run)",
+                    ..Default::default()
+                },
+                ArgSpec {
+                    name: "inspect", kind: ArgKind::Flag, long: Some("inspect"),
+                    value_type: ArgValueType::Bool, cardinality: Cardinality::Optional,
+                    help: "Print resolved requirements without executing workflows or creating a run",
+                    ..Default::default()
+                },
+                ArgSpec {
+                    name: "preflight", kind: ArgKind::Flag, long: Some("preflight"),
+                    value_type: ArgValueType::Bool, cardinality: Cardinality::Optional,
+                    help: "Check workflow and evaluator prerequisites without starting a run",
+                    ..Default::default()
+                },
                 ArgSpec {
                     name: "project-id",
                     kind: ArgKind::Positional,
@@ -43,12 +62,39 @@ pub(crate) fn optimize_command() -> Command {
                     ..Default::default()
                 },
                 ArgSpec {
+                    name: "definition",
+                    kind: ArgKind::Option,
+                    long: Some("definition"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    help: "Optimization Definition YAML; overrides project definition_file",
+                    ..Default::default()
+                },
+                ArgSpec {
+                    name: "resume",
+                    kind: ArgKind::Option,
+                    long: Some("resume"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    help: "Resume a persisted Optimize Run; uncertain external effects require reconciliation",
+                    ..Default::default()
+                },
+                ArgSpec {
+                    name: "requirements-update",
+                    kind: ArgKind::Option,
+                    long: Some("requirements-update"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    help: "RequirementsUpdate YAML (requires --resume); owner activates at a safe evaluation boundary and regrades before acceptance",
+                    ..Default::default()
+                },
+                ArgSpec {
                     name: "once",
                     kind: ArgKind::Flag,
                     long: Some("once"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
-                    help: "Process a single Plan and exit instead of running as a daemon",
+                    help: "Run one complete cycle including evaluation before acceptance",
                     ..Default::default()
                 },
                 ArgSpec {
@@ -57,7 +103,7 @@ pub(crate) fn optimize_command() -> Command {
                     long: Some("poll-interval"),
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
-                    help: "Seconds to wait when the Plan queue is empty (default: 60)",
+                    help: "Seconds between optimization cycles (default: 60)",
                     min: Some(1),
                     ..Default::default()
                 },

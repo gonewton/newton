@@ -1,0 +1,57 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: prepare
+    io:
+      result_map:
+        candidate: '$expr: tasks.result.output.metadata.candidate'
+  tasks:
+    - id: prepare
+      operator: AgentOperator
+      params:
+        engine: command
+        signals: {completed: '^NEWTON_HELPER_COMPLETED$'}
+        require_signal: true
+        engine_command:
+          - python3
+          - -c
+          - {$expr: 'triggers.assets["security.py"]'}
+          - prepare
+          - {$expr: triggers.input_file}
+      transitions:
+        - to: prepared
+    - id: prepared
+      operator: ReadControlFileOperator
+      params:
+        path: {$expr: triggers.result_file}
+      transitions:
+        - to: remediate
+    - id: remediate
+      operator: AgentOperator
+      params:
+        engine: {$expr: triggers.parameters.agent.value}
+        model: {$expr: triggers.parameters.model.value}
+        working_dir: {$expr: tasks.prepared.output.metadata.candidate_directory}
+        prompt: {$expr: tasks.prepared.output.metadata.prompt}
+      transitions:
+        - to: snapshot
+    - id: snapshot
+      operator: AgentOperator
+      params:
+        engine: command
+        signals: {completed: '^NEWTON_HELPER_COMPLETED$'}
+        require_signal: true
+        engine_command:
+          - python3
+          - -c
+          - {$expr: 'triggers.assets["security.py"]'}
+          - snapshot
+          - {$expr: triggers.input_file}
+      transitions:
+        - to: result
+    - id: result
+      operator: ReadControlFileOperator
+      params:
+        path: {$expr: triggers.result_file}
+      terminal: success

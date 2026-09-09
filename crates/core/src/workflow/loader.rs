@@ -10,6 +10,21 @@ pub fn load_and_lint_workflow(
     workflow_path: &Path,
 ) -> Result<(WorkflowDocument, Vec<LintResult>), AppError> {
     let raw_document = crate::workflow::schema::parse_workflow(workflow_path)?;
+    transform_and_lint(raw_document)
+}
+
+/// Load a workflow from caller-owned immutable source bytes.
+pub fn load_and_lint_workflow_source(
+    source: &str,
+    display_path: &Path,
+) -> Result<(WorkflowDocument, Vec<LintResult>), AppError> {
+    let raw_document = WorkflowDocument::parse_from_source(source, display_path)?;
+    transform_and_lint(raw_document)
+}
+
+fn transform_and_lint(
+    raw_document: WorkflowDocument,
+) -> Result<(WorkflowDocument, Vec<LintResult>), AppError> {
     // NOTE: despite the name, this is the load path for `newton run`'s
     // top-level workflow (see `execute_run_command` in
     // crates/cli/src/cli/commands/workflow.rs), not a validate/lint-only

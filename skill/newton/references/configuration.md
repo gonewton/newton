@@ -1,61 +1,40 @@
 # Newton configuration (`.newton/configs`)
 
-Workspace Newton metadata lives under `.newton/`. This sheet describes the **`key=value` `.conf` files** in `.newton/configs/` and **which keys the Newton CLI reads** for batch.
-
-The same file may also be sourced or extended by **organization-specific** shell, CI, or wrappers; only the keys in the sections below are read by Newton's `batch` subcommand. Anything else is outside the tool unless your distribution documents it.
+Workspace Newton metadata lives under `.newton/`. This sheet describes the
+**`key=value` `.conf` files** in `.newton/configs/` that the native `optimize`
+command reads. Values are declarative bindings, not shell code.
 
 Lines support `#` comments. Unknown keys are ignored by each consumer unless noted.
 
-## `newton batch <project_id>` — `.newton/configs/<project_id>.conf`
-
-The batch runner loads **only** the following keys from Rust (`BatchProjectConfig`):
-
-### Required
+## `newton optimize <project_id>` — `.newton/configs/<project_id>.conf`
 
 | Key | Meaning |
 | --- | --- |
-| `project_root` | Directory that contains a `.newton/` tree (absolute path, or relative to the **Newton workspace root** passed to `--workspace` / discovered by walking upward for `.newton`). |
-| `workflow_file` **or** `workflow_path` | Path to the workflow YAML Newton runs for each queued plan. Use **`workflow_file`** in new configs. **`workflow_path`** is an alias when `workflow_file` is unset (same resolution). If both are set, **`workflow_file` wins**. Resolution: absolute values are used as-is; otherwise if `project_root/<value>` exists that path wins, else `workspace_root/<value>`. |
+| `project_root` | Context root. It is absolute or relative to the Newton workspace. |
+| `definition_file` | Versioned Optimization Definition YAML. `--definition` overrides it. |
+| `optimize_allowed_actions` | Comma-separated authority ceiling: `agent`, `command`, `network`, `commit`, `draft_pull_request`, `publish`, `merge`, `deploy`. The host rejects a workflow it cannot enforce safely. |
+| `parameter.<name>` | Ordinary JSON literal (or plain string) that overrides the definition default. It cannot grant permission. |
 
-### What batch does
-
-1. Picks the next markdown plan from `.newton/plan/<project_id>/todo/`.
-2. Copies it to `project_root/.newton/tasks/<task_id>/input/spec.md`.
-3. Runs the configured workflow like `newton run` with a **manual** trigger payload containing `input_file` and `workspace` (see repository `README.md`).
-4. Moves the plan to `completed/` or `failed/`.
-
-No `coding_agent`, `evaluator_cmd`, `pre_run_script`, or classic-loop keys are read by `newton batch` anymore; drive agents and shell from **workflow YAML** and operators instead.
-
-### Example (minimal)
-
-```bash
+```text
 # .newton/configs/myapp.conf
-project_root=/home/me/repos/myapp
-workflow_file=.newton/workflows/planner.yaml
+project_root=.
+definition_file=.newton/definitions/security.yaml
+optimize_allowed_actions=agent,command,network,commit,draft_pull_request,merge
+parameter.test_command="cargo test --workspace"
 ```
 
-Relative workflow under project root:
-
-```bash
-project_root=./repos/myapp
-workflow_file=newton/workflows/ci.yaml
-```
-
-### Plan metadata
-
-Plans are Markdown files in `.newton/plan/<project_id>/todo/`. Optional YAML frontmatter can include `branch:` for workflows that consume it (see main Newton `README.md` for the plan format).
+The native driver does not consume Plan queues. It requires `grade`, `plan`, and
+`develop` roles in a definition, persists its run binding and evidence, and
+evaluates the Candidate before optional promotion. Use `--requirements-update`
+only with `--resume`; an update that cannot reach a safe boundary remains Pending.
 
 ---
 
 ## `newton init` — `.newton/configs/default.conf`
 
-After `newton init .`, Newton writes `default.conf` with:
-
-- `project_root=` set to the initialized directory (absolute).
-- `coding_model=` default (from built-in executor defaults, often a Z.ai-style id string).
-- A commented `# workflow_file=...` hint for batch.
-
-`coding_model` in that stub is **not** consumed by `newton batch`; it is legacy/extra context for templates and humans. Set `workflow_file` (or `workflow_path`) when you use batch.
+After `newton init .`, set `definition_file` only after choosing or authoring a
+definition compatible with the installed template workflows. Initialization does
+not infer a definition or grant workflow permissions.
 
 ---
 
@@ -65,10 +44,11 @@ Valid model and engine identifiers depend on the **workflow YAML**, the **agent 
 
 ---
 
-## Validation errors (batch)
+## Validation errors (optimize)
 
 Typical failures:
 
-- Missing `project_root` or both `workflow_file` and `workflow_path`.
-- `project_root` does not contain `.newton/`.
+- Missing definition selection (`--definition` or `definition_file`).
+- A malformed definition, unsupported restriction, or insufficient action authority.
+- Candidate evidence that belongs to a different run, artifact, evaluator, or requirements revision.
 - Unreadable `.conf` path (wrong `--workspace` or missing `.newton/configs/<project_id>.conf`).

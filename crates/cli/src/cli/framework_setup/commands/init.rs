@@ -22,6 +22,7 @@ pub(crate) fn init_command() -> Command {
                 "newton init .",
                 "newton init ./workspace",
                 "newton init . --template gonewton/newton-templates",
+                "newton init . --template builtin",
             ],
             args: vec![
                 ArgSpec {
@@ -39,7 +40,7 @@ pub(crate) fn init_command() -> Command {
                     long: Some("template"),
                     value_type: ArgValueType::String,
                     cardinality: Cardinality::Optional,
-                    help: "Template source (GitHub repo, URL, or local path)",
+                    help: "Template source: builtin (offline optimization setup), GitHub repo, URL, or local path",
                     ..Default::default()
                 },
             ],

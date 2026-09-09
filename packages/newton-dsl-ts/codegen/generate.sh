@@ -16,7 +16,7 @@ if [ ! -f "$SCHEMA" ]; then
   exit 1
 fi
 
-pnpm dlx json-schema-to-typescript \
+pnpm exec json2ts \
   "$SCHEMA" \
   --no-additionalProperties \
   --unreachableDefinitions \

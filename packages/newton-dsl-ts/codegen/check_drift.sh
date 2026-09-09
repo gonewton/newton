@@ -20,7 +20,7 @@ TMPFILE=$(mktemp /tmp/ir_check_XXXXXX.ts)
 TMPFILE2=$(mktemp /tmp/output_schemas_check_XXXXXX.ts)
 trap "rm -f $TMPFILE $TMPFILE2" EXIT
 
-pnpm dlx json-schema-to-typescript \
+pnpm exec json2ts \
   "$SCHEMA" \
   --no-additionalProperties \
   --unreachableDefinitions \

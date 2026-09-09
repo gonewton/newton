@@ -4,6 +4,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 mod models;
+pub mod optimization;
 mod store;
 
 pub use models::*;

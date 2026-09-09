@@ -1,0 +1,15 @@
+[package]
+name = "newton-dependencies"
+version.workspace = true
+edition.workspace = true
+description = "Deterministic, approved-baseline dependency impact analysis for Newton"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+semver.workspace = true
+petgraph.workspace = true
+sha2.workspace = true
+hex.workspace = true
+toml.workspace = true

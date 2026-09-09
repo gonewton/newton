@@ -1,0 +1,15 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: retrying_task
+    io:
+      result_map:
+        decision: none
+  tasks:
+    - id: retrying_task
+      operator: NoOpOperator
+      retry:
+        max_attempts: 2
+        backoff_ms: 0
+      terminal: success
