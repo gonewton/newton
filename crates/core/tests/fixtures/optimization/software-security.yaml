@@ -1,0 +1,47 @@
+schema_version: 1
+id: software-security
+revision: fixture-v1
+strategy: software-improvement
+workflows:
+  grade: grading.yaml
+  plan: planning.yaml
+  develop: development.yaml
+  promote: promotion.yaml
+requirements:
+  objective:
+    mode: primary
+    objective:
+      id: critical_vulnerabilities
+      evaluator: security
+      measurement:
+        kind: numeric
+        unit: verified_vulnerabilities
+        direction: minimize
+  evaluators:
+    security:
+      workflow: grading.yaml
+      revision: evaluator-content-v1
+    tests:
+      workflow: tests.yaml
+      revision: protected-tests-v1
+  comparison:
+    kind: exact
+  acceptance_constraints:
+    - id: tests_preserved
+      evaluator: tests
+  execution_restrictions:
+    denied_actions: [merge, deploy]
+    protected_paths: [audit/evaluate.sh]
+  resource_limits:
+    elapsed_seconds: 3600
+    max_cycles: 8
+    max_work: 16
+    max_evaluations: 32
+  completion:
+    - kind: objective_target
+      objective: critical_vulnerabilities
+      target: 0
+defaults:
+  agent:
+    kind: literal
+    value: claude

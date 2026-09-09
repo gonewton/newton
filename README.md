@@ -44,7 +44,9 @@ Verify: `newton --version` and `newton --help`.
    newton workflow run path/to/workflow.yaml --workspace .
    ```
 
-For an existing repository, run `newton init .` at the repo root. Edit `.newton/configs/default.conf` to set `workflow_file`, or add an `optimize_*` block to drive the [optimization loop](#optimization-loop).
+For an existing repository, run `newton init .` at the repo root. Run workflow
+graphs directly, or bind an Optimization Definition to drive the
+[optimization loop](#optimization-loop).
 
 ## What you get
 
@@ -69,7 +71,7 @@ For operator reference, see [docs/operators/](docs/operators/) and the [Newton s
 | `newton workflow runs list\|show` | Inspect past executions |
 | `newton workflow checkpoint\|artifact` | Manage checkpoints and artifacts |
 | `newton init [path]` | Scaffold `.newton/` and install template |
-| `newton optimize <project_id>` | Drive the optimization loop / drain the Plan queue (renamed from `batch`) |
+| `newton optimize <project_id> --definition <file>` | Run a definition-bound native optimization lifecycle |
 | `newton serve` | HTTP/WebSocket API for workflow state, loop observation, and integrations |
 | `newton data <verb> <entity>` | Catalog CRUD (`finding`, `change-request`, `plan`, `optimize-run`, …) |
 | `newton doctor` | Environment readiness diagnostics |
@@ -91,23 +93,34 @@ Trigger payload merge order: `--parameters-json` (base object), then each `--tri
 
 ### Optimization loop
 
-Newton's autonomous loop improves a project toward a **Grade**:
+Newton's native loop runs a reusable, versioned **Optimization Definition**. A
+definition declares the strategy, objective, comparison policy, constraints,
+limits, completion criteria, and workflow roles. It can use a numeric objective
+with units (for example, bytes or verified vulnerabilities) or a Grade.
 
 ```
-grade ─→ reconcile ─→ change-request ─→ plan ─→ develop ─→ merge ─→ re-grade
-(Assessment) (Findings)  (Change Request)  (HOW)  (tests)   (local git)
+baseline grade ─→ plan ─→ candidate develop ─→ candidate grade ─→ accept ─→ promote
+                                                               │
+                                                     constraints + comparison
 ```
 
-The durable work spine — `Finding → Change Request → Plan → Execution` — lives in Newton's store (never a board). It runs **GitHub-free** and terminates on a break condition (converged / max-cycles / per-grader target / regression / no-progress / `stalled_on_blocked`).
+The software-improvement strategy may use the durable `Finding → Change Request
+→ Plan → Execution` spine, but unrelated strategies do not have to. A candidate
+is promoted only after its exact evaluated artifact qualifies under the active
+requirements. A passing development test alone is not acceptance.
 
 ```bash
-# Closed loop (interim driver; reads the optimize_* block in .newton/configs/<id>.conf)
-.newton/scripts/optimize.sh my-project --once
-# Rust command (currently drains the Plan queue under .newton/plan/<id>/todo/)
-newton optimize my-project --once
+# Definition path can also be definition_file in .newton/configs/<id>.conf.
+newton optimize my-project --definition .newton/definitions/my-security.yaml --once
+# Inspect a finished run or continue only from a known safe durable phase.
+newton optimize my-project --resume <RUN_ID>
 ```
 
-Observe runs over `serve`: `GET /api/v1/optimize-runs[/{id}/trajectory]`, `GET /api/v1/findings?status=blocked`, `POST /api/v1/findings/{id}/unblock`. See [skill/newton/references/optimize.md](skill/newton/references/optimize.md) and [CONTEXT.md](CONTEXT.md).
+The definition roles `grade`, `plan`, and `develop` are required for the native
+software strategy; `promote` is optional. Each role emits a validated result
+envelope. See [the optimization contract](docs/optimization-contract.md) for a
+definition example, permission boundaries, requirements revisions, and recovery
+semantics.
 
 ### HTTP serve API
 
@@ -217,10 +230,9 @@ workspace/
 ├── .newton/
 │   ├── workflows/       # Workflow YAML (from template)
 │   ├── grader/          # Command-Graders: <name>/generate.sh (prints an Assessment)
-│   ├── configs/         # Workflow, optimize, and integration config (*.conf)
-│   ├── plan/            # Plan queues by project_id
-│   ├── optimize/        # Per-project loop trajectory.jsonl (audit trail)
-│   ├── tasks/           # Per-plan execution state
+│   ├── configs/         # Project bindings and integration config (*.conf)
+│   ├── definitions/     # Versioned Optimization Definition YAML
+│   ├── optimize/        # Durable run journals and local ownership markers
 │   ├── state/           # Workflow run records
 │   ├── checkpoints/     # Resume checkpoints
 │   ├── artifacts/       # Generated artifacts

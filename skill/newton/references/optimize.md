@@ -2,16 +2,20 @@
 
 > Supersedes the old `batch.md`. `batch` was renamed to `optimize` (ADR 0003).
 
-## Two drivers
+## Native driver
 
-| Driver | What it does today |
-| --- | --- |
-| `newton optimize <project_id>` | Rust command. **Currently drains the Plan queue** under `.newton/plan/<project_id>/todo/` (the renamed `batch`), running the configured workflow per Plan until the queue is empty. |
-| `.newton/scripts/optimize.sh <project_id>` | The **full closed loop** (grade → reconcile → change-request → plan → develop → re-grade) with break conditions — the interim driver until the in-process `newton optimize` lands (spec 073). |
+`newton optimize <project_id>` runs a durable native lifecycle. It requires a
+versioned Optimization Definition supplied by `--definition <path>` or the
+project config's `definition_file`. The software strategy invokes `grade`,
+`plan`, and `develop`, evaluates the exact Candidate under active requirements,
+then invokes optional `promote` only for a qualifying result. Legacy Plan queues
+and the shell driver are not the production contract.
 
-Both read `.newton/configs/<project_id>.conf`.
+Use `--resume <RUN_ID>` for a known safe durable phase. A declarative local
+`--requirements-update <path>` is serialized with the run; an update that cannot
+be enforced while work is live remains Pending rather than becoming active.
 
-## `optimize.sh` options
+## Legacy shell scaffold (not the native contract)
 
 ```
 optimize.sh <project_id> [--once] [--max-cycles N] [--converge-rounds K]
@@ -24,7 +28,7 @@ optimize.sh <project_id> [--once] [--max-cycles N] [--converge-rounds K]
 - `--delivery local|pr` — `local` merges to main with `git merge --ff-only` (zero GitHub); `pr` opens a PR.
 - `--auto-approve` — bypass HIL approval gates (loops/tests).
 
-## The loop, one cycle
+## Historical Findings-driven loop shape
 
 1. **Grade** — for each configured grader, run `.newton/grader/<name>/generate.sh <repo_id> <repo_path>`, which **prints an Assessment to stdout**. `GraderCommandOperator` validates + persists it. (The script must NOT self-persist.)
 2. **Reconcile** — `ReconcileOperator` matches Observations → durable **Findings** (refresh / create / resolve).
@@ -35,7 +39,7 @@ optimize.sh <project_id> [--once] [--max-cycles N] [--converge-rounds K]
 7. **Develop** — `develop.yaml` renders `Plan.body` → implements → runs `optimize_test_cmd` (gate) → commits → merges (or PR). Success → `Plan: complete`; failure after retries → `Plan: failed`.
 8. **Re-grade** — record the cycle in the **Trajectory** and loop.
 
-## Break conditions
+## Historical strategy guards
 
 | Condition | Fires when |
 | --- | --- |
@@ -46,7 +50,7 @@ optimize.sh <project_id> [--once] [--max-cycles N] [--converge-rounds K]
 | `regressed` | **any** grader drops > its `optimize_regression_tolerance[_<grader>]` vs last cycle (disjunction) |
 | `no_progress` | grade + open-Finding count unchanged for K cycles (failed-develop cycles count) |
 
-## Failed Plans → `blocked` Findings
+## Historical failed-Plan quarantine
 
 When a Plan fails develop after `optimize_max_failed_attempts` (default 2), its linked Finding(s) become **`blocked`**: fenced from change-request synthesis (never re-planned), still open, **human-cleared only**. The loop keeps optimizing the rest. A human un-blocks via:
 
@@ -67,7 +71,7 @@ POST /api/v1/findings/{id}/unblock         # un-block a Finding
 
 The HTTP surface is **read-only + unblock** (the loop is self-driving; no HTTP route starts/stops/configures a run — ADR 0004). Run/cycle state is mirrored to the store by the driver via the local CLI (`newton data post optimize-run|optimize-cycle`).
 
-## Configuration (`.newton/configs/<project_id>.conf`)
+## Historical shell configuration
 
 ```sh
 optimize_repo_id="…"                 # Newton Repo UUID = grading scope_id

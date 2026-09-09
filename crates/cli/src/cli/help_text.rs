@@ -32,8 +32,22 @@ EXAMPLES:
     newton init . --template gonewton/newton-templates";
 
 pub(super) const OPTIMIZE_LONG_ABOUT: &str = "\
-Optimize reads Plans from .newton/plan/<project_id>/todo and drives the \
-autonomous optimization loop until the Plan queue is drained.
+Optimize binds a versioned Optimization Definition and runs native, durable \
+grade/plan/develop/evaluate cycles. A definition is required through --definition \
+or definition_file in .newton/configs/<project_id>.conf. Legacy plan files are not consumed.
+
+The software-improvement strategy requires grade, plan and develop workflow roles; \
+promote is optional and runs only after qualifying evaluation. Each workflow must \
+declare io.result_map and the documented optimization result envelope. \
+Local ownership is not a distributed lock. Interrupted external effects require reconciliation.
+
+--requirements-update accepts a full RequirementsUpdate YAML with base_revision \
+and requirements, only with --resume. A live owner retains the request in a local \
+Pending inbox; it is not active and is not automatically applied by running work. \
+Resume activates at a ready or completed-cycle boundary after ownership is acquired. \
+Uncertain effects keep the revision Pending until reconciliation; stale requests are \
+recorded as Rejected. Local CLI access supplies update authority without widening \
+the persisted execution ceiling. Restrictions unsupported by this host are rejected.
 
 EXAMPLES:
   Drive the optimization loop for a project:
@@ -42,8 +56,14 @@ EXAMPLES:
   With workspace override:
     newton optimize project-alpha --workspace ./workspace
 
-  Process one Plan and exit:
-    newton optimize project-alpha --once
+  Run one complete evaluated cycle:
+    newton optimize project-alpha --definition ./security.yaml --once
+
+  Resume using persisted requirements:
+    newton optimize project-alpha --resume <RUN_ID>
+
+  Submit a local revision and resume at a safe boundary:
+    newton optimize project-alpha --resume <RUN_ID> --requirements-update ./revision.yaml --once
 
   Custom poll interval (seconds):
     newton optimize project-alpha --poll-interval 30";

@@ -262,7 +262,16 @@ pub struct OptimizeArgs {
     /// Workspace root containing the .newton directory (default: discover from CWD)
     pub workspace: Option<PathBuf>,
 
-    /// Process a single Plan and exit instead of running as a daemon
+    /// Reusable Optimization Definition; overrides definition_file in project config.
+    pub definition: Option<PathBuf>,
+
+    /// Resume an existing run from its persisted definition and phase journal.
+    pub resume: Option<String>,
+
+    /// Declarative requirements revision, submitted only with --resume.
+    pub requirements_update: Option<PathBuf>,
+
+    /// Execute one complete candidate/evaluation cycle and stop.
     pub once: bool,
 
     /// Seconds to wait when the Plan queue is empty (default: 60)

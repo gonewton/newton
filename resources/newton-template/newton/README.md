@@ -13,11 +13,21 @@ This template scaffolds a Newton workspace with **workflow YAML** definitions an
 
 ## After `newton init`
 
-1. Edit `.newton/configs/default.conf`: set `workflow_file` to the workflow you want `newton batch` to use (path relative to `project_root` or your workspace), for example:
-   - `workflow_file=.newton/workflows/develop.yaml`
-2. Run a workflow directly:
+1. Run a workflow directly:
    - `newton run .newton/workflows/develop.yaml --workspace .`
-3. Use the helper scripts from your workspace root if you prefer (they expect a matching `<project_id>.conf` under `.newton/configs/`).
+2. Use the helper scripts from your workspace root if you prefer (they expect a matching `<project_id>.conf` under `.newton/configs/`).
+3. To use `newton optimize`, add a versioned Optimization Definition and point a
+   project config at it:
+
+   ```text
+   project_root=.
+   definition_file=.newton/definitions/my-definition.yaml
+   optimize_allowed_actions=agent,command,network,commit,draft_pull_request,merge
+   ```
+
+   The native software strategy requires `grade`, `plan`, and `develop` workflow
+   roles, and validates candidate evidence before an optional `promote` role.
+   Read Newton's optimization contract before granting workflow actions.
 4. For vulnerability grading via workflow/wrapper, add keys like:
    - `vuln_grader_agent=claude`
    - `vuln_grader_model=sonnet`

@@ -340,6 +340,9 @@ impl FromArgValueMap for OptimizeArgs {
         OptimizeArgs {
             project_id,
             workspace: get_opt_path(map, "workspace"),
+            definition: get_opt_path(map, "definition"),
+            resume: get_opt_str(map, "resume"),
+            requirements_update: get_opt_path(map, "requirements-update"),
             once: get_bool(map, "once"),
             poll_interval_seconds,
         }

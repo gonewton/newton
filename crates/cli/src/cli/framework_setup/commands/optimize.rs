@@ -22,7 +22,8 @@ pub(crate) fn optimize_command() -> Command {
                 "newton optimize project-alpha",
                 "newton optimize project-alpha --workspace ./workspace",
                 "newton optimize project-alpha --once",
-                "newton optimize project-alpha --poll-interval 30",
+                "newton optimize project-alpha --definition ./security.yaml --once",
+                "newton optimize project-alpha --resume <RUN_ID>",
             ],
             args: vec![
                 ArgSpec {
@@ -43,12 +44,39 @@ pub(crate) fn optimize_command() -> Command {
                     ..Default::default()
                 },
                 ArgSpec {
+                    name: "definition",
+                    kind: ArgKind::Option,
+                    long: Some("definition"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    help: "Optimization Definition YAML; overrides project definition_file",
+                    ..Default::default()
+                },
+                ArgSpec {
+                    name: "resume",
+                    kind: ArgKind::Option,
+                    long: Some("resume"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    help: "Resume a persisted Optimize Run; uncertain external effects require reconciliation",
+                    ..Default::default()
+                },
+                ArgSpec {
+                    name: "requirements-update",
+                    kind: ArgKind::Option,
+                    long: Some("requirements-update"),
+                    value_type: ArgValueType::String,
+                    cardinality: Cardinality::Optional,
+                    help: "RequirementsUpdate YAML (requires --resume); live or uncertain work retains Pending, never claims activation",
+                    ..Default::default()
+                },
+                ArgSpec {
                     name: "once",
                     kind: ArgKind::Flag,
                     long: Some("once"),
                     value_type: ArgValueType::Bool,
                     cardinality: Cardinality::Optional,
-                    help: "Process a single Plan and exit instead of running as a daemon",
+                    help: "Run one complete cycle including evaluation before acceptance",
                     ..Default::default()
                 },
                 ArgSpec {
@@ -57,7 +85,7 @@ pub(crate) fn optimize_command() -> Command {
                     long: Some("poll-interval"),
                     value_type: ArgValueType::Int,
                     cardinality: Cardinality::Optional,
-                    help: "Seconds to wait when the Plan queue is empty (default: 60)",
+                    help: "Seconds between optimization cycles (default: 60)",
                     min: Some(1),
                     ..Default::default()
                 },

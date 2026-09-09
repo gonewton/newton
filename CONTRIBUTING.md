@@ -12,6 +12,8 @@ The repository is a Cargo workspace:
 | `crates/cli` | `newton-cli` | Binary `newton`: clap/cli-framework wiring. Depends on `newton-core`. |
 | `crates/types` | `newton-types` | Shared API and domain types (leaf crate). |
 | `crates/backend` | `newton-backend` | SQLite persistence store. Depends on `newton-types`. |
+| `crates/dependencies` | `newton-dependencies` | Deterministic dependency discovery and impact planning. No storage, HTTP, or LLM access. |
+| `crates/projections` | `newton-projections` | Optional write-only external-status projections with durable local delivery records. |
 | `crates/test-utils` | `ws001-test-utils` | Shared test helpers (HTTP fixtures, temp workspaces). |
 
 Dependency direction:

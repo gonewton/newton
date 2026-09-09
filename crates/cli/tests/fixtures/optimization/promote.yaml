@@ -1,0 +1,13 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: promote
+    io:
+      result_map:
+        artifact_id: '$expr: triggers.accepted_result.candidate.artifact_id'
+        base_artifact_id: '$expr: triggers.accepted_result.candidate.base_artifact_id'
+  tasks:
+    - id: promote
+      operator: NoOpOperator
+      terminal: success

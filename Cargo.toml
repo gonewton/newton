@@ -5,6 +5,8 @@ members = [
     "crates/cli",
     "crates/types",
     "crates/backend",
+    "crates/dependencies",
+    "crates/projections",
     "crates/test-utils",
 ]
 
@@ -75,3 +77,4 @@ schemars = { version = "1.2", features = ["chrono04", "uuid1", "indexmap2"] }
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "migrate", "chrono", "uuid"] }
 flate2 = "1.0"
 libc = "0.2"
+semver = { version = "1", features = ["serde"] }

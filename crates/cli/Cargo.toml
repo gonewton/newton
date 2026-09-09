@@ -96,10 +96,6 @@ name = "test_log_commands"
 path = "tests/integration/test_log_commands.rs"
 
 [[test]]
-name = "test_batch_workflow_state_paths"
-path = "tests/batch/test_batch_workflow_state_paths.rs"
-
-[[test]]
 name = "test_workflow_scenarios"
 path = "tests/integration/test_workflow_scenarios.rs"
 

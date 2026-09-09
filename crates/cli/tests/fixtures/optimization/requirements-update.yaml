@@ -1,0 +1,17 @@
+base_revision: 1
+requirements:
+  objective:
+    mode: primary
+    objective:
+      id: size
+      evaluator: fixture
+      measurement: {kind: numeric, unit: bytes, direction: minimize}
+  evaluators:
+    fixture: {workflow: grade.yaml, revision: '1'}
+  comparison: {kind: exact}
+  acceptance_constraints:
+    - {id: behavior, evaluator: fixture}
+  execution_restrictions: {denied_actions: [], protected_paths: []}
+  resource_limits: {elapsed_seconds: 120, max_cycles: 4, max_work: 12, max_evaluations: 12}
+  completion:
+    - {kind: objective_target, objective: size, target: 0}

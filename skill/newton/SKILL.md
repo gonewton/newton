@@ -1,20 +1,20 @@
 ---
 name: newton
-description: Newton CLI for workflow YAML graphs (operators, checkpoints, goal gates), the autonomous optimization loop (grade → reconcile → change-request → plan → develop → re-grade) over the Finding → Change Request → Plan → Execution spine with Graders/Assessments, ailoop human-in-the-loop via HumanApprovalOperator/HumanDecisionOperator, and HTTP APIs via serve. Use when running or resuming workflows, driving or observing the optimization loop, validating or linting workflow files, managing checkpoints or artifacts, configuring .newton/configs, or using `optimize`, `workflow validate`, `workflow lint`, `workflow preview`, `workflow graph`, `workflow resume`, `workflow runs`, `workflow checkpoint`, `workflow artifact`.
+description: Newton CLI for workflow YAML graphs (operators, checkpoints, goal gates) and versioned Optimization Definitions. `optimize` runs durable baseline-grade → plan → candidate-develop → candidate-grade → accept → optional-promote cycles with explicit constraints and requirements revisions. Use when running/resuming workflows, binding an optimization definition, observing a run, validating YAML, or managing checkpoints/artifacts.
 license: Apache-2.0
 compatibility: Requires the newton binary on PATH. newton init requires aikit on PATH for templates.
 ---
 
 # Newton
 
-Newton is a **workflow-first** CLI **and an autonomous optimizer**: it runs YAML workflow graphs (operators, checkpoints, artifacts, goal gates) and drives the **optimization loop** that improves a project toward a **Grade**. **Sub-workflows** are supported: a task can invoke another workflow file with `WorkflowOperator` (`workflow_path`, optional `context` and `triggers` merges), subject to workspace path rules and a maximum nesting depth.
+Newton is a **workflow-first** CLI **and an autonomous optimizer**: it runs YAML workflow graphs (operators, checkpoints, artifacts, goal gates) and drives definition-bound optimization toward a numeric or Grade objective. **Sub-workflows** are supported: a task can invoke another workflow file with `WorkflowOperator` (`workflow_path`, optional `context` and `triggers` merges), subject to workspace path rules and a maximum nesting depth.
 
 > **Vocabulary changes (pre-1.0):** `batch` was renamed to **`optimize`** (ADR 0003); the `webhook` command and `health` CLI command were **removed** (`webhook` per ADR 0004 — the optimizer is self-driving, no external ingress; `health` folded into `doctor`). The durable work entity `Opportunity` was renamed to **`Finding`** (061). See [Optimization loop](#optimization-loop) and `CONTEXT.md`.
 
 ## When to use
 
 - Running or resuming workflows (including graphs that call nested workflows via `WorkflowOperator`).
-- Driving the **optimization loop** for a project (`newton optimize <project>` / the `.newton/scripts/optimize.sh` loop driver) or **observing** it over `serve`.
+- Driving a definition-bound **optimization loop** for a project (`newton optimize <project> --definition <file>`) or **observing** it over `serve`.
 - Initializing a workspace (`newton init`) and editing `.newton/configs/*.conf`.
 - Validating or explaining workflow YAML; cleaning checkpoints or artifacts.
 - Operating `newton serve` for HTTP or WebSocket APIs (incl. the optimize-run + grading read endpoints).
@@ -49,7 +49,7 @@ These subcommands match the current CLI (confirm with `newton --help` on your bu
 | --- | --- |
 | `run` | Execute a workflow graph from YAML |
 | `init` | Create `.newton/` and install the default template |
-| `optimize` | Drive the optimization loop for a project (renamed from `batch`, ADR 0003). The current Rust command drains the **Plan** queue under `.newton/plan/<project_id>/`; the **full closed loop** (grade → reconcile → change-request → plan → develop → re-grade) is driven by `.newton/scripts/optimize.sh` until the in-process driver lands (spec 073) |
+| `optimize` | Run a durable, definition-bound native loop. The software strategy requires `grade`, `plan`, and `develop` roles; it evaluates a Candidate before optional `promote`. Legacy Plan queues are not consumed. |
 | `serve` | HTTP/WebSocket API for workflow state, streaming, and loop observation |
 | `data` | Catalog CRUD over HTTP-style verbs (`get`/`post`/`patch`/`put`/`delete`) for entities incl. `finding`, `change-request`, `plan`, `optimize-run`, `optimize-cycle`, `eval-run`, `grade` |
 | `doctor` | Environment readiness diagnostics (replaces the removed `health` command) |
@@ -70,8 +70,8 @@ There is **no** `step`, `status`, `report`, or `error` subcommand in current rel
 
 ## Typical flows
 
-1. **New workspace**: `newton init .` then set `workflow_file` in `.newton/configs/default.conf`; run workflows with `newton workflow run path/to/workflow.yaml --workspace .`.
-2. **Optimization loop**: Configure `.newton/configs/<project_id>.conf` with the `optimize_*` block (repo, test cmd, graders, break-condition thresholds — see [Optimization loop](#optimization-loop)); run the closed loop with `.newton/scripts/optimize.sh <project_id> [--once]`. (The Rust `newton optimize <project_id>` currently drains the Plan queue.)
+1. **New workspace**: `newton init .`; run workflows with `newton workflow run path/to/workflow.yaml --workspace .`.
+2. **Optimization loop**: write or select a versioned definition, set `definition_file` in `.newton/configs/<project_id>.conf`, then run `newton optimize <project_id> --once`. Use `--resume <RUN_ID>` to continue a safe durable phase; `--requirements-update <file>` is local-only and only activates at a safe boundary.
 3. **Live HIL**: Use `HumanApprovalOperator` or `HumanDecisionOperator` in your workflow YAML to pause for human input via [ailoop](https://github.com/goailoop/ailoop). Interact with ailoop channels using ailoop's own clients.
 4. **API / dashboards**: `newton serve` exposes REST, WebSocket, and SSE endpoints for workflow instances, streams, and the optimization loop (`/api/v1/optimize-runs`, trajectory, findings), and serves the **embedded web UI** at `/` by default (open the URL printed on startup in a browser to visualize optimize runs, findings, change requests, and plans; `--no-web` disables it). See `newton serve --help` and the Newton `README.md`.
 5. **Grade a project (Finding ingest)**: Write a **command-Grader** at `.newton/grader/<name>/generate.sh <repo_id> <repo_path>` that runs your analyzer (e.g. `dk review`) and **prints an Assessment JSON to stdout** (it must NOT self-persist). The loop's grade phase runs it via `GraderCommandOperator`, which validates and persists the Assessment; `ReconcileOperator` then turns its Observations into durable **Findings**.
@@ -107,7 +107,7 @@ grade ─→ reconcile ─→ change-request ─→ (approve) ─→ plan ─→
 - **`blocked` Finding + un-block** — when a Plan fails develop after `optimize_max_failed_attempts`, its Findings are **quarantined** (`blocked`) and a human is escalated to; the loop keeps optimizing the rest. Clear with `POST /api/v1/findings/{id}/unblock`.
 - **Multi-grader** — `optimize_graders` is a space list; Findings pool into one Change Request per cycle; targets/regression are per-grader.
 
-**Drivers:** the **closed loop** runs via `.newton/scripts/optimize.sh <project_id> [--once] [--max-cycles N] [--delivery local|pr] [--auto-approve]` (interim; the in-process `newton optimize` is spec 073). It reads the `optimize_*` block in `.newton/configs/<project_id>.conf` (`optimize_repo_id`, `optimize_repo_path`, `optimize_test_cmd`, `optimize_graders`, `optimize_max_cycles`, `optimize_converge_rounds`, `optimize_target_grade[_<grader>]`, `optimize_regression_tolerance[_<grader>]`, `optimize_max_failed_attempts`, `optimize_auto_approve`, `delivery`).
+**Native driver:** `newton optimize` requires `--definition <file>` or `definition_file` in its project config. It persists a definition binding, requirements revisions, Candidate evidence, a Cycle journal, and the final outcome. A Candidate is promoted only after correlated current evidence satisfies every Acceptance Constraint and the Comparison Policy. A legacy shell script MAY remain as a development scaffold but is not the production loop contract.
 
 **Observe over `serve`** (read-only — the loop is self-driving, ADR 0004):
 
@@ -125,8 +125,8 @@ See [references/optimize.md](references/optimize.md).
 
 ```bash
 newton workflow run workflow.yaml --workspace . --verbose
-.newton/scripts/optimize.sh my-project --once          # drive one closed-loop cycle
-newton optimize my-project --workspace ~/ws --once     # Rust command: drain the Plan queue
+newton optimize my-project --definition security.yaml --once
+newton optimize my-project --resume <RUN_ID> --requirements-update update.yaml
 newton workflow validate workflow.yaml
 newton workflow lint workflow.yaml
 newton workflow preview workflow.yaml
@@ -269,7 +269,7 @@ A successful bind emits one structured `tracing::info!` event with fields `event
 
 ## References
 
-- [references/configuration.md](references/configuration.md) — `.newton/configs` keys read by Newton (`optimize_*` block, `init` stub)
+- [references/configuration.md](references/configuration.md) — `.newton/configs` keys read by Newton
 - [references/init.md](references/init.md)
 - [references/run.md](references/run.md)
 - [references/optimize.md](references/optimize.md) — the `optimize` command + the closed optimization loop, entities, break conditions, and `serve` endpoints (supersedes the old `batch.md`)

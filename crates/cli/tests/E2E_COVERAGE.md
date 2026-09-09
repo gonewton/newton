@@ -52,7 +52,7 @@ Required smoke rows: `init`, `optimize`, `serve`, `workflow`,
 | checkpoint clean | --older-than | integ_checkpoint_clean_older_than | integration |
 | artifact clean | --older-than | integ_artifact_clean_removes_old | integration |
 | init |  | integ_init_creates_workspace | integration |
-| optimize | --once | integ_optimize_once_no_plans | integration |
+| optimize | --definition <file> --once | native_once_grades_before_plan_and_before_promotion | integration |
 | doctor |  | integ_doctor_command | integration |
 | config show |  | integ_config_show | integration |
 | completion | bash | integ_completion_bash | integration |
