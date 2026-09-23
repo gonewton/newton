@@ -22,6 +22,31 @@ use wait_timeout::ChildExt;
 
 pub const KILL_WAIT_TIMEOUT_SECS: u64 = 5;
 
+/// Pick a port for a `newton` server under test. `newton serve --port` and
+/// `newton mcp serve --port` reject `0`, so the kernel can't choose for us.
+///
+/// Candidates come from 20000..30000, below Linux's ephemeral range
+/// (32768..60999). A port found free by binding `127.0.0.1:0` and dropping the
+/// listener comes from that ephemeral range, so the kernel can hand it to any
+/// outbound connection before `newton` binds it. Same approach as
+/// aroff/cli-framework#153.
+pub fn reserve_port() -> u16 {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    const BASE: u32 = 20_000;
+    const SPAN: u32 = 10_000;
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+
+    let seed = std::process::id().wrapping_add(NEXT.fetch_add(97, Ordering::Relaxed));
+    for offset in 0..SPAN {
+        let candidate = (BASE + seed.wrapping_add(offset) % SPAN) as u16;
+        if std::net::TcpListener::bind(("127.0.0.1", candidate)).is_ok() {
+            return candidate;
+        }
+    }
+    panic!("no free TCP port in {}..{}", BASE, BASE + SPAN);
+}
+
 pub fn fixture_path(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")

@@ -4,6 +4,9 @@
 //! Note: `ExecutionContext::Server` disables tracing to stderr (`ConsoleOutput::None`),
 //! so we cannot wait for "Newton API server listening" on stderr. Readiness is asserted
 //! via `GET /health` polling instead.
+#[path = "../support/mod.rs"]
+mod support;
+
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -26,11 +29,6 @@ const STDERR_LINE_WAIT: Duration = Duration::from_secs(2);
 /// Per-request HTTP bound for assertions after the server is ready.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(6);
 
-fn pick_free_port() -> u16 {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    l.local_addr().unwrap().port()
-}
-
 #[tokio::test]
 async fn serve_default_does_not_emit_mcp_log_and_mcp_route_absent() {
     let outcome = tokio::time::timeout(TEST_TIMEOUT, run_serve_without_mcp_test()).await;
@@ -47,7 +45,7 @@ async fn serve_default_does_not_emit_mcp_log_and_mcp_route_absent() {
 
 async fn run_serve_without_mcp_test() -> Result<(), String> {
     let dir = tempdir().map_err(|e| format!("tempdir: {e}"))?;
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let bin = assert_cmd::cargo::cargo_bin("newton");
 
     let saw_mcp_event = Arc::new(AtomicBool::new(false));

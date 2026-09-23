@@ -6,16 +6,14 @@
 //! We verify the contract end-to-end by spawning the binary on a free port
 //! and reading the JSON-line we mirror to stderr (spec §4.6). The cli-framework
 //! HTTP transport keeps running until killed; we read one line then SIGKILL.
+#[path = "../support/mod.rs"]
+mod support;
+
 use newton_cli::cli::framework_setup::MCP_EXPOSED_COMMAND_IDS;
 use newton_cli::cli::mcp;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-
-fn pick_free_port() -> u16 {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    l.local_addr().unwrap().port()
-}
 
 #[test]
 fn tool_count_matches_registered_command_ids() {
@@ -24,7 +22,7 @@ fn tool_count_matches_registered_command_ids() {
 
 #[test]
 fn mcp_serve_emits_structured_startup_log() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let bin = assert_cmd::cargo::cargo_bin("newton");
     let mut child = Command::new(bin)
         .arg("mcp")

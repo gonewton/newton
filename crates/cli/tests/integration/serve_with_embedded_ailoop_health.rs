@@ -2,15 +2,13 @@
 //! router onto the same Axum listener as Newton REST API, emits a structured
 //! `ailoop_serve_started` JSON event on stderr, and serves both Newton REST
 //! (`/health`) and ailoop health (`<base_path>/api/v1/health`) on the same port.
+#[path = "../support/mod.rs"]
+mod support;
+
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-
-fn pick_free_port() -> u16 {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    l.local_addr().unwrap().port()
-}
 
 /// Starts `newton serve --with-embedded-ailoop` and waits for the structured
 /// `ailoop_serve_started` JSON line on stderr. Returns the child process so
@@ -61,24 +59,14 @@ fn start_embedded_ailoop_server(port: u16, base_path: &str) -> (std::process::Ch
         }
     };
 
-    // The `ailoop_serve_started` line is emitted just before the listener binds,
-    // so it is NOT a reliable "accepting connections" signal. Poll the socket
-    // until it actually accepts before returning — otherwise callers race the
-    // bind and get a spurious connection-refused (flaky under the slow
-    // coverage-instrumented binary).
-    let ready_deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            break;
-        }
-        if Instant::now() >= ready_deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!("server did not accept connections on port {port} within 30s");
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    // Keep draining stderr for the child's lifetime. The startup banner is
+    // written *after* `ailoop_serve_started`, and `eprintln!` panics on a
+    // closed pipe, so dropping the reader here kills the server at a random
+    // point before the request below is served.
+    std::thread::spawn(move || std::io::copy(&mut reader, &mut std::io::sink()));
 
+    // `newton serve` binds before it emits `ailoop_serve_started` (#527), so
+    // the line itself means the port is accepting: no extra readiness poll.
     (child, startup_line)
 }
 
@@ -88,7 +76,7 @@ fn start_embedded_ailoop_server(port: u16, base_path: &str) -> (std::process::Ch
 /// the structured log event emitted to stderr.
 #[test]
 fn ailoop_serve_started_event_has_correct_fields() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let base_path = "/ailoop";
     let (mut child, line) = start_embedded_ailoop_server(port, base_path);
 
@@ -109,7 +97,7 @@ fn ailoop_serve_started_event_has_correct_fields() {
 /// Criterion 3: Newton REST `/health` endpoint is reachable on the same port.
 #[test]
 fn newton_health_responds_on_same_port() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let (mut child, _line) = start_embedded_ailoop_server(port, "/ailoop");
 
     let result = (|| -> Result<(), String> {
@@ -140,7 +128,7 @@ fn newton_health_responds_on_same_port() {
 /// Criteria 1 and 2: ailoop health endpoint responds under the base path.
 #[test]
 fn ailoop_health_endpoint_responds_under_base_path() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let base_path = "/ailoop";
     let (mut child, _line) = start_embedded_ailoop_server(port, base_path);
 
@@ -175,7 +163,7 @@ fn ailoop_health_endpoint_responds_under_base_path() {
 /// §4.7 CORS verification: OPTIONS preflight on an ailoop route returns 2xx.
 #[test]
 fn cors_options_preflight_on_ailoop_route_returns_2xx() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let base_path = "/ailoop";
     let (mut child, _line) = start_embedded_ailoop_server(port, base_path);
 

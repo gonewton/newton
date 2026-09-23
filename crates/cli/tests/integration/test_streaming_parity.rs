@@ -7,16 +7,14 @@
 //!
 //! Spawns `newton serve` as a child process and polls `/health` for readiness.
 
+#[path = "../support/mod.rs"]
+mod support;
+
 use futures::StreamExt;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use tempfile::tempdir;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-
-fn pick_free_port() -> u16 {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    l.local_addr().unwrap().port()
-}
 
 fn start_newton_serve(port: u16) -> (std::process::Child, tempfile::TempDir) {
     let dir = tempdir().expect("tempdir");
@@ -56,7 +54,7 @@ async fn wait_for_ready(port: u16) -> bool {
 /// G1: heartbeat `/ws` sends `{"type":"welcome"}` as the first text frame.
 #[tokio::test]
 async fn ws_heartbeat_welcome() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let (mut child, _dir) = start_newton_serve(port);
 
     let ready = wait_for_ready(port).await;
@@ -103,7 +101,7 @@ async fn ws_heartbeat_welcome() {
 /// G1: heartbeat `/ws` forwards broadcast events to connected clients.
 #[tokio::test]
 async fn ws_heartbeat_forwards_broadcast() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let (mut child, _dir) = start_newton_serve(port);
 
     let ready = wait_for_ready(port).await;
@@ -186,7 +184,7 @@ async fn ws_heartbeat_forwards_broadcast() {
 /// G2: per-instance WS emits `workflowInstanceUpdated` snapshot as first frame.
 #[tokio::test]
 async fn ws_workflow_snapshot_on_connect() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let (mut child, _dir) = start_newton_serve(port);
 
     let ready = wait_for_ready(port).await;
@@ -251,7 +249,7 @@ async fn ws_workflow_snapshot_on_connect() {
 /// surfaces this as `Error::Http(response)`.
 #[tokio::test]
 async fn ws_workflow_not_found_returns_404() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let (mut child, _dir) = start_newton_serve(port);
 
     let ready = wait_for_ready(port).await;
@@ -295,7 +293,7 @@ async fn ws_workflow_not_found_returns_404() {
 /// G3: logs WS emits `logMessage "Connected to <name>"` as first frame.
 #[tokio::test]
 async fn ws_logs_connected_line() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let (mut child, _dir) = start_newton_serve(port);
 
     let ready = wait_for_ready(port).await;
