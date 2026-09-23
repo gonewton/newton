@@ -3,6 +3,7 @@ source: crates/cli/tests/integration/cli_help_test.rs
 description: |
   Parity snapshot of `newton --help` after spec 051 moves `run` under `workflow`
   and after cli-framework v0.4.2 introduces category-grouped help output.
+  cli-framework b3fd5df adds the root-help "Environment Variables" section.
   `run` is excluded from the snapshot (deprecated hidden alias).
   Command lines are sorted alphabetically for determinism.
 ---
@@ -22,11 +23,16 @@ Workflow:
 Workspace:
   init  Initialize a Newton workspace with the default template
 Other:
-  completion  Emit a shell completion stub for top-level subcommands
+  completion  Emit a shell completion script for the registered command tree
   data        Catalog CRUD via HTTP-style verbs (get/post/put/patch/delete)
   dependency  Discover, review, and query approved dependency maps
   mcp         MCP server management
   spec        Export the CLI command surface as JSON, YAML, or Markdown
 Options:
   --help, -h      Print this help message.
-  --version, -V   Print version (newton 0.5.110).
+  --version, -V   Print version (newton 0.5.128).
+Environment Variables:
+  AIKIT_LLM_URL               OpenAI-compatible base URL (default: https://api.openai.com/v1)
+  AIKIT_MODEL                 Default model name (overridden by --model)
+  ALLOW_DESTRUCTIVE_COMMANDS  Set to 1/true to allow destructive commands (still requires confirmation)
+  OPENAI_API_KEY              API key used by the embedded chat agent (OpenAI-compatible)
