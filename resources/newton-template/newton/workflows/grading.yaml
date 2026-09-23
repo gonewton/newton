@@ -1,36 +1,87 @@
 # grading.yaml — reference grading loop workflow (Spec 066)
 # Closes the grade → reconcile → change-request edge per ADR 0003.
-id: grading
-version: "1"
-description: |
-  Reference grading workflow. Runs a command Grader, reconciles Observations
-  into Findings, and synthesizes a Change Request (or halts on convergence).
+version: "2.0"
+mode: workflow_graph
 
-  Required context vars: grader, scope, scope_id, grader_cmd
-tasks:
-  grade:
-    operator: GraderCommandOperator
-    params:
-      cmd: "{{ grader_cmd }}"
-      grader: "{{ grader }}"
-      scope: "{{ scope }}"
-      scope_id: "{{ scope_id }}"
+metadata:
+  name: grading
+  description: |
+    Reference grading workflow. Runs a command Grader, reconciles Observations
+    into Findings, and synthesizes a Change Request (or halts on convergence:
+    the change_request task decides "none" when no open Findings remain).
 
-  reconcile:
-    operator: ReconcileOperator
-    depends_on: [grade]
-    params:
-      scope_id: "{{ scope_id }}"
-      grader: "{{ grader }}"
-      assessment: "{{ tasks.grade.output.assessment }}"
+    Required triggers: grader, grader_cmd, scope (e.g. "repo"), scope_id.
 
-  change_request:
-    operator: ChangeRequestOperator
-    depends_on: [reconcile]
-    params:
-      scope_id: "{{ scope_id }}"
-      max_findings: 10
+triggers:
+  type: manual
+  schema_version: "1.0"
+  payload:
+    grader: ""
+    grader_cmd: ""
+    scope: ""
+    scope_id: ""
 
-goal:
-  # Convergence: high score AND no critical findings.
-  condition: "tasks.grade.output.overall_score >= 90 || tasks.change_request.output.decision == 'none'"
+workflow:
+  settings:
+    entry_task: grade
+    max_time_seconds: 3600
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 1
+    max_workflow_iterations: 10
+    required_triggers: [grader, grader_cmd, scope, scope_id]
+
+  tasks:
+    - id: grade
+      operator: GraderCommandOperator
+      params:
+        cmd:
+          $expr: 'triggers.grader_cmd'
+        grader:
+          $expr: 'triggers.grader'
+        scope:
+          $expr: 'triggers.scope'
+        scope_id:
+          $expr: 'triggers.scope_id'
+      transitions:
+        - to: reconcile
+
+    - id: reconcile
+      operator: ReconcileOperator
+      params:
+        scope:
+          $expr: 'triggers.scope'
+        scope_id:
+          $expr: 'triggers.scope_id'
+        grader:
+          $expr: 'triggers.grader'
+        assessment:
+          $expr: 'tasks.grade.output.assessment'
+      transitions:
+        - to: change_request
+
+    - id: change_request
+      operator: ChangeRequestOperator
+      params:
+        scope:
+          $expr: 'triggers.scope'
+        scope_id:
+          $expr: 'triggers.scope_id'
+        max_findings: 10
+      transitions:
+        - to: proposed
+          when:
+            $expr: 'tasks.change_request.output.decision == "propose"'
+        - to: converged
+          when:
+            $expr: 'tasks.change_request.output.decision == "none"'
+
+    - id: proposed
+      operator: NoOpOperator
+      params: {}
+      terminal: success
+
+    - id: converged
+      operator: NoOpOperator
+      params: {}
+      terminal: success
