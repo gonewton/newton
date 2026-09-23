@@ -233,6 +233,17 @@ fn permissive_cors_allowed(oidc_configured: bool) -> bool {
     oidc_configured
 }
 
+/// Writes one line of startup output to stderr, ignoring write errors.
+///
+/// The startup events and banner are advisory; the server must keep serving
+/// when whoever launched it stops reading stderr. `eprintln!` panics on a
+/// failed write (EPIPE once the read end is closed), which unwinds out of
+/// `serve` and takes the listener down with it.
+fn stderr_line(line: &str) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stderr().lock(), "{line}");
+}
+
 /// Builds the human-readable startup banner lines. Newton's `info!` startup
 /// logs are silenced in the serve (Server) console context, and
 /// cli-framework's `serve()` prints nothing, so without this `newton serve`
@@ -578,10 +589,10 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
             tool_count = count,
             "MCP router mounted on Newton serve listener"
         );
-        eprintln!(
+        stderr_line(&format!(
             "{{\"event\":\"mcp_serve_started\",\"mcp_enabled\":true,\"bind_address\":\"{}\",\"mcp_path\":\"/mcp\",\"tool_count\":{}}}",
             bind_address, count
-        );
+        ));
     }
 
     if args.with_embedded_ailoop {
@@ -592,14 +603,14 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
             ailoop_base_path = %args.ailoop_base_path,
             "ailoop embedding active on Newton serve listener"
         );
-        eprintln!(
-            "{}",
-            serde_json::json!({
+        stderr_line(
+            &serde_json::json!({
                 "event": "ailoop_serve_started",
                 "ailoop_enabled": true,
                 "bind_address": bind_address,
                 "ailoop_base_path": args.ailoop_base_path,
             })
+            .to_string(),
         );
     }
 
@@ -615,7 +626,7 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         non_loopback_bind,
         oidc_config.as_ref().map(|c| c.issuer.as_str()),
     ) {
-        eprintln!("{line}");
+        stderr_line(&line);
     }
 
     server
