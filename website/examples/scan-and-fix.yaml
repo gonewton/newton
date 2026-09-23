@@ -1,0 +1,92 @@
+version: "2.0"
+mode: workflow_graph
+
+metadata:
+  name: "scan-and-fix"
+  description: "Scan dependencies, ask a person before fixing, then loop an agent against the tests until they pass."
+
+triggers:
+  type: manual
+  schema_version: "1.0"
+  payload: {}
+
+workflow:
+  settings:
+    entry_task: scan
+    max_time_seconds: 3600
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 40
+    default_engine: claude
+    command_operator:
+      allow_shell: true
+
+  tasks:
+    - id: scan
+      operator: CommandOperator
+      params:
+        shell: true
+        capture_stdout: true
+        cmd: |
+          osv-scanner scan source -r . --format json > osv.json
+          [ $? -le 1 ] && echo "SCAN_OK"
+      transitions:
+        - to: triage
+
+    - id: triage
+      operator: AgentOperator
+      params:
+        engine: claude
+        model: sonnet
+        prompt: "Read osv.json. Write an upgrade plan to plan.md, then print <status>PLANNED</status>, or <status>CLEAN</status> if nothing needs fixing."
+        signals:
+          planned: "<status>PLANNED</status>"
+          clean: "<status>CLEAN</status>"
+      transitions:
+        - to: approve
+          priority: 0
+          when: { "$expr": 'tasks.triage.output.signal == "planned"' }
+        - to: done
+          priority: 10
+
+    - id: approve
+      operator: HumanApprovalOperator
+      params:
+        prompt: "Apply the upgrade plan in plan.md?"
+      transitions:
+        - to: develop
+          priority: 0
+          when: { "$expr": "tasks.approve.output.approved == true" }
+        - to: done
+          priority: 10
+
+    - id: develop
+      operator: AgentOperator
+      max_iterations: 3
+      params:
+        engine: claude
+        model: sonnet
+        prompt: "Apply plan.md. If tests failed before, fix what they report."
+      transitions:
+        - to: test
+
+    - id: test
+      operator: CommandOperator
+      max_iterations: 3
+      params:
+        shell: true
+        capture_stdout: true
+        cmd: |
+          ./scripts/run-tests.sh && echo "TEST_STATUS: passed" || echo "TEST_STATUS: failed"
+      transitions:
+        - to: done
+          priority: 0
+          when: { "$expr": 'contains(tasks.test.output.stdout, "TEST_STATUS: passed")' }
+        - to: develop
+          priority: 10
+
+    - id: done
+      operator: NoOpOperator
+      params: {}
+      terminal: success

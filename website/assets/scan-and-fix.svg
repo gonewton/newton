@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg role="img" aria-labelledby="graph-title" class="workflow-graph" width="404pt" height="380pt"
+ viewBox="0.00 0.00 404.00 380.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<style>
+svg{font-variant-ligatures:none;--bg:#eef0ec;--panel:#e3e7e1;--line:#d6dbd3;--ink:#1f2a24;--text:#3e4a43;--muted:#5f6a63;--accent:#1f7a55;--amber:#9a5b12;background:var(--bg)}
+@media (prefers-color-scheme:dark){svg{--bg:#151916;--panel:#1e231f;--line:#2c332d;--ink:#e6ebe5;--text:#c3cbc4;--muted:#8f9a91;--accent:#4fb487;--amber:#d49a4a}}
+</style>
+<title id="graph-title">scan-and-fix: scan, triage, approve, develop, test (retries develop until tests pass), done</title>
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(7.2 373.2)">
+<g id="node1" class="node task op">
+<path fill="var(--panel)" stroke="var(--accent)" stroke-width="1.2" d="M262.83,-366C262.83,-366 106.83,-366 106.83,-366 100.83,-366 94.83,-360 94.83,-354 94.83,-354 94.83,-342 94.83,-342 94.83,-336 100.83,-330 106.83,-330 106.83,-330 262.83,-330 262.83,-330 268.83,-330 274.83,-336 274.83,-342 274.83,-342 274.83,-354 274.83,-354 274.83,-360 268.83,-366 262.83,-366"/>
+<text xml:space="preserve" text-anchor="start" x="168.03" y="-348.4" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-weight="bold" font-size="14.00" fill="var(--ink)">scan</text>
+<text xml:space="preserve" text-anchor="start" x="139.82" y="-338" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10.00" fill="var(--muted)">CommandOperator</text>
+</g>
+<g id="node2" class="node task op">
+<path fill="var(--panel)" stroke="var(--line)" stroke-width="1.2" d="M262.83,-300C262.83,-300 106.83,-300 106.83,-300 100.83,-300 94.83,-294 94.83,-288 94.83,-288 94.83,-276 94.83,-276 94.83,-270 100.83,-264 106.83,-264 106.83,-264 262.83,-264 262.83,-264 268.83,-264 274.83,-270 274.83,-276 274.83,-276 274.83,-288 274.83,-288 274.83,-294 268.83,-300 262.83,-300"/>
+<text xml:space="preserve" text-anchor="start" x="159.63" y="-282.4" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-weight="bold" font-size="14.00" fill="var(--ink)">triage</text>
+<text xml:space="preserve" text-anchor="start" x="145.82" y="-272" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10.00" fill="var(--muted)">AgentOperator</text>
+</g>
+<g id="edge1" class="edge">
+<path fill="none" stroke="var(--text)" stroke-width="1.1" d="M184.83,-329.51C184.83,-322.88 184.83,-315.19 184.83,-308"/>
+<polygon fill="var(--text)" stroke="var(--text)" stroke-width="1.1" points="186.93,-308.13 184.83,-302.13 182.73,-308.13 186.93,-308.13"/>
+</g>
+<g id="node3" class="node task human">
+<path fill="var(--panel)" stroke="var(--amber)" stroke-width="1.2" d="M262.83,-234C262.83,-234 106.83,-234 106.83,-234 100.83,-234 94.83,-228 94.83,-222 94.83,-222 94.83,-210 94.83,-210 94.83,-204 100.83,-198 106.83,-198 106.83,-198 262.83,-198 262.83,-198 268.83,-198 274.83,-204 274.83,-210 274.83,-210 274.83,-222 274.83,-222 274.83,-228 268.83,-234 262.83,-234"/>
+<text xml:space="preserve" text-anchor="start" x="155.43" y="-216.4" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-weight="bold" font-size="14.00" fill="var(--ink)">approve</text>
+<text xml:space="preserve" text-anchor="start" x="121.82" y="-206" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10.00" fill="var(--amber)">HumanApprovalOperator</text>
+</g>
+<g id="edge2" class="edge">
+<path fill="none" stroke="var(--accent)" stroke-width="1.1" d="M184.83,-263.51C184.83,-256.88 184.83,-249.19 184.83,-242"/>
+<polygon fill="var(--accent)" stroke="var(--accent)" stroke-width="1.1" points="186.93,-242.13 184.83,-236.13 182.73,-242.13 186.93,-242.13"/>
+<text xml:space="preserve" text-anchor="middle" x="115.52" y="-252.14" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11.00" fill="var(--accent)"> signal == &quot;planned&quot; </text>
+</g>
+<g id="node6" class="node task terminal">
+<path fill="var(--accent)" stroke="var(--accent)" stroke-width="1.2" d="M262.83,-36C262.83,-36 106.83,-36 106.83,-36 100.83,-36 94.83,-30 94.83,-24 94.83,-24 94.83,-12 94.83,-12 94.83,-6 100.83,0 106.83,0 106.83,0 262.83,0 262.83,0 268.83,0 274.83,-6 274.83,-12 274.83,-12 274.83,-24 274.83,-24 274.83,-30 268.83,-36 262.83,-36"/>
+<text xml:space="preserve" text-anchor="start" x="168.03" y="-18.4" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-weight="bold" font-size="14.00" fill="var(--bg)">done</text>
+<text xml:space="preserve" text-anchor="start" x="148.82" y="-8" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10.00" fill="var(--bg)">NoOpOperator</text>
+</g>
+<g id="edge3" class="edge">
+<path fill="none" stroke="var(--muted)" stroke-width="1.1" stroke-dasharray="5,2" d="M275.83,-282C379.83,-282 419.34,-155.18 365.83,-66 343.83,-29.33 323.59,-19.13 283.31,-18.09"/>
+<polygon fill="var(--muted)" stroke="var(--muted)" stroke-width="1.1" points="283.52,-15.99 277.49,-18.02 283.47,-20.19 283.52,-15.99"/>
+<text xml:space="preserve" text-anchor="middle" x="346.02" y="-69.29" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11.00" fill="var(--muted)"> else </text>
+</g>
+<g id="node4" class="node task op">
+<path fill="var(--panel)" stroke="var(--line)" stroke-width="1.2" d="M262.83,-168C262.83,-168 106.83,-168 106.83,-168 100.83,-168 94.83,-162 94.83,-156 94.83,-156 94.83,-144 94.83,-144 94.83,-138 100.83,-132 106.83,-132 106.83,-132 262.83,-132 262.83,-132 268.83,-132 274.83,-138 274.83,-144 274.83,-144 274.83,-156 274.83,-156 274.83,-162 268.83,-168 262.83,-168"/>
+<text xml:space="preserve" text-anchor="start" x="155.43" y="-150.4" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-weight="bold" font-size="14.00" fill="var(--ink)">develop</text>
+<text xml:space="preserve" text-anchor="start" x="145.82" y="-140" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10.00" fill="var(--muted)">AgentOperator</text>
+</g>
+<g id="edge4" class="edge">
+<path fill="none" stroke="var(--accent)" stroke-width="1.1" d="M184.83,-197.51C184.83,-190.88 184.83,-183.19 184.83,-176"/>
+<polygon fill="var(--accent)" stroke="var(--accent)" stroke-width="1.1" points="186.93,-176.13 184.83,-170.13 182.73,-176.13 186.93,-176.13"/>
+<text xml:space="preserve" text-anchor="middle" x="125.42" y="-186.14" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11.00" fill="var(--accent)"> approved == true </text>
+</g>
+<g id="edge5" class="edge">
+<path fill="none" stroke="var(--muted)" stroke-width="1.1" stroke-dasharray="5,2" d="M275.83,-216C361.25,-216 363.75,-29.43 283.34,-18.5"/>
+<polygon fill="var(--muted)" stroke="var(--muted)" stroke-width="1.1" points="283.62,-16.41 277.49,-18.11 283.34,-20.6 283.62,-16.41"/>
+<text xml:space="preserve" text-anchor="middle" x="322.03" y="-120.71" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11.00" fill="var(--muted)"> else </text>
+</g>
+<g id="node5" class="node task op">
+<path fill="var(--panel)" stroke="var(--line)" stroke-width="1.2" d="M262.83,-102C262.83,-102 106.83,-102 106.83,-102 100.83,-102 94.83,-96 94.83,-90 94.83,-90 94.83,-78 94.83,-78 94.83,-72 100.83,-66 106.83,-66 106.83,-66 262.83,-66 262.83,-66 268.83,-66 274.83,-72 274.83,-78 274.83,-78 274.83,-90 274.83,-90 274.83,-96 268.83,-102 262.83,-102"/>
+<text xml:space="preserve" text-anchor="start" x="168.03" y="-84.4" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-weight="bold" font-size="14.00" fill="var(--ink)">test</text>
+<text xml:space="preserve" text-anchor="start" x="139.82" y="-74" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10.00" fill="var(--muted)">CommandOperator</text>
+</g>
+<g id="edge6" class="edge">
+<path fill="none" stroke="var(--text)" stroke-width="1.1" d="M184.83,-131.51C184.83,-124.88 184.83,-117.19 184.83,-110"/>
+<polygon fill="var(--text)" stroke="var(--text)" stroke-width="1.1" points="186.93,-110.13 184.83,-104.13 182.73,-110.13 186.93,-110.13"/>
+</g>
+<g id="edge8" class="edge">
+<path fill="none" stroke="var(--muted)" stroke-width="1.1" stroke-dasharray="5,2" d="M93.83,-84C67.25,-84 64.75,-138.21 86.35,-148.37"/>
+<polygon fill="var(--muted)" stroke="var(--muted)" stroke-width="1.1" points="85.89,-150.42 92.2,-149.65 86.79,-146.31 85.89,-150.42"/>
+<text xml:space="preserve" text-anchor="middle" x="52.03" y="-120.57" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11.00" fill="var(--muted)"> else </text>
+</g>
+<g id="edge7" class="edge">
+<path fill="none" stroke="var(--accent)" stroke-width="1.1" d="M184.83,-65.51C184.83,-58.88 184.83,-51.19 184.83,-44"/>
+<polygon fill="var(--accent)" stroke="var(--accent)" stroke-width="1.1" points="186.93,-44.13 184.83,-38.13 182.73,-44.13 186.93,-44.13"/>
+<text xml:space="preserve" text-anchor="middle" x="92.42" y="-54.14" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11.00" fill="var(--accent)"> contains(stdout, &quot;passed&quot;) </text>
+</g>
+</g>
+</svg>
