@@ -226,6 +226,10 @@ name = "serve_with_mcp_and_ailoop"
 path = "tests/integration/serve_with_mcp_and_ailoop.rs"
 
 [[test]]
+name = "serve_survives_closed_stderr"
+path = "tests/integration/serve_survives_closed_stderr.rs"
+
+[[test]]
 name = "test_streaming_parity"
 path = "tests/integration/test_streaming_parity.rs"
 
