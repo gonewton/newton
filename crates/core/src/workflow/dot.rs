@@ -100,7 +100,9 @@ fn format_transition_label(transition: &Transition) -> String {
     } else {
         format!("priority={}", transition.priority)
     };
-    escape_label(&truncate(&base, 80))
+    // No manual quote escaping: petgraph's `Dot` escapes `"` and `\` in
+    // every label it writes, so escaping here too would emit `\\\"`.
+    truncate(&base, 80)
 }
 
 fn truncate(value: &str, limit: usize) -> String {
@@ -109,10 +111,6 @@ fn truncate(value: &str, limit: usize) -> String {
     } else {
         format!("{}...", &value[..limit])
     }
-}
-
-fn escape_label(value: &str) -> String {
-    value.replace('\"', "\\\"")
 }
 
 #[cfg(test)]
@@ -153,5 +151,48 @@ workflow:
         assert!(!dot.contains(r#"init\\nNoOpOperator"#), "dot output: {dot}");
         assert!(dot.contains("init"));
         assert!(dot.contains("NoOpOperator"));
+    }
+
+    #[test]
+    fn edge_labels_escape_quotes_exactly_once() {
+        let yaml = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  context: {}
+  settings:
+    entry_task: triage
+    max_time_seconds: 60
+    parallel_limit: 1
+    continue_on_error: false
+    max_task_iterations: 10
+    max_workflow_iterations: 10
+  tasks:
+    - id: triage
+      operator: NoOpOperator
+      params: {}
+      transitions:
+        - to: done
+          when:
+            $expr: 'tasks.triage.output.signal == "planned"'
+    - id: done
+      operator: NoOpOperator
+      params: {}
+"#;
+        let document: WorkflowDocument =
+            serde_yaml::from_str(yaml).expect("workflow should deserialize");
+
+        let dot = workflow_to_dot(&document);
+
+        assert!(
+            dot.contains(
+                r#"label = "when:tasks.triage.output.signal == \"planned\" priority=100""#
+            ),
+            "dot output: {dot}"
+        );
+        assert!(
+            !dot.contains(r#"\\""#),
+            "double-escaped quote in dot output: {dot}"
+        );
     }
 }
