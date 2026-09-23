@@ -553,8 +553,22 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
         );
     }
 
+    // Bind before announcing anything. The `*_serve_started` events and the
+    // banner below tell callers (and the integration tests) that the server
+    // accepts connections; emitting them before the socket exists let a client
+    // that reacted to the event hit "connection refused".
+    let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|err| {
+        AppError::new(
+            ErrorCategory::IoError,
+            format!("failed to bind {addr}: {err}"),
+        )
+    })?;
+    let bind_address = listener
+        .local_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| addr.clone());
+
     if args.with_mcp {
-        let bind_address = format!("{}:{}", args.host, args.port);
         let count = crate::cli::mcp::tool_count();
         tracing::info!(
             event = "mcp_serve_started",
@@ -571,7 +585,6 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     }
 
     if args.with_embedded_ailoop {
-        let bind_address = format!("{}:{}", args.host, args.port);
         tracing::info!(
             event = "ailoop_serve_started",
             ailoop_enabled = true,
@@ -606,7 +619,7 @@ pub async fn serve(args: ServeArgs) -> StdResult<(), AppError> {
     }
 
     server
-        .serve(&addr)
+        .serve_with_listener(listener)
         .await
         .map_err(|err| AppError::new(ErrorCategory::IoError, format!("server error: {err}")))?;
 
