@@ -4,8 +4,11 @@
 //! dispatch and starts the cli-framework MCP HTTP server. cli-framework owns
 //! the protocol; Newton's contribution is:
 //!
-//! 1. A pre-bind probe that emits a single structured `tracing::info!` event
-//!    after we have proven the host:port is bindable.
+//! 1. Binding host:port itself and emitting a single structured
+//!    `mcp_serve_started` event while it holds the listener, then handing that
+//!    listener to cli-framework (`AppBuilder::with_mcp_http_listener`). The
+//!    event therefore means the port is accepting, and nothing can take the
+//!    port between the event and the serve.
 //! 2. Mapping cli-framework errors onto stable Newton error codes
 //!    `NEWTON-MCP-001` (bind failure) and `NEWTON-MCP-002` (upstream runtime
 //!    error after a successful bind).
@@ -145,15 +148,12 @@ pub fn check_mcp_loopback_only(host: &str) -> Result<(), String> {
     }
 }
 
-/// Probe-bind `host:port` to fail-fast on conflicts before the framework
-/// starts up. The listener is dropped immediately; cli-framework will rebind
-/// when it owns the runtime. The TOCTOU window is acceptable for the
-/// `NEWTON-MCP-001` policy (spec §4.3).
-pub async fn probe_bind(flags: &McpFlags) -> Result<(), std::io::Error> {
-    let addr = format!("{}:{}", flags.host, flags.port);
-    let l = tokio::net::TcpListener::bind(&addr).await?;
-    drop(l);
-    Ok(())
+/// Bind `host:port` for the MCP server. The listener is kept and served by
+/// cli-framework, so a bind failure (`NEWTON-MCP-001`) is reported before any
+/// startup event and the port cannot change hands after it. A std listener,
+/// because cli-framework converts it on its own runtime.
+pub fn bind_listener(flags: &McpFlags) -> Result<std::net::TcpListener, std::io::Error> {
+    std::net::TcpListener::bind(format!("{}:{}", flags.host, flags.port))
 }
 
 /// Run MCP mode using cli-framework's `serve_mcp` entry point. Returns the
@@ -170,15 +170,18 @@ pub async fn run(argv: Vec<String>, ctx: crate::cli::context::NewtonContext) -> 
         return 1;
     }
 
-    if let Err(e) = probe_bind(&flags).await {
-        eprintln!(
-            "{}: failed to bind MCP server to {}: {}",
-            error_codes::NEWTON_MCP_001,
-            bind_address,
-            e
-        );
-        return 1;
-    }
+    let listener = match bind_listener(&flags) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!(
+                "{}: failed to bind MCP server to {}: {}",
+                error_codes::NEWTON_MCP_001,
+                bind_address,
+                e
+            );
+            return 1;
+        }
+    };
 
     let count = tool_count();
     tracing::info!(
@@ -197,7 +200,7 @@ pub async fn run(argv: Vec<String>, ctx: crate::cli::context::NewtonContext) -> 
         bind_address, flags.path, count
     );
 
-    let app = match crate::cli::framework_setup::build_app(ctx) {
+    let app = match crate::cli::framework_setup::build_app_with_mcp_listener(ctx, listener) {
         Ok(a) => a,
         Err(e) => {
             eprintln!(
@@ -209,8 +212,8 @@ pub async fn run(argv: Vec<String>, ctx: crate::cli::context::NewtonContext) -> 
         }
     };
 
-    // Hand off to cli-framework. We pass the original argv so the framework's
-    // own `--mcp-serve` short-circuit fires inside `run_with_args`.
+    // Hand off to cli-framework: `run_with_args` dispatches its auto-registered
+    // `mcp serve`, which serves on `listener` (`--path` still applies).
     let mut app = app;
     let argv_for_framework = argv_with_newton_defaults(&argv, &flags);
     match app.run_with_args(argv_for_framework).await {

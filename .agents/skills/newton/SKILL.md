@@ -119,7 +119,7 @@ newton serve --host 127.0.0.1 --port 8080 --with-mcp --mcp-path /mcp
 
 ### Option B — Dedicated MCP-only process (`newton mcp serve`) _(primary)_
 
-`newton mcp serve` is the canonical subcommand for a dedicated MCP-only process. It binds a separate MCP-only listener and applies Newton's probe-bind, structured startup event, and stable error codes.
+`newton mcp serve` is the canonical subcommand for a dedicated MCP-only process. It binds a separate MCP-only listener itself (so the structured `mcp_serve_started` startup event means the port is already accepting) and applies Newton's stable error codes.
 
 | Flag | Default | Description |
 | --- | --- | --- |
