@@ -692,7 +692,7 @@ dependencies = [
 [[package]]
 name = "cli-framework"
 version = "0.5.8"
-source = "git+https://github.com/aroff/cli-framework?rev=b3fd5df41547c418c2a8f2f8fbe35babd1afc033#b3fd5df41547c418c2a8f2f8fbe35babd1afc033"
+source = "git+https://github.com/aroff/cli-framework?rev=82af07cb5d5b7dda00de9681b68eba48bd3eaf55#82af07cb5d5b7dda00de9681b68eba48bd3eaf55"
 dependencies = [
  "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?rev=eb50f2c5509d4345cab65af0f7faed012ab0e557)",
  "aikit-sdk 0.3.0 (git+https://github.com/goaikit/aikit.git?rev=eb50f2c5509d4345cab65af0f7faed012ab0e557)",
@@ -729,7 +729,7 @@ dependencies = [
 [[package]]
 name = "cli-framework-oidc"
 version = "0.1.0"
-source = "git+https://github.com/aroff/cli-framework?rev=b3fd5df41547c418c2a8f2f8fbe35babd1afc033#b3fd5df41547c418c2a8f2f8fbe35babd1afc033"
+source = "git+https://github.com/aroff/cli-framework?rev=82af07cb5d5b7dda00de9681b68eba48bd3eaf55#82af07cb5d5b7dda00de9681b68eba48bd3eaf55"
 dependencies = [
  "anyhow",
  "async-trait",

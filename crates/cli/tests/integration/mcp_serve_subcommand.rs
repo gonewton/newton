@@ -88,6 +88,48 @@ fn mcp_serve_subcommand_emits_structured_startup_log() {
     );
 }
 
+/// `mcp_serve_started` is emitted while Newton holds the listener that
+/// cli-framework then serves on, so a client may connect the moment it sees
+/// the event: no readiness poll, no window in which the port is unbound.
+#[test]
+fn mcp_serve_started_means_port_is_accepting() {
+    let port = support::reserve_port();
+    let bin = assert_cmd::cargo::cargo_bin("newton");
+    let mut child = Command::new(bin)
+        .args(["mcp", "serve", "--host", "127.0.0.1", "--port"])
+        .arg(port.to_string())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn newton mcp serve");
+
+    let stderr = child.stderr.take().expect("stderr pipe");
+    let mut reader = BufReader::new(stderr);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut started = false;
+    while Instant::now() < deadline {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) if line.contains("\"event\":\"mcp_serve_started\"") => {
+                started = true;
+                break;
+            }
+            Ok(_) => {}
+        }
+    }
+    let connected = started && std::net::TcpStream::connect(("127.0.0.1", port)).is_ok();
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(started, "mcp_serve_started not observed within 10s");
+    assert!(
+        connected,
+        "port {port} refused a connection right after mcp_serve_started"
+    );
+}
+
 #[test]
 fn mcp_serve_subcommand_tool_count_matches_exposed_ids() {
     assert_eq!(mcp::tool_count(), MCP_EXPOSED_COMMAND_IDS.len());

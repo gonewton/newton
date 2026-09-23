@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### fix: `newton mcp serve` emits `mcp_serve_started` only once the port is held
+
+Standalone `newton mcp serve` probe-bound host:port, released it, emitted `mcp_serve_started` and then let cli-framework bind again, so the event could arrive before anything was listening, and another process could take the port in between. Newton now binds the listener itself, emits the event while holding it and hands it to cli-framework (`AppBuilder::with_mcp_http_listener`), which serves on it. Bind failures still exit with `NEWTON-MCP-001` before any event. The cli-framework pin moves to include that hook.
+
 ### feat: embed the web UI in `newton serve`; replace `--static-ui`
 
 The Newton UI is now compiled into the `newton` binary as a single gzip-compressed `index.html` (~0.46 MB; vendored via `scripts/vendor-web.sh`) and served at all non-API paths **by default** — `newton serve` then opening the browser just works, including deep links like `/optimize` and `/findings` (a true `200` SPA fallback, not the prior `ServeDir` 404). Only document `GET`/`HEAD` requests get the SPA shell, so an unknown `POST`/`PUT` (e.g. an API typo) still returns a proper `404`.

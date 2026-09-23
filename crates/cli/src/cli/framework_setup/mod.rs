@@ -209,15 +209,31 @@ fn populate_command_registry(builder: AppBuilder) -> anyhow::Result<AppBuilder> 
 
 /// Build the Newton CLI application backed by `cli-framework`.
 pub fn build_app(ctx: NewtonContext) -> anyhow::Result<App<NewtonContext>> {
+    configured_builder()?
+        .build(ctx)
+        .map_err(|e| anyhow!("{}: {}", error_codes::CLI_MIG_001, e))
+}
+
+/// Like [`build_app`], but `mcp serve` serves HTTP on `listener` (already bound
+/// by the caller) instead of binding `--host`/`--port` itself.
+pub fn build_app_with_mcp_listener(
+    ctx: NewtonContext,
+    listener: std::net::TcpListener,
+) -> anyhow::Result<App<NewtonContext>> {
+    configured_builder()?
+        .with_mcp_http_listener(listener)
+        .build(ctx)
+        .map_err(|e| anyhow!("{}: {}", error_codes::CLI_MIG_001, e))
+}
+
+fn configured_builder() -> anyhow::Result<AppBuilder> {
     use cli_framework::command::chat::ChatToolPolicy;
     use cli_framework::mcp::McpToolExportPolicy;
     let builder = AppBuilder::new().with_version("newton", env!("CARGO_PKG_VERSION"));
     let builder = populate_command_registry(builder)?;
-    builder
+    Ok(builder
         .with_mcp_export_policy(McpToolExportPolicy::ExposeMcpOnly)
-        .with_chat_tool_policy(ChatToolPolicy::UseCommandFlag)
-        .build(ctx)
-        .map_err(|e| anyhow!("{}: {}", error_codes::CLI_MIG_001, e))
+        .with_chat_tool_policy(ChatToolPolicy::UseCommandFlag))
 }
 
 /// Stable list of tree-path strings registered by [`build_app`].
