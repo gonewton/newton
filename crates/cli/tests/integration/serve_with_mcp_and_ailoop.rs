@@ -7,178 +7,156 @@
 //! verifying ailoop health under the base path is marked `#[ignore]`.
 use newton_cli::cli::mcp;
 use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
-use tempfile::tempdir;
+use tempfile::{tempdir, TempDir};
 
-fn pick_free_port() -> u16 {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    l.local_addr().unwrap().port()
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Pick a port for `newton serve --port` (which rejects `0`, so the kernel
+/// can't choose for us).
+///
+/// Candidates come from 20000..30000, below Linux's ephemeral range
+/// (32768..60999). A port found free by binding `127.0.0.1:0` and dropping the
+/// listener comes from that ephemeral range, so the kernel can hand it to any
+/// outbound connection before `newton` binds it. Same approach as
+/// aroff/cli-framework#153.
+fn reserve_port() -> u16 {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    const BASE: u32 = 20_000;
+    const SPAN: u32 = 10_000;
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+
+    let seed = std::process::id().wrapping_add(NEXT.fetch_add(97, Ordering::Relaxed));
+    for offset in 0..SPAN {
+        let candidate = (BASE + seed.wrapping_add(offset) % SPAN) as u16;
+        if std::net::TcpListener::bind(("127.0.0.1", candidate)).is_ok() {
+            return candidate;
+        }
+    }
+    panic!("no free TCP port in {}..{}", BASE, BASE + SPAN);
+}
+
+/// A running `newton serve --with-mcp --with-embedded-ailoop` process.
+///
+/// Stderr is drained on a background thread so the child can never block on a
+/// full pipe, and every line is kept so a failed wait can show what the server
+/// actually printed. The child is killed on drop.
+struct Serve {
+    child: Child,
+    port: u16,
+    lines: Receiver<String>,
+    seen: Vec<String>,
+    _dir: TempDir,
+}
+
+impl Serve {
+    fn start() -> Self {
+        let dir = tempdir().expect("tempdir");
+        let port = reserve_port();
+        let bin = assert_cmd::cargo::cargo_bin("newton");
+        let mut child = Command::new(bin)
+            .current_dir(dir.path())
+            .args([
+                "serve",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                &port.to_string(),
+                "--with-mcp",
+                "--with-embedded-ailoop",
+                "--ailoop-base-path",
+                "/ailoop",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn newton serve --with-mcp --with-embedded-ailoop");
+
+        let stderr = child.stderr.take().expect("stderr pipe");
+        let (tx, lines) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+
+        Serve {
+            child,
+            port,
+            lines,
+            seen: Vec::new(),
+            _dir: dir,
+        }
+    }
+
+    /// Wait for the stderr JSON line carrying `"event":"<event>"` and return it.
+    /// Panics with the collected stderr if the server exits or the timeout
+    /// passes first.
+    fn wait_for_event(&mut self, event: &str) -> String {
+        let needle = format!("\"event\":\"{event}\"");
+        if let Some(line) = self.seen.iter().find(|l| l.contains(&needle)) {
+            return line.clone();
+        }
+        let deadline = Instant::now() + STARTUP_TIMEOUT;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match self.lines.recv_timeout(remaining) {
+                Ok(line) => {
+                    let hit = line.contains(&needle);
+                    self.seen.push(line.clone());
+                    if hit {
+                        return line;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => panic!(
+                    "{event} not seen within {STARTUP_TIMEOUT:?}; stderr so far:\n{}",
+                    self.seen.join("\n")
+                ),
+                Err(RecvTimeoutError::Disconnected) => panic!(
+                    "newton serve exited before {event} (status {:?}); stderr:\n{}",
+                    self.child.try_wait(),
+                    self.seen.join("\n")
+                ),
+            }
+        }
+    }
+}
+
+impl Drop for Serve {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 /// Criterion 16: both `mcp_serve_started` and `ailoop_serve_started` appear on
 /// stderr when both flags are active.
 #[test]
 fn both_serve_started_events_emitted() {
-    let dir = tempdir().expect("tempdir");
-    let port = pick_free_port();
-    let bin = assert_cmd::cargo::cargo_bin("newton");
-    let mut child = Command::new(bin)
-        .current_dir(dir.path())
-        .args([
-            "serve",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-            "--with-mcp",
-            "--with-embedded-ailoop",
-            "--ailoop-base-path",
-            "/ailoop",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn newton serve --with-mcp --with-embedded-ailoop");
-
-    let stderr = child.stderr.take().expect("stderr pipe");
-    let mut reader = BufReader::new(stderr);
-
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let mut mcp_found = false;
-    let mut ailoop_found = false;
-
-    while Instant::now() < deadline && !(mcp_found && ailoop_found) {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) => break,
-            Ok(_) => {
-                if line.contains("\"event\":\"mcp_serve_started\"") {
-                    mcp_found = true;
-                }
-                if line.contains("\"event\":\"ailoop_serve_started\"") {
-                    ailoop_found = true;
-                }
-            }
-            Err(_) => break,
-        }
-    }
-
-    let _ = child.kill();
-    let _ = child.wait();
-
-    assert!(
-        mcp_found,
-        "expected mcp_serve_started JSON line on stderr within 30s"
-    );
-    assert!(
-        ailoop_found,
-        "expected ailoop_serve_started JSON line on stderr within 30s"
-    );
+    let mut serve = Serve::start();
+    serve.wait_for_event("mcp_serve_started");
+    serve.wait_for_event("ailoop_serve_started");
 }
 
 /// Criterion 15: non-colliding `--mcp-path /mcp` and `--ailoop-base-path /ailoop`
 /// do not produce validation errors; the server starts successfully.
 #[test]
 fn non_colliding_mcp_and_ailoop_paths_start_successfully() {
-    let dir = tempdir().expect("tempdir");
-    let port = pick_free_port();
-    let bin = assert_cmd::cargo::cargo_bin("newton");
-    let mut child = Command::new(bin)
-        .current_dir(dir.path())
-        .args([
-            "serve",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-            "--with-mcp",
-            "--with-embedded-ailoop",
-            "--ailoop-base-path",
-            "/ailoop",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn newton serve");
-
-    let stderr = child.stderr.take().expect("stderr pipe");
-    let mut reader = BufReader::new(stderr);
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let mut started = false;
-    while Instant::now() < deadline {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) => break,
-            Ok(_) => {
-                if line.contains("\"event\":\"ailoop_serve_started\"")
-                    || line.contains("\"event\":\"mcp_serve_started\"")
-                {
-                    started = true;
-                    break;
-                }
-            }
-            Err(_) => break,
-        }
-    }
-
-    let _ = child.kill();
-    let _ = child.wait();
-
-    assert!(started, "server did not start within 30s");
+    let mut serve = Serve::start();
+    serve.wait_for_event("ailoop_serve_started");
 }
 
 /// Verifies `mcp_serve_started` event has expected fields alongside ailoop.
 #[test]
 fn mcp_serve_started_has_correct_fields_when_ailoop_also_active() {
-    let dir = tempdir().expect("tempdir");
-    let port = pick_free_port();
-    let bin = assert_cmd::cargo::cargo_bin("newton");
-    let mut child = Command::new(bin)
-        .current_dir(dir.path())
-        .args([
-            "serve",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-            "--with-mcp",
-            "--with-embedded-ailoop",
-            "--ailoop-base-path",
-            "/ailoop",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn newton serve");
-
-    let stderr = child.stderr.take().expect("stderr pipe");
-    let mut reader = BufReader::new(stderr);
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let mut mcp_line: Option<String> = None;
-    let mut ailoop_line: Option<String> = None;
-
-    while Instant::now() < deadline && (mcp_line.is_none() || ailoop_line.is_none()) {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) => break,
-            Ok(_) => {
-                if line.contains("\"event\":\"mcp_serve_started\"") && mcp_line.is_none() {
-                    mcp_line = Some(line.clone());
-                }
-                if line.contains("\"event\":\"ailoop_serve_started\"") && ailoop_line.is_none() {
-                    ailoop_line = Some(line.clone());
-                }
-            }
-            Err(_) => break,
-        }
-    }
-
-    let _ = child.kill();
-    let _ = child.wait();
-
-    let mcp = mcp_line.expect("mcp_serve_started not found within 30s");
-    let ailoop = ailoop_line.expect("ailoop_serve_started not found within 30s");
+    let mut serve = Serve::start();
+    let mcp = serve.wait_for_event("mcp_serve_started");
+    let ailoop = serve.wait_for_event("ailoop_serve_started");
 
     let expected_count = mcp::tool_count();
     assert!(
@@ -186,6 +164,8 @@ fn mcp_serve_started_has_correct_fields_when_ailoop_also_active() {
         "mcp line={mcp}"
     );
     assert!(mcp.contains("\"mcp_path\":\"/mcp\""), "mcp line={mcp}");
+    let bind_address = format!("\"bind_address\":\"127.0.0.1:{}\"", serve.port);
+    assert!(mcp.contains(&bind_address), "mcp line={mcp}");
 
     assert!(
         ailoop.contains("\"ailoop_base_path\":\"/ailoop\""),
@@ -195,45 +175,19 @@ fn mcp_serve_started_has_correct_fields_when_ailoop_also_active() {
         ailoop.contains("\"ailoop_enabled\":true"),
         "ailoop line={ailoop}"
     );
+    assert!(ailoop.contains(&bind_address), "ailoop line={ailoop}");
 }
 
 /// Full multi-surface test: `/health`, MCP, and ailoop routes all reachable.
+///
+/// No readiness polling: `newton serve` binds its listener before it emits
+/// `ailoop_serve_started`, so once that line is seen the port is accepting
+/// connections.
 #[test]
 fn all_surfaces_respond_when_both_flags_active() {
-    let dir = tempdir().expect("tempdir");
-    let port = pick_free_port();
-    let bin = assert_cmd::cargo::cargo_bin("newton");
-    let mut child = Command::new(bin)
-        .current_dir(dir.path())
-        .args([
-            "serve",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-            "--with-mcp",
-            "--with-embedded-ailoop",
-            "--ailoop-base-path",
-            "/ailoop",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn newton serve");
-
-    let stderr = child.stderr.take().expect("stderr pipe");
-    let mut reader = BufReader::new(stderr);
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while Instant::now() < deadline {
-        let mut line = String::new();
-        if matches!(reader.read_line(&mut line), Ok(n) if n > 0) {
-            if line.contains("\"event\":\"ailoop_serve_started\"") {
-                break;
-            }
-        } else {
-            break;
-        }
-    }
+    let mut serve = Serve::start();
+    serve.wait_for_event("ailoop_serve_started");
+    let port = serve.port;
 
     let result = (|| -> Result<(), String> {
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -279,7 +233,5 @@ fn all_surfaces_respond_when_both_flags_active() {
         })
     })();
 
-    let _ = child.kill();
-    let _ = child.wait();
     result.expect("all surfaces (/health, /mcp, /ailoop health) reachable");
 }

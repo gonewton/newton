@@ -94,6 +94,7 @@ pub fn build_mcp_command_registry() -> anyhow::Result<CommandRegistry> {
             GroupMetadata {
                 summary: "Catalog CRUD via HTTP-style verbs (get/post/put/patch/delete)",
                 hidden: false,
+                ..Default::default()
             },
         )
         .map_err(|e| anyhow!("{e}"))?;
@@ -120,6 +121,7 @@ pub fn build_mcp_command_registry() -> anyhow::Result<CommandRegistry> {
             GroupMetadata {
                 summary: commands::dependency::GROUP_SUMMARY,
                 hidden: false,
+                ..Default::default()
             },
         )
         .map_err(|e| anyhow!("{e}"))?;

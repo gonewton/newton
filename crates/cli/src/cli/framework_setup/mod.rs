@@ -168,6 +168,7 @@ fn populate_command_registry(builder: AppBuilder) -> anyhow::Result<AppBuilder> 
         GroupMetadata {
             summary: "Catalog CRUD via HTTP-style verbs (get/post/put/patch/delete)",
             hidden: false,
+            ..Default::default()
         },
     )?;
 
@@ -192,6 +193,7 @@ fn populate_command_registry(builder: AppBuilder) -> anyhow::Result<AppBuilder> 
         GroupMetadata {
             summary: commands::dependency::GROUP_SUMMARY,
             hidden: false,
+            ..Default::default()
         },
     )?;
     commands::dependency::commands()

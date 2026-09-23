@@ -59,7 +59,7 @@ dependencies = [
 [[package]]
 name = "aikit-agent"
 version = "0.1.0"
-source = "git+https://github.com/goaikit/aikit.git?rev=14b02dbb90acf00ab12f9417153c8c027c5c47b1#14b02dbb90acf00ab12f9417153c8c027c5c47b1"
+source = "git+https://github.com/goaikit/aikit.git?rev=eb50f2c5509d4345cab65af0f7faed012ab0e557#eb50f2c5509d4345cab65af0f7faed012ab0e557"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -110,9 +110,9 @@ dependencies = [
 [[package]]
 name = "aikit-sdk"
 version = "0.3.0"
-source = "git+https://github.com/goaikit/aikit.git?rev=14b02dbb90acf00ab12f9417153c8c027c5c47b1#14b02dbb90acf00ab12f9417153c8c027c5c47b1"
+source = "git+https://github.com/goaikit/aikit.git?rev=eb50f2c5509d4345cab65af0f7faed012ab0e557#eb50f2c5509d4345cab65af0f7faed012ab0e557"
 dependencies = [
- "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?rev=14b02dbb90acf00ab12f9417153c8c027c5c47b1)",
+ "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?rev=eb50f2c5509d4345cab65af0f7faed012ab0e557)",
  "claude-agent-sdk",
  "dirs 6.0.0",
  "glob",
@@ -366,9 +366,9 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.17.0"
+version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ec2f1fc3ec205783a5da9a7e6c1509cc69dedf09a1949e412c1e18469326d00"
+checksum = "b281d307588d634de920874890732659e2e7672f72b5e10e81badc1a8a83621e"
 dependencies = [
  "aws-lc-sys",
  "zeroize",
@@ -376,14 +376,15 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.41.0"
+version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a2f9779ce85b93ab6170dd940ad0169b5766ff848247aff13bb788b832fe3f4"
+checksum = "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27"
 dependencies = [
  "cc",
  "cmake",
  "dunce",
  "fs_extra",
+ "pkg-config",
 ]
 
 [[package]]
@@ -691,10 +692,10 @@ dependencies = [
 [[package]]
 name = "cli-framework"
 version = "0.5.8"
-source = "git+https://github.com/aroff/cli-framework?rev=74cde5b0d02c12dc657486b2839bed29b32934ab#74cde5b0d02c12dc657486b2839bed29b32934ab"
+source = "git+https://github.com/aroff/cli-framework?rev=b3fd5df41547c418c2a8f2f8fbe35babd1afc033#b3fd5df41547c418c2a8f2f8fbe35babd1afc033"
 dependencies = [
- "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?rev=14b02dbb90acf00ab12f9417153c8c027c5c47b1)",
- "aikit-sdk 0.3.0 (git+https://github.com/goaikit/aikit.git?rev=14b02dbb90acf00ab12f9417153c8c027c5c47b1)",
+ "aikit-agent 0.1.0 (git+https://github.com/goaikit/aikit.git?rev=eb50f2c5509d4345cab65af0f7faed012ab0e557)",
+ "aikit-sdk 0.3.0 (git+https://github.com/goaikit/aikit.git?rev=eb50f2c5509d4345cab65af0f7faed012ab0e557)",
  "ailoop-core 1.0.13",
  "anyhow",
  "async-trait",
@@ -705,6 +706,7 @@ dependencies = [
  "dirs 5.0.1",
  "http",
  "httpdate",
+ "libc",
  "opentelemetry",
  "regex",
  "reqwest 0.12.28",
@@ -721,12 +723,13 @@ dependencies = [
  "tracing",
  "utoipa-swagger-ui",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "cli-framework-oidc"
 version = "0.1.0"
-source = "git+https://github.com/aroff/cli-framework?rev=74cde5b0d02c12dc657486b2839bed29b32934ab#74cde5b0d02c12dc657486b2839bed29b32934ab"
+source = "git+https://github.com/aroff/cli-framework?rev=b3fd5df41547c418c2a8f2f8fbe35babd1afc033#b3fd5df41547c418c2a8f2f8fbe35babd1afc033"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1761,6 +1764,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustls",
+ "rustls-native-certs",
  "tokio",
  "tokio-rustls",
  "tower-service",
@@ -3417,6 +3421,7 @@ dependencies = [
  "pin-project-lite",
  "quinn",
  "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -3520,9 +3525,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "1.7.0"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0810a9f717d9828f475fe1f629f4c305c8464b7f496c3a854b58d29e65f4058e"
+checksum = "14db48ee17a9ba61810ab1a9c1beb7d06d8136ae39ac25a1137f10d357af01af"
 dependencies = [
  "async-trait",
  "base64",
@@ -3551,9 +3556,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp-macros"
-version = "1.7.0"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6aefac48c364756e97f04c0401ba3231e8607882c7c1d92da0437dc16307904d"
+checksum = "783d787bf21813b285f13019adc49e11af501c658890c1e519f31f937c68b7e3"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3659,9 +3664,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.40"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
@@ -3723,9 +3728,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.13"
+version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
  "aws-lc-rs",
  "ring",
