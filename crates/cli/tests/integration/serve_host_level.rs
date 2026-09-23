@@ -1,12 +1,10 @@
 //! Host-level endpoint tests: /api 308 redirect, /healthz, /readyz.
+#[path = "../support/mod.rs"]
+mod support;
+
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-
-fn pick_free_port() -> u16 {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    l.local_addr().unwrap().port()
-}
 
 fn start_serve(port: u16) -> (std::process::Child, tempfile::TempDir) {
     start_serve_with(port, &[])
@@ -61,7 +59,7 @@ fn wait_ready(port: u16) -> bool {
 
 #[test]
 fn healthz_returns_200_with_version() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let (mut child, _dir) = start_serve(port);
 
     if !wait_ready(port) {
@@ -91,7 +89,7 @@ fn healthz_returns_200_with_version() {
 
 #[test]
 fn readyz_returns_200() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let (mut child, _dir) = start_serve(port);
 
     if !wait_ready(port) {
@@ -118,7 +116,7 @@ fn readyz_returns_200() {
 
 #[test]
 fn api_root_redirects_to_v1() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let (mut child, _dir) = start_serve(port);
 
     if !wait_ready(port) {
@@ -148,7 +146,7 @@ fn health_old_path_returns_404() {
     // The deprecated `/health` API endpoint is gone (replaced by `/healthz`).
     // Run with --no-web so the SPA catch-all (which serves the UI for every
     // non-API path by default) doesn't mask the API-surface assertion.
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let (mut child, _dir) = start_serve_with(port, &["--no-web"]);
 
     if !wait_ready(port) {
@@ -177,7 +175,7 @@ fn health_old_path_returns_404() {
 fn embedded_web_ui_serves_spa_deeplinks_by_default() {
     // `newton serve` (no flags) serves the embedded UI at every non-API path,
     // including SPA deep links, with a clean 200 (not the prior ServeDir 404).
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let (mut child, _dir) = start_serve(port);
 
     if !wait_ready(port) {
@@ -231,7 +229,7 @@ fn serve_prints_startup_banner_with_urls() {
     // `newton serve` must print a human-readable banner: its `info!` startup logs
     // are silenced in the serve console context and cli-framework prints nothing,
     // so without the banner the process looks like it hangs.
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let dir = tempdir().unwrap();
     let errpath = dir.path().join("stderr.log");
     let errfile = std::fs::File::create(&errpath).unwrap();
@@ -277,7 +275,7 @@ fn default_serve_binds_loopback_without_exposure_warning() {
     // Default `--host` (127.0.0.1) with no OIDC configured must start
     // unauthenticated with no exposure warning; the "Auth disabled" banner
     // line is the friction-free local-tool default.
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let dir = tempdir().unwrap();
     let errpath = dir.path().join("stderr.log");
     let errfile = std::fs::File::create(&errpath).unwrap();
@@ -321,7 +319,7 @@ fn non_loopback_host_without_oidc_refuses_to_start() {
     // refuse to start (never bind the listener) and print an actionable error
     // naming the exact flags/env vars needed, rather than booting wide open
     // behind a warning banner.
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let dir = tempdir().unwrap();
     let errpath = dir.path().join("stderr.log");
     let errfile = std::fs::File::create(&errpath).unwrap();
@@ -367,7 +365,7 @@ fn auth_config_disabled_reports_enabled_false_and_no_issuer() {
     // No OIDC configured: `/auth-config` is public (no auth layer at all in
     // this mode) and must report `{"enabled":false}` with nothing else
     // leaked.
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let (mut child, _dir) = start_serve(port);
 
     if !wait_ready(port) {
@@ -408,7 +406,7 @@ fn non_loopback_host_with_oidc_starts_and_gates_the_api() {
     // `WWW-Authenticate: Bearer` challenge, while `/healthz` stays public.
     // `/auth-config` (also public, not under `/api`) must report the
     // resolved issuer/audience/clientId so the SPA can self-configure login.
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let dir = tempdir().unwrap();
     let errpath = dir.path().join("stderr.log");
     let errfile = std::fs::File::create(&errpath).unwrap();
@@ -514,7 +512,7 @@ fn default_unauthenticated_serve_does_not_expose_permissive_cors() {
     // it needs no CORS grant. `/api/v1/workflows` is an unauthenticated GET that
     // the CORS layer wraps (host-level `/healthz` is not), so it's the faithful
     // probe for the exposure.
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let (mut child, _dir) = start_serve(port);
 
     if !wait_ready(port) {

@@ -5,6 +5,9 @@
 //! NOTE: Full verification that ailoop routes are accessible (criterion 16 §3)
 //! is pending the upstream Axum 0.8 upgrade (goailoop/ailoop#59). The test
 //! verifying ailoop health under the base path is marked `#[ignore]`.
+#[path = "../support/mod.rs"]
+mod support;
+
 use newton_cli::cli::mcp;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
@@ -13,31 +16,6 @@ use std::time::{Duration, Instant};
 use tempfile::{tempdir, TempDir};
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Pick a port for `newton serve --port` (which rejects `0`, so the kernel
-/// can't choose for us).
-///
-/// Candidates come from 20000..30000, below Linux's ephemeral range
-/// (32768..60999). A port found free by binding `127.0.0.1:0` and dropping the
-/// listener comes from that ephemeral range, so the kernel can hand it to any
-/// outbound connection before `newton` binds it. Same approach as
-/// aroff/cli-framework#153.
-fn reserve_port() -> u16 {
-    use std::sync::atomic::{AtomicU32, Ordering};
-
-    const BASE: u32 = 20_000;
-    const SPAN: u32 = 10_000;
-    static NEXT: AtomicU32 = AtomicU32::new(0);
-
-    let seed = std::process::id().wrapping_add(NEXT.fetch_add(97, Ordering::Relaxed));
-    for offset in 0..SPAN {
-        let candidate = (BASE + seed.wrapping_add(offset) % SPAN) as u16;
-        if std::net::TcpListener::bind(("127.0.0.1", candidate)).is_ok() {
-            return candidate;
-        }
-    }
-    panic!("no free TCP port in {}..{}", BASE, BASE + SPAN);
-}
 
 /// A running `newton serve --with-mcp --with-embedded-ailoop` process.
 ///
@@ -55,7 +33,7 @@ struct Serve {
 impl Serve {
     fn start() -> Self {
         let dir = tempdir().expect("tempdir");
-        let port = reserve_port();
+        let port = support::reserve_port();
         let bin = assert_cmd::cargo::cargo_bin("newton");
         let mut child = Command::new(bin)
             .current_dir(dir.path())

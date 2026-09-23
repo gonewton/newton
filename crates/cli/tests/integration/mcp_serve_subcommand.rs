@@ -2,16 +2,14 @@
 //! - emits `mcp_serve_started` JSON on stderr
 //! - on an occupied port emits `NEWTON-MCP-001`
 //! - `tool_count` matches `MCP_EXPOSED_COMMAND_IDS.len()`
+#[path = "../support/mod.rs"]
+mod support;
+
 use newton_cli::cli::framework_setup::MCP_EXPOSED_COMMAND_IDS;
 use newton_cli::cli::mcp;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-
-fn pick_free_port() -> u16 {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    l.local_addr().unwrap().port()
-}
 
 #[test]
 fn is_mcp_subcommand_detects_subcommand_form() {
@@ -37,7 +35,7 @@ fn is_mcp_subcommand_detects_subcommand_form() {
 
 #[test]
 fn mcp_serve_subcommand_emits_structured_startup_log() {
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let bin = assert_cmd::cargo::cargo_bin("newton");
     let mut child = Command::new(bin)
         .arg("mcp")
@@ -102,7 +100,7 @@ fn mcp_serve_subcommand_non_loopback_host_refused() {
     // exists on `newton serve --with-mcp`). Binding a non-loopback host would
     // therefore expose unauthenticated data-catalog CRUD to the network, so it
     // must fail CLOSED — refuse the bind before the server ever starts.
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let bin = assert_cmd::cargo::cargo_bin("newton");
     let mut child = Command::new(bin)
         .arg("mcp")

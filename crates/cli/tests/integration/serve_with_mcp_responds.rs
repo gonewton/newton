@@ -8,21 +8,19 @@
 //! 3. `POST <mcp-path>` reaches the MCP transport (any non-404 response).
 //!
 //! Like `mcp_on_starts_and_logs.rs`, the listener keeps running until killed.
+#[path = "../support/mod.rs"]
+mod support;
+
 use newton_cli::cli::mcp;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
-fn pick_free_port() -> u16 {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    l.local_addr().unwrap().port()
-}
-
 #[test]
 fn serve_with_mcp_emits_log_and_serves_both_surfaces() {
     let dir = tempdir().expect("tempdir");
-    let port = pick_free_port();
+    let port = support::reserve_port();
     let bin = assert_cmd::cargo::cargo_bin("newton");
     let mut child = Command::new(bin)
         .current_dir(dir.path())
