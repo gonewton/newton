@@ -1,0 +1,22 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      '@viz-js/viz':
+        specifier: ^3.30.0
+        version: 3.30.0
+
+packages:
+
+  '@viz-js/viz@3.30.0':
+    resolution: {integrity: sha512-2zmcP55QY44uQfZ+GvgNHmGd8S6KUD+2eMur9AbYybSzrOd/m8nMUg0ZircJNiJRKGgVBKAE8kh0hAwpUFUFQQ==}
+
+snapshots:
+
+  '@viz-js/viz@3.30.0': {}

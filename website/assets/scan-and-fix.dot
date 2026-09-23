@@ -1,0 +1,17 @@
+digraph {
+    0 [ label = "scan\lCommandOperator" ]
+    1 [ label = "triage\lAgentOperator" ]
+    2 [ label = "approve\lHumanApprovalOperator" ]
+    3 [ label = "develop\lAgentOperator" ]
+    4 [ label = "test\lCommandOperator" ]
+    5 [ label = "done\lNoOpOperator" ]
+    0 -> 1 [ label = "priority=100" ]
+    1 -> 2 [ label = "when:tasks.triage.output.signal == \\\"planned\\\" priority=0" ]
+    1 -> 5 [ label = "priority=10" ]
+    2 -> 3 [ label = "when:tasks.approve.output.approved == true priority=0" ]
+    2 -> 5 [ label = "priority=10" ]
+    3 -> 4 [ label = "priority=100" ]
+    4 -> 5 [ label = "when:contains(tasks.test.output.stdout, \\\"TEST_STATUS: passed\\\") priority=0" ]
+    4 -> 3 [ label = "priority=10" ]
+}
+

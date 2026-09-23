@@ -1,0 +1,12 @@
+{
+  "name": "newton-website",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "graph": "bun scripts/render-graph.ts",
+    "serve": "bunx serve ."
+  },
+  "devDependencies": {
+    "@viz-js/viz": "^3.30.0"
+  }
+}

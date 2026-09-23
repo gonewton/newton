@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Newton</title>
+<meta name="description" content="Newton runs YAML workflow graphs for agents, with human gates and checkpoints, and a loop that grades, fixes and re-grades your code.">
+<meta name="theme-color" content="#eef0ec" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#151916" media="(prefers-color-scheme: dark)">
+<meta property="og:title" content="Newton">
+<meta property="og:description" content="Workflow graphs for agents, and a loop that grades, fixes and re-grades your code.">
+<meta property="og:type" content="website">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<header class="site-header">
+  <a class="wordmark" href="#top" id="top">newton</a>
+  <nav aria-label="Primary">
+    <a class="wide" href="#loop">loop</a>
+    <a class="wide" href="#graphs">workflows</a>
+    <a href="https://github.com/gonewton/newton#readme">docs</a>
+    <a class="wide" href="https://github.com/gonewton/newton">github</a>
+    <a class="btn btn-primary" href="#start">install</a>
+  </nav>
+</header>
+
+<main>
+
+<section class="hero">
+  <div class="kicker">gonewton / newton · v0.5</div>
+  <h1>Newton</h1>
+  <p class="lede">Workflow graphs for agents, and a loop that grades, fixes and re-grades your code.</p>
+  <p class="tagline">YAML graphs · human gates · checkpoints · a self-driving optimizer</p>
+  <div class="actions">
+    <a class="btn btn-primary" href="#start">Get started</a>
+    <a class="btn btn-secondary" href="#loop">See the loop</a>
+  </div>
+  <div class="panel install has-copy">
+    <div class="line"><span class="p">$ </span>brew tap gonewton/cli</div>
+    <div class="line"><span class="p">$ </span>brew install newton</div>
+    <div class="line"><span class="p">$ </span>newton init .<span class="cursor" aria-hidden="true"></span></div>
+    <button type="button" class="copy" aria-label="Copy install commands">copy</button>
+  </div>
+</section>
+
+<section class="chapter" aria-labelledby="s1">
+  <h2 id="s1"><span class="num">§1</span>One engine, two drivers</h2>
+  <p>Newton runs <b>YAML workflow graphs</b>: shell steps, agents, human gates and nested workflows, with explicit transitions, checkpoints and artifacts.</p>
+  <p>The same engine drives an <b>optimizer</b>. It grades a project, plans a change, develops it and grades the result. It keeps the change only if the evidence says it is better.</p>
+</section>
+
+<section class="chapter" id="loop" aria-labelledby="s2">
+  <h2 id="s2"><span class="num">§2</span>The loop</h2>
+  <p>You write an <b>Optimization Definition</b>. It sets the objective (a Grade, or a number with units such as bytes or verified vulnerabilities), the comparison policy, the constraints and limits, and the workflows that play <code>grade</code>, <code>plan</code> and <code>develop</code>.</p>
+<pre class="panel small" aria-label="Optimization loop diagram"><span class="k">baseline grade</span> ──▶ plan ──▶ develop ──▶ candidate grade ──▶ <span class="s">accept?</span>
+      <span class="s">▲</span>                                                        │
+      <span class="s">└</span>───────────────────────── next cycle ───────────────────┘
+
+<span class="c">software spine  </span>Finding → Change Request → Plan → Execution</pre>
+  <p class="lead-in">A candidate is accepted only when the exact artifact that was evaluated qualifies. Passing tests is not enough. Newton never pushes or opens a pull request. An accepted candidate is a local commit, and you decide how to promote it.</p>
+  <p class="lead-in">Every run ends with a reason you can read:</p>
+  <ul class="reasons">
+    <li>converged</li>
+    <li>cycle_complete</li>
+    <li class="stop">resource_limit</li>
+    <li class="stop">no_progress</li>
+    <li class="human">regressed</li>
+    <li class="human">stalled_on_blocked</li>
+  </ul>
+  <div class="panel has-copy" style="margin-top: 20px">
+    <div class="line"><span class="p">$ </span>newton optimize my-project \</div>
+    <div class="line">    --definition .newton/definitions/security.yaml --once</div>
+    <div class="line"><span class="p">$ </span>newton optimize my-project --resume &lt;RUN_ID&gt;</div>
+    <button type="button" class="copy" aria-label="Copy optimize commands">copy</button>
+  </div>
+</section>
+
+<section class="chapter" id="graphs" aria-labelledby="s3">
+  <h2 id="s3"><span class="num">§3</span>A workflow is a graph</h2>
+  <p>Tasks are operators, and edges are transitions with conditions. There is no hidden control flow and no glue script. This workflow scans the dependencies, asks a person before touching anything, then loops an agent against the tests.</p>
+<pre class="panel small" aria-label="Workflow YAML excerpt"><span class="c"># scan-and-fix.yaml (excerpt)</span>
+<span class="k">version:</span> <span class="s">"2.0"</span>
+<span class="k">mode:</span> workflow_graph
+<span class="k">workflow:</span>
+  <span class="k">settings:</span> { <span class="k">entry_task:</span> scan, <span class="k">default_engine:</span> claude }
+  <span class="k">tasks:</span>
+    - <span class="k">id:</span> approve
+      <span class="k">operator:</span> <span class="x">HumanApprovalOperator</span>
+      <span class="k">params:</span> { <span class="k">prompt:</span> <span class="s">"Apply the upgrade plan in plan.md?"</span> }
+      <span class="k">transitions:</span>
+        - <span class="k">to:</span> develop
+          <span class="k">priority:</span> 0
+          <span class="k">when:</span> { <span class="x">"$expr":</span> <span class="s">"tasks.approve.output.approved == true"</span> }
+        - { <span class="k">to:</span> done, <span class="k">priority:</span> 10 }
+
+    - <span class="k">id:</span> test
+      <span class="k">operator:</span> CommandOperator
+      <span class="k">max_iterations:</span> 3
+      <span class="k">params:</span>
+        <span class="k">cmd:</span> <span class="s">./scripts/run-tests.sh &amp;&amp; echo "TEST_STATUS: passed"</span>
+      <span class="k">transitions:</span>
+        - <span class="k">to:</span> done
+          <span class="k">priority:</span> 0
+          <span class="k">when:</span> { <span class="x">"$expr":</span> <span class="s">'contains(tasks.test.output.stdout, "passed")'</span> }
+        - { <span class="k">to:</span> develop, <span class="k">priority:</span> 10 }</pre>
+  <p class="lead-in">The full file is <a href="examples/scan-and-fix.yaml">examples/scan-and-fix.yaml</a>. Newton drew its graph:</p>
+  <figure class="figure">
+<!-- graph:start -->
+<svg role="img" aria-labelledby="graph-title" class="workflow-graph" width="404pt" height="380pt"
+ viewBox="0.00 0.00 404.00 380.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<title id="graph-title">scan-and-fix: scan, triage, approve, develop, test (retries develop until tests pass), done</title>
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(7.2 373.2)">
+<g id="node1" class="node task op">
+<path fill="var(--panel)" stroke="var(--accent)" stroke-width="1.2" d="M262.83,-366C262.83,-366 106.83,-366 106.83,-366 100.83,-366 94.83,-360 94.83,-354 94.83,-354 94.83,-342 94.83,-342 94.83,-336 100.83,-330 106.83,-330 106.83,-330 262.83,-330 262.83,-330 268.83,-330 274.83,-336 274.83,-342 274.83,-342 274.83,-354 274.83,-354 274.83,-360 268.83,-366 262.83,-366"/>
+<text xml:space="preserve" text-anchor="start" x="168.03" y="-348.4" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-weight="bold" font-size="14.00" fill="var(--ink)">scan</text>
+<text xml:space="preserve" text-anchor="start" x="139.82" y="-338" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10.00" fill="var(--muted)">CommandOperator</text>
+</g>
+<g id="node2" class="node task op">
+<path fill="var(--panel)" stroke="var(--line)" stroke-width="1.2" d="M262.83,-300C262.83,-300 106.83,-300 106.83,-300 100.83,-300 94.83,-294 94.83,-288 94.83,-288 94.83,-276 94.83,-276 94.83,-270 100.83,-264 106.83,-264 106.83,-264 262.83,-264 262.83,-264 268.83,-264 274.83,-270 274.83,-276 274.83,-276 274.83,-288 274.83,-288 274.83,-294 268.83,-300 262.83,-300"/>
+<text xml:space="preserve" text-anchor="start" x="159.63" y="-282.4" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-weight="bold" font-size="14.00" fill="var(--ink)">triage</text>
+<text xml:space="preserve" text-anchor="start" x="145.82" y="-272" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10.00" fill="var(--muted)">AgentOperator</text>
+</g>
+<g id="edge1" class="edge">
+<path fill="none" stroke="var(--text)" stroke-width="1.1" d="M184.83,-329.51C184.83,-322.88 184.83,-315.19 184.83,-308"/>
+<polygon fill="var(--text)" stroke="var(--text)" stroke-width="1.1" points="186.93,-308.13 184.83,-302.13 182.73,-308.13 186.93,-308.13"/>
+</g>
+<g id="node3" class="node task human">
+<path fill="var(--panel)" stroke="var(--amber)" stroke-width="1.2" d="M262.83,-234C262.83,-234 106.83,-234 106.83,-234 100.83,-234 94.83,-228 94.83,-222 94.83,-222 94.83,-210 94.83,-210 94.83,-204 100.83,-198 106.83,-198 106.83,-198 262.83,-198 262.83,-198 268.83,-198 274.83,-204 274.83,-210 274.83,-210 274.83,-222 274.83,-222 274.83,-228 268.83,-234 262.83,-234"/>
+<text xml:space="preserve" text-anchor="start" x="155.43" y="-216.4" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-weight="bold" font-size="14.00" fill="var(--ink)">approve</text>
+<text xml:space="preserve" text-anchor="start" x="121.82" y="-206" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10.00" fill="var(--amber)">HumanApprovalOperator</text>
+</g>
+<g id="edge2" class="edge">
+<path fill="none" stroke="var(--accent)" stroke-width="1.1" d="M184.83,-263.51C184.83,-256.88 184.83,-249.19 184.83,-242"/>
+<polygon fill="var(--accent)" stroke="var(--accent)" stroke-width="1.1" points="186.93,-242.13 184.83,-236.13 182.73,-242.13 186.93,-242.13"/>
+<text xml:space="preserve" text-anchor="middle" x="115.52" y="-252.14" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11.00" fill="var(--accent)"> signal == &quot;planned&quot; </text>
+</g>
+<g id="node6" class="node task terminal">
+<path fill="var(--accent)" stroke="var(--accent)" stroke-width="1.2" d="M262.83,-36C262.83,-36 106.83,-36 106.83,-36 100.83,-36 94.83,-30 94.83,-24 94.83,-24 94.83,-12 94.83,-12 94.83,-6 100.83,0 106.83,0 106.83,0 262.83,0 262.83,0 268.83,0 274.83,-6 274.83,-12 274.83,-12 274.83,-24 274.83,-24 274.83,-30 268.83,-36 262.83,-36"/>
+<text xml:space="preserve" text-anchor="start" x="168.03" y="-18.4" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-weight="bold" font-size="14.00" fill="var(--bg)">done</text>
+<text xml:space="preserve" text-anchor="start" x="148.82" y="-8" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10.00" fill="var(--bg)">NoOpOperator</text>
+</g>
+<g id="edge3" class="edge">
+<path fill="none" stroke="var(--muted)" stroke-width="1.1" stroke-dasharray="5,2" d="M275.83,-282C379.83,-282 419.34,-155.18 365.83,-66 343.83,-29.33 323.59,-19.13 283.31,-18.09"/>
+<polygon fill="var(--muted)" stroke="var(--muted)" stroke-width="1.1" points="283.52,-15.99 277.49,-18.02 283.47,-20.19 283.52,-15.99"/>
+<text xml:space="preserve" text-anchor="middle" x="346.02" y="-69.29" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11.00" fill="var(--muted)"> else </text>
+</g>
+<g id="node4" class="node task op">
+<path fill="var(--panel)" stroke="var(--line)" stroke-width="1.2" d="M262.83,-168C262.83,-168 106.83,-168 106.83,-168 100.83,-168 94.83,-162 94.83,-156 94.83,-156 94.83,-144 94.83,-144 94.83,-138 100.83,-132 106.83,-132 106.83,-132 262.83,-132 262.83,-132 268.83,-132 274.83,-138 274.83,-144 274.83,-144 274.83,-156 274.83,-156 274.83,-162 268.83,-168 262.83,-168"/>
+<text xml:space="preserve" text-anchor="start" x="155.43" y="-150.4" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-weight="bold" font-size="14.00" fill="var(--ink)">develop</text>
+<text xml:space="preserve" text-anchor="start" x="145.82" y="-140" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10.00" fill="var(--muted)">AgentOperator</text>
+</g>
+<g id="edge4" class="edge">
+<path fill="none" stroke="var(--accent)" stroke-width="1.1" d="M184.83,-197.51C184.83,-190.88 184.83,-183.19 184.83,-176"/>
+<polygon fill="var(--accent)" stroke="var(--accent)" stroke-width="1.1" points="186.93,-176.13 184.83,-170.13 182.73,-176.13 186.93,-176.13"/>
+<text xml:space="preserve" text-anchor="middle" x="125.42" y="-186.14" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11.00" fill="var(--accent)"> approved == true </text>
+</g>
+<g id="edge5" class="edge">
+<path fill="none" stroke="var(--muted)" stroke-width="1.1" stroke-dasharray="5,2" d="M275.83,-216C361.25,-216 363.75,-29.43 283.34,-18.5"/>
+<polygon fill="var(--muted)" stroke="var(--muted)" stroke-width="1.1" points="283.62,-16.41 277.49,-18.11 283.34,-20.6 283.62,-16.41"/>
+<text xml:space="preserve" text-anchor="middle" x="322.03" y="-120.71" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11.00" fill="var(--muted)"> else </text>
+</g>
+<g id="node5" class="node task op">
+<path fill="var(--panel)" stroke="var(--line)" stroke-width="1.2" d="M262.83,-102C262.83,-102 106.83,-102 106.83,-102 100.83,-102 94.83,-96 94.83,-90 94.83,-90 94.83,-78 94.83,-78 94.83,-72 100.83,-66 106.83,-66 106.83,-66 262.83,-66 262.83,-66 268.83,-66 274.83,-72 274.83,-78 274.83,-78 274.83,-90 274.83,-90 274.83,-96 268.83,-102 262.83,-102"/>
+<text xml:space="preserve" text-anchor="start" x="168.03" y="-84.4" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-weight="bold" font-size="14.00" fill="var(--ink)">test</text>
+<text xml:space="preserve" text-anchor="start" x="139.82" y="-74" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10.00" fill="var(--muted)">CommandOperator</text>
+</g>
+<g id="edge6" class="edge">
+<path fill="none" stroke="var(--text)" stroke-width="1.1" d="M184.83,-131.51C184.83,-124.88 184.83,-117.19 184.83,-110"/>
+<polygon fill="var(--text)" stroke="var(--text)" stroke-width="1.1" points="186.93,-110.13 184.83,-104.13 182.73,-110.13 186.93,-110.13"/>
+</g>
+<g id="edge8" class="edge">
+<path fill="none" stroke="var(--muted)" stroke-width="1.1" stroke-dasharray="5,2" d="M93.83,-84C67.25,-84 64.75,-138.21 86.35,-148.37"/>
+<polygon fill="var(--muted)" stroke="var(--muted)" stroke-width="1.1" points="85.89,-150.42 92.2,-149.65 86.79,-146.31 85.89,-150.42"/>
+<text xml:space="preserve" text-anchor="middle" x="52.03" y="-120.57" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11.00" fill="var(--muted)"> else </text>
+</g>
+<g id="edge7" class="edge">
+<path fill="none" stroke="var(--accent)" stroke-width="1.1" d="M184.83,-65.51C184.83,-58.88 184.83,-51.19 184.83,-44"/>
+<polygon fill="var(--accent)" stroke="var(--accent)" stroke-width="1.1" points="186.93,-44.13 184.83,-38.13 182.73,-44.13 186.93,-44.13"/>
+<text xml:space="preserve" text-anchor="middle" x="92.42" y="-54.14" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="11.00" fill="var(--accent)"> contains(stdout, &quot;passed&quot;) </text>
+</g>
+</g>
+</svg>
+<!-- graph:end -->
+    <figcaption><code>newton workflow graph scan-and-fix.yaml</code>, styled for this page</figcaption>
+  </figure>
+  <p class="lead-in">Check it before it runs:</p>
+  <div class="panel has-copy">
+    <div class="line"><span class="p">$ </span>newton workflow validate scan-and-fix.yaml</div>
+    <div class="line"><span class="p">$ </span>newton workflow lint scan-and-fix.yaml</div>
+    <div class="line"><span class="p">$ </span>newton workflow graph scan-and-fix.yaml | dot -Tsvg &gt; graph.svg</div>
+    <div class="line"><span class="p">$ </span>newton workflow run scan-and-fix.yaml --workspace .</div>
+    <button type="button" class="copy" aria-label="Copy workflow commands">copy</button>
+  </div>
+</section>
+
+<section class="chapter" aria-labelledby="s4">
+  <h2 id="s4"><span class="num">§4</span>Findings that remember</h2>
+  <p>Every grade is matched against what Newton already knows, first by a stable fingerprint and then by meaning. Known issues are refreshed, new ones are created and vanished ones are resolved. A fixed issue that comes back is reopened.</p>
+  <p>The same Findings are the work queue for your agents.</p>
+  <div class="panel">
+    <div class="line"><span class="p">$ </span>newton data get findings --status triaged --scope repo --scope-id api</div>
+  </div>
+</section>
+
+<section class="chapter" aria-labelledby="s5">
+  <h2 id="s5"><span class="num">§5</span>People where they matter</h2>
+  <p>Approval and decision gates pause a graph and ask a person live, over <a href="https://github.com/goailoop/ailoop">ailoop</a>. Everything else runs on its own.</p>
+  <p>A Plan that keeps failing doesn't loop forever. Its Findings are marked <span class="highlight">blocked</span> and the optimizer carries on with the rest. If nothing else is actionable, the run stops as <code>stalled_on_blocked</code> and waits for a human.</p>
+</section>
+
+<section class="chapter" aria-labelledby="s6">
+  <h2 id="s6"><span class="num">§6</span>Yours, and durable</h2>
+  <p>Newton is one binary. State lives in your workspace under <code>.newton/</code>: checkpoints, artifacts and history. There is no hosted service, and no issue board pretending to be the source of truth.</p>
+  <p><code>newton serve</code> adds a web UI, REST and MCP on one port. It stays on loopback by default. Bind it anywhere else and OIDC becomes mandatory.</p>
+  <div class="panel has-copy">
+    <div class="line"><span class="p">$ </span>newton workflow resume --run-id &lt;uuid&gt;</div>
+    <div class="line"><span class="p">$ </span>newton serve --with-mcp <span class="c">  # web UI, REST and MCP on :8080</span></div>
+    <button type="button" class="copy" aria-label="Copy commands">copy</button>
+  </div>
+</section>
+
+<section class="chapter" id="start" aria-labelledby="s7">
+  <h2 id="s7"><span class="num">§7</span>Get started</h2>
+  <div class="install-grid">
+    <div class="panel has-copy">
+      <div class="line c"># macOS / Linux</div>
+      <div class="line"><span class="p">$ </span>brew tap gonewton/cli</div>
+      <div class="line"><span class="p">$ </span>brew install newton</div>
+      <button type="button" class="copy" aria-label="Copy Homebrew commands">copy</button>
+    </div>
+    <div class="panel has-copy">
+      <div class="line c"># Windows</div>
+      <div class="line"><span class="p">$ </span>scoop bucket add gonewton https://github.com/gonewton/scoop-bucket</div>
+      <div class="line"><span class="p">$ </span>scoop install newton</div>
+      <button type="button" class="copy" aria-label="Copy Scoop commands">copy</button>
+    </div>
+  </div>
+  <p class="lead-in">Then run <code>newton init .</code> at a repo root, and <code>newton doctor</code> to check the environment.</p>
+  <div class="actions" style="margin-top: 28px">
+    <a class="btn btn-primary" href="https://github.com/gonewton/newton#readme">Read the docs</a>
+    <a class="btn btn-secondary" href="https://github.com/gonewton/newton">View on GitHub</a>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <span>newton · gonewton</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/gonewton/newton#readme">docs</a>
+    <a href="https://github.com/gonewton/newton">github</a>
+    <a href="https://github.com/gonewton/newton/blob/main/CHANGELOG.md">changelog</a>
+  </nav>
+</footer>
+
+</div>
+<script src="copy.js" defer></script>
+</body>
+</html>
