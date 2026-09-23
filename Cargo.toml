@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.5.131"
+version = "0.5.132"
 edition = "2021"
 authors = ["Newton Loop Framework"]
 repository = "https://github.com/gonewton/newton.git"
