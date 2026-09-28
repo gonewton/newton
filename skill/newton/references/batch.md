@@ -7,7 +7,7 @@
 
 ## Purpose
 
-Headless **queue runner**: for each markdown plan in `.newton/plan/<project_id>/todo/`, copy it into the per-task layout under `project_root/.newton/tasks/<task_id>/` and execute the **configured workflow YAML** the same way as `newton run`, then move the plan to `completed/` or `failed/`.
+Headless **queue runner**: for each markdown plan in `.newton/plan/<project_id>/todo/`, copy it into the per-task layout under `project_root/.newton/tasks/<task_id>/` and execute the **configured workflow YAML** the same way as `newton workflow run`, then move the plan to `completed/` or `failed/`.
 
 ## Required input
 
