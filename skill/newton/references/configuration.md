@@ -40,7 +40,7 @@ not infer a definition or grant workflow permissions.
 
 ## Model and engine strings
 
-Valid model and engine identifiers depend on the **workflow YAML**, the **agent operator**, and your provider. Confirm with `newton run --help` and your workflow definitions; do not treat examples in the wild as stable API.
+Valid model and engine identifiers depend on the **workflow YAML**, the **agent operator**, and your provider. Confirm with `newton workflow run --help` and your workflow definitions; do not treat examples in the wild as stable API.
 
 ---
 

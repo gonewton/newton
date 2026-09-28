@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### docs: make the in-tree Newton skill canonical
+
+`skill/newton/` is now the only maintained Newton skill (1.3.0); the standalone `gonewton/skill` repository and its publish workflow are retired. The skill was corrected against the current CLI: `newton init` uses the bundled aikit-sdk and `--template` (including `builtin`), workflow commands live under `newton workflow` (`workflow run` flags rewritten from `--help`), the MCP section drops the non-existent `serve --mcp-path` and documents `newton mcp serve` as loopback-only, and a `serve` API reference (ported from `gonewton/skill`, pointing at `openapi/newton-api.yaml`) was added. `.agents/skills/newton` is re-synced from it.
+
 ### fix: `newton mcp serve` emits `mcp_serve_started` only once the port is held
 
 Standalone `newton mcp serve` probe-bound host:port, released it, emitted `mcp_serve_started` and then let cli-framework bind again, so the event could arrive before anything was listening, and another process could take the port in between. Newton now binds the listener itself, emits the event while holding it and hands it to cli-framework (`AppBuilder::with_mcp_http_listener`), which serves on it. Bind failures still exit with `NEWTON-MCP-001` before any event. The cli-framework pin moves to include that hook.

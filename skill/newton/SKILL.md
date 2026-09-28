@@ -2,7 +2,7 @@
 name: newton
 description: Newton CLI for workflow YAML graphs (operators, checkpoints, goal gates) and versioned Optimization Definitions. `optimize` runs durable baseline-grade → plan → candidate-develop → candidate-grade → accept cycles with explicit constraints and requirements revisions. Use when running/resuming workflows, binding an optimization definition, observing a run, validating YAML, or managing checkpoints/artifacts.
 license: Apache-2.0
-compatibility: Requires the newton binary on PATH. newton init requires aikit on PATH for templates.
+compatibility: Requires the newton binary on PATH.
 ---
 
 # Newton
@@ -38,8 +38,8 @@ Verify: `newton --help` and `newton --version`.
 ## Quick start
 
 1. `newton --help` and `newton <command> --help` for flags.
-2. `newton init [PATH]` to create `.newton/` and install the template via `aikit` (PATH defaults to the current directory).
-3. `newton run <workflow.yaml> --workspace <root>` (optional second positional input file for trigger payload).
+2. `newton init [PATH]` to create `.newton/` and install the template via the bundled aikit-sdk (PATH defaults to the current directory; `--template builtin` works offline).
+3. `newton workflow run <workflow.yaml> --workspace <root>` (optional second positional input file for trigger payload).
 
 ## CLI commands (source order)
 
@@ -47,13 +47,13 @@ These subcommands match the current CLI (confirm with `newton --help` on your bu
 
 | Command | Role |
 | --- | --- |
-| `run` | Execute a workflow graph from YAML |
 | `init` | Create `.newton/` and install the default template |
 | `optimize` | Run a durable, definition-bound native loop. The software strategy requires `grade`, `plan`, and `develop` roles and retains qualified candidates for review. Legacy Plan queues are not consumed. |
-| `serve` | HTTP/WebSocket API for workflow state, streaming, and loop observation |
+| `serve` | HTTP/WebSocket API for workflow state, streaming, and loop observation (see [serve API](references/serve-api.md)) |
 | `data` | Catalog CRUD over HTTP-style verbs (`get`/`post`/`patch`/`put`/`delete`) for entities incl. `finding`, `change-request`, `plan`, `optimize-run`, `optimize-cycle`, `eval-run`, `grade` |
 | `dependency discover\|inspect\|approve\|impact` | Discover Cargo facts, package human-reviewed Baselines, and query deterministic target-scoped Impact Sequences; see [dependency planning](references/dependency.md). |
 | `doctor` | Environment readiness diagnostics (replaces the removed `health` command) |
+| `workflow run` | Execute a workflow graph from YAML (see [run](references/run.md)) |
 | `workflow validate` | Validate workflow YAML before run |
 | `workflow graph` | Emit Graphviz DOT for the workflow graph (`--format dot --output <PATH>`) |
 | `workflow lint` | Best-practice checks on a workflow file |
@@ -74,14 +74,14 @@ There is **no** `step`, `status`, `report`, or `error` subcommand in current rel
 1. **New workspace**: `newton init .`; run workflows with `newton workflow run path/to/workflow.yaml --workspace .`.
 2. **Optimization loop**: write or select a versioned definition, set `definition_file` in `.newton/configs/<project_id>.conf`, then run `newton optimize <project_id> --once`. Use `--resume <RUN_ID>` to continue a safe durable phase; `--requirements-update <file>` is local-only and only activates at a safe boundary.
 3. **Live HIL**: Use `HumanApprovalOperator` or `HumanDecisionOperator` in your workflow YAML to pause for human input via [ailoop](https://github.com/goailoop/ailoop). Interact with ailoop channels using ailoop's own clients.
-4. **API / dashboards**: `newton serve` exposes REST, WebSocket, and SSE endpoints for workflow instances, streams, and the optimization loop (`/api/v1/optimize-runs`, trajectory, findings), and serves the **embedded web UI** at `/` by default (open the URL printed on startup in a browser to visualize optimize runs, findings, change requests, and plans; `--no-web` disables it). See `newton serve --help` and the Newton `README.md`.
+4. **API / dashboards**: `newton serve` exposes REST, WebSocket, and SSE endpoints for workflow instances, streams, and the optimization loop (`/api/v1/optimize-runs`, trajectory, findings), and serves the **embedded web UI** at `/` by default (open the URL printed on startup in a browser to visualize optimize runs, findings, change requests, and plans; `--no-web` disables it). See [references/serve-api.md](references/serve-api.md) and `openapi/newton-api.yaml`.
 5. **Grade a project (Finding ingest)**: Write a **command-Grader** at `.newton/grader/<name>/generate.sh <repo_id> <repo_path>` that runs your analyzer (e.g. `dk review`) and **prints an Assessment JSON to stdout** (it must NOT self-persist). The loop's grade phase runs it via `GraderCommandOperator`, which validates and persists the Assessment; `ReconcileOperator` then turns its Observations into durable **Findings**.
 
 ## Usage notes
 
-- `newton init` requires `aikit` on `PATH` and refuses to run if `.newton` already exists (remove it or pick another directory).
-- `newton run` takes the workflow path as the required first positional argument; the legacy named flag is gone.
-- `--server <URL>` on `newton run` registers the run with a Newton API instance started via `newton serve` for lifecycle notifications.
+- `newton init` does not need `aikit` on `PATH` (templates install via the bundled aikit-sdk) and refuses to run if `.newton` already exists (remove it or pick another directory). It needs network access to GitHub unless `--template` is `builtin` or a local path.
+- `newton workflow run` takes the workflow path as the required first positional argument; the top-level `newton run` and its `--file` flag are gone.
+- `--server <URL>` on `newton workflow run` registers the run with a Newton API instance started via `newton serve` for lifecycle notifications.
 - Checkpoint and artifact layouts live under `.newton/` inside the workspace you pass with `--workspace` (or the discovered project root).
 
 ## Optimization loop
@@ -194,16 +194,13 @@ Newton exposes explicitly selected commands as MCP (Model Context Protocol) tool
 Mount the MCP HTTP router on the **same listener** as the Newton REST API. One process, one port, one client URL.
 
 ```bash
-newton serve --host 127.0.0.1 --port 8080 --with-mcp --mcp-path /mcp
+newton serve --host 127.0.0.1 --port 8080 --with-mcp
 # Web UI: http://127.0.0.1:8080/
 # REST:   http://127.0.0.1:8080/healthz
 # MCP:    http://127.0.0.1:8080/mcp
 ```
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--with-mcp` | off | Opt-in; absent leaves `serve` behavior unchanged |
-| `--mcp-path` | `/mcp` | Path prefix for the MCP endpoint (must start with `/`, must not collide with a REST route) |
+The MCP endpoint is always mounted at `/mcp`. `--with-mcp` is opt-in; without it `serve` behavior is unchanged. It sits behind the same OIDC layer as the REST API, so this is the only supported way to expose MCP beyond loopback (`--oidc-issuer` / `--oidc-audience`).
 
 **Cursor / Claude Desktop integration (single-port HTTP):**
 
@@ -218,35 +215,35 @@ newton serve --host 127.0.0.1 --port 8080 --with-mcp --mcp-path /mcp
 }
 ```
 
-**Failure modes:** `NEWTON-SERVE-MCP-001` — invalid `--mcp-path`; `NEWTON-SERVE-MCP-002` — path collides with an existing REST route; `NEWTON-SERVE-MCP-004` — MCP router construction failed.
+**Failure mode:** `NEWTON-SERVE-MCP-004` — MCP router construction failed.
 
-### Option B — Dedicated MCP-only process (`newton --mcp-serve`)
+### Option B — Dedicated MCP-only process (`newton mcp serve`)
 
-`--mcp-serve` is **a top-level mode**, not a subcommand argument. It short-circuits subcommand dispatch and binds a separate MCP-only listener. Use this when you do not want the REST API running.
+Runs MCP without the REST API. It has **no authentication**, so it binds loopback only: a non-loopback `--host` is refused with `NEWTON-MCP-003` (use Option A with OIDC for remote access).
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--mcp-serve` | off | Enable MCP server mode |
-| `--mcp-host` | `127.0.0.1` | Bind address for the Streamable HTTP listener |
-| `--mcp-port` | `8730` | Distinct from `newton serve` (8080) to avoid collision |
-| `--mcp-path` | `/mcp` | HTTP path prefix for the MCP endpoint |
+| `--transport` | `http` | `http` (Streamable HTTP) or `stdio` |
+| `--host` | `127.0.0.1` | Loopback address only (`127.0.0.1`, `::1`, `localhost`) |
+| `--port` | `8730` | Distinct from `newton serve` (8080) to avoid collision |
+| `--path` | `/mcp` | HTTP path prefix for the MCP endpoint |
 
 ```bash
-# Default (loopback, port 8730, /mcp)
-newton --mcp-serve --mcp-port 8730
+# Streamable HTTP on loopback, port 8730, /mcp
+newton mcp serve
 
-# Custom interface, port, and path
-newton --mcp-serve --mcp-host 0.0.0.0 --mcp-port 9100 --mcp-path /tools
+# stdio (what `newton mcp install --stdio` registers)
+newton mcp serve --transport stdio
 ```
 
-**Cursor / Claude Desktop integration (dedicated process):**
+**Agent config (stdio, dedicated process):**
 
 ```json
 {
   "mcpServers": {
     "newton": {
       "command": "newton",
-      "args": ["--mcp-serve", "--mcp-port", "8730"]
+      "args": ["mcp", "serve", "--transport", "stdio"]
     }
   }
 }
@@ -278,10 +275,11 @@ A successful bind emits one structured `tracing::info!` event with fields `event
 
 - [references/configuration.md](references/configuration.md) — `.newton/configs` keys read by Newton
 - [references/init.md](references/init.md)
-- [references/run.md](references/run.md)
+- [references/run.md](references/run.md) — `newton workflow run` arguments and options
+- [references/serve-api.md](references/serve-api.md) — `newton serve` REST/stream map, auth, storage, OpenAPI pointer
 - [references/optimize.md](references/optimize.md) — the `optimize` command + the closed optimization loop, entities, break conditions, and `serve` endpoints (supersedes the old `batch.md`)
 - [references/dependency.md](references/dependency.md) — approved local Baselines and deterministic planner queries
 
-**Canonical skill:** agent instructions for Newton CLI are maintained in [gonewton/skill](https://github.com/gonewton/skill) (`newton/`). Prefer `newton <cmd> --help` when behavior differs by version.
+**Canonical skill:** this in-tree copy (`skill/newton/` in [gonewton/newton](https://github.com/gonewton/newton)) is the only maintained source; the standalone `gonewton/skill` repository is retired. Install with `fastskill add https://github.com/gonewton/newton/tree/main/skill/newton`. Prefer `newton <cmd> --help` when behavior differs by version.
 
 Organization-specific shell or YAML that sources the same `.conf` files (extra keys, `develop` wrappers) is **not** documented here; keep that in your own workspace skill or internal docs.

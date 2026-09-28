@@ -1,20 +1,25 @@
 ---
 name: newton
-description: Newton CLI for workflow YAML graphs (operators, checkpoints, goal gates), batch plan queues, ailoop human-in-the-loop via HumanApprovalOperator/HumanDecisionOperator, and HTTP APIs via serve. Use when running or resuming workflows, validating or linting workflow files, managing checkpoints or artifacts, configuring .newton/configs, or using `workflow validate`, `workflow lint`, `workflow preview`, `workflow graph`, `workflow resume`, `workflow runs`, `workflow checkpoint`, `workflow artifact`, webhook, or batch.
+description: Newton CLI for workflow YAML graphs (operators, checkpoints, goal gates) and versioned Optimization Definitions. `optimize` runs durable baseline-grade → plan → candidate-develop → candidate-grade → accept cycles with explicit constraints and requirements revisions. Use when running/resuming workflows, binding an optimization definition, observing a run, validating YAML, or managing checkpoints/artifacts.
 license: Apache-2.0
-compatibility: Requires the newton binary on PATH. newton init requires aikit on PATH for templates.
+compatibility: Requires the newton binary on PATH.
 ---
 
 # Newton
 
-Newton is a **workflow-first** CLI: YAML workflow graphs with operators, checkpoints, artifacts, and goal gates. Classic evaluator, advisor, and executor-only loops are expressed inside workflows now, not as separate top-level commands. **Sub-workflows** are supported: a task can invoke another workflow file with `WorkflowOperator` (`workflow_path`, optional `context` and `triggers` merges), subject to workspace path rules and a maximum nesting depth.
+Newton is a **workflow-first** CLI **and an autonomous optimizer**: it runs YAML workflow graphs (operators, checkpoints, artifacts, goal gates) and drives definition-bound optimization toward a numeric or Grade objective. **Sub-workflows** are supported: a task can invoke another workflow file with `WorkflowOperator` (`workflow_path`, optional `context` and `triggers` merges), subject to workspace path rules and a maximum nesting depth.
+
+> **Vocabulary changes (pre-1.0):** `batch` was renamed to **`optimize`** (ADR 0003); the `webhook` command and `health` CLI command were **removed** (`webhook` per ADR 0004 — the optimizer is self-driving, no external ingress; `health` folded into `doctor`). The durable work entity `Opportunity` was renamed to **`Finding`** (061). See [Optimization loop](#optimization-loop) and `CONTEXT.md`.
 
 ## When to use
 
-- Running or resuming workflows (including graphs that call nested workflows via `WorkflowOperator`), batch plan queues, or webhook-driven runs.
+- Running or resuming workflows (including graphs that call nested workflows via `WorkflowOperator`).
+- Driving a definition-bound **optimization loop** for a project (`newton optimize <project> --definition <file>`) or **observing** it over `serve`.
 - Initializing a workspace (`newton init`) and editing `.newton/configs/*.conf`.
 - Validating or explaining workflow YAML; cleaning checkpoints or artifacts.
-- Operating `newton serve` for HTTP or WebSocket APIs.
+- Operating `newton serve` for HTTP or WebSocket APIs (incl. the optimize-run + grading read endpoints).
+- Working with loop entities — **Finding**, **Change Request**, **Plan**, **Assessment** — via `newton data` or `/api/v1` (e.g. `newton data post finding`, `POST /api/v1/findings/{id}/unblock`).
+- Wiring a **Grader** (`.newton/grader/<name>/generate.sh`) that prints an **Assessment** to stdout for the loop's grade phase.
 
 ## Installation
 
@@ -28,11 +33,13 @@ scoop install newton
 
 Verify: `newton --help` and `newton --version`.
 
+> **Deprecated:** Manually editing agent config files (`.cursor/mcp.json`, `~/.claude.json`, etc.) to register Newton as an MCP server is deprecated. Use `newton mcp install` instead (see [MCP agent registration](#mcp-agent-registration) below).
+
 ## Quick start
 
 1. `newton --help` and `newton <command> --help` for flags.
-2. `newton init [PATH]` to create `.newton/` and install the template via `aikit` (PATH defaults to the current directory).
-3. `newton run <workflow.yaml> --workspace <root>` (optional second positional input file for trigger payload).
+2. `newton init [PATH]` to create `.newton/` and install the template via the bundled aikit-sdk (PATH defaults to the current directory; `--template builtin` works offline).
+3. `newton workflow run <workflow.yaml> --workspace <root>` (optional second positional input file for trigger payload).
 
 ## CLI commands (source order)
 
@@ -40,10 +47,13 @@ These subcommands match the current CLI (confirm with `newton --help` on your bu
 
 | Command | Role |
 | --- | --- |
-| `run` | Execute a workflow graph from YAML |
 | `init` | Create `.newton/` and install the default template |
-| `batch` | Process queued plans under `.newton/plan/<project_id>/` |
-| `serve` | HTTP/WebSocket API for workflow state and streaming |
+| `optimize` | Run a durable, definition-bound native loop. The software strategy requires `grade`, `plan`, and `develop` roles and retains qualified candidates for review. Legacy Plan queues are not consumed. |
+| `serve` | HTTP/WebSocket API for workflow state, streaming, and loop observation (see [serve API](references/serve-api.md)) |
+| `data` | Catalog CRUD over HTTP-style verbs (`get`/`post`/`patch`/`put`/`delete`) for entities incl. `finding`, `change-request`, `plan`, `optimize-run`, `optimize-cycle`, `eval-run`, `grade` |
+| `dependency discover\|inspect\|approve\|impact` | Discover Cargo facts, package human-reviewed Baselines, and query deterministic target-scoped Impact Sequences; see [dependency planning](references/dependency.md). |
+| `doctor` | Environment readiness diagnostics (replaces the removed `health` command) |
+| `workflow run` | Execute a workflow graph from YAML (see [run](references/run.md)) |
 | `workflow validate` | Validate workflow YAML before run |
 | `workflow graph` | Emit Graphviz DOT for the workflow graph (`--format dot --output <PATH>`) |
 | `workflow lint` | Best-practice checks on a workflow file |
@@ -52,7 +62,8 @@ These subcommands match the current CLI (confirm with `newton --help` on your bu
 | `workflow runs` | `list` past runs / `show --run-id <RUN_ID>` task replay |
 | `workflow checkpoint` | `list` / `clean` checkpoint data |
 | `workflow artifact` | `clean` old execution artifacts |
-| `webhook` | `serve` or `status` for webhook-triggered runs (`--workflow <PATH>`) |
+
+> **Removed:** `webhook` (ADR 0004 — no external HTTP ingress; the optimizer is self-driving) and `health` (folded into `doctor`). Don't reference them.
 
 For commands without a dedicated reference file below, use `newton <cmd> --help` as the source of truth for flags and examples.
 
@@ -60,47 +71,136 @@ There is **no** `step`, `status`, `report`, or `error` subcommand in current rel
 
 ## Typical flows
 
-1. **New workspace**: `newton init .` then set `workflow_file` in `.newton/configs/default.conf` when using batch; run workflows with `newton run path/to/workflow.yaml --workspace .`.
-2. **Queue of plans**: Configure `.newton/configs/<project_id>.conf` with `project_root` and `workflow_file`; place plans in `.newton/plan/<project_id>/todo/`; run `newton batch <project_id>`.
+1. **New workspace**: `newton init .`; run workflows with `newton workflow run path/to/workflow.yaml --workspace .`.
+2. **Optimization loop**: write or select a versioned definition, set `definition_file` in `.newton/configs/<project_id>.conf`, then run `newton optimize <project_id> --once`. Use `--resume <RUN_ID>` to continue a safe durable phase; `--requirements-update <file>` is local-only and only activates at a safe boundary.
 3. **Live HIL**: Use `HumanApprovalOperator` or `HumanDecisionOperator` in your workflow YAML to pause for human input via [ailoop](https://github.com/goailoop/ailoop). Interact with ailoop channels using ailoop's own clients.
-4. **API / dashboards**: `newton serve` exposes REST, WebSocket, and SSE endpoints for workflow instances and streams (see `newton serve --help` and the Newton repository `README.md` when updated).
+4. **API / dashboards**: `newton serve` exposes REST, WebSocket, and SSE endpoints for workflow instances, streams, and the optimization loop (`/api/v1/optimize-runs`, trajectory, findings), and serves the **embedded web UI** at `/` by default (open the URL printed on startup in a browser to visualize optimize runs, findings, change requests, and plans; `--no-web` disables it). See [references/serve-api.md](references/serve-api.md) and `openapi/newton-api.yaml`.
+5. **Grade a project (Finding ingest)**: Write a **command-Grader** at `.newton/grader/<name>/generate.sh <repo_id> <repo_path>` that runs your analyzer (e.g. `dk review`) and **prints an Assessment JSON to stdout** (it must NOT self-persist). The loop's grade phase runs it via `GraderCommandOperator`, which validates and persists the Assessment; `ReconcileOperator` then turns its Observations into durable **Findings**.
 
 ## Usage notes
 
-- `newton init` requires `aikit` on `PATH` and refuses to run if `.newton` already exists (remove it or pick another directory).
-- `newton run` takes the workflow path as the required first positional argument; the legacy named flag is gone.
-- `--server <URL>` on `newton run` registers the run with a Newton API instance started via `newton serve` for lifecycle notifications.
-- Checkpoint and artifact layouts live under `.newton/` inside the workspace you pass with `--workspace` (or the discovered project root for batch).
+- `newton init` does not need `aikit` on `PATH` (templates install via the bundled aikit-sdk) and refuses to run if `.newton` already exists (remove it or pick another directory). It needs network access to GitHub unless `--template` is `builtin` or a local path.
+- `newton workflow run` takes the workflow path as the required first positional argument; the top-level `newton run` and its `--file` flag are gone.
+- `--server <URL>` on `newton workflow run` registers the run with a Newton API instance started via `newton serve` for lifecycle notifications.
+- Checkpoint and artifact layouts live under `.newton/` inside the workspace you pass with `--workspace` (or the discovered project root).
+
+## Optimization loop
+
+Newton's reason to exist is an **autonomous, GitHub-free loop** that improves a project toward a project-defined **Grade**. One pass:
+
+```
+grade ─→ reconcile ─→ change-request ─→ (approve) ─→ plan ─→ develop ─→ merge ─┐
+(Assessment)(Findings)(Change Request)   (HIL/auto)  (HOW)  (tests+commit) local│
+                            │ decision=none + nothing blocked → CONVERGED       │ re-grade
+                            └───────────────────────────────────────────────────┘
+```
+
+**Durable spine (lives in Newton's store, never a board):** `Finding → Change Request → Plan → Execution`.
+
+**Key concepts** (full glossary in `CONTEXT.md`):
+
+- **Grader / Assessment / Score / Observation** — a **Grader** (a command program, e.g. `generate.sh`, or a rubric agent) inspects the repo and emits an **Assessment**: an overall **Grade** (0–100), per-dimension **Scores**, and **Observations** (the text-gradient: problem + why + recommended action).
+- **Reconciliation → Finding** — `ReconcileOperator` matches an Assessment's Observations against open **Findings** (the durable, triageable records); match refreshes, no-match creates, open-with-no-match **resolves**. Identity is Newton's, never the grader's.
+- **Change Request** — the synthesized proposal (`ChangeRequestOperator`) over the standing Findings (the WHAT/WHY). `decision: propose | none`.
+- **Plan** — the enriched implementation spec (the HOW). Status: `draft → ready → running → complete | failed`, plus `abandoned`. Fields: `body`, `executionId`, `attempts`, `lastError`, `module`.
+- **Optimize Run / Cycle / Trajectory** — one loop invocation is an **Optimize Run**; each iteration is a **Cycle**; the per-cycle audit log (grades, decision, plan, develop status) is the **Trajectory**. A Run contains Cycles; each Cycle fires several **Steps** (workflow runs) and one develop **Execution**.
+- **Break conditions (the loop MUST terminate)** — `converged` (decision none for K rounds, zero blocked) · `stalled_on_blocked` · `max_cycles` · per-grader `target` (all clear) · per-grader `regression` (any drops) · `no_progress`.
+- **`blocked` Finding + un-block** — when a Plan fails develop after `optimize_max_failed_attempts`, its Findings are **quarantined** (`blocked`) and a human is escalated to; the loop keeps optimizing the rest. Clear with `POST /api/v1/findings/{id}/unblock`.
+- **Multi-grader** — `optimize_graders` is a space list; Findings pool into one Change Request per cycle; targets/regression are per-grader.
+
+**Native driver:** `newton optimize` requires `--definition <file>` or `definition_file` in its project config. It persists a definition binding, requirements revisions, Candidate evidence, a Cycle journal, and the final outcome. A Candidate is accepted only after correlated current evidence satisfies every Acceptance Constraint and the Comparison Policy. The generic host rejects `workflows.promote` because it cannot verify or atomically update an arbitrary target; use a target-specific external promotion boundary. A legacy shell script MAY remain as a development scaffold but is not the production loop contract.
+
+**Observe over `serve`** (read-only — the loop is self-driving, ADR 0004):
+
+```bash
+GET  /api/v1/optimize-runs                      # list runs (status, cycle, per-grader grades, open/blocked)
+GET  /api/v1/optimize-runs/{id}                 # one run + outcome reason
+GET  /api/v1/optimize-runs/{id}/trajectory      # per-cycle rows
+GET  /api/v1/findings?status=blocked            # blocked findings (inline plan/attempts/lastError/CR)
+POST /api/v1/findings/{id}/unblock              # return a blocked Finding to the actionable pool (409 if not blocked)
+```
+
+See [references/optimize.md](references/optimize.md).
 
 ## Quick reference
 
 ```bash
-newton run workflow.yaml --workspace . --verbose
-newton batch my-project --workspace ~/ws --once
+newton workflow run workflow.yaml --workspace . --verbose
+newton optimize my-project --definition security.yaml --once
+newton optimize my-project --resume <RUN_ID> --requirements-update update.yaml
 newton workflow validate workflow.yaml
 newton workflow lint workflow.yaml
 newton workflow preview workflow.yaml
 newton workflow resume --run-id <uuid> --workspace .
+curl -s localhost:8080/api/v1/optimize-runs            # observe loop runs
 ```
+
+## MCP agent registration
+
+Newton can register itself as an MCP server in any supported agent with a single command. This replaces manual config-file editing, which is deprecated.
+
+**Discover supported agents and their config file paths:**
+
+```bash
+newton mcp list
+```
+
+**Register for Cursor (project scope — writes `.cursor/mcp.json` in CWD):**
+
+```bash
+newton mcp install --agent cursor --stdio --scope project --overwrite
+```
+
+**Register for Claude Code (project scope — writes `.mcp.json` in CWD):**
+
+```bash
+newton mcp install --agent claude --stdio --scope project --overwrite
+```
+
+**Preview the config entry without writing any file:**
+
+```bash
+newton mcp install --agent cursor --stdio --dry-run
+```
+
+**Register for other agents (global scope):**
+
+```bash
+newton mcp install --agent gemini --stdio --scope global --overwrite
+newton mcp install --agent copilot --stdio --scope global --overwrite
+newton mcp install --agent opencode --stdio --scope global --overwrite
+newton mcp install --agent codex --stdio --scope global --overwrite
+```
+
+`newton mcp register` is an alias for `newton mcp install`.
+
+After running `mcp install`, reload the agent (restart or re-open the workspace). Newton's explicitly exposed MCP tools will be callable over the registered stdio transport; see the tool surface below.
+
+| Agent flag | Project-scope config file | Global-scope config file |
+| --- | --- | --- |
+| `claude` | `.mcp.json` in CWD | `~/.claude.json` |
+| `cursor` | `.cursor/mcp.json` in CWD | `~/.cursor/mcp.json` |
+| `gemini` | `.gemini/settings.json` in CWD | `~/.gemini/settings.json` |
+| `copilot` / `vscode` | `.vscode/mcp.json` in CWD | `~/.config/Code/User/mcp.json` |
+| `opencode` | `opencode.json` in CWD | `~/.config/opencode/opencode.json` |
+| `codex` | `.codex/config.toml` in CWD | `~/.codex/config.toml` |
 
 ## MCP Server Mode
 
-Newton exposes a curated subset of commands as MCP (Model Context Protocol) tools via the `ExposeMcpOnly` policy. Two deployment topologies are supported.
+Newton exposes explicitly selected commands as MCP (Model Context Protocol) tools. Two deployment topologies are supported.
 
 ### Option A — Single-port (`newton serve --with-mcp`) _(recommended)_
 
 Mount the MCP HTTP router on the **same listener** as the Newton REST API. One process, one port, one client URL.
 
 ```bash
-newton serve --host 127.0.0.1 --port 8080 --with-mcp --mcp-path /mcp
-# REST:  http://127.0.0.1:8080/health
-# MCP:   http://127.0.0.1:8080/mcp
+newton serve --host 127.0.0.1 --port 8080 --with-mcp
+# Web UI: http://127.0.0.1:8080/
+# REST:   http://127.0.0.1:8080/healthz
+# MCP:    http://127.0.0.1:8080/mcp
 ```
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--with-mcp` | off | Opt-in; absent leaves `serve` behavior unchanged |
-| `--mcp-path` | `/mcp` | Path prefix for the MCP endpoint (must start with `/`, must not collide with a REST route) |
+The MCP endpoint is always mounted at `/mcp`. `--with-mcp` is opt-in; without it `serve` behavior is unchanged. It sits behind the same OIDC layer as the REST API, so this is the only supported way to expose MCP beyond loopback (`--oidc-issuer` / `--oidc-audience`).
 
 **Cursor / Claude Desktop integration (single-port HTTP):**
 
@@ -115,53 +215,49 @@ newton serve --host 127.0.0.1 --port 8080 --with-mcp --mcp-path /mcp
 }
 ```
 
-**Failure modes:** `NEWTON-SERVE-MCP-001` — invalid `--mcp-path`; `NEWTON-SERVE-MCP-002` — path collides with an existing REST route; `NEWTON-SERVE-MCP-004` — MCP router construction failed.
+**Failure mode:** `NEWTON-SERVE-MCP-004` — MCP router construction failed.
 
-### Option B — Dedicated MCP-only process (`newton mcp serve`) _(primary)_
+### Option B — Dedicated MCP-only process (`newton mcp serve`)
 
-`newton mcp serve` is the canonical subcommand for a dedicated MCP-only process. It binds a separate MCP-only listener itself (so the structured `mcp_serve_started` startup event means the port is already accepting) and applies Newton's stable error codes.
+Runs MCP without the REST API. It has **no authentication**, so it binds loopback only: a non-loopback `--host` is refused with `NEWTON-MCP-003` (use Option A with OIDC for remote access).
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--host` | `127.0.0.1` | Bind address for the Streamable HTTP listener |
+| `--transport` | `http` | `http` (Streamable HTTP) or `stdio` |
+| `--host` | `127.0.0.1` | Loopback address only (`127.0.0.1`, `::1`, `localhost`) |
 | `--port` | `8730` | Distinct from `newton serve` (8080) to avoid collision |
 | `--path` | `/mcp` | HTTP path prefix for the MCP endpoint |
 
 ```bash
-# Default (loopback, port 8730, /mcp)
+# Streamable HTTP on loopback, port 8730, /mcp
 newton mcp serve
 
-# Custom interface, port, and path
-newton mcp serve --host 0.0.0.0 --port 9100 --path /tools
+# stdio (what `newton mcp install --stdio` registers)
+newton mcp serve --transport stdio
 ```
 
-**Cursor / Claude Desktop integration (dedicated process):**
+**Agent config (stdio, dedicated process):**
 
 ```json
 {
   "mcpServers": {
     "newton": {
       "command": "newton",
-      "args": ["mcp", "serve", "--port", "8730"]
+      "args": ["mcp", "serve", "--transport", "stdio"]
     }
   }
 }
 ```
 
-**Compatibility alias (deprecated):** `newton --mcp-serve --mcp-port 8730` still works but emits a deprecation notice on stderr. Migrate to `newton mcp serve --port 8730`.
-
 ### Tool surface
 
-Newton uses `McpToolExportPolicy::ExposeMcpOnly` for both MCP entry points. Only the following four commands are exposed as MCP tools (issues #309, #305):
-
-| MCP tool name | Command | Notes |
-| --- | --- | --- |
-| `newton.run` | `run` | Execute a workflow graph from YAML |
-| `newton.workflow` | `workflow` | validate / lint / preview / graph / resume / runs / checkpoint / artifact via positional `subcommand` |
-| `newton.health` | `health` | Liveness probe |
-| `newton.config` | `config` | Redacted configuration inspection |
-
-The following commands are **NOT** available as MCP tools: `newton.init`, `newton.batch`, `newton.serve`, `newton.webhook`, `newton.doctor`, `newton.completion`. Adding a new Newton command does **not** automatically expose it as an MCP tool — it must have `expose_mcp: true` set in its `Command` definition.
+Newton uses `McpToolExportPolicy::ExposeMcpOnly`; the exposed commands are `config`,
+`workflow`, `data.get`, `data.post`, `data.put`, `data.patch`, `data.delete`,
+`dependency.inspect`, and `dependency.impact`. Tool names use underscores, for
+example `newton_dependency_impact`. `dependency.approve` is not an agent tool:
+agents MUST NOT invent a human review record or approve their own dependency map.
+Adding a command does not automatically expose it; its `expose_mcp` flag and
+`MCP_EXPOSED_COMMAND_IDS` must agree.
 
 ### Port-conflict policy
 
@@ -177,11 +273,13 @@ A successful bind emits one structured `tracing::info!` event with fields `event
 
 ## References
 
-- [references/configuration.md](references/configuration.md) — `.newton/configs` keys read by Newton (`batch`, `init` stub)
+- [references/configuration.md](references/configuration.md) — `.newton/configs` keys read by Newton
 - [references/init.md](references/init.md)
-- [references/run.md](references/run.md)
-- [references/batch.md](references/batch.md)
+- [references/run.md](references/run.md) — `newton workflow run` arguments and options
+- [references/serve-api.md](references/serve-api.md) — `newton serve` REST/stream map, auth, storage, OpenAPI pointer
+- [references/optimize.md](references/optimize.md) — the `optimize` command + the closed optimization loop, entities, break conditions, and `serve` endpoints (supersedes the old `batch.md`)
+- [references/dependency.md](references/dependency.md) — approved local Baselines and deterministic planner queries
 
-**Canonical skill:** agent instructions for Newton CLI are maintained in [gonewton/skill](https://github.com/gonewton/skill) (`newton/`). Prefer `newton <cmd> --help` when behavior differs by version.
+**Canonical skill:** this in-tree copy (`skill/newton/` in [gonewton/newton](https://github.com/gonewton/newton)) is the only maintained source; the standalone `gonewton/skill` repository is retired. Install with `fastskill add https://github.com/gonewton/newton/tree/main/skill/newton`. Prefer `newton <cmd> --help` when behavior differs by version.
 
 Organization-specific shell or YAML that sources the same `.conf` files (extra keys, `develop` wrappers) is **not** documented here; keep that in your own workspace skill or internal docs.
