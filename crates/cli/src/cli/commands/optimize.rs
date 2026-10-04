@@ -58,6 +58,7 @@ pub async fn optimize(args: OptimizeArgs) -> crate::Result<()> {
             let binding: BoundOptimizationDefinition =
                 serde_json::from_value(journal.binding.clone())?;
             let mut inspection = inspect_binding(&binding);
+            inspection["state_dir"] = serde_json::json!(state_dir);
             inspection["definition_root"] = serde_json::json!(journal.definition_root);
             inspection["definition_snapshot"] = serde_json::json!(journal.definition_snapshot);
             println!("{}", serde_json::to_string_pretty(&inspection)?);
@@ -81,19 +82,9 @@ pub async fn optimize(args: OptimizeArgs) -> crate::Result<()> {
             && journal
                 .outcome
                 .as_ref()
-                .and_then(|outcome| outcome.get("stop_reason"))
-                == Some(&serde_json::json!("cycle_complete"))
+                .and_then(|value| value.get("stop_reason"))
+                != Some(&serde_json::json!("cycle_complete"))
         {
-            journal.phase = lifecycle::Phase::CycleComplete;
-            journal.outcome = None;
-            newton_core::fs_util::atomic_write(
-                &state_dir.join("optimize").join(run_id).join("current.json"),
-                &serde_json::to_vec_pretty(&journal)?,
-            )?;
-            remove_if_present(&run_directory.join("outcome.json"))?;
-            remove_if_present(&run_directory.join("report.json"))?;
-        }
-        if journal.phase == lifecycle::Phase::Finished {
             let binding: BoundOptimizationDefinition =
                 serde_json::from_value(journal.binding.clone())?;
             let report = projection::retry_finished(
@@ -202,6 +193,7 @@ pub async fn optimize(args: OptimizeArgs) -> crate::Result<()> {
     let prepared = snapshot::Prepared::read(&binding, &definition_root)?;
     let runtime = prepared.runtime(&binding)?;
     let mut inspection = inspect_binding(&binding);
+    inspection["state_dir"] = serde_json::json!(state_dir);
     inspection["definition_root"] = serde_json::json!(definition_root);
     inspection["definition_source_manifest"] = serde_json::json!(prepared.manifest);
     println!("{}", serde_json::to_string_pretty(&inspection)?);

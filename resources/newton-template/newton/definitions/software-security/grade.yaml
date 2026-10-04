@@ -18,7 +18,7 @@ workflow:
           - python3
           - -c
           - {$expr: 'triggers.assets["security.py"]'}
-          - grade
+          - evaluate
           - {$expr: triggers.input_file}
       transitions:
         - to: result

@@ -17,6 +17,9 @@ pre-implementation warnings.
 6. [Implemented contract](../docs/optimization-contract.md),
    [review resolution](../docs/generic-optimization-review-resolution.md), and
    [architecture](../architecture.md).
+7. [Implementation review](../docs/generic-optimization-implementation-review.md)
+   and its regression/validation record; this follow-up corrects defects found
+   after the first implementation was merged.
 
 ## Implementation entry points
 

@@ -199,6 +199,18 @@ forward without replaying execution. A conflicting Cycle, malformed identity,
 active dispatch, or uncertain effect fails closed. One local claim serializes
 writers; it is not a distributed lock.
 
+Publication uses a complete temporary file and an atomic no-overwrite operation.
+Resume acquires ownership before reloading or changing the checkpoint. A saved
+decision is reused without repeating acceptance or stagnation updates; recovered
+completion and no-action decisions stop before dispatching more work. A safe
+mid-Cycle resource stop publishes a `resource_limit` Cycle so an explicit
+requirements update can extend the limits and start the next Cycle without a
+history gap. Changing requirements resets stagnation and threshold baselines.
+
+All history readers validate schema versions and contiguous numeric Cycle
+identities. `--inspect` includes the resolved `state_dir`; external readers and
+test harnesses should use it instead of assuming the context root owns state.
+
 `run.json`, Cycle records, and reports carry schema versions. Existing runs that
 only contain the pre-version-2 `journal.json`/SQLite representation are not
 migrated in place. Finish them with Newton 0.5.133 or start a new run.

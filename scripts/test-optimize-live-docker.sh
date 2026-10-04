@@ -32,5 +32,5 @@ docker run --rm --network host \
   "${docker_environment[@]}" \
   --mount "type=bind,src=$workspace,dst=/workspace" \
   --mount "type=bind,src=$evidence,dst=/evidence" \
-  --mount "type=bind,src=$(realpath "$pi_agent_dir"),dst=/tmp/newton-home/.pi/agent,readonly" \
-  "$image" /workspace "$project" newton --evidence-dir /evidence "$@"
+  --mount "type=bind,src=$(realpath "$pi_agent_dir"),dst=/pi-config,readonly" \
+  "$image" /workspace "$project" newton --evidence-dir /evidence/trial "$@"

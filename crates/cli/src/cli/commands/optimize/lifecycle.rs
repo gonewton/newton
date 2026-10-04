@@ -172,11 +172,24 @@ impl Lifecycle {
     }
 
     pub fn resume(
-        mut journal: Journal,
+        journal: Journal,
         events: broadcast::Sender<BroadcastEvent>,
         state_dir: &Path,
         context_root: &Path,
     ) -> Result<Self> {
+        // Serialize before reading or reopening the checkpoint. A competing
+        // resume must never overwrite the running owner's newer checkpoint.
+        let claim = RunClaim::resume(
+            &context_root.join(".newton/optimize/claim"),
+            &journal.run_id,
+        )?;
+        let directory = state_dir.join("optimize").join(&journal.run_id);
+        let expected_run_id = journal.run_id;
+        let mut journal: Journal = read_json(&directory.join("current.json"))?;
+        anyhow::ensure!(
+            journal.run_id == expected_run_id,
+            "recovery checkpoint identity changed while acquiring ownership"
+        );
         if journal.schema_version != HISTORY_SCHEMA_VERSION {
             anyhow::bail!(
                 "unsupported optimization checkpoint schema {}",
@@ -186,7 +199,35 @@ impl Lifecycle {
         if journal.requires_reconciliation || journal.active_dispatch.is_some() {
             anyhow::bail!("Optimize Run {} stopped during {:?}; external effects may have occurred. Reconcile the recorded dispatch before resuming; it will not be replayed", journal.run_id, journal.phase);
         }
-        let directory = state_dir.join("optimize").join(&journal.run_id);
+        if journal.phase == Phase::Finished
+            && journal
+                .outcome
+                .as_ref()
+                .and_then(|value| value.get("stop_reason"))
+                == Some(&serde_json::json!("cycle_complete"))
+        {
+            journal.phase = Phase::CycleComplete;
+            journal.outcome = None;
+        }
+        let history = read_cycles(&directory, &journal.run_id);
+        let history = match history {
+            Ok(history) => history,
+            Err(error) => {
+                journal.requires_reconciliation = true;
+                newton_core::fs_util::atomic_write(
+                    &directory.join("current.json"),
+                    &serde_json::to_vec_pretty(&journal)?,
+                )?;
+                return Err(error);
+            }
+        };
+        let committed = history.last().map_or(0, |record| record.cycle);
+        anyhow::ensure!(
+            committed <= journal.cycle
+                && (committed == journal.cycle
+                    || (journal.phase != Phase::CycleComplete && committed + 1 == journal.cycle)),
+            "Cycle history is missing a committed Cycle or is ahead of the checkpoint"
+        );
         let recovered_cycle = recover_published_cycle(&directory, &mut journal)?;
         if !matches!(
             journal.phase,
@@ -194,12 +235,8 @@ impl Lifecycle {
         ) {
             anyhow::bail!("Optimize Run {} stopped during {:?}; external effects may have occurred. Reconcile the recorded dispatch before resuming; it will not be replayed", journal.run_id, journal.phase);
         }
-        let claim = RunClaim::resume(
-            &context_root.join(".newton/optimize/claim"),
-            &journal.run_id,
-        )?;
         let run: OptimizationRunRecord = read_json(&directory.join("run.json"))?;
-        if run.run_id != journal.run_id {
+        if run.run_id != journal.run_id || run.schema_version != HISTORY_SCHEMA_VERSION {
             anyhow::bail!("run metadata and recovery checkpoint identity disagree");
         }
         let lifecycle = Self {
@@ -209,8 +246,10 @@ impl Lifecycle {
             directory,
             claim: Some(claim),
         };
-        if recovered_cycle {
+        if recovered_cycle || lifecycle.journal.phase == Phase::CycleComplete {
             lifecycle.save()?;
+            super::remove_if_present(&lifecycle.directory.join("outcome.json"))?;
+            super::remove_if_present(&lifecycle.directory.join("report.json"))?;
         }
         Ok(lifecycle)
     }
@@ -351,6 +390,13 @@ fn recover_published_cycle(directory: &Path, journal: &mut Journal) -> Result<bo
             record.run_id == journal.run_id && record.cycle == journal.cycle,
             "published Cycle identity conflicts with recovery checkpoint"
         );
+        anyhow::ensure!(
+            record.decision == journal.decision
+                && record.proposal == journal.proposal
+                && record.candidate_evaluations == journal.candidate_evaluations
+                && record.baseline_evaluations == journal.baseline_evaluations,
+            "published Cycle evidence conflicts with recovery checkpoint"
+        );
         // A completed Cycle is committed by the immutable file. A crash before
         // current.json advances is safe to recover without replaying execution.
         journal.phase = Phase::CycleComplete;
@@ -361,12 +407,13 @@ fn recover_published_cycle(directory: &Path, journal: &mut Journal) -> Result<bo
 }
 
 fn write_new_json(path: &Path, value: &impl Serialize) -> Result<()> {
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)?;
+    let parent = path.parent().context("JSON artifact has no parent")?;
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
     file.write_all(&serde_json::to_vec_pretty(value)?)?;
-    file.sync_all()?;
+    file.as_file().sync_all()?;
+    file.persist_noclobber(path)?;
+    #[cfg(unix)]
+    fs::File::open(parent)?.sync_all()?;
     Ok(())
 }
 
@@ -375,31 +422,25 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
 }
 
 fn read_cycles(directory: &Path, run_id: &str) -> Result<Vec<OptimizationCycleRecord>> {
-    let mut paths = fs::read_dir(directory.join("cycles"))?
-        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| {
-            path.extension()
-                .is_some_and(|extension| extension == "json")
-        })
-        .collect::<Vec<_>>();
-    paths.sort();
-    paths
-        .into_iter()
-        .enumerate()
-        .map(|(index, path)| {
-            let cycle: OptimizationCycleRecord = read_json(&path)?;
-            anyhow::ensure!(
-                cycle.run_id == run_id && cycle.cycle == index.saturating_add(1) as u64,
-                "Cycle history is non-contiguous or belongs to another run"
-            );
-            Ok(cycle)
-        })
-        .collect()
+    Ok(newton_core::optimization::read_cycle_history(
+        directory, run_id,
+    )?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn immutable_publication_never_overwrites_existing_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("record.json");
+        write_new_json(&path, &serde_json::json!({"original": true})).unwrap();
+        let original = fs::read(&path).unwrap();
+        assert!(write_new_json(&path, &serde_json::json!({"replacement": true})).is_err());
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
 
     #[test]
     fn lifecycle_starts_without_sqlite() {

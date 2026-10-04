@@ -326,7 +326,7 @@ def main(role, input_path):
         origin.write_text(json.dumps({"commit": initial}))
     original = json.loads(origin.read_text())["commit"]
     validate_original_state(original)
-    accepted = request.get("accepted_result")
+    accepted = request.get("accepted_result") or request.get("retained_result")
     base = accepted["candidate"]["artifact_id"] if accepted else original
     candidate_dir = artifacts / f"candidate-{request['cycle']}"
 
@@ -390,7 +390,7 @@ def main(role, input_path):
     if role != "evaluate":
         raise RuntimeError(f"unsupported adapter role: {role}")
     if request["stage"] == "baseline":
-        candidate = (
+        candidate = request.get("candidate") or (
             accepted["candidate"]
             if accepted
             else {

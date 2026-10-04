@@ -4,6 +4,10 @@ This record closes the concrete gaps in the historical
 `docs/draft/generic-optimization-adversarial-review.md`. The original review is
 retained unchanged as evidence of the earlier design state.
 
+The subsequent [implementation review](generic-optimization-implementation-review.md)
+found and corrected runtime, recovery and harness defects missed by this initial
+closure. Its regression evidence supplements the table below.
+
 | Review area | Resolution | Validation evidence |
 | --- | --- | --- |
 | Workflow envelopes | Public `EvaluationOutput`, `ProposalOutput`, and `ExecutionOutput` types define field-level identity, evidence, optional assessment/Plan data, direct candidates, and safe failures. | Generated-schema tests and `test_e2e_optimize` |

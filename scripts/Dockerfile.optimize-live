@@ -1,18 +1,32 @@
 # syntax=docker/dockerfile:1
-FROM rust:1.90-bookworm AS build
+FROM rust:1.93.1-bookworm AS build
 WORKDIR /src
 COPY . .
-RUN cargo build --locked --release -p newton-cli
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/src/target \
+    cargo build --locked --release -p newton-cli \
+    && install -D target/release/newton /out/newton
 
-FROM rust:1.90-bookworm
+FROM oven/bun:1.3.10 AS bun
+
+FROM rust:1.93.1-bookworm
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates git python3 \
+    && apt-get install -y --no-install-recommends ca-certificates git python3 ripgrep \
     && rm -rf /var/lib/apt/lists/* \
     && cargo install cargo-audit --locked
-COPY --from=build /src/target/release/newton /usr/local/bin/newton
+WORKDIR /opt/pi
+RUN bun add --exact @earendil-works/pi-coding-agent@0.82.1
+COPY scripts/optimize-live-pi.sh /usr/local/bin/pi
+RUN chmod +x /usr/local/bin/pi && pi --version
+COPY --from=build /out/newton /usr/local/bin/newton
 COPY scripts/test-optimize-live.py /opt/newton/test-optimize-live.py
 COPY scripts/optimize_live_evidence.py /opt/newton/optimize_live_evidence.py
 COPY scripts/optimize_live_route.py /opt/newton/optimize_live_route.py
+COPY scripts/optimize_live_transport.py /opt/newton/optimize_live_transport.py
+COPY scripts/optimize-live-entrypoint.sh /opt/newton/entrypoint.sh
+RUN chmod +x /opt/newton/entrypoint.sh
 WORKDIR /workspace
 ENV HOME=/tmp/newton-home
-ENTRYPOINT ["python3", "/opt/newton/test-optimize-live.py"]
+ENTRYPOINT ["/opt/newton/entrypoint.sh"]

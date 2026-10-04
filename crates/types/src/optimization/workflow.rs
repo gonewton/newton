@@ -155,6 +155,7 @@ pub enum CycleStatus {
     NoActionableWork,
     Completed,
     ThresholdStop,
+    ResourceLimit,
     OperationalFailure,
     NeedsIntervention,
 }

@@ -10,7 +10,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from optimize_live_evidence import (
     collect_agent_evidence,
@@ -76,7 +76,7 @@ class LiveGateTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.state = self.root / ".newton" / "state"
-        self.artifacts = self.root / ".newton" / "artifacts"
+        self.artifacts = self.state / "artifacts"
         self.evidence = self.root / "evidence"
         self.run_id = "trial-run"
         self.model = "fixture/fixture-model"
@@ -275,7 +275,12 @@ class LiveGateTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     self.verify()
 
-    def run_harness(self, mode, route="configured-provider"):
+    def run_harness(self, mode, route="configured-provider", relocated=False):
+        if relocated:
+            self.state = self.root / "custom" / "deep" / "run-state"
+            self.artifacts = self.state / "artifacts"
+            self.workflow = self.state / "workflows" / self.workflow_id
+            self.trace = self.artifacts / "workflows" / self.workflow_id / "task" / "remediate" / "1" / "events.ndjson"
         if mode == "stale-run":
             self.fixture()
         args = argparse.Namespace(
@@ -305,7 +310,11 @@ class LiveGateTests(unittest.TestCase):
             "definition_id": "software-security",
             "definition_revision": "fixture",
             "context": {"root": str(self.root)},
+            "state_dir": str(self.state),
         }
+        transport = Mock()
+        transport.agent_dir = self.root / "isolated-agent"
+        transport.evidence.return_value = {"transport_observed": mode == "gateway-success"}
 
         def run(command, **_kwargs):
             stage = command[-1]
@@ -331,6 +340,7 @@ class LiveGateTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, json.dumps(self.outcome), "")
 
         with (
+            patch.object(GATE, "GatewayTransport", return_value=transport),
             patch.object(GATE, "parse_args", return_value=args),
             patch.object(GATE.subprocess, "run", side_effect=run) as process,
             patch.object(GATE.subprocess, "check_output", return_value="original\n"),
@@ -340,7 +350,7 @@ class LiveGateTests(unittest.TestCase):
             redirect_stdout(io.StringIO()),
             redirect_stderr(io.StringIO()),
         ):
-            if mode == "success" and route != "local-gateway":
+            if (mode == "success" and route != "local-gateway") or mode == "gateway-success":
                 GATE.main()
             else:
                 with self.assertRaises(RuntimeError):
@@ -351,6 +361,17 @@ class LiveGateTests(unittest.TestCase):
                 "a failed trial must not be retried",
             )
         return json.loads((self.evidence / "report.json").read_text())
+
+    def test_harness_collects_relocated_state_and_relative_artifact_references(self):
+        report = self.run_harness("success", relocated=True)
+        self.assertEqual(report["status"], "passed")
+        self.assertTrue(report["verified_agent_execution"])
+
+    def test_gateway_success_requires_transport_and_correlated_agent_evidence(self):
+        report = self.run_harness("gateway-success", route="local-gateway")
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["local_gateway_gate"], "passed")
+        self.assertEqual(report["route_verification"], "observed_private_gateway_transport")
 
     def test_harness_fake_command_negative_control_is_failed_not_passed(self):
         report = self.run_harness("fake-command", route="local-gateway")

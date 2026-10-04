@@ -182,3 +182,156 @@ fn pre_generic_journal_has_an_explicit_non_migration_error() {
             "pre-generic journal/SQLite format",
         ));
 }
+
+#[test]
+fn resume_after_saved_acceptance_does_not_decide_or_count_it_twice() {
+    let directory = tempfile::tempdir().unwrap();
+    setup_scheduling(directory.path());
+    command(directory.path())
+        .args(["optimize", "demo", "--once"])
+        .assert()
+        .success();
+    let run = run_directory(directory.path());
+    let mut current = read(run.join("current.json"));
+    let run_id = current["run_id"].as_str().unwrap().to_owned();
+    let accepted = current["accepted"].clone();
+    // Simulate the crash window after saving the decision but before publication.
+    current["phase"] = serde_json::json!("evaluated");
+    current["outcome"] = Value::Null;
+    fs::remove_file(run.join("cycles/0001.json")).unwrap();
+    fs::write(
+        run.join("current.json"),
+        serde_json::to_vec(&current).unwrap(),
+    )
+    .unwrap();
+    command(directory.path())
+        .args(["optimize", "demo", "--resume", &run_id, "--once"])
+        .assert()
+        .success();
+    let recovered = read(run.join("current.json"));
+    assert_eq!(recovered["accepted"], accepted);
+    assert_eq!(recovered["consecutive_no_improvement"], 0);
+    assert_eq!(recovered["work_count"], current["work_count"]);
+    assert_eq!(read(run.join("cycles/0001.json"))["status"], "accepted");
+    assert!(!run.join("cycles/0002.json").exists());
+}
+
+#[test]
+fn recovered_completed_cycle_stops_without_dispatching_again() {
+    let directory = tempfile::tempdir().unwrap();
+    setup_scheduling(directory.path());
+    command(directory.path())
+        .args(["optimize", "demo", "--poll-interval", "1"])
+        .assert()
+        .success();
+    let run = run_directory(directory.path());
+    let mut current = read(run.join("current.json"));
+    let run_id = current["run_id"].as_str().unwrap().to_owned();
+    current["phase"] = serde_json::json!("evaluated");
+    current["outcome"] = Value::Null;
+    fs::write(
+        run.join("current.json"),
+        serde_json::to_vec(&current).unwrap(),
+    )
+    .unwrap();
+    command(directory.path())
+        .args(["optimize", "demo", "--resume", &run_id])
+        .assert()
+        .success();
+    assert_eq!(read(run.join("outcome.json"))["stop_reason"], "completed");
+    assert_eq!(
+        read(run.join("current.json"))["evaluation_count"],
+        current["evaluation_count"]
+    );
+    assert!(!run.join("cycles/0003.json").exists());
+}
+
+#[test]
+fn concurrent_resume_cannot_reopen_a_checkpoint_owned_by_another_process() {
+    let directory = tempfile::tempdir().unwrap();
+    setup_scheduling(directory.path());
+    command(directory.path())
+        .args(["optimize", "demo", "--once"])
+        .assert()
+        .success();
+    let run = run_directory(directory.path());
+    let before = fs::read(run.join("current.json")).unwrap();
+    let run_id = read(run.join("current.json"))["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(directory.path().join(".newton/optimize/claim/lock"))
+        .unwrap();
+    lock.try_lock().unwrap();
+    command(directory.path())
+        .args(["optimize", "demo", "--resume", &run_id, "--once"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("live local owner"));
+    assert_eq!(fs::read(run.join("current.json")).unwrap(), before);
+    assert!(run.join("outcome.json").exists());
+}
+
+#[test]
+fn missing_committed_cycle_is_rejected_before_more_work() {
+    let directory = tempfile::tempdir().unwrap();
+    setup_scheduling(directory.path());
+    command(directory.path())
+        .args(["optimize", "demo", "--once"])
+        .assert()
+        .success();
+    let run = run_directory(directory.path());
+    let run_id = read(run.join("current.json"))["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    fs::remove_file(run.join("cycles/0001.json")).unwrap();
+    command(directory.path())
+        .args(["optimize", "demo", "--resume", &run_id, "--once"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("missing a committed Cycle"));
+    assert!(!run.join("cycles/0002.json").exists());
+}
+
+#[test]
+fn recovered_no_actionable_work_preserves_its_stop_reason() {
+    let directory = tempfile::tempdir().unwrap();
+    setup_scheduling(directory.path());
+    let path = directory.path().join("propose.yaml");
+    let mut proposal: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    proposal["workflow"]["settings"]["io"]["result_map"] =
+        serde_yaml::from_str("decision: none\nreason: no useful move\n").unwrap();
+    fs::write(path, serde_yaml::to_string(&proposal).unwrap()).unwrap();
+    command(directory.path())
+        .args(["optimize", "demo", "--once"])
+        .assert()
+        .success();
+    let run = run_directory(directory.path());
+    let mut current = read(run.join("current.json"));
+    let run_id = current["run_id"].as_str().unwrap().to_owned();
+    current["phase"] = serde_json::json!("working");
+    current["outcome"] = Value::Null;
+    fs::write(
+        run.join("current.json"),
+        serde_json::to_vec(&current).unwrap(),
+    )
+    .unwrap();
+    command(directory.path())
+        .args(["optimize", "demo", "--resume", &run_id])
+        .assert()
+        .success();
+    assert_eq!(
+        read(run.join("outcome.json"))["stop_reason"],
+        "no_actionable_work"
+    );
+    assert_eq!(
+        read(run.join("current.json"))["evaluation_count"],
+        current["evaluation_count"]
+    );
+    assert!(!run.join("cycles/0002.json").exists());
+}

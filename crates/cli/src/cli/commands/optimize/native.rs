@@ -75,16 +75,18 @@ impl NativeDriver {
         state_dir: PathBuf,
         events: broadcast::Sender<BroadcastEvent>,
     ) -> Result<Self> {
-        let runtime = super::snapshot::runtime_from_journal(&journal, &state_dir)?;
         let binding: BoundOptimizationDefinition = serde_json::from_value(journal.binding.clone())?;
         let workspace = PathBuf::from(&binding.context.root).canonicalize()?;
+        let lifecycle = Lifecycle::resume(journal, events, &state_dir, &workspace)?;
+        let journal = &lifecycle.journal;
+        let runtime = super::snapshot::runtime_from_journal(journal, &state_dir)?;
+        let binding: BoundOptimizationDefinition = serde_json::from_value(journal.binding.clone())?;
         let definition_root = journal.definition_root.clone();
         let previous_elapsed = (chrono::Utc::now()
             - chrono::DateTime::parse_from_rfc3339(&journal.started_at)?
                 .with_timezone(&chrono::Utc))
         .num_seconds()
         .max(0) as u64;
-        let lifecycle = Lifecycle::resume(journal, events, &state_dir, &workspace)?;
         Ok(Self {
             binding,
             definition_root,
@@ -146,6 +148,14 @@ impl NativeDriver {
                             ),
                         )
                     };
+                    if safe
+                        && reason == OptimizationStopReason::ResourceLimit
+                        && self.lifecycle.journal.cycle > 0
+                        && self.lifecycle.journal.phase != Phase::CycleComplete
+                    {
+                        self.lifecycle
+                            .complete_cycle(CycleStatus::ResourceLimit, vec![error.to_string()])?;
+                    }
                     let outcome = self.outcome(reason, vec![error.to_string()])?;
                     self.finish_and_project(serde_json::to_value(&outcome)?, safe)
                         .await?;
@@ -222,34 +232,15 @@ impl NativeDriver {
             .join("optimize")
             .join(&self.binding.run_id)
             .join("cycles");
-        let Ok(entries) = std::fs::read_dir(directory) else {
-            return Ok(Vec::new());
-        };
-        let mut paths = entries
-            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-            .filter(|path| {
-                path.extension()
-                    .is_some_and(|extension| extension == "json")
-            })
-            .collect::<Vec<_>>();
-        paths.sort();
-        paths
-            .into_iter()
-            .enumerate()
-            .map(|(index, path)| {
-                let record: OptimizationCycleRecord = serde_json::from_slice(
-                    &std::fs::read(&path)
-                        .with_context(|| format!("read prior Cycle {}", path.display()))?,
-                )
-                .with_context(|| format!("parse prior Cycle {}", path.display()))?;
-                anyhow::ensure!(
-                    record.run_id == self.binding.run_id
-                        && record.cycle == index.saturating_add(1) as u64,
-                    "prior Cycle history is non-contiguous or belongs to another run"
-                );
-                Ok(serde_json::to_value(record)?)
-            })
-            .collect()
+        newton_core::optimization::read_cycle_history(
+            directory
+                .parent()
+                .context("Cycle directory has no run parent")?,
+            &self.binding.run_id,
+        )?
+        .into_iter()
+        .map(|record| Ok(serde_json::to_value(record)?))
+        .collect()
     }
 
     async fn step(&mut self, role: &str, mut triggers: Value) -> Result<(Value, String)> {
@@ -338,6 +329,19 @@ impl NativeDriver {
         once: bool,
         poll_seconds: u64,
     ) -> Result<OptimizationStopReason> {
+        if self.lifecycle.journal.phase == Phase::CycleComplete {
+            let history = self.previous_attempts()?;
+            if history.last().is_some_and(|cycle| {
+                cycle["status"] == "no_actionable_work"
+                    && cycle["requirements_revision"].as_u64()
+                        == Some(self.binding.requirements.revision)
+            }) {
+                return Ok(OptimizationStopReason::NoActionableWork);
+            }
+            if let Some(reason) = self.post_decision_stop(false)? {
+                return Ok(reason);
+            }
+        }
         if self.lifecycle.journal.phase == Phase::Evaluated {
             self.decide_current_candidate()?;
             let reason = self.post_decision_stop(once)?;
@@ -521,6 +525,11 @@ impl NativeDriver {
     }
 
     fn decide_current_candidate(&mut self) -> Result<()> {
+        // Acceptance and counters are saved before Cycle publication. Reuse that
+        // decision after a crash instead of comparing the candidate to itself.
+        if let Some(decision) = self.lifecycle.journal.decision.clone() {
+            return self.publish_decision(decision);
+        }
         let candidate: Candidate = serde_json::from_value(
             self.lifecycle
                 .journal
@@ -561,7 +570,6 @@ impl NativeDriver {
                 incumbent.as_ref(),
             )?
         };
-        let improved = decision.accepted_result.is_some();
         if let Some(accepted) = &decision.accepted_result {
             let value = serde_json::to_value(accepted)?;
             if let Some(previous) = self.lifecycle.journal.retained.replace(value.clone()) {
@@ -580,9 +588,13 @@ impl NativeDriver {
         self.lifecycle.journal.decision = Some(decision.clone());
         // Acceptance is checkpointed before publishing the Cycle and evaluating stop guards.
         self.lifecycle.save()?;
+        self.publish_decision(decision)
+    }
+
+    fn publish_decision(&mut self, decision: CandidateDecision) -> Result<()> {
         let status = if self.threshold_regressed()? {
             CycleStatus::ThresholdStop
-        } else if improved {
+        } else if decision.accepted_result.is_some() {
             CycleStatus::Accepted
         } else {
             match decision.disposition {

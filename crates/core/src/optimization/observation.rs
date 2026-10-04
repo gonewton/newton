@@ -52,7 +52,13 @@ impl OptimizeRunObservationSource {
         &self,
         run_id: &str,
     ) -> Result<OptimizeRunObservation, OptimizationObservationError> {
-        if run_id.trim().is_empty() {
+        if run_id.trim().is_empty()
+            || Path::new(run_id).components().count() != 1
+            || !matches!(
+                Path::new(run_id).components().next(),
+                Some(std::path::Component::Normal(_))
+            )
+        {
             return Err(OptimizationObservationError::MissingRun);
         }
         let receiver = self.publisher.subscribe();
@@ -131,27 +137,12 @@ fn read_snapshot(
             .ok_or_else(|| {
                 OptimizationObservationError::Store("current.json lacks cycle".into())
             })?;
-        let mut cycles = Vec::new();
-        let entries = fs::read_dir(directory.join("cycles")).map_err(store_error)?;
-        for entry in entries {
-            let path = entry.map_err(store_error)?.path();
-            if path
-                .extension()
-                .is_some_and(|extension| extension == "json")
-            {
-                let cycle: OptimizationCycleRecord = read_json(&path)?;
-                if cycle.run_id != run_id || cycle.cycle > current_cycle {
-                    return Err(OptimizationObservationError::ScopeMismatch);
-                }
-                cycles.push(cycle);
-            }
-        }
-        cycles.sort_by_key(|cycle| cycle.cycle);
+        let cycles = read_cycle_history(&directory, run_id);
         let terminal = current
             .get("phase")
             .and_then(serde_json::Value::as_str)
             .is_some_and(|phase| matches!(phase, "finished" | "failed"));
-        let outcome = if terminal {
+        let outcome: Option<OptimizationOutcome> = if terminal {
             match fs::read(directory.join("outcome.json")) {
                 Ok(bytes) => Some(serde_json::from_slice(&bytes).map_err(store_error)?),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -162,8 +153,23 @@ fn read_snapshot(
         };
         let after = read_bytes(&directory.join("current.json"))?;
         if before == after {
-            if run.run_id != run_id {
+            let cycles = cycles?;
+            if run.run_id != run_id
+                || current.get("run_id").and_then(serde_json::Value::as_str) != Some(run_id)
+                || cycles.iter().any(|cycle| cycle.cycle > current_cycle)
+                || outcome
+                    .as_ref()
+                    .is_some_and(|outcome| outcome.run_id != run_id)
+            {
                 return Err(OptimizationObservationError::ScopeMismatch);
+            }
+            if run.schema_version != 1
+                || current
+                    .get("schema_version")
+                    .and_then(serde_json::Value::as_u64)
+                    != Some(1)
+            {
+                return Err(store_error("unsupported optimization history schema"));
             }
             return Ok(OptimizationRunSnapshot {
                 run,
@@ -177,6 +183,45 @@ fn read_snapshot(
     Err(OptimizationObservationError::SnapshotBusy)
 }
 
+/// Read and validate immutable Cycle history in numeric order. Unknown schema
+/// versions, partial files, gaps, duplicate identities and foreign runs fail closed.
+pub fn read_cycle_history(
+    directory: &Path,
+    run_id: &str,
+) -> Result<Vec<OptimizationCycleRecord>, OptimizationObservationError> {
+    let mut cycles = Vec::new();
+    for entry in fs::read_dir(directory.join("cycles")).map_err(store_error)? {
+        let path = entry.map_err(store_error)?.path();
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+        {
+            let cycle: OptimizationCycleRecord = read_json(&path)?;
+            if cycle.schema_version != 1 {
+                return Err(store_error("unsupported Cycle history schema"));
+            }
+            if cycle.run_id != run_id
+                || path.file_name().and_then(|name| name.to_str())
+                    != Some(&format!("{:04}.json", cycle.cycle))
+            {
+                return Err(store_error(
+                    "Cycle filename or run identity conflicts with history",
+                ));
+            }
+            cycles.push(cycle);
+        }
+    }
+    cycles.sort_by_key(|cycle| cycle.cycle);
+    if cycles
+        .iter()
+        .enumerate()
+        .any(|(index, cycle)| cycle.cycle != index as u64 + 1)
+    {
+        return Err(store_error("Cycle history is non-contiguous"));
+    }
+    Ok(cycles)
+}
+
 fn read_bytes(path: &Path) -> Result<Vec<u8>, OptimizationObservationError> {
     fs::read(path).map_err(store_error)
 }
@@ -184,9 +229,73 @@ fn read_bytes(path: &Path) -> Result<Vec<u8>, OptimizationObservationError> {
 fn read_json<T: serde::de::DeserializeOwned>(
     path: &Path,
 ) -> Result<T, OptimizationObservationError> {
-    serde_json::from_slice(&read_bytes(path)?).map_err(store_error)
+    serde_json::from_slice(&read_bytes(path)?)
+        .map_err(|error| store_error(format!("{}: {error}", path.display())))
 }
 
 fn store_error(error: impl std::fmt::Display) -> OptimizationObservationError {
     OptimizationObservationError::Store(error.to_string())
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+
+    fn record(cycle: u64) -> OptimizationCycleRecord {
+        OptimizationCycleRecord {
+            schema_version: 1,
+            run_id: "run".into(),
+            cycle,
+            requirements_revision: 1,
+            started_at: "start".into(),
+            completed_at: "end".into(),
+            baseline_evaluations: vec![],
+            proposal: None,
+            execution_id: None,
+            execution: None,
+            candidate_evaluations: vec![],
+            decision: None,
+            retained_result: None,
+            status: CycleStatus::NoActionableWork,
+            diagnostics: vec![],
+        }
+    }
+
+    fn write(root: &Path, value: &OptimizationCycleRecord) {
+        fs::write(
+            root.join("cycles").join(format!("{:04}.json", value.cycle)),
+            serde_json::to_vec(value).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn cycle_reader_rejects_unknown_schemas_foreign_runs_and_missing_records() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("cycles")).unwrap();
+        let mut value = record(1);
+        value.schema_version = 2;
+        write(root.path(), &value);
+        assert!(read_cycle_history(root.path(), "run").is_err());
+        value.schema_version = 1;
+        value.run_id = "foreign".into();
+        write(root.path(), &value);
+        assert!(read_cycle_history(root.path(), "run").is_err());
+        write(root.path(), &record(1));
+        write(root.path(), &record(3));
+        assert!(read_cycle_history(root.path(), "run").is_err());
+        write(root.path(), &record(2));
+        assert_eq!(read_cycle_history(root.path(), "run").unwrap().len(), 3);
+    }
+
+    #[test]
+    fn cycle_reader_orders_numerically_after_four_digit_names() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("cycles")).unwrap();
+        for cycle in 1..=10_000 {
+            write(root.path(), &record(cycle));
+        }
+        let history = read_cycle_history(root.path(), "run").unwrap();
+        assert_eq!(history[9999].cycle, 10_000);
+    }
 }
