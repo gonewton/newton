@@ -11,14 +11,15 @@ trial requires Pi's existing active models.json and an exact provider/model on
 a private endpoint. No configuration or credentials are changed. The harness
 preserves every command result and never retries a failed trial.
 
-Success requires correlated runtime Pi SDK tool and terminal events. Because Pi
-does not expose its selected endpoint in those events, local configuration alone
-cannot pass the local-gateway route gate.
+Success requires correlated runtime Pi SDK tool and terminal events. A temporary
+forwarding proxy observes local-gateway inference transport without retaining
+credentials, prompts or response bodies; configuration alone cannot pass.
 """
 
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -30,6 +31,7 @@ from optimize_live_evidence import (
     require_pi_execution,
 )
 from optimize_live_route import verify_local_route
+from optimize_live_transport import GatewayTransport
 
 
 def objects(value):
@@ -93,11 +95,15 @@ def main():
     state = workspace / ".newton" / "state"
     previous_runs = set()
     attempted = False
+    transport = None
+    execution_env = os.environ.copy()
 
     def save_report():
         report_path.write_text(json.dumps(report, indent=2) + "\n")
 
     def retain_trial_evidence():
+        if transport is not None:
+            report["transport_evidence"] = transport.evidence()
         if root is None or not attempted:
             return
         new_runs = {
@@ -153,7 +159,7 @@ def main():
         ]
         try:
             result = subprocess.run(
-                command, capture_output=True, text=True, timeout=3700
+                command, capture_output=True, text=True, timeout=3700, env=execution_env
             )
         except subprocess.TimeoutExpired as error:
             stdout = (
@@ -226,6 +232,9 @@ def main():
         ).strip()
         report["original_head"] = head
         invoke("preflight", "--preflight")
+        if args.route == "local-gateway":
+            transport = GatewayTransport(args.pi_models_file, parameters["model"])
+            execution_env["PI_CODING_AGENT_DIR"] = str(transport.agent_dir)
         previous_runs = {
             path.parent.name
             for path in (state / "optimize").glob("*/current.json")
@@ -272,17 +281,21 @@ def main():
                 raise RuntimeError(
                     "Pi gateway configuration or address resolution changed during the trial"
                 )
-            raise RuntimeError(
-                "local gateway transport was not observed; private configuration "
-                "alone cannot satisfy the route gate"
-            )
+            report["transport_evidence"] = transport.evidence()
+            if not report["transport_evidence"]["transport_observed"]:
+                raise RuntimeError(
+                    "local gateway transport was not observed; private configuration "
+                    "alone cannot satisfy the route gate"
+                )
+            report["route_verification"] = "observed_private_gateway_transport"
+            report["local_gateway_gate"] = "passed"
         report["status"] = "passed"
         report["finished_at"] = datetime.now(timezone.utc).isoformat()
         save_report()
         print(f"Real Pi/aikit candidate accepted; evidence: {report_path}")
         print(
             "This demonstrates the declared dependency-audit workflow, "
-            "not comprehensive security, compliance, or verified local-gateway routing."
+            "not comprehensive security, compliance, or proof of the gateway's upstream model placement."
         )
     except Exception as error:
         report["status"] = "failed"
@@ -298,6 +311,9 @@ def main():
             file=sys.stderr,
         )
         raise
+    finally:
+        if transport is not None:
+            transport.close()
 
 
 if __name__ == "__main__":

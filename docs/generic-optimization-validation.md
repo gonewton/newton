@@ -11,18 +11,20 @@ environment blockers in the initial-delivery record below:
 | `cargo test --workspace --all-features` | Passed: 1,356 tests across 110 suite results, no failures or ignored tests. Run outside the filesystem sandbox so existing tests can write their normal log directory. |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Passed |
 | `cargo fmt --all -- --check` and `git diff --check` | Passed |
-| `python3 -B -m unittest discover -s scripts -p 'test_optim*.py'` | Passed: 18 evidence, routing-control and shipped-adapter tests. Includes relocated state and exact retained-commit evaluation. These are deterministic controls, not live inference. |
+| `python3 -B -m unittest discover -s scripts -p 'test_optim*.py'` | Passed: 21 evidence, routing-control, loopback-transport and shipped-adapter tests. Includes relocated state and exact retained-commit evaluation. These are deterministic controls, not live inference. |
 | Newton skill install and locked restore | Both passed offline in a disposable project containing the canonical local skill. The repository-wide legacy lock still lacks integrity for unrelated dependencies; it was not rewritten. |
 | Canonical/distributed skill equality | Passed |
 | Docker runtime availability | Host Docker works outside the sandbox; the original snap-capability error was a sandbox limitation. |
-| Final Docker image | Built successfully with host networking after a bridge-network crates.io timeout. Image ID: `sha256:1b06956c3f9b46b1e7f12a7af4b30f92c0c23ff345856d63f4c9cceb1da42c4f`. |
+| Final Docker image | Built successfully with host networking after a bridge-network crates.io timeout. Image ID: `sha256:441bd54fb2ed07b1b38da5136a66adf517eef7a0c12e6b2b968ee693be448e67`. |
 | Container prerequisites and entrypoint | Pi 0.82.1, Newton 0.5.134 and cargo-audit 0.22.2 run as uid 1000. The entrypoint starts using a read-only, credential-free test registry and a writable disposable home. |
 | Docker non-coding E2E | The image's Newton binary completes scheduling from 10 to 7 to 4 as uid 1000, with a completed outcome and retained `schedule:4`. No model is called. |
+| Packaged Docker transport observer | Two deterministic loopback HTTP tests pass as uid 1000 against the image's packaged observer. Stream forwarding, private-peer evidence, failure/empty/wrong-model rejection, and payload redaction are covered. |
 | Pi/gateway inference | Not exercised: no active Pi `models.json` or internal gateway credential/model configuration was available. No inference request was sent. |
 
-The gateway route gate still deliberately refuses to treat private configuration
-as observed transport. A configured runner must supply actual inference and
-transport evidence before the real-agent completion checkbox can be closed.
+The gateway route gate uses a temporary forwarding proxy to observe actual
+private-peer inference transport without storing credentials or payloads.
+Deterministic proxy tests pass, but a configured runner must complete actual
+inference before the real-agent completion checkbox can be closed.
 
 ## Initial delivery record
 

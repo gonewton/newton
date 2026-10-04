@@ -24,6 +24,7 @@ COPY --from=build /out/newton /usr/local/bin/newton
 COPY scripts/test-optimize-live.py /opt/newton/test-optimize-live.py
 COPY scripts/optimize_live_evidence.py /opt/newton/optimize_live_evidence.py
 COPY scripts/optimize_live_route.py /opt/newton/optimize_live_route.py
+COPY scripts/optimize_live_transport.py /opt/newton/optimize_live_transport.py
 COPY scripts/optimize-live-entrypoint.sh /opt/newton/entrypoint.sh
 RUN chmod +x /opt/newton/entrypoint.sh
 WORKDIR /workspace

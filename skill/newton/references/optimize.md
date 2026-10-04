@@ -137,6 +137,10 @@ For a real coding-agent trial, use `scripts/test-optimize-live.py`. A valid pass
 requires correlated Pi SDK/tool/terminal events, a changed accepted artifact, and
 an unchanged original checkout. Gateway configuration and observed runtime
 transport are separate evidence; report missing configuration as not exercised.
+The local-gateway harness observes transport with a temporary forwarding proxy
+and a disposable Pi registry; it leaves the original registry unchanged and
+does not log credentials or payloads. This proves the private gateway connection,
+not which machine hosts the gateway's upstream model.
 
 The full contract is `docs/optimization-contract.md`; migration guidance is
 `docs/generic-optimization-migration.md`.

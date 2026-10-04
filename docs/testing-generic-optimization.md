@@ -55,6 +55,15 @@ registry. The harness reports configuration verification separately from runtime
 transport observation. A successful optimization does not by itself prove which
 network route served inference.
 
+With `--route local-gateway`, the harness verifies the original active registry,
+then gives only the child process a disposable copy pointing to a per-trial
+loopback forwarding proxy. The proxy forwards streaming inference to the
+configured gateway and records the connected private peer, model, HTTP status,
+and response byte count. No credentials, prompts, or response bodies enter its
+evidence. The original registry is unchanged and the copy is removed on exit.
+Passing requires both successful observed transport and correlated Pi/tool/result
+evidence. Upstream placement behind the gateway remains unverified.
+
 Run the harness only against a disposable coding fixture. Passing requires
 correlated Pi SDK, tool, and terminal traces, a changed accepted commit, retained
 earlier improvements, and an unchanged original HEAD. Keep the harness report

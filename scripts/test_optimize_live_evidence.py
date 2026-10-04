@@ -10,7 +10,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from optimize_live_evidence import (
     collect_agent_evidence,
@@ -312,6 +312,9 @@ class LiveGateTests(unittest.TestCase):
             "context": {"root": str(self.root)},
             "state_dir": str(self.state),
         }
+        transport = Mock()
+        transport.agent_dir = self.root / "isolated-agent"
+        transport.evidence.return_value = {"transport_observed": mode == "gateway-success"}
 
         def run(command, **_kwargs):
             stage = command[-1]
@@ -337,6 +340,7 @@ class LiveGateTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, json.dumps(self.outcome), "")
 
         with (
+            patch.object(GATE, "GatewayTransport", return_value=transport),
             patch.object(GATE, "parse_args", return_value=args),
             patch.object(GATE.subprocess, "run", side_effect=run) as process,
             patch.object(GATE.subprocess, "check_output", return_value="original\n"),
@@ -346,7 +350,7 @@ class LiveGateTests(unittest.TestCase):
             redirect_stdout(io.StringIO()),
             redirect_stderr(io.StringIO()),
         ):
-            if mode == "success" and route != "local-gateway":
+            if (mode == "success" and route != "local-gateway") or mode == "gateway-success":
                 GATE.main()
             else:
                 with self.assertRaises(RuntimeError):
@@ -362,6 +366,12 @@ class LiveGateTests(unittest.TestCase):
         report = self.run_harness("success", relocated=True)
         self.assertEqual(report["status"], "passed")
         self.assertTrue(report["verified_agent_execution"])
+
+    def test_gateway_success_requires_transport_and_correlated_agent_evidence(self):
+        report = self.run_harness("gateway-success", route="local-gateway")
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["local_gateway_gate"], "passed")
+        self.assertEqual(report["route_verification"], "observed_private_gateway_transport")
 
     def test_harness_fake_command_negative_control_is_failed_not_passed(self):
         report = self.run_harness("fake-command", route="local-gateway")

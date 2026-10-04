@@ -20,14 +20,16 @@ and documentation. This is a code and execution review, not another spec review.
 | P2 | Requirements revisions retained old stagnation and regression baselines. | Clear revision-specific stopping state and verify requalification can proceed. |
 | P2 | The coding adapter fell back to original HEAD when the retained result was temporarily unqualified. | Honor the supplied retained candidate during re-evaluation and preparation. The adapter test checks its exact commit and file contents. |
 | P2 | The live harness searched the target repository and `.newton/artifacts`, while the driver writes to workspace state and `state/artifacts`. | Export resolved `state_dir` in inspection, consume it in the harness, and resolve relative traces against the execution context. Relocated-state evidence has a regression test. |
+| P1 | The local-gateway route gate always failed, with no way to observe transport even on a configured runner. | A per-trial loopback proxy forwards inference to the verified private gateway through a disposable Pi registry. It records actual peer/model/status/byte evidence, forwards streaming responses, and stores no credentials or request/response bodies. Loopback HTTP tests cover successful, failed, empty and wrong-model exchanges. |
 
 ## Validation and remaining boundaries
 
 The [validation record](generic-optimization-validation.md) contains executed
 checks. Docker and the deterministic non-coding scenario are independently
 testable without an inference credential. A live Pi/gateway pass still requires
-the operator's gateway configuration and actual transport evidence; simulated
-SDK events and private configuration labels are not a substitute.
+the operator's gateway configuration and actual transport evidence. The proxy
+provides the latter during a configured run; simulated SDK events, loopback test
+servers and private configuration labels are not a real inference pass.
 
 The domain-neutral driver still uses the existing software-security-specific
 prerequisite check in CLI preflight. That adapter coupling is an architectural
