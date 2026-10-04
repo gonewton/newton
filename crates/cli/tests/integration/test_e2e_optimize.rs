@@ -165,6 +165,36 @@ fn evaluation_limit_stops_safely_and_retains_the_qualified_baseline() {
         outcome["retained_result"]["candidate"]["artifact_id"],
         "schedule:10"
     );
+    let run = run_directory(directory.path());
+    assert_eq!(
+        read(run.join("cycles/0001.json"))["status"],
+        "resource_limit"
+    );
+    // Extending the budget preserves the partial attempt and resumes at a new Cycle.
+    definition["requirements"]["resource_limits"]["max_evaluations"] = 6.into();
+    let update = serde_yaml::to_string(&serde_json::json!({
+        "base_revision": 1, "requirements": definition["requirements"],
+    }))
+    .unwrap();
+    fs::write(directory.path().join("requirements-update.yaml"), update).unwrap();
+    let run_id = outcome["run_id"].as_str().unwrap();
+    command(directory.path())
+        .args([
+            "optimize",
+            "demo",
+            "--resume",
+            run_id,
+            "--requirements-update",
+            "requirements-update.yaml",
+            "--once",
+        ])
+        .assert()
+        .success();
+    assert!(run.join("cycles/0002.json").exists());
+    assert_eq!(
+        read(run.join("outcome.json"))["retained_result"]["candidate"]["artifact_id"],
+        "schedule:4"
+    );
 }
 
 #[test]
@@ -215,6 +245,14 @@ fn requirements_revision_requalifies_retained_state_before_new_acceptance() {
         .as_str()
         .unwrap()
         .to_owned();
+    let mut prior = read(run.join("current.json"));
+    prior["consecutive_no_improvement"] = serde_json::json!(2);
+    prior["threshold_baselines"] = serde_json::json!({"obsolete-objective": 90});
+    fs::write(
+        run.join("current.json"),
+        serde_json::to_vec(&prior).unwrap(),
+    )
+    .unwrap();
     let definition = yaml(&directory.path().join("definition.yaml"));
     let update = serde_yaml::to_string(&serde_json::json!({
         "base_revision": 1,
@@ -238,6 +276,11 @@ fn requirements_revision_requalifies_retained_state_before_new_acceptance() {
 
     let current = read(run.join("current.json"));
     assert_eq!(current["binding"]["requirements"]["revision"], 2);
+    assert_eq!(current["consecutive_no_improvement"], 0);
+    assert!(current["threshold_baselines"]
+        .as_object()
+        .unwrap()
+        .is_empty());
     assert_eq!(
         current["accepted"]["evaluation"]["requirements_revision"],
         2

@@ -108,6 +108,12 @@ recovery checkpoint. A published Cycle is the commit point and resume rolls an
 older checkpoint forward without replaying the attempt. An active dispatch or
 uncertain effect requires reconciliation.
 
+Resume locks the context before reopening state and reuses an already-saved
+decision. Safe mid-Cycle resource stops publish `resource_limit` Cycle records;
+extend limits with an explicit requirements update before continuing. New
+requirements reset stagnation and threshold baselines. Use the `state_dir` from
+`--inspect` when reading relocated state and its `artifacts/` directory.
+
 `retained_result` preserves the best artifact. `accepted_result` is present only
 when its evidence qualifies under the active requirements revision. Do not
 interpret `no_actionable_work` or a resource stop as target completion.

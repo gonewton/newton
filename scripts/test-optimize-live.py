@@ -90,6 +90,7 @@ def main():
         "agent_evidence": [],
     }
     root = None
+    state = workspace / ".newton" / "state"
     previous_runs = set()
     attempted = False
 
@@ -99,7 +100,6 @@ def main():
     def retain_trial_evidence():
         if root is None or not attempted:
             return
-        state = root / ".newton" / "state"
         new_runs = {
             path.parent.name for path in (state / "optimize").glob("*/current.json")
         } - previous_runs
@@ -134,7 +134,7 @@ def main():
                 )
             records.extend(
                 collect_agent_evidence(
-                    state, root / ".newton" / "artifacts", run_id, artifacts
+                    state, state / "artifacts", run_id, artifacts, context_root=root
                 )
             )
         report["agent_evidence"] = records
@@ -220,6 +220,7 @@ def main():
         elif args.route == "configured-provider":
             report["route_verification"] = "configuration_only"
         root = Path(inspection["context"]["root"])
+        state = Path(inspection.get("state_dir", state))
         head = subprocess.check_output(
             ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
         ).strip()
@@ -227,7 +228,7 @@ def main():
         invoke("preflight", "--preflight")
         previous_runs = {
             path.parent.name
-            for path in (root / ".newton" / "state" / "optimize").glob("*/current.json")
+            for path in (state / "optimize").glob("*/current.json")
         }
         attempted = True
         output = invoke("once", "--once")

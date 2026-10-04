@@ -119,6 +119,9 @@ pub(super) async fn apply_update(
             journal.accepted_history.push(prior);
         }
         binding.requirements = activation.active;
+        journal.consecutive_no_improvement = 0;
+        journal.threshold_baselines.clear();
+        journal.evidence = None;
         journal.binding = serde_json::to_value(&binding)?;
         journal.outcome = None;
         if journal.phase == Phase::Finished {

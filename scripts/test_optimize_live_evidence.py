@@ -76,7 +76,7 @@ class LiveGateTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.state = self.root / ".newton" / "state"
-        self.artifacts = self.root / ".newton" / "artifacts"
+        self.artifacts = self.state / "artifacts"
         self.evidence = self.root / "evidence"
         self.run_id = "trial-run"
         self.model = "fixture/fixture-model"
@@ -275,7 +275,12 @@ class LiveGateTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     self.verify()
 
-    def run_harness(self, mode, route="configured-provider"):
+    def run_harness(self, mode, route="configured-provider", relocated=False):
+        if relocated:
+            self.state = self.root / "custom" / "deep" / "run-state"
+            self.artifacts = self.state / "artifacts"
+            self.workflow = self.state / "workflows" / self.workflow_id
+            self.trace = self.artifacts / "workflows" / self.workflow_id / "task" / "remediate" / "1" / "events.ndjson"
         if mode == "stale-run":
             self.fixture()
         args = argparse.Namespace(
@@ -305,6 +310,7 @@ class LiveGateTests(unittest.TestCase):
             "definition_id": "software-security",
             "definition_revision": "fixture",
             "context": {"root": str(self.root)},
+            "state_dir": str(self.state),
         }
 
         def run(command, **_kwargs):
@@ -351,6 +357,11 @@ class LiveGateTests(unittest.TestCase):
                 "a failed trial must not be retried",
             )
         return json.loads((self.evidence / "report.json").read_text())
+
+    def test_harness_collects_relocated_state_and_relative_artifact_references(self):
+        report = self.run_harness("success", relocated=True)
+        self.assertEqual(report["status"], "passed")
+        self.assertTrue(report["verified_agent_execution"])
 
     def test_harness_fake_command_negative_control_is_failed_not_passed(self):
         report = self.run_harness("fake-command", route="local-gateway")

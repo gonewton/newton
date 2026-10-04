@@ -119,10 +119,10 @@ def summarize_trace(path, retained_path=None):
     return summary
 
 
-def collect_agent_evidence(state_dir, artifact_dir, run_id, evidence_dir=None):
+def collect_agent_evidence(state_dir, artifact_dir, run_id, evidence_dir=None, context_root=None):
     """Correlate one Run's workflow, checkpoint, resolved task and SDK trace."""
     records = []
-    workspace = state_dir.parent.parent
+    workspace = context_root or state_dir.parent.parent
     for workflow in sorted((state_dir / "workflows").glob("*")):
         try:
             definition = read_object(workflow / "workflow_definition.json")
