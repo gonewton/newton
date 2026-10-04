@@ -110,7 +110,7 @@ class LiveGateTests(unittest.TestCase):
     def fixture(self, engine="pi", status="success", trace_events=None):
         payload = {
             "run_id": self.run_id,
-            "role": "develop",
+            "role": "execute",
             "cycle": 1,
             "candidate_id": self.candidate["id"],
             # Labels deliberately claim Pi even for the command negative control.
@@ -154,7 +154,7 @@ class LiveGateTests(unittest.TestCase):
         }
         self.save_workflow()
         write_json(
-            self.state / "optimize" / self.run_id / "journal.json",
+            self.state / "optimize" / self.run_id / "current.json",
             {
                 "run_id": self.run_id,
                 "phase": "finished" if status == "success" else "failed",

@@ -4,7 +4,8 @@
 //! The native driver persists bound definitions/revisions and enforces the
 //! capabilities supplied here. Policy helpers do not sandbox executables,
 //! dispatch work, merge changes, or claim durable acknowledgment on their own.
-//! Observation reads the supplied store and follows the existing event publisher.
+//! Observation reads authoritative per-run JSON and follows the existing event
+//! publisher for invalidation hints.
 
 mod binding;
 mod decision;

@@ -1,68 +1,53 @@
-//! Same-process, read-only Optimize Run observation with durable lag recovery.
+//! Same-process, read-only observation of authoritative optimization JSON files.
 
-use newton_types::{BackendStore, BroadcastEvent, OptimizeRunTrajectory};
+use newton_types::{optimization::*, BroadcastEvent};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 use tokio::sync::broadcast;
 
-/// Observation failures are not optimizer work, acceptance, or completion decisions.
 #[derive(Debug, thiserror::Error)]
 pub enum OptimizationObservationError {
-    /// A scoped snapshot could not be read from the authoritative store.
     #[error("cannot read Optimize Run observation: {0}")]
     Store(String),
-    /// A faulty store returned data belonging to a different run.
     #[error("Optimize Run observation returned out-of-scope data")]
     ScopeMismatch,
-    /// The requested identity was empty.
     #[error("Optimize Run observation requires a nonempty run identity")]
     MissingRun,
-    /// Concurrent writes prevented a coherent snapshot within the bounded retries.
     #[error("Optimize Run changed while reading its snapshot; retry observation")]
     SnapshotBusy,
 }
 
-/// Reason a fresh scoped snapshot was supplied; no other run's event metadata leaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunObservationReason {
-    /// The real native driver published a durable change for this run.
     Changed,
-    /// The bounded channel overflowed; the snapshot recovers current durable state.
     LagRecovered,
-    /// An embedding caller explicitly requested a fresh snapshot.
     Refreshed,
 }
 
-/// Latest durable Run/Cycle snapshot, not an inferred delta or synthetic event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunObservationUpdate {
-    /// Why this snapshot was fetched.
     pub reason: RunObservationReason,
-    /// Only the bound Run and its persisted Cycles.
-    pub snapshot: OptimizeRunTrajectory,
+    pub snapshot: OptimizationRunSnapshot,
 }
 
-/// Compose the exact store and publisher used by the native driver.
-///
-/// This is an in-process read capability, not a server or authentication bypass.
-/// An embedding application must authorize the run identity before subscription.
-/// Existing HTTP authentication/exposure rules remain unchanged.
 #[derive(Clone)]
 pub struct OptimizeRunObservationSource {
-    store: Arc<dyn BackendStore>,
+    state_dir: PathBuf,
     publisher: broadcast::Sender<BroadcastEvent>,
 }
 
 impl OptimizeRunObservationSource {
-    /// Reuse the driver's actual store and event channel; do not create a second
-    /// publisher in another process and expect it to receive native events.
-    pub fn new(store: Arc<dyn BackendStore>, publisher: broadcast::Sender<BroadcastEvent>) -> Self {
-        Self { store, publisher }
+    pub fn new(state_dir: PathBuf, publisher: broadcast::Sender<BroadcastEvent>) -> Self {
+        Self {
+            state_dir,
+            publisher,
+        }
     }
 
-    /// Subscribe before reading the initial snapshot, closing the usual
-    /// snapshot-then-subscribe lost-update window. No task, daemon, or socket starts.
     pub async fn subscribe(
         &self,
         run_id: &str,
@@ -71,10 +56,10 @@ impl OptimizeRunObservationSource {
             return Err(OptimizationObservationError::MissingRun);
         }
         let receiver = self.publisher.subscribe();
-        let snapshot = read_snapshot(self.store.as_ref(), run_id).await?;
+        let snapshot = read_snapshot(&self.state_dir, run_id)?;
         Ok(OptimizeRunObservation {
             run_id: run_id.into(),
-            store: self.store.clone(),
+            state_dir: self.state_dir.clone(),
             receiver,
             snapshot,
             pending: None,
@@ -82,33 +67,25 @@ impl OptimizeRunObservationSource {
     }
 }
 
-/// Run-scoped read-only observer. Dropping it never cancels or changes the run.
-/// The channel is bounded by the driver; snapshots read the full persisted
-/// trajectory and therefore cost O(number of recorded Cycles).
 pub struct OptimizeRunObservation {
     run_id: String,
-    store: Arc<dyn BackendStore>,
+    state_dir: PathBuf,
     receiver: broadcast::Receiver<BroadcastEvent>,
-    snapshot: OptimizeRunTrajectory,
+    snapshot: OptimizationRunSnapshot,
     pending: Option<RunObservationReason>,
 }
 
 impl OptimizeRunObservation {
-    /// Initial snapshot, or the most recently delivered durable snapshot.
-    pub fn snapshot(&self) -> &OptimizeRunTrajectory {
+    pub fn snapshot(&self) -> &OptimizationRunSnapshot {
         &self.snapshot
     }
 
-    /// Wait for this run's actual driver event, filtering other runs and unrelated
-    /// events. Lag automatically recovers from storage instead of silently dropping
-    /// updates. `None` means all publishers closed, not optimizer completion.
-    /// A failed or cancelled snapshot read stays pending for the next call.
     pub async fn next_update(
         &mut self,
     ) -> Result<Option<RunObservationUpdate>, OptimizationObservationError> {
         loop {
             if let Some(reason) = self.pending {
-                return self.read_update(reason).await.map(Some);
+                return self.read_update(reason).map(Some);
             }
             let reason = match self.receiver.recv().await {
                 Ok(BroadcastEvent::OptimizeRunUpdate { run_id, .. }) if run_id == self.run_id => {
@@ -122,17 +99,15 @@ impl OptimizeRunObservation {
         }
     }
 
-    /// Explicitly refresh a scoped snapshot, for example after reconnecting an
-    /// embedding consumer. This does not read or alter any external tracker.
     pub async fn refresh(&mut self) -> Result<RunObservationUpdate, OptimizationObservationError> {
-        self.read_update(RunObservationReason::Refreshed).await
+        self.read_update(RunObservationReason::Refreshed)
     }
 
-    async fn read_update(
+    fn read_update(
         &mut self,
         reason: RunObservationReason,
     ) -> Result<RunObservationUpdate, OptimizationObservationError> {
-        self.snapshot = read_snapshot(self.store.as_ref(), &self.run_id).await?;
+        self.snapshot = read_snapshot(&self.state_dir, &self.run_id)?;
         self.pending = None;
         Ok(RunObservationUpdate {
             reason,
@@ -141,46 +116,77 @@ impl OptimizeRunObservation {
     }
 }
 
-async fn read_snapshot(
-    store: &dyn BackendStore,
+fn read_snapshot(
+    state_dir: &Path,
     run_id: &str,
-) -> Result<OptimizeRunTrajectory, OptimizationObservationError> {
-    // BackendStore does not expose a read transaction. Compare surrounding Run
-    // reads and retry a bounded number of times rather than mix two transitions.
+) -> Result<OptimizationRunSnapshot, OptimizationObservationError> {
+    let directory = state_dir.join("optimize").join(run_id);
     for _ in 0..4 {
-        let before = store.get_optimize_run(run_id).await.map_err(store_error)?;
-        let mut cycles = store
-            .list_optimize_cycles(run_id)
-            .await
-            .map_err(store_error)?;
-        let after = store.get_optimize_run(run_id).await.map_err(store_error)?;
-        if before.run.id != run_id
-            || after.run.id != run_id
-            || cycles.iter().any(|cycle| cycle.run_id != run_id)
-        {
-            return Err(OptimizationObservationError::ScopeMismatch);
+        let before = read_bytes(&directory.join("current.json"))?;
+        let run: OptimizationRunRecord = read_json(&directory.join("run.json"))?;
+        let current: serde_json::Value = serde_json::from_slice(&before).map_err(store_error)?;
+        let current_cycle = current
+            .get("cycle")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| {
+                OptimizationObservationError::Store("current.json lacks cycle".into())
+            })?;
+        let mut cycles = Vec::new();
+        let entries = fs::read_dir(directory.join("cycles")).map_err(store_error)?;
+        for entry in entries {
+            let path = entry.map_err(store_error)?.path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+            {
+                let cycle: OptimizationCycleRecord = read_json(&path)?;
+                if cycle.run_id != run_id || cycle.cycle > current_cycle {
+                    return Err(OptimizationObservationError::ScopeMismatch);
+                }
+                cycles.push(cycle);
+            }
         }
-        let before_value = serde_json::to_value(&before)
-            .map_err(|error| OptimizationObservationError::Store(error.to_string()))?;
-        let after_value = serde_json::to_value(&after)
-            .map_err(|error| OptimizationObservationError::Store(error.to_string()))?;
-        if before_value == after_value && cycles.iter().all(|cycle| cycle.cycle <= after.run.cycle)
-        {
-            cycles.sort_by(|left, right| {
-                left.cycle
-                    .cmp(&right.cycle)
-                    .then_with(|| left.id.cmp(&right.id))
-            });
-            return Ok(OptimizeRunTrajectory {
-                detail: after,
+        cycles.sort_by_key(|cycle| cycle.cycle);
+        let terminal = current
+            .get("phase")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|phase| matches!(phase, "finished" | "failed"));
+        let outcome = if terminal {
+            match fs::read(directory.join("outcome.json")) {
+                Ok(bytes) => Some(serde_json::from_slice(&bytes).map_err(store_error)?),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(store_error(error)),
+            }
+        } else {
+            None
+        };
+        let after = read_bytes(&directory.join("current.json"))?;
+        if before == after {
+            if run.run_id != run_id {
+                return Err(OptimizationObservationError::ScopeMismatch);
+            }
+            return Ok(OptimizationRunSnapshot {
+                run,
+                current,
                 cycles,
+                outcome,
             });
         }
-        tokio::task::yield_now().await;
+        std::thread::yield_now();
     }
     Err(OptimizationObservationError::SnapshotBusy)
 }
 
-fn store_error(error: newton_types::ApiError) -> OptimizationObservationError {
-    OptimizationObservationError::Store(format!("{}: {}", error.code, error.message))
+fn read_bytes(path: &Path) -> Result<Vec<u8>, OptimizationObservationError> {
+    fs::read(path).map_err(store_error)
+}
+
+fn read_json<T: serde::de::DeserializeOwned>(
+    path: &Path,
+) -> Result<T, OptimizationObservationError> {
+    serde_json::from_slice(&read_bytes(path)?).map_err(store_error)
+}
+
+fn store_error(error: impl std::fmt::Display) -> OptimizationObservationError {
+    OptimizationObservationError::Store(error.to_string())
 }

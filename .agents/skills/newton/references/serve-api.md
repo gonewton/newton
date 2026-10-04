@@ -40,4 +40,8 @@ curl -s -X PATCH localhost:8080/api/v1/findings/<id> \
 
 ## Storage
 
-State lives in SQLite at `<workspace>/.newton/state/backend.sqlite` (override with `--state-dir`). Run a single `serve` process per state directory.
+Serve/catalog state lives in SQLite at `<workspace>/.newton/state/backend.sqlite`
+(override with `--state-dir`). Generic `newton optimize` history instead lives in
+versioned JSON under `.newton/state/optimize/<run-id>/` and is not automatically
+projected into these legacy optimize-run endpoints. Run a single `serve` process
+per SQLite state directory.

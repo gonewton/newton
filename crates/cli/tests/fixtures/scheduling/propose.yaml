@@ -1,0 +1,16 @@
+version: '2.0'
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: search
+    io:
+      result_map:
+        decision: candidate
+        proposal_id: '$expr: triggers.candidate_id + "-proposal"'
+        candidate: '$expr: #{id: triggers.candidate_id, artifact_id: if triggers.cycle == 1 { "schedule:7" } else { "schedule:4" }, base_artifact_id: "schedule:base", created_under_revision: triggers.requirements_revision}'
+        rationale: reduce the deterministic simulated makespan
+        selected_observations: []
+  tasks:
+    - id: search
+      operator: NoOpOperator
+      terminal: success

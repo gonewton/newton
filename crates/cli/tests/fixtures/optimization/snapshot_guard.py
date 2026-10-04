@@ -1,1 +1,0 @@
-print("PINNED_HELPER_OK")

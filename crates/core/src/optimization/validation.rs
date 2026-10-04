@@ -14,14 +14,16 @@ pub fn parse_definition(source: &str) -> Result<OptimizationDefinition, Optimiza
 /// Check the versioned source contract without granting execution permissions.
 pub fn validate_definition(definition: &OptimizationDefinition) -> Result<(), OptimizationError> {
     if definition.schema_version != OPTIMIZATION_DEFINITION_VERSION {
-        return invalid("schema_version must be 1");
+        return invalid("schema_version must be 2");
     }
-    for (label, value) in [
-        ("id", &definition.id),
-        ("revision", &definition.revision),
-        ("strategy", &definition.strategy),
-    ] {
+    for (label, value) in [("id", &definition.id), ("revision", &definition.revision)] {
         nonempty(value, label)?;
+    }
+    if matches!(
+        definition.strategy,
+        OptimizationStrategy::ObservationDriven { max_suggestions: 0 }
+    ) {
+        return invalid("observation-driven max_suggestions must be positive");
     }
     if definition.workflows.is_empty() {
         return invalid("at least one strategy workflow is required");
@@ -47,6 +49,9 @@ pub fn validate_requirements(
         return invalid(
             "elapsed_seconds, max_cycles, max_work, and max_evaluations must be positive",
         );
+    }
+    if requirements.stagnation_cycles == 0 {
+        return invalid("stagnation_cycles must be positive");
     }
     let samples = match requirements.comparison {
         ComparisonPolicy::Exact => 1,

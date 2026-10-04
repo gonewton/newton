@@ -4,8 +4,10 @@ The single canonical glossary for Newton's domain language: the optimization
 loop, grading, the portfolio model, evaluation, planning, and dependency
 mapping. Terms here are domain vocabulary, not implementation notes — internal
 data-shape and engine terms (workflow IR, execution, checkpointing, operators,
-realtime, expressions, diagnostics) live in `architecture.md`. When code and
-this glossary disagree, one of them is wrong — resolve it.
+realtime, expressions, diagnostics) live in `architecture.md`. This glossary
+reflects the implemented generic optimization model. Historical design context
+is retained in `docs/draft/optimization-loop-design.md`; the current wire
+contract is `docs/optimization-contract.md`.
 
 ## Loop, grading & operational surface
 
@@ -29,46 +31,76 @@ unit of work `workflow run` performs. A Step has no opinion about what runs
 before or after it.
 
 ### Optimization loop
-Newton's reason to exist (and the source of its name — Newton's method, iterating
-toward an objective). The autonomous cycle that drives a project toward a better
-**Grade**: `change-request → plan → refine → implement → test → grade →
-change-request`. It is a **Driver** that sequences **Steps**; it is not itself a
-Step. Distinct from a batch: a batch drains a finite set once and stops; the
-optimization loop is closed — grading feeds the next round of change requests.
-The CLI command is **`optimize`** (renamed from `batch`; see ADR 0003).
-The `change-request` phase is the loop's *optimizer step*: it reads the standing
-**Findings** and synthesizes a **Change Request**. Full closing chain:
-`grade (→ Assessment) → reconcile (→ Findings) → change-request (→ Change Request)
-→ plan → implement → grade`.
-(As of this writing the edge is **designed but not yet wired** in code; the
-vocabulary and ADR 0009 describe the target.)
+The process that evaluates candidate states, proposes improvements, executes
+attempts when needed, and retains accepted progress toward an Objective. The
+core is agnostic to the work and delivery; Strategies, Workflows, and adapters
+provide those behaviors. Observations and Plans are optional, and stopping short
+of the target is distinct from operational failure and verified completion.
 
 ### Objective
-The project-defined goal the optimization loop drives toward — *what progress
-means* for this project. General and project-specific: it may be code quality,
-roadmap completion, a security baseline, dependency freshness, migration
-progress, and so on. Overall quality ("health") is just one possible Objective,
-not a privileged one. The Objective determines what a **Grader** measures and
-what the **Grade** scores.
-_Avoid_: "health" as the general term (it is one specific Objective); "goal"
-(collides with **Goal Gate**); "target" (collides with dependency **Target**);
-"KPI"/"indicator" (a KPI is a monitored measurable, not the goal itself).
+The declared meaning of progress for an optimization problem. It may concern
+quality, waiting time, throughput, resource use, or another measurable outcome;
+an Evaluator supplies measurements with explicit comparison and acceptance rules.
+_Avoid_: "health" as the general term; "Grade" for the Objective itself.
+
+### Optimization Definition
+A reusable declaration of an Objective, its evaluators, acceptance and comparison
+criteria, completion criteria, resource limits, and referenced Workflows. It
+describes the optimization problem; a Workflow describes executable steps.
+_Avoid_: "workflow definition" when referring to the Optimization Definition.
+
+### Candidate
+An identifiable proposed state or artifact evaluated against an Objective and
+its acceptance criteria. Its stable identity can denote parameters, a file
+snapshot, a versioned external artifact, or a Git commit; it implies no repository
+or source-code ancestry.
+
+### Objective Measurement
+A value used to judge progress toward an Objective: either a Grade or a numeric
+quantity with explicit units and a minimize/maximize direction. Measurements
+are compared only under compatible evaluation criteria.
+
+### Evaluator
+A unit that evaluates an identified Candidate and returns Objective Measurements,
+acceptance-check results, and evidence. Qualitative Observations are optional;
+a simulator can return measurements without manufacturing Findings.
+
+### Evaluation
+The immutable result of applying an Evaluator to an identified Candidate under
+identified criteria. It records measurements, checks, and evidence; a rubric
+Assessment is a supported form of evaluation feedback.
+
+### Strategy
+The policy for proposing and deriving Candidates from the accepted state,
+measurements, and relevant history. An observation-driven Strategy can select
+suggestions and create a Plan; a parameter Strategy can propose a Candidate
+directly. A search policy is distinct from the generic evaluation/history contract.
+
+### Accepted Result
+A retained Candidate and the evidence that qualified it under identified
+criteria. Acceptance does not imply applying, publishing, merging, or deploying
+that result; delivery belongs to the configured adapter or workflow.
+
+### Execution Resource
+A domain-specific resource on which execution can have effects and for which an
+adapter can define ownership or coordination. A repository is one example, not
+the universal execution boundary.
+_Avoid_: bare "Target", which also names a dependency-planning concept.
+
+### Review Branch
+A local branch identifying the retained optimization result for developer
+review. Delivery of a Review Branch does not imply merging or publication.
+_Avoid_: "merged result" or "published result" for a locally delivered result.
 
 ### Grade
-The current scalar **measure of progress toward the Objective** (0–100) — the
-value the loop maximizes; what every Step is ultimately trying to improve. The
-Grade is a **single-scope** quantity computed and consumed *inside* one loop;
-rolling Grades up to a coarser scope (Component/Product) gives the **governance
-view** that lives *outside* the loop — a scope distinction, not a separate
-metric.
-_Avoid_: "grade" for a per-dimension number (that is a **Score**), for an
-evaluation event (an **Assessment**), or for the goal itself (the **Objective**);
-"health" for the aggregate (it is aggregated Grade).
+A 0–100 rubric-based Objective Measurement for which larger is better. It is
+one supported measurement type, not the required scale for all optimization.
+_Avoid_: "Grade" for an arbitrary numeric measurement with native units, a
+per-dimension Score, an Assessment, or the Objective itself.
 
 ### Grader
-A pluggable evaluation unit that inspects a project's current state (codebase
-plus artifacts) and emits an **Assessment**. The actor behind the loop's `grade`
-phase. A Grader is defined by what it emits (an Assessment), not by how it is
+An Evaluator that inspects a candidate state and emits an **Assessment** with
+a Grade, dimension Scores, and optional Observations. A Grader is defined by what it emits (an Assessment), not by how it is
 implemented; it takes one of two forms:
 - a **command Grader** — an external program, in any language, that prints an
   Assessment; or
@@ -106,8 +138,9 @@ feedback). An Assessment is an **absolute**
 statement about the project's current state, never a self-reported delta — it
 carries no baseline. Movement (did the Grade improve?) is derived by the loop
 comparing successive Assessments from the same Grader, not reported by the
-Grader. Assessments are the durable record of evaluation and the input the loop
-folds into the **Grade**.
+Grader. Assessments are immutable historical records of evaluation, retaining the
+evaluated state and criteria revision. Later evaluations never replace their
+original Scores or Observations.
 A Grader reports facts and advice only: scores, a **verdict** (advisory; a
 required, ordered enum `approve | approve_with_comments | request_changes |
 reject`), and **Observations**. It does not decide pass/fail — that is
@@ -127,139 +160,65 @@ Observations (meaning "this axis is clean").
 _Avoid_: "grade" (reserved for the objective), "metric", "grade row".
 
 ### Observation
-One unit of the **text-gradient** within an Assessment: a single critique as the
-Grader phrased it. It carries a mandatory **directional triple** — the *problem*,
-*why it matters*, and a *recommended action* (without the action it is a mere
-complaint, not a gradient) — plus its **dimension** and a **severity**
-(`critical | high | medium | low`); optionally a flexible **location** (which may
-be coarse or absent for non-local critiques) and a **confidence**. Observations
-are the directional signal that drives the next change (the scalar Score only
-says how far off, not which way). An Observation is **transient** — recomputed
-every run, in the Grader's words, and **deliberately carries no id**: identity is
-Newton's, assigned via **Reconciliation**. It becomes durable only by being
-reconciled into a **Finding**.
-_Avoid_: "finding" for the raw item (a Finding is its durable, reconciled form).
+An actionable critique within an Assessment: the problem, why it matters, and a
+recommended action, with supporting evidence and optional domain-specific priority or severity. It is preserved
+as originally reported and is addressable within that Assessment; optional links
+to earlier observations express continuity without requiring permanent identity.
+_Avoid_: treating a reworded, split, merged, or omitted observation as proof that
+an earlier problem was fixed.
 
 ### Finding
-The durable, triageable record of one recurring problem or improvement, into
-which matching **Observations** are reconciled across grading runs. It is
-`Opportunity` *renamed and extended*: beyond portfolio metadata (risk/severity,
-effort, expected value, `dependsOn`/`blocks`, **Origin** `system | human`,
-`source` grader, links to **Component**/**Repo**/**KPI**) it carries the
-**structured text-gradient** — `dimension`, `location`, `why_it_matters`, and
-`recommended_action` (the direction the **Change Request** synthesis reads) — plus
-reconciliation metadata (`fingerprint`, `last_seen_at`). Lifecycle:
-`awaiting_triage → triaged → approved_for_planning → structured →
-deferred | rejected`, plus **`resolved`** — set *automatically* by
-**Reconciliation** when the issue vanishes (the per-Finding convergence signal),
-firmly distinct from the human `rejected`/`deferred` (Reconciliation never
-resurrects a human-closed Finding; it reopens a `resolved` one if it recurs) —
-and **`blocked`** — set *automatically* by the loop when the **Plan** implementing
-this Finding **fails** develop after the configured retry budget. A `blocked`
-Finding is **fenced from the work pipeline** (the `change-request` synthesis skips
-it, so it never re-enters Plan/develop) yet stays open and keeps being refreshed
-by Reconciliation (the problem is still in the code); it is **cleared only by a
-human** (un-block to retry, or fix it directly so it auto-`resolved`s). Distinct
-from `deferred`/`rejected` (human-closed) and `resolved` (auto-closed): `blocked`
-means "the loop tried and could not, a human must act." A loop run that reaches
-no-more-actionable-work with `blocked` Findings still open ends in
-**`stalled_on_blocked`** (needs-human), *not* the clean **`converged`** success
-endpoint. A Finding's identity is
-**assigned and maintained by Newton via Reconciliation — never taken from a
-Grader** (Graders are non-deterministic and cannot supply stable ids). Findings
-are the standing text-gradient that the loop synthesizes (Score-prioritized) into
-a **Change Request** — the durable work pipeline is
-`Finding → Change Request → Plan → Execution → re-grade`.
-_Avoid_: "Opportunity" (the former name, being retired), "Issue", "Ticket",
-"suggestion", "recommendation".
+An optional durable, triageable issue that groups related Observations across
+Assessments. The generic optimizer does not require a persistent Finding backlog;
+its evaluator-reported findings are assessment-local Observations. Persistent
+issue tracking belongs to workflows or platform features that need it.
+_Avoid_: requiring every Observation to acquire a global Finding identity.
 
 ### Reconciliation
-The per-run step, owned by Newton (not the Grader), that matches an Assessment's
-**Observations** against the currently-open **Findings** for a scope. A match
-**refreshes** the existing Finding; an unmatched Observation **creates** a new
-Finding; an open Finding with no matching Observation this run is marked
-**resolved** (the gradient landed). Matching is hybrid: a natural-key
-fingerprint (scope + dimension + normalized location + rule) first, then
-**semantic similarity** for the rest — because non-deterministic AI Observations
-cannot be matched by equality. Reconciliation is what gives Findings stable
-identity and yields per-Finding resolution tracking, a richer convergence signal
-than the scalar Grade delta.
+Best-effort association of related Observations across Assessments, optionally
+supporting a persistent Finding backlog. It is not a mandatory stage of generic
+optimization and does not rewrite historical Assessments.
 
-**Resolution tracking is best-effort, not exact — by design.** With
-non-deterministic graders (different wording each run) and location-less findings
-(no natural key), perfectly accounting for every Finding's open/resolved transition
-is **not achievable in principle**, only approximated. The loop is therefore a
-**fuzzy optimizer** (closer to a genetic/stochastic search than a crisp state
-machine): it tolerates imperfect matching and converges through **re-grading plus
-the break conditions** (a still-present problem is simply re-reported next run and
-re-matched), never relying on exact per-Finding bookkeeping. Mis-matches degrade
-*quality and efficiency* (blurry tracking, an occasional merged/muddled Change
-Request), not *correctness* — the loop does not declare victory while a problem is
-still detectable.
-
-**Fuzziness is not failure tolerance.** The best-effort stance covers
-*mis-matches* between Observations and Findings — it does not cover a
-Reconciliation that runs *without* its semantic-matching half. If adjudication
-itself fails (the LLM matcher errors), the Reconciliation **fails as a task**
-(normal retry applies; a persistent failure fails the cycle) rather than
-proceeding fingerprint-only — because a sweep without semantic matching would
-mass-resolve open Findings (including `blocked` ones, which only a human may
-clear) and could end a run falsely `converged`.
+A claim of resolution requires an evaluator conclusion with evidence, or absence
+under declared complete relevant coverage. Otherwise resolution is unverified;
+that does not automatically block progress or completion. Explicit acceptance
+and completion criteria determine what is required.
 
 ### Plan
-A unit of queued work a project's optimization loop consumes — the spec for one
-Step. This is the canonical noun; "work item", "task", and "batch item" are
-deprecated synonyms to be removed.
+The intended work for an optimization attempt: selected Observations, rationale,
+implementation instructions, and intended verification. Finishing a Plan does
+not itself establish improvement, acceptance, merging, or publication.
 
 ### Plan queue
-The per-project backlog of Plans and their lifecycle:
-`draft → ready → running → complete | failed`, plus **`abandoned`** as a holding
-state (a human shelved or rejected the Plan, distinct from `failed` which is a
-develop/test failure). `draft` = planner emitted, not yet approved; `ready` =
-approved, queued for develop; `running` = develop executing; `complete` = develop
-succeeded and merged; `failed` = develop/tests failed after retries. The queue is
-the only durable state the loop owns between Steps.
+An optional backlog of Plans awaiting execution. A queue and its approval
+lifecycle are workflow or platform concerns, not prerequisites for the generic
+Optimization loop.
 
 ### Trajectory
-The **Optimization loop**'s flight recorder: the ordered, per-cycle record of the
-path a scope takes toward its **Objective** — one entry per cycle capturing that
-cycle's `Grade`(s), `decision` (`propose | none`), the `Plan`/`Execution` it ran,
-`develop` outcome, and open/resolved **Finding** counts. Written by the loop driver
-(as `.newton/optimize/<scope>/trajectory.jsonl`). It has two jobs: the **audit
-trail** ("what did the loop do, and why did it stop?") and the **input to the break
-conditions** — regression, no-progress, max-cycles, and convergence are all judged
-over the Trajectory, never from a single moment. Borrowed from optimization: the
-sequence of states a system traces through its state-space over time.
-_Avoid_: "history"/"log" (too generic — it is the structured per-cycle series the
-break conditions read), confusing it with an **Execution** (one develop run *within*
-a cycle; the Trajectory spans *all* cycles).
+The ordered history of an Optimize Run's Evaluations, proposals, attempts,
+Candidates, decisions, and results. It explains progress and stopping without
+requiring perfect continuity of Finding identities.
+_Avoid_: confusing a Trajectory with one workflow Execution.
 
 ### Optimize Run
-One invocation of the **Optimization loop** over a scope — the durable, addressable
-record of "this project being driven toward its Objective from start to stop." It
-owns a `status` (`running | converged | stalled_on_blocked | max_cycles | regressed
-| no_progress`), the configured graders, and an ordered set of **Cycles**; its
-**Trajectory** is the per-cycle series within it. A Run is the **top of the nesting**
-— one Run contains many Cycles; each Cycle fires several **Steps** and produces one
-**Execution**. This is the proper-noun entity behind the `optimize` driver.
-_Avoid_: bare "run" (ambiguous — a **Step** is also "a workflow run" and an
-**Execution** is colloquially "this run"); say **Optimize Run** for the loop
-invocation, **Step** for one workflow run, **Execution** for one develop run.
+One invocation of the Optimization loop, binding an Objective and its evaluation
+criteria to a sequence of Cycles. It retains historical evidence and the best
+accepted result, and distinguishes target completion, stagnation, limits, no
+actionable improvement, and operational failure.
+_Avoid_: bare "run" when it could mean a single workflow Step.
 
 ### Cycle
-One iteration of an **Optimize Run**: a single pass of `grade → reconcile →
-change-request → (approve) → plan → develop → re-grade`. A Cycle contains several
-**Steps** (the grading / planner / develop workflow runs) and at most one develop
-**Execution**; it is the unit recorded as one row of the **Trajectory**. Many Cycles
-make one **Optimize Run**.
-_Avoid_: "iteration"/"round" (informal), "Step" (a Step is *one workflow run within*
-a Cycle, not the Cycle itself).
+One iteration of an Optimize Run: evaluate, propose, optionally execute, and
+evaluate and decide on the resulting Candidate. Proposal may directly produce
+a Candidate or report no useful next action; a separate Plan and execution phase
+are not mandatory.
+_Avoid_: "Step" (one workflow run within a Cycle).
 
 ### Driver
 A way to set Steps running over the one execution engine. Newton has exactly
 these drivers, distinguished only by what originates the work:
 - **`workflow run`** — a human/CLI runs one Step, one shot.
-- **`optimize`** — the autonomous Optimization loop drives Steps toward the Grade.
+- **`optimize`** — the autonomous Optimization loop drives Steps toward the Objective.
 - **`serve`** — exposes the engine and its state over HTTP (observe).
 
 External HTTP *ingress* (an outside system POSTing to start a Step) is **out of
@@ -383,8 +342,8 @@ _Avoid_: "degradation", "decline".
 
 ## Planning & improvement
 
-The durable work pipeline a **Finding** feeds: Finding → Change Request → Plan →
-Execution. (**Finding**, **Change Request**, and **Plan** are defined above.)
+The generic loop selects Observations and executes Plans. Optional platform
+issue management can connect Findings and Change Requests to those Plans.
 
 ### Effort
 T-shirt sizing on a **Finding**: `XS | S | M | L | XL`. Set by triage, never by a
@@ -397,20 +356,10 @@ Whether a **Finding** was surfaced by the system or submitted by a human:
 _Avoid_: "source", "provenance".
 
 ### Change Request
-The synthesized, reviewable proposal of changes derived from reading the standing
-**Findings** (prioritized by **Scores**) — the loop's *optimizer step* (it
-applies the aggregated text-gradient). It is **WHAT/WHY**; the **Plan** it drives
-is the **HOW**. Once approved it produces a Plan. Lifecycle:
-`proposed → approved → planned → rejected`. A Change Request is a concrete,
-pipeline-bound change even while `proposed` — not a loose suggestion. Read as
-"Request for Change" (change-management sense). Unifies the loop's
-`change-request` phase and the former `Request` entity — it is `Request` renamed
-and extended: it links **many** Findings (`finding_ids[]`, not a single
-opportunity), carries a structured `body` (the synthesized proposal) and an
-**Origin** (`system` synthesized | `human` authored).
-_Avoid_: "Proposal"/"suggestion" (too soft), "Request for Comments" (wrong
-sense), "changelist"/"changeset" (that is a diff, not a request to change),
-"ticket".
+An optional reviewable proposal explaining what should change and why, often
+grouping Findings before a Plan describes how. The generic loop can retain this
+rationale with its selected work and Plan without a separate Change Request
+lifecycle.
 
 ### PlanSection
 An authored content subdivision within a **Plan** (e.g. "Background", "Proposed

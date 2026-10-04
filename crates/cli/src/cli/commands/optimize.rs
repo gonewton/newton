@@ -14,7 +14,6 @@ use std::{
 
 pub(crate) mod assets;
 mod control;
-mod envelopes;
 mod lifecycle;
 mod native;
 pub mod observation;
@@ -22,9 +21,7 @@ mod ownership;
 mod preflight;
 mod projection;
 mod snapshot;
-mod software_work;
 mod stop;
-mod thresholds;
 mod workflow;
 
 /// Run or inspect/resume a durable, definition-bound native optimization loop.
@@ -46,10 +43,13 @@ pub async fn optimize(args: OptimizeArgs) -> crate::Result<()> {
         if args.definition.is_some() || !args.parameters.is_empty() {
             anyhow::bail!("resume uses the persisted definition; do not pass --definition");
         }
-        let mut journal: lifecycle::Journal = serde_json::from_slice(&fs::read(
-            state_dir.join("optimize").join(run_id).join("journal.json"),
-        )?)
-        .context("load durable Optimize Run journal")?;
+        let run_directory = state_dir.join("optimize").join(run_id);
+        let current = run_directory.join("current.json");
+        if !current.exists() && run_directory.join("journal.json").exists() {
+            anyhow::bail!("this run uses the pre-generic journal/SQLite format and cannot be resumed; finish it with Newton v0.5.133 or start a new run");
+        }
+        let mut journal: lifecycle::Journal = serde_json::from_slice(&fs::read(current)?)
+            .context("load durable Optimize Run journal")?;
         if journal.run_id != *run_id {
             anyhow::bail!("Optimize Run journal identity mismatch");
         }
@@ -76,6 +76,22 @@ pub async fn optimize(args: OptimizeArgs) -> crate::Result<()> {
         {
             println!("requirements update is Pending; reconcile recorded work before activation");
             return Ok(());
+        }
+        if journal.phase == lifecycle::Phase::Finished
+            && journal
+                .outcome
+                .as_ref()
+                .and_then(|outcome| outcome.get("stop_reason"))
+                == Some(&serde_json::json!("cycle_complete"))
+        {
+            journal.phase = lifecycle::Phase::CycleComplete;
+            journal.outcome = None;
+            newton_core::fs_util::atomic_write(
+                &state_dir.join("optimize").join(run_id).join("current.json"),
+                &serde_json::to_vec_pretty(&journal)?,
+            )?;
+            remove_if_present(&run_directory.join("outcome.json"))?;
+            remove_if_present(&run_directory.join("report.json"))?;
         }
         if journal.phase == lifecycle::Phase::Finished {
             let binding: BoundOptimizationDefinition =
@@ -217,4 +233,12 @@ pub async fn optimize(args: OptimizeArgs) -> crate::Result<()> {
 
 fn unquote(value: &str) -> &str {
     value.trim().trim_matches('"').trim_matches('\'')
+}
+
+fn remove_if_present(path: &Path) -> std::io::Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }

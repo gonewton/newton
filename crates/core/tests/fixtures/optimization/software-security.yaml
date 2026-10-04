@@ -1,12 +1,10 @@
-schema_version: 1
+schema_version: 2
 id: software-security
 revision: fixture-v1
-strategy: software-improvement
+strategy: {kind: observation_driven, max_suggestions: 5}
 workflows:
-  grade: grading.yaml
-  plan: planning.yaml
-  develop: development.yaml
-  promote: promotion.yaml
+  propose: planning.yaml
+  execute: development.yaml
 requirements:
   objective:
     mode: primary
@@ -41,6 +39,7 @@ requirements:
     - kind: objective_target
       objective: critical_vulnerabilities
       target: 0
+  stagnation_cycles: 3
 defaults:
   agent:
     kind: literal

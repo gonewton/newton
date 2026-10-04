@@ -5,6 +5,7 @@ workflow:
     entry_task: prepare
     io:
       result_map:
+        status: candidate
         candidate: '$expr: tasks.result.output.metadata.candidate'
   tasks:
     - id: prepare

@@ -258,14 +258,14 @@ def collect_agent_evidence(state_dir, artifact_dir, run_id, evidence_dir=None):
 
 
 def require_pi_execution(records, outcome, expected_model):
-    """Reject label-only, stale, failed or unrelated evidence of development."""
+    """Reject label-only, stale, failed or unrelated evidence of candidate execution."""
     accepted = outcome.get("accepted_result") or {}
     candidate = accepted.get("candidate")
     evaluation = accepted.get("evaluation") or {}
     for workflow in records:
         if (
             workflow["run_id"] != outcome["run_id"]
-            or workflow["role"] != "develop"
+            or workflow["role"] != "execute"
             or workflow["status"] != "Completed"
             or workflow["issues"]
             or not candidate
@@ -282,6 +282,6 @@ def require_pi_execution(records, outcome, expected_model):
                     "run_seq": task["run_seq"],
                 }
     raise RuntimeError(
-        "no correlated successful Pi/aikit development task with tool and terminal SDK evidence; "
+        "no correlated successful Pi/aikit execute task with tool and terminal SDK evidence; "
         "configured agent/model labels and a changed artifact are insufficient"
     )

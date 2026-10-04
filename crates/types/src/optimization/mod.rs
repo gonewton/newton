@@ -6,7 +6,9 @@
 mod definition;
 mod evaluation;
 mod revision;
+mod workflow;
 
 pub use definition::*;
 pub use evaluation::*;
 pub use revision::*;
+pub use workflow::*;

@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1
+FROM rust:1.90-bookworm AS build
+WORKDIR /src
+COPY . .
+RUN cargo build --locked --release -p newton-cli
+
+FROM rust:1.90-bookworm
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && cargo install cargo-audit --locked
+COPY --from=build /src/target/release/newton /usr/local/bin/newton
+COPY scripts/test-optimize-live.py /opt/newton/test-optimize-live.py
+COPY scripts/optimize_live_evidence.py /opt/newton/optimize_live_evidence.py
+COPY scripts/optimize_live_route.py /opt/newton/optimize_live_route.py
+WORKDIR /workspace
+ENV HOME=/tmp/newton-home
+ENTRYPOINT ["python3", "/opt/newton/test-optimize-live.py"]

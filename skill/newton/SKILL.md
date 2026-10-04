@@ -1,6 +1,6 @@
 ---
 name: newton
-description: Newton CLI for workflow YAML graphs (operators, checkpoints, goal gates) and versioned Optimization Definitions. `optimize` runs durable baseline-grade → plan → candidate-develop → candidate-grade → accept cycles with explicit constraints and requirements revisions. Use when running/resuming workflows, binding an optimization definition, observing a run, validating YAML, or managing checkpoints/artifacts.
+description: Newton CLI for workflow YAML graphs and versioned generic Optimization Definitions. `optimize` runs durable evaluate → propose → optional execute → evaluate → decide cycles over identifiable candidate states, with JSON history, constraints, stopping, and requirements revisions. Use when running workflows or authoring, validating, running, resuming, or observing optimization definitions.
 license: Apache-2.0
 compatibility: Requires the newton binary on PATH.
 ---
@@ -14,12 +14,12 @@ Newton is a **workflow-first** CLI **and an autonomous optimizer**: it runs YAML
 ## When to use
 
 - Running or resuming workflows (including graphs that call nested workflows via `WorkflowOperator`).
-- Driving a definition-bound **optimization loop** for a project (`newton optimize <project> --definition <file>`) or **observing** it over `serve`.
+- Driving a definition-bound **optimization loop** for a local candidate context (`newton optimize <project> --definition <file>`) or reading its JSON history.
 - Initializing a workspace (`newton init`) and editing `.newton/configs/*.conf`.
 - Validating or explaining workflow YAML; cleaning checkpoints or artifacts.
 - Operating `newton serve` for HTTP or WebSocket APIs (incl. the optimize-run + grading read endpoints).
-- Working with loop entities — **Finding**, **Change Request**, **Plan**, **Assessment** — via `newton data` or `/api/v1` (e.g. `newton data post finding`, `POST /api/v1/findings/{id}/unblock`).
-- Wiring a **Grader** (`.newton/grader/<name>/generate.sh`) that prints an **Assessment** to stdout for the loop's grade phase.
+- Working with optional catalog entities such as **Finding**, **Change Request**, and **Plan** via `newton data` or `/api/v1`; these are not prerequisites for generic optimization.
+- Authoring an evaluator that returns measurements, checks, evidence, and optional assessment-local observations.
 
 ## Installation
 
@@ -48,7 +48,7 @@ These subcommands match the current CLI (confirm with `newton --help` on your bu
 | Command | Role |
 | --- | --- |
 | `init` | Create `.newton/` and install the default template |
-| `optimize` | Run a durable, definition-bound native loop. The software strategy requires `grade`, `plan`, and `develop` roles and retains qualified candidates for review. Legacy Plan queues are not consumed. |
+| `optimize` | Run a durable generic loop. Every definition needs an evaluator and `propose`; `execute` is optional. Qualified candidates and immutable Cycle evidence are retained as JSON. |
 | `serve` | HTTP/WebSocket API for workflow state, streaming, and loop observation (see [serve API](references/serve-api.md)) |
 | `data` | Catalog CRUD over HTTP-style verbs (`get`/`post`/`patch`/`put`/`delete`) for entities incl. `finding`, `change-request`, `plan`, `optimize-run`, `optimize-cycle`, `eval-run`, `grade` |
 | `dependency discover\|inspect\|approve\|impact` | Discover Cargo facts, package human-reviewed Baselines, and query deterministic target-scoped Impact Sequences; see [dependency planning](references/dependency.md). |
@@ -86,47 +86,46 @@ There is **no** `step`, `status`, `report`, or `error` subcommand in current rel
 
 ## Optimization loop
 
-Newton's reason to exist is an **autonomous, GitHub-free loop** that improves a project toward a project-defined **Grade**. One pass:
+Newton optimizes an Objective over identifiable candidate states:
 
-```
-grade ─→ reconcile ─→ change-request ─→ (approve) ─→ plan ─→ develop ─→ merge ─┐
-(Assessment)(Findings)(Change Request)   (HIL/auto)  (HOW)  (tests+commit) local│
-                            │ decision=none + nothing blocked → CONVERGED       │ re-grade
-                            └───────────────────────────────────────────────────┘
+```text
+evaluate incumbent → propose → [execute] → evaluate candidate → decide
 ```
 
-**Durable spine (lives in Newton's store, never a board):** `Finding → Change Request → Plan → Execution`.
+- Start from an **existing schema-version-2 Optimization Definition**. Create or
+  edit definitions with a coding agent and this skill; Newton does not generate
+  them from a free-form goal.
+- Use `measurement_driven` when a strategy can propose candidates from numeric or
+  Grade measurements. It needs no observations, Plan, execute workflow, Git, or
+  database.
+- Use `observation_driven` when evaluator suggestions guide the next attempt.
+  Select at most `max_suggestions` observations from the current assessment;
+  the default is five. Findings and cross-assessment links are optional.
+- The evaluator returns the exact candidate, correlated evaluation, measurements,
+  constraints, and optional assessment. A Grade is one 0–100 measurement type;
+  native numeric values retain their units and minimize/maximize direction.
+- `propose` returns a ready candidate, an attempt requiring optional `execute`,
+  no action, or a known-safe failure. A Plan is optional data on a proposal.
+- A candidate replaces the incumbent only after re-evaluation proves improvement
+  and every acceptance constraint passes. Unknown evidence never passes.
+- Completion, stagnation, no action, limits, regression, cancellation, and
+  operational failure are distinct stop results. Retained historical results are
+  separate from qualification under the active requirements revision.
+- History is authoritative JSON at `.newton/state/optimize/<RUN_ID>/`: immutable
+  `run.json` and `cycles/*.json`, mutable `current.json`, then `outcome.json` and
+  `report.json`. The standard optimizer does not require SQLite.
+- Delivery is domain-specific. A coding workflow may create a review branch; a
+  simulator may retain a parameter candidate. Do not add `workflows.promote`.
 
-**Key concepts** (full glossary in `CONTEXT.md`):
-
-- **Grader / Assessment / Score / Observation** — a **Grader** (a command program, e.g. `generate.sh`, or a rubric agent) inspects the repo and emits an **Assessment**: an overall **Grade** (0–100), per-dimension **Scores**, and **Observations** (the text-gradient: problem + why + recommended action).
-- **Reconciliation → Finding** — `ReconcileOperator` matches an Assessment's Observations against open **Findings** (the durable, triageable records); match refreshes, no-match creates, open-with-no-match **resolves**. Identity is Newton's, never the grader's.
-- **Change Request** — the synthesized proposal (`ChangeRequestOperator`) over the standing Findings (the WHAT/WHY). `decision: propose | none`.
-- **Plan** — the enriched implementation spec (the HOW). Status: `draft → ready → running → complete | failed`, plus `abandoned`. Fields: `body`, `executionId`, `attempts`, `lastError`, `module`.
-- **Optimize Run / Cycle / Trajectory** — one loop invocation is an **Optimize Run**; each iteration is a **Cycle**; the per-cycle audit log (grades, decision, plan, develop status) is the **Trajectory**. A Run contains Cycles; each Cycle fires several **Steps** (workflow runs) and one develop **Execution**.
-- **Break conditions (the loop MUST terminate)** — `converged` (decision none for K rounds, zero blocked) · `stalled_on_blocked` · `max_cycles` · per-grader `target` (all clear) · per-grader `regression` (any drops) · `no_progress`.
-- **`blocked` Finding + un-block** — when a Plan fails develop after `optimize_max_failed_attempts`, its Findings are **quarantined** (`blocked`) and a human is escalated to; the loop keeps optimizing the rest. Clear with `POST /api/v1/findings/{id}/unblock`.
-- **Multi-grader** — `optimize_graders` is a space list; Findings pool into one Change Request per cycle; targets/regression are per-grader.
-
-**Native driver:** `newton optimize` requires `--definition <file>` or `definition_file` in its project config. It persists a definition binding, requirements revisions, Candidate evidence, a Cycle journal, and the final outcome. A Candidate is accepted only after correlated current evidence satisfies every Acceptance Constraint and the Comparison Policy. The generic host rejects `workflows.promote` because it cannot verify or atomically update an arbitrary target; use a target-specific external promotion boundary. A legacy shell script MAY remain as a development scaffold but is not the production loop contract.
-
-**Observe over `serve`** (read-only — the loop is self-driving, ADR 0004):
-
-```bash
-GET  /api/v1/optimize-runs                      # list runs (status, cycle, per-grader grades, open/blocked)
-GET  /api/v1/optimize-runs/{id}                 # one run + outcome reason
-GET  /api/v1/optimize-runs/{id}/trajectory      # per-cycle rows
-GET  /api/v1/findings?status=blocked            # blocked findings (inline plan/attempts/lastError/CR)
-POST /api/v1/findings/{id}/unblock              # return a blocked Finding to the actionable pool (409 if not blocked)
-```
-
-See [references/optimize.md](references/optimize.md).
+Read [references/optimize.md](references/optimize.md) before authoring a
+definition, and [references/configuration.md](references/configuration.md) for
+binding and authority.
 
 ## Quick reference
 
 ```bash
 newton workflow run workflow.yaml --workspace . --verbose
-newton optimize my-project --definition security.yaml --once
+newton optimize my-project --definition objective.yaml --once
 newton optimize my-project --resume <RUN_ID> --requirements-update update.yaml
 newton workflow validate workflow.yaml
 newton workflow lint workflow.yaml

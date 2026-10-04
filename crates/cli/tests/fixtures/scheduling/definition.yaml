@@ -1,0 +1,23 @@
+schema_version: 2
+id: scheduling-parameters
+revision: '1'
+strategy: {kind: measurement_driven}
+workflows:
+  propose: propose.yaml
+requirements:
+  objective:
+    mode: primary
+    objective:
+      id: makespan
+      evaluator: simulator
+      measurement: {kind: numeric, unit: simulated_minutes, direction: minimize}
+  evaluators:
+    simulator: {workflow: evaluate.yaml, revision: deterministic-v1}
+  comparison: {kind: exact}
+  acceptance_constraints:
+    - {id: feasible, evaluator: simulator}
+  execution_restrictions: {denied_actions: [], protected_paths: []}
+  resource_limits: {elapsed_seconds: 60, max_cycles: 3, max_work: 3, max_evaluations: 6}
+  completion:
+    - {kind: objective_target, objective: makespan, target: 4}
+  stagnation_cycles: 2

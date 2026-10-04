@@ -154,7 +154,7 @@ fn declarative_parser_is_strict_and_versioned() {
     assert_eq!(parse_definition(&yaml).unwrap(), original);
     assert!(parse_definition(&format!("{yaml}\nexecute: malicious-command\n")).is_err());
     let mut invalid = original.clone();
-    invalid.schema_version = 2;
+    invalid.schema_version = 1;
     assert!(validate_definition(&invalid).is_err());
     invalid = original.clone();
     invalid.requirements.completion.clear();
@@ -868,6 +868,20 @@ fn generated_schemas_match_definition_evidence_and_update_serialization() {
     invalid["measurements"]["critical_vulnerabilities"]["status"] = json!("passed");
     assert!(!validator.is_valid(&invalid));
     assert!(serde_json::from_value::<CandidateEvaluation>(invalid).is_err());
+}
+
+#[test]
+fn generated_generic_workflow_and_history_schemas_are_valid() {
+    for schema in [
+        evaluation_output_schema(),
+        proposal_output_schema(),
+        execution_output_schema(),
+        optimization_cycle_schema(),
+        optimization_report_schema(),
+    ] {
+        jsonschema::JSONSchema::compile(&schema).unwrap();
+        assert!(schema.is_object());
+    }
 }
 
 #[test]

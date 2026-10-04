@@ -7,12 +7,10 @@ use std::{collections::BTreeMap, path::Path, time::Duration};
 
 fn binding(workspace: &Path, project: &str) -> BoundOptimizationDefinition {
     let definition = parse_definition(include_str!(
-        "../../../../../tests/fixtures/optimization/definition.yaml"
+        "../../../../../tests/fixtures/scheduling/definition.yaml"
     ))
     .unwrap();
-    let authority = ExecutionAuthority {
-        allowed_actions: [ExecutionAction::Merge].into(),
-    };
+    let authority = ExecutionAuthority::default();
     bind_definition(
         &definition,
         DefinitionBinding {
@@ -32,7 +30,7 @@ fn binding(workspace: &Path, project: &str) -> BoundOptimizationDefinition {
 }
 
 fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/optimization")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/scheduling")
 }
 
 async fn update(
@@ -55,25 +53,24 @@ async fn actual_driver_supplies_initial_snapshot_updates_and_refresh_without_ser
         ObservedOptimizationRun::start(binding, fixtures(), state.clone(), 4096)
             .await
             .unwrap();
-    assert_eq!(observer.snapshot().detail.run.id, run_id);
-    assert_eq!(observer.snapshot().detail.run.status, "running");
-    assert_eq!(observer.snapshot().detail.run.cycle, 0);
+    assert_eq!(observer.snapshot().run.run_id, run_id);
+    assert_eq!(observer.snapshot().current["phase"], "ready");
+    assert_eq!(observer.snapshot().current["cycle"], 0);
     assert!(observer.snapshot().cycles.is_empty());
 
     let result = run.run(false, 0).await.unwrap();
     assert_eq!(result.completion.status, CheckStatus::Satisfied);
     let changed = update(&mut observer).await;
     assert_eq!(changed.reason, RunObservationReason::Changed);
-    assert_eq!(changed.snapshot.detail.run.id, run_id);
-    assert_eq!(changed.snapshot.detail.run.status, "converged");
+    assert_eq!(changed.snapshot.run.run_id, run_id);
+    assert_eq!(changed.snapshot.current["phase"], "finished");
     assert!(!changed.snapshot.cycles.is_empty());
     assert!(changed
         .snapshot
         .cycles
         .iter()
         .all(|cycle| cycle.run_id == run_id));
-    let stored_outcome: OptimizationOutcome =
-        serde_json::from_value(changed.snapshot.detail.outcome_reason.unwrap()).unwrap();
+    let stored_outcome = changed.snapshot.outcome.unwrap();
     assert_eq!(stored_outcome.run_id, result.run_id);
     assert_eq!(stored_outcome.stop_reason, result.stop_reason);
     assert_eq!(
@@ -99,10 +96,10 @@ async fn actual_driver_channel_overflow_recovers_terminal_durable_trajectory() {
     let outcome = run.run(false, 0).await.unwrap();
     let recovered = update(&mut observer).await;
     assert_eq!(recovered.reason, RunObservationReason::LagRecovered);
-    assert_eq!(recovered.snapshot.detail.run.id, run_id);
-    assert_eq!(recovered.snapshot.detail.run.status, "converged");
+    assert_eq!(recovered.snapshot.run.run_id, run_id);
+    assert_eq!(recovered.snapshot.current["phase"], "finished");
     assert_eq!(
-        recovered.snapshot.detail.run.cycle as u64,
+        recovered.snapshot.current["cycle"].as_u64().unwrap(),
         outcome.usage.cycles
     );
     assert_eq!(recovered.snapshot.cycles.len() as u64, outcome.usage.cycles);
@@ -112,7 +109,7 @@ async fn actual_driver_channel_overflow_recovers_terminal_durable_trajectory() {
     );
     assert!(observer.next_update().await.unwrap().is_none());
     // Closing a publisher is not itself completion; the durable outcome is.
-    assert!(observer.snapshot().detail.outcome_reason.is_some());
+    assert!(observer.snapshot().outcome.is_some());
 }
 
 #[tokio::test]
@@ -132,7 +129,7 @@ async fn shared_real_publisher_never_delivers_another_runs_incremental_stream() 
     )
     .await
     .unwrap();
-    let first_id = first_observer.snapshot().detail.run.id.clone();
+    let first_id = first_observer.snapshot().run.run_id.clone();
     let (second, second_observer) = ObservedOptimizationRun::start_with_publisher(
         binding(&second_context, "second"),
         fixtures(),
@@ -141,7 +138,7 @@ async fn shared_real_publisher_never_delivers_another_runs_incremental_stream() 
     )
     .await
     .unwrap();
-    let second_id = second_observer.snapshot().detail.run.id.clone();
+    let second_id = second_observer.snapshot().run.run_id.clone();
     assert_ne!(first_id, second_id);
     second.run(false, 0).await.unwrap();
     assert!(
@@ -149,11 +146,11 @@ async fn shared_real_publisher_never_delivers_another_runs_incremental_stream() 
             .await
             .is_err()
     );
-    assert_eq!(first_observer.snapshot().detail.run.status, "running");
+    assert_ne!(first_observer.snapshot().current["phase"], "finished");
     first.run(false, 0).await.unwrap();
     let changed = update(&mut first_observer).await;
     assert_eq!(changed.reason, RunObservationReason::Changed);
-    assert_eq!(changed.snapshot.detail.run.id, first_id);
+    assert_eq!(changed.snapshot.run.run_id, first_id);
     assert!(changed
         .snapshot
         .cycles
@@ -212,7 +209,7 @@ async fn actual_resource_stop_is_observed_as_resource_limit_not_completion() {
     let mut binding = binding(directory.path(), "resource-limited");
     binding.definition.requirements.resource_limits.max_cycles = 1;
     binding.definition.requirements.completion = vec![CompletionCriterion::ObjectiveTarget {
-        objective: "size".into(),
+        objective: "makespan".into(),
         target: 0.0,
     }];
     binding.requirements.requirements = binding.definition.requirements.clone();
@@ -229,9 +226,9 @@ async fn actual_resource_stop_is_observed_as_resource_limit_not_completion() {
     assert_ne!(outcome.completion.status, CheckStatus::Satisfied);
     assert!(outcome.accepted_result.is_some());
     let changed = update(&mut observer).await;
-    assert_eq!(changed.snapshot.detail.run.status, "resource_limit");
+    assert_eq!(changed.snapshot.current["phase"], "finished");
     assert_eq!(
-        changed.snapshot.detail.outcome_reason.unwrap()["stop_reason"],
+        serde_json::to_value(changed.snapshot.outcome.unwrap()).unwrap()["stop_reason"],
         "resource_limit"
     );
 }

@@ -5,8 +5,12 @@ workflow:
     entry_task: plan
     io:
       result_map:
-        decision: propose
-        plan_id: '$expr: triggers.candidate_id + "-dependency-security"'
+        decision: execute
+        proposal_id: '$expr: triggers.candidate_id + "-dependency-security"'
+        rationale: remediate the highest-value dependency security issue
+        attempt: {kind: dependency_security_remediation}
+        selected_observations: []
+        plan: {kind: agent_remediation}
   tasks:
     - id: plan
       operator: NoOpOperator

@@ -185,6 +185,7 @@ pub fn build_outcome(
         completion,
         no_acceptable_result_found: accepted_result.is_none(),
         accepted_result,
+        retained_result: accepted.cloned(),
         historical_result_ids,
         blocked_work: context.blocked_work,
         usage: context.usage,

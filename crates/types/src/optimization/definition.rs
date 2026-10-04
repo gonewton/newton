@@ -2,20 +2,20 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Current declarative Optimization Definition schema version.
-pub const OPTIMIZATION_DEFINITION_VERSION: u32 = 1;
+pub const OPTIMIZATION_DEFINITION_VERSION: u32 = 2;
 
 /// Reusable process declaration. Loading this data never executes its references.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OptimizationDefinition {
-    /// Serialization version; currently exactly `1`.
+    /// Serialization version; currently exactly `2`.
     pub schema_version: u32,
     /// Stable, author-controlled definition identity.
     pub id: String,
     /// Immutable author-controlled version of this definition.
     pub revision: String,
-    /// Strategy identifier; the generic contract does not require Findings.
-    pub strategy: String,
+    /// Candidate proposal policy. Only observation-driven strategies use K.
+    pub strategy: OptimizationStrategy,
     /// Role to workflow path, interpreted by the selected strategy.
     pub workflows: BTreeMap<String, String>,
     /// Relative local helper/input files copied with workflows into a run snapshot.
@@ -27,6 +27,24 @@ pub struct OptimizationDefinition {
     /// Ordinary values overridden by project values, then explicit run values.
     #[serde(default)]
     pub defaults: BTreeMap<String, ParameterValue>,
+}
+
+/// How a definition proposes the next candidate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum OptimizationStrategy {
+    /// Select assessment-local suggestions before proposing work.
+    ObservationDriven {
+        /// Maximum suggestions selected for one Cycle.
+        #[serde(default = "default_max_suggestions")]
+        max_suggestions: u32,
+    },
+    /// Propose directly from measurements or other strategy-owned state.
+    MeasurementDriven,
+}
+
+const fn default_max_suggestions() -> u32 {
+    5
 }
 
 /// A non-secret literal or a reference resolved only by the authorized host.
@@ -58,6 +76,13 @@ pub struct OptimizationRequirements {
     pub resource_limits: ResourceLimits,
     /// Destination checks, distinct from acceptable incremental improvement.
     pub completion: Vec<CompletionCriterion>,
+    /// Consecutive completed Cycles without accepted improvement before stopping.
+    #[serde(default = "default_stagnation_cycles")]
+    pub stagnation_cycles: u64,
+}
+
+const fn default_stagnation_cycles() -> u64 {
+    3
 }
 
 /// How objective progress is measured; objectives are never implicitly weighted.

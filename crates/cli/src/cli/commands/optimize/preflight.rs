@@ -2,43 +2,29 @@
 
 use super::workflow::{validate_authority, validate_resource_metering};
 use anyhow::{Context, Result};
-use newton_types::{optimization::BoundOptimizationDefinition, BackendStore};
+use newton_types::optimization::BoundOptimizationDefinition;
 use serde_json::{json, Value};
-use std::{fs, sync::Arc, time::Duration};
+use std::{fs, time::Duration};
 
 pub(super) async fn check(
     binding: &BoundOptimizationDefinition,
     runtime: &super::snapshot::Runtime,
 ) -> Result<()> {
-    for role in ["grade", "plan", "develop"] {
-        if !binding.definition.workflows.contains_key(role) {
-            anyhow::bail!("definition requires workflow role '{role}'");
-        }
+    if !binding.definition.workflows.contains_key("propose") {
+        anyhow::bail!("definition requires workflow role 'propose'");
     }
     if binding.definition.workflows.contains_key("promote") {
         anyhow::bail!(
             "promotion workflow is unsupported: the generic workflow host cannot independently verify the promoted target state or perform an atomic compare-and-swap; remove workflows.promote and retain the qualified candidate for an external, target-specific promotion boundary"
         );
     }
-    let grade = super::workflow::grade_reference(&binding.requirements.requirements)?;
-    // Store-gated operators need an instance to expose their normal validators.
-    // Never open the workspace database or execute an operator during preflight.
-    let validation_store: Arc<dyn BackendStore> = Arc::new(
-        newton_backend::SqliteBackendStore::new_in_memory()
-            .await
-            .map_err(|error| {
-                anyhow::anyhow!(
-                    "initialize transient operator validation: {}",
-                    error.message
-                )
-            })?,
-    );
+    let evaluate = super::workflow::evaluator_reference(&binding.requirements.requirements)?;
     for (role, reference) in binding
         .definition
         .workflows
         .iter()
         .map(|(role, reference)| (role.as_str(), reference.as_str()))
-        .chain(std::iter::once(("active evaluator", grade)))
+        .chain(std::iter::once(("active evaluator", evaluate)))
     {
         let document = runtime
             .workflow(reference)
@@ -60,7 +46,7 @@ pub(super) async fn check(
             binding.context.root.clone().into(),
             &document.workflow.settings,
             None,
-            Some(validation_store.clone()),
+            None,
             Some(0),
         );
         for task in document.workflow.tasks() {

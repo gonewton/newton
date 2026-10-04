@@ -88,11 +88,13 @@ not an embedded substitute.
    # Grant only explicitly reviewed authority supported by the host.
    ```
 
-   The native software strategy requires `grade`, `plan`, and `develop` workflow
-   roles. It validates candidate evidence and retains qualified candidates for
-   review. The generic host rejects a `promote` role because it cannot verify an
-   arbitrary target or atomically compare-and-swap its integration base. Read
-   Newton's optimization contract before granting workflow actions.
+   The native generic loop uses the Objective's evaluator plus required
+   `propose` and optional `execute` roles. This security definition maps those
+   roles to its grade, planning, and development adapters. Other definitions can
+   optimize non-coding measurements and return candidates directly without Git,
+   observations, or Plans. The generic host rejects a `promote` role because it
+   cannot verify an arbitrary target or atomically compare-and-swap its
+   integration base. Read Newton's optimization contract before granting actions.
 4. For vulnerability grading via workflow/wrapper, add keys like:
    - `vuln_grader_agent=claude`
    - `vuln_grader_model=sonnet`

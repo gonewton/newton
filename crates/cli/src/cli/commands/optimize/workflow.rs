@@ -5,37 +5,32 @@ use newton_core::workflow::{
     executor::ExecutionSummary,
     schema::{WorkflowDocument, WorkflowTrigger},
 };
-use newton_types::{
-    optimization::{ExecutionAction, ExecutionAuthority, OptimizationRequirements},
-    BackendStore,
-};
+use newton_types::optimization::{ExecutionAction, ExecutionAuthority, OptimizationRequirements};
 use serde_json::Value;
 use std::{
     collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 pub(super) struct WorkflowExecutor {
     pub workspace: PathBuf,
     pub state_dir: PathBuf,
-    pub store: Arc<dyn BackendStore>,
 }
 
-/// GradeOutput is one aggregate envelope, not a mergeable evaluator fragment.
+/// EvaluationOutput is one aggregate envelope, not a mergeable evaluator fragment.
 /// Shared-workflow evaluator identities execute together once per sample.
-pub(super) fn grade_reference(requirements: &OptimizationRequirements) -> anyhow::Result<&str> {
+pub(super) fn evaluator_reference(requirements: &OptimizationRequirements) -> anyhow::Result<&str> {
     let first = requirements
         .evaluators
         .values()
         .next()
-        .ok_or_else(|| anyhow!("grading requires an active evaluator"))?;
+        .ok_or_else(|| anyhow!("optimization requires an active evaluator"))?;
     if requirements
         .evaluators
         .values()
         .any(|evaluator| evaluator.workflow != first.workflow)
     {
-        anyhow::bail!("native aggregate GradeOutput requires all active evaluators to share one workflow; compose evaluators in that workflow instead of merging incompatible envelopes");
+        anyhow::bail!("native aggregate EvaluationOutput requires all active evaluators to share one workflow; compose evaluators in that workflow instead of merging incompatible outputs");
     }
     Ok(&first.workflow)
 }
@@ -69,12 +64,10 @@ impl WorkflowExecutor {
             newton_core::workflow::io::validate_input_schema(schema, &triggers)
                 .map_err(|e| anyhow!("{}: {}", e.code, e.message))?;
         }
-        let setup = super::super::shared_execution::build_execution_setup_with_backend(
+        let setup = super::super::shared_execution::build_file_execution_setup(
             self.state_dir.clone(),
             None,
             Some(remaining_seconds),
-            None,
-            self.store.clone(),
         )
         .map_err(|e| anyhow!("{}: {}", e.code, e.message))?;
         let hil = newton_core::integrations::ailoop::init_context_for_command_name(
@@ -86,7 +79,7 @@ impl WorkflowExecutor {
             self.workspace.clone(),
             settings,
             hil,
-            Some(self.store.clone()),
+            None,
             Some(0),
         );
         // Enforce the deadline around the entire step, including agent calls and
