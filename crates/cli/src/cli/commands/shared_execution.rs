@@ -83,6 +83,32 @@ pub fn build_execution_setup_with_backend(
     ))
 }
 
+/// Build a file-only execution environment for generic optimization roles.
+///
+/// Checkpoints and artifacts remain durable, while workflow/database registration
+/// is deliberately absent. Operators that require a backend are therefore not
+/// available in this mode and remain optional platform integrations.
+pub fn build_file_execution_setup(
+    state_dir: PathBuf,
+    parallel_limit: Option<usize>,
+    timeout_seconds: Option<u64>,
+) -> Result<ExecutionSetup, AppError> {
+    prepare_state_directories(&state_dir)?;
+    Ok(ExecutionSetup {
+        overrides: ExecutionOverrides {
+            parallel_limit,
+            max_time_seconds: timeout_seconds,
+            checkpoint_base_path: Some(state_checkpoints_dir(&state_dir)),
+            artifact_base_path: Some(state_artifacts_dir(&state_dir)),
+            sink: None,
+            pre_seed_nodes: true,
+            state_dir: Some(state_dir.clone()),
+            ..Default::default()
+        },
+        state_dir,
+    })
+}
+
 fn prepare_state_directories(state_dir: &Path) -> Result<(), AppError> {
     if state_dir.exists() && !state_dir.is_dir() {
         return Err(AppError::new(

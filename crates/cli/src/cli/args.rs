@@ -283,7 +283,7 @@ pub struct OptimizeArgs {
     /// Execute one complete candidate/evaluation cycle and stop.
     pub once: bool,
 
-    /// Seconds to wait when the Plan queue is empty (default: 60)
+    /// Seconds to wait between incomplete optimization Cycles (default: 60)
     pub poll_interval_seconds: u64,
 }
 

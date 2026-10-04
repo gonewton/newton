@@ -39,12 +39,14 @@ EXAMPLES:
 
 pub(super) const OPTIMIZE_LONG_ABOUT: &str = "\
 Optimize binds a versioned Optimization Definition and runs native, durable \
-grade/plan/develop/evaluate cycles. A definition is required through --definition \
-or definition_file in .newton/configs/<project_id>.conf. Legacy plan files are not consumed.
+evaluate/propose/optional-execute/evaluate/decide cycles. A definition is required through \
+--definition or definition_file in .newton/configs/<project_id>.conf.
 
-The software-improvement strategy requires grade, plan and develop workflow roles. \
-The generic host rejects a promote role because it cannot verify the target. Each workflow must \
-declare io.result_map and the documented optimization result envelope. \
+Every definition requires an evaluator and a propose role; execute is required only when \
+a proposal returns an executable attempt. Observation-driven strategies select at most K \
+current-assessment observations (default 5); measurement-driven strategies need no observations \
+or Plan. The generic host rejects a promote role because delivery is domain-specific. Workflows \
+must declare io.result_map and the documented typed result. \
 Local ownership is not a distributed lock. Interrupted external effects require reconciliation.
 
 --inspect prints resolved requirements without creating a run. --preflight validates \
@@ -52,9 +54,11 @@ workflows and supported evaluator prerequisites without dispatching agents or cr
 candidates. Normal runs perform the same checks first. Repeat --param NAME=JSON for \
 non-secret run overrides; strings must be JSON-quoted. Resume uses saved parameters.
 
-The shipped software-security definition covers Cargo.lock RustSec advisory matches \
-and tests, not comprehensive security/compliance. Candidates remain detached; no \
-promotion workflow is supplied. The current agent host is unsandboxed: external \
+Run records are stored under .newton/state/optimize/<RUN_ID>/ as immutable run/cycle \
+JSON, current.json recovery state, outcome.json, and report.json. The optimizer does not \
+require SQLite. The shipped software-security definition is one coding-specific adapter; \
+its candidates remain detached and it supplies no promotion workflow. The current agent host \
+is unsandboxed: external \
 execution requires explicit project grants for agent,command,network,commit,\
 draft_pull_request,publish,merge,deploy. Do not grant these on an untrusted host or \
 assume that a detached worktree enforces a permission restriction.

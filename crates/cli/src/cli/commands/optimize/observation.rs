@@ -23,7 +23,7 @@ impl ObservedOptimizationRun {
     ///
     /// `event_capacity` must be 1..=4096. Overflow triggers durable scoped snapshot
     /// recovery, not an unbounded event queue. The snapshot and future updates use
-    /// the exact SQLite store and publisher owned by this native driver.
+    /// the exact per-run JSON directory and publisher owned by this native driver.
     pub async fn start(
         binding: BoundOptimizationDefinition,
         definition_root: PathBuf,

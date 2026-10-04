@@ -12,7 +12,9 @@ release/
 **/.newton/*
 !**/.newton/scripts/
 !**/.newton/scripts/**
-specs
+specs/*
+!specs/generic-optimization.md
+!specs/generic-optimization-handoff.md
 tarpaulin-report.html.gitignore
 # Auto-release workflow trigger file
 auto_release_trigger.txt
@@ -29,8 +31,11 @@ auto_release_trigger.txt
 
 # insta pending snapshots (generated during test runs, never committed)
 *.pending-snap
+__pycache__/
 
 .dk
 dk.toml
 
-docs/adr
+docs/adr/*
+!docs/adr/0016-optimization-history-as-json.md
+!docs/adr/0017-domain-neutral-optimization.md

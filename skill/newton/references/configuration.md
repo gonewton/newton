@@ -23,10 +23,11 @@ optimize_allowed_actions=agent,command,network,commit,draft_pull_request,merge
 parameter.test_command="cargo test --workspace"
 ```
 
-The native driver does not consume Plan queues. It requires `grade`, `plan`, and
-`develop` roles in a definition, persists its run binding and evidence, and
-evaluates the Candidate before optional promotion. Use `--requirements-update`
-only with `--resume`; an update that cannot reach a safe boundary remains Pending.
+The native driver does not consume Plan queues. It requires an evaluator and a
+`propose` role; `execute` is optional. It persists binding, evaluations, attempts,
+decisions, and reports as per-run JSON without requiring SQLite. Promotion is a
+domain-specific step outside the generic loop. Use `--requirements-update` only
+with `--resume`; an update cannot activate across uncertain in-flight effects.
 
 ---
 
@@ -51,4 +52,7 @@ Typical failures:
 - Missing definition selection (`--definition` or `definition_file`).
 - A malformed definition, unsupported restriction, or insufficient action authority.
 - Candidate evidence that belongs to a different run, artifact, evaluator, or requirements revision.
+- Observation selections outside the current assessment or above the configured K.
+- An execute proposal without a configured `execute` workflow.
+- A legacy schema-version-1 definition or pre-generic `journal.json` run.
 - Unreadable `.conf` path (wrong `--workspace` or missing `.newton/configs/<project_id>.conf`).

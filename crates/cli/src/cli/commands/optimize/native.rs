@@ -1,19 +1,23 @@
-//! Native, definition-bound workflow coordinator.
+//! Native, definition-bound domain-neutral optimization coordinator.
 
-use super::envelopes::{DevelopOutput, GradeOutput, PlanOutput};
 use super::{
-    lifecycle::{Journal, Lifecycle, Phase},
+    lifecycle::{ActiveDispatch, Journal, Lifecycle, Phase},
     workflow::WorkflowExecutor,
 };
-use anyhow::{anyhow, Context, Result};
-use newton_types::{optimization::*, BackendStore, BroadcastEvent};
+use anyhow::{Context, Result};
+use newton_types::{optimization::*, BroadcastEvent};
 use serde_json::{json, Value};
 use std::{
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
-    sync::Arc,
     time::Instant,
 };
 use tokio::sync::broadcast;
+
+struct Evaluated {
+    combined: EvaluationOutput,
+    invocations: Vec<EvaluationOutput>,
+}
 
 pub(super) struct NativeDriver {
     binding: BoundOptimizationDefinition,
@@ -36,65 +40,34 @@ impl NativeDriver {
     ) -> Result<Self> {
         definition_snapshot.verify(&binding, &definition_root)?;
         let workspace = PathBuf::from(&binding.context.root).canonicalize()?;
-        for role in ["grade", "plan", "develop"] {
-            if !binding.definition.workflows.contains_key(role) {
-                anyhow::bail!("native software strategy requires workflow role '{role}'");
-            }
+        if !binding.definition.workflows.contains_key("propose") {
+            anyhow::bail!("generic optimization requires workflow role 'propose'");
         }
-        if !matches!(
-            binding.definition.strategy.as_str(),
-            "software-improvement" | "direct-search"
-        ) {
-            anyhow::bail!(
-                "unsupported optimization strategy {}; available: software-improvement, direct-search",
-                binding.definition.strategy
-            );
-        }
-        let store: Arc<dyn BackendStore> = Arc::new(
-            newton_backend::SqliteBackendStore::new(
-                &crate::cli::workspace_paths::state_backend_sqlite_url(&state_dir),
-            )
-            .await
-            .map_err(|e| anyhow!("open optimization store: {}", e.message))?,
-        );
         let mut lifecycle = Lifecycle::start(
-            store.clone(),
             events,
             &state_dir,
             &workspace,
             &binding.run_id,
-            &binding.context.id,
-            binding.requirements.requirements.resource_limits.max_cycles,
-            binding
-                .requirements
-                .requirements
-                .evaluators
-                .keys()
-                .cloned()
-                .collect(),
             serde_json::to_value(&binding)?,
-        )
-        .await?;
+        )?;
         lifecycle.journal.definition_root = definition_root.clone();
         lifecycle.journal.definition_snapshot = Some(definition_snapshot);
         lifecycle.save()?;
         let projection_report =
             super::projection::prepare(&mut lifecycle, &workspace, &binding.requirements.authority);
         super::projection::report(&projection_report);
-        let driver = Self {
+        Ok(Self {
             binding,
             definition_root,
             runtime,
             executor: WorkflowExecutor {
                 workspace,
                 state_dir,
-                store,
             },
             lifecycle,
             started: Instant::now(),
             previous_elapsed: 0,
-        };
-        Ok(driver)
+        })
     }
 
     pub async fn resume(
@@ -111,15 +84,7 @@ impl NativeDriver {
                 .with_timezone(&chrono::Utc))
         .num_seconds()
         .max(0) as u64;
-        let store: Arc<dyn BackendStore> = Arc::new(
-            newton_backend::SqliteBackendStore::new(
-                &crate::cli::workspace_paths::state_backend_sqlite_url(&state_dir),
-            )
-            .await
-            .map_err(|e| anyhow!("open optimization store: {}", e.message))?,
-        );
-        let lifecycle =
-            Lifecycle::resume(journal, store.clone(), events, &state_dir, &workspace).await?;
+        let lifecycle = Lifecycle::resume(journal, events, &state_dir, &workspace)?;
         Ok(Self {
             binding,
             definition_root,
@@ -127,7 +92,6 @@ impl NativeDriver {
             executor: WorkflowExecutor {
                 workspace,
                 state_dir,
-                store,
             },
             lifecycle,
             started: Instant::now(),
@@ -136,8 +100,6 @@ impl NativeDriver {
     }
 
     pub async fn run(mut self, once: bool, poll_seconds: u64) -> Result<OptimizationOutcome> {
-        // Register before any workflow can publish a dispatch. A lazy ctrl_c
-        // future can otherwise miss an interrupt in that publication window.
         #[cfg(unix)]
         let mut interrupts =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
@@ -163,18 +125,7 @@ impl NativeDriver {
         match result {
             Ok(reason) => {
                 let outcome = self.outcome(reason, Vec::new())?;
-                let status = match reason {
-                    OptimizationStopReason::Completed => "converged",
-                    OptimizationStopReason::NoActionableWork => "no_actionable_work",
-                    OptimizationStopReason::CycleComplete => "cycle_complete",
-                    OptimizationStopReason::Regression => "regressed",
-                    OptimizationStopReason::NoProgress => "no_progress",
-                    OptimizationStopReason::NeedsIntervention => "stalled_on_blocked",
-                    OptimizationStopReason::ResourceLimit => "resource_limit",
-                    OptimizationStopReason::OperationalFailure => "failed",
-                    OptimizationStopReason::Cancelled => "cancelled",
-                };
-                self.finish_and_project(status, serde_json::to_value(&outcome)?, true)
+                self.finish_and_project(serde_json::to_value(&outcome)?, true)
                     .await?;
                 Ok(outcome)
             }
@@ -182,18 +133,13 @@ impl NativeDriver {
                 if error.is::<super::stop::Cancelled>()
                     || error.is::<super::stop::ResourceExhausted>()
                 {
-                    let (reason, status, safe) = if let Some(limit) =
+                    let (reason, safe) = if let Some(limit) =
                         error.downcast_ref::<super::stop::ResourceExhausted>()
                     {
-                        (
-                            OptimizationStopReason::ResourceLimit,
-                            "resource_limit",
-                            !limit.uncertain,
-                        )
+                        (OptimizationStopReason::ResourceLimit, !limit.uncertain)
                     } else {
                         (
                             OptimizationStopReason::Cancelled,
-                            "cancelled",
                             matches!(
                                 self.lifecycle.journal.phase,
                                 Phase::Ready | Phase::CycleComplete
@@ -201,7 +147,7 @@ impl NativeDriver {
                         )
                     };
                     let outcome = self.outcome(reason, vec![error.to_string()])?;
-                    self.finish_and_project(status, serde_json::to_value(&outcome)?, safe)
+                    self.finish_and_project(serde_json::to_value(&outcome)?, safe)
                         .await?;
                     return Ok(outcome);
                 }
@@ -209,24 +155,15 @@ impl NativeDriver {
                     OptimizationStopReason::OperationalFailure,
                     vec![error.to_string()],
                 )?;
-                // A failure during external work has an unknown side-effect
-                // outcome. Persist the failure but retain ownership for review.
-                self.finish_and_project("failed", serde_json::to_value(outcome)?, false)
+                self.finish_and_project(serde_json::to_value(outcome)?, false)
                     .await?;
                 Err(error)
             }
         }
     }
 
-    async fn finish_and_project(
-        &mut self,
-        status: &str,
-        outcome: Value,
-        safe_to_release: bool,
-    ) -> Result<()> {
-        self.lifecycle
-            .finish(status, outcome, safe_to_release)
-            .await?;
+    async fn finish_and_project(&mut self, outcome: Value, safe_to_release: bool) -> Result<()> {
+        self.lifecycle.finish(outcome, safe_to_release)?;
         let report = super::projection::reflect(
             &mut self.lifecycle,
             &self.executor.workspace,
@@ -246,29 +183,9 @@ impl NativeDriver {
         &self,
     ) -> newton_core::optimization::OptimizeRunObservationSource {
         newton_core::optimization::OptimizeRunObservationSource::new(
-            self.lifecycle.store.clone(),
+            self.executor.state_dir.clone(),
             self.lifecycle.events.clone(),
         )
-    }
-
-    fn is_software(&self) -> bool {
-        self.binding.definition.strategy == "software-improvement"
-    }
-
-    fn failure_limit(&self) -> Result<u64> {
-        match self
-            .binding
-            .requirements
-            .parameters
-            .get("max_failed_attempts")
-        {
-            None => Ok(2),
-            Some(ParameterValue::Literal { value }) => value
-                .as_u64()
-                .filter(|n| *n > 0)
-                .context("max_failed_attempts must be a positive integer"),
-            _ => anyhow::bail!("max_failed_attempts must be a non-secret positive integer"),
-        }
     }
 
     fn remaining_seconds(&self) -> u64 {
@@ -283,8 +200,8 @@ impl NativeDriver {
             .saturating_add(self.started.elapsed().as_secs())
     }
 
-    fn triggers(&self) -> Value {
-        json!({
+    fn triggers(&self) -> Result<Value> {
+        Ok(json!({
             "workspace": self.executor.workspace,
             "run_id": self.binding.run_id,
             "cycle": self.lifecycle.journal.cycle,
@@ -292,17 +209,52 @@ impl NativeDriver {
             "requirements_revision": self.binding.requirements.revision,
             "requirements": self.requirements(),
             "parameters": self.binding.requirements.parameters,
+            "retained_result": self.lifecycle.journal.retained,
             "accepted_result": self.lifecycle.journal.accepted,
-            "change_request_id": self.lifecycle.journal.change_request_id,
-            "blocked_work": self.lifecycle.journal.software_work.blocked(),
-            "blocked_work_count": self.lifecycle.journal.software_work.blocked().len(),
-            "software_work": self.lifecycle.journal.software_work,
-        })
+            "previous_attempts": self.previous_attempts()?,
+        }))
     }
 
-    async fn step(&mut self, role: &str, mut triggers: Value) -> Result<Value> {
-        let reference = if role == "grade" {
-            super::workflow::grade_reference(self.requirements())?
+    fn previous_attempts(&self) -> Result<Vec<Value>> {
+        let directory = self
+            .executor
+            .state_dir
+            .join("optimize")
+            .join(&self.binding.run_id)
+            .join("cycles");
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return Ok(Vec::new());
+        };
+        let mut paths = entries
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
+            .collect::<Vec<_>>();
+        paths.sort();
+        paths
+            .into_iter()
+            .enumerate()
+            .map(|(index, path)| {
+                let record: OptimizationCycleRecord = serde_json::from_slice(
+                    &std::fs::read(&path)
+                        .with_context(|| format!("read prior Cycle {}", path.display()))?,
+                )
+                .with_context(|| format!("parse prior Cycle {}", path.display()))?;
+                anyhow::ensure!(
+                    record.run_id == self.binding.run_id
+                        && record.cycle == index.saturating_add(1) as u64,
+                    "prior Cycle history is non-contiguous or belongs to another run"
+                );
+                Ok(serde_json::to_value(record)?)
+            })
+            .collect()
+    }
+
+    async fn step(&mut self, role: &str, mut triggers: Value) -> Result<(Value, String)> {
+        let reference = if role == "evaluate" {
+            super::workflow::evaluator_reference(self.requirements())?
         } else {
             self.binding
                 .definition
@@ -312,10 +264,8 @@ impl NativeDriver {
         };
         let path = resolve_reference(&self.definition_root, reference)?;
         let document = self.runtime.workflow(reference)?;
-        if role == "grade" {
+        if role == "evaluate" {
             triggers["evaluator_workflow"] = json!(reference);
-        }
-        if role == "grade" {
             if self.lifecycle.journal.evaluation_count
                 >= self.requirements().resource_limits.max_evaluations
             {
@@ -358,6 +308,11 @@ impl NativeDriver {
         triggers["input_file"] = json!(input_file);
         triggers["result_file"] = json!(exchange.join(format!("{dispatch}-result.json")));
         newton_core::fs_util::atomic_write(&input_file, &serde_json::to_vec(&triggers)?)?;
+        self.lifecycle.journal.active_dispatch = Some(ActiveDispatch {
+            id: dispatch,
+            role: role.into(),
+            started_at: chrono::Utc::now().to_rfc3339(),
+        });
         self.lifecycle.save()?;
         let summary = self
             .executor
@@ -369,11 +324,13 @@ impl NativeDriver {
                 &self.binding.requirements.authority,
             )
             .await?;
-        if role == "develop" {
-            self.lifecycle.journal.execution_id = Some(summary.execution_id.to_string());
-            self.lifecycle.save()?;
-        }
-        summary.result.with_context(|| format!("{role} workflow must expose an explicit io.result_map; absent output is not no work"))
+        let execution_id = summary.execution_id.to_string();
+        self.lifecycle.journal.active_dispatch = None;
+        self.lifecycle.save()?;
+        let result = summary.result.with_context(|| {
+            format!("{role} workflow must expose an explicit io.result_map; absent output is not no work")
+        })?;
+        Ok((result, execution_id))
     }
 
     async fn run_cycles(
@@ -382,49 +339,10 @@ impl NativeDriver {
         poll_seconds: u64,
     ) -> Result<OptimizationStopReason> {
         if self.lifecycle.journal.phase == Phase::Evaluated {
-            let candidate = serde_json::from_value(
-                self.lifecycle
-                    .journal
-                    .candidate
-                    .clone()
-                    .context("resume evaluated phase requires candidate")?,
-            )?;
-            let evaluation = serde_json::from_value(
-                self.lifecycle
-                    .journal
-                    .evidence
-                    .clone()
-                    .context("resume evaluated phase requires evidence")?,
-            )?;
-            let work_claim = if self.is_software() {
-                let cr = self
-                    .lifecycle
-                    .journal
-                    .change_request_id
-                    .as_ref()
-                    .context("evaluated software work requires its Change Request")?;
-                let key = newton_core::workflow::state::compute_sha256_hex(cr.as_bytes());
-                Some(super::ownership::RunClaim::resume(
-                    &self
-                        .executor
-                        .state_dir
-                        .join("optimize/work-claims")
-                        .join(key),
-                    &self.binding.run_id,
-                )?)
-            } else {
-                None
-            };
-            self.accept_evaluated(candidate, evaluation).await?;
-            self.finish_software_candidate().await?;
-            if let Some(claim) = work_claim {
-                claim.release()?;
-            }
-            if let Some(reason) = self.lifecycle.journal.threshold_history.stop {
+            self.decide_current_candidate()?;
+            let reason = self.post_decision_stop(once)?;
+            if let Some(reason) = reason {
                 return Ok(reason);
-            }
-            if once {
-                return Ok(OptimizationStopReason::CycleComplete);
             }
         }
         loop {
@@ -436,243 +354,95 @@ impl NativeDriver {
             {
                 return Ok(OptimizationStopReason::ResourceLimit);
             }
-            self.lifecycle.journal.cycle += 1;
-            self.lifecycle.journal.evidence = None;
-            self.lifecycle.journal.plan_id = None;
-            self.lifecycle.journal.change_request_id = None;
-            self.lifecycle.journal.execution_id = None;
-            self.lifecycle.phase(Phase::Evaluating).await?;
-            let mut baseline_trigger = self.triggers();
+            self.begin_cycle()?;
+            let mut baseline_trigger = self.triggers()?;
             baseline_trigger["stage"] = json!("baseline");
-            baseline_trigger["candidate_id"] = json!(format!(
-                "{}-baseline-{}",
-                self.binding.run_id, self.lifecycle.journal.cycle
-            ));
-            if let Some(accepted) = &self.lifecycle.journal.accepted {
-                baseline_trigger["candidate_id"] = accepted["candidate"]["id"].clone();
-                baseline_trigger["candidate"] = accepted["candidate"].clone();
+            if let Some(retained) = &self.lifecycle.journal.retained {
+                baseline_trigger["candidate_id"] = retained["candidate"]["id"].clone();
+                baseline_trigger["candidate"] = retained["candidate"].clone();
+            } else {
+                baseline_trigger["candidate_id"] =
+                    json!(format!("{}-baseline", self.binding.run_id));
             }
-            let baseline = self.grade(baseline_trigger).await?;
-            self.lifecycle.journal.change_request_id = baseline.change_request_id.clone();
-            self.lifecycle.journal.open_findings = baseline.open_findings.clone();
-            self.validate_cycle(&baseline.evaluation)?;
-            let baseline_decision = newton_core::optimization::evaluate_candidate(
-                &self.binding.run_id,
-                &self.binding.requirements,
-                &baseline.candidate,
-                &baseline.evaluation,
-                None,
-            )?;
-            refresh_incumbent(
-                &mut self.lifecycle.journal,
-                &self.binding.requirements,
-                baseline_decision.accepted_result,
-                &baseline.candidate,
-            )?;
-            self.lifecycle.journal.evidence = Some(serde_json::to_value(&baseline.evaluation)?);
-            if let Some(reason) = self.lifecycle.journal.threshold_history.observe(
-                &self.binding.requirements,
-                &baseline.evaluation,
-                true,
-                self.lifecycle.journal.open_findings.as_ref(),
-            )? {
+            let baseline = self.evaluate(baseline_trigger).await?;
+            self.lifecycle.journal.baseline_evaluations = baseline.invocations.clone();
+            self.validate_cycle(&baseline.combined.evaluation)?;
+            self.qualify_baseline(&baseline.combined)?;
+            self.lifecycle.journal.evidence =
+                Some(serde_json::to_value(&baseline.combined.evaluation)?);
+            self.lifecycle.save()?;
+            if self.current_completion()?.status == CheckStatus::Satisfied {
                 self.lifecycle
-                    .complete_cycle("threshold_stop", None)
-                    .await?;
-                return Ok(reason);
-            }
-            if self
-                .outcome(OptimizationStopReason::ResourceLimit, Vec::new())?
-                .completion
-                .status
-                == CheckStatus::Satisfied
-            {
-                self.lifecycle.complete_cycle("completed", None).await?;
+                    .complete_cycle(CycleStatus::Completed, Vec::new())?;
                 return Ok(OptimizationStopReason::Completed);
             }
-            self.lifecycle.phase(Phase::Working).await?;
-            let mut plan_trigger = self.triggers();
-            plan_trigger["baseline"] = serde_json::to_value(&baseline)?;
-            plan_trigger["change_request_id"] = json!(baseline.change_request_id);
-            let plan: PlanOutput = serde_json::from_value(self.step("plan", plan_trigger).await?)
-                .context(
-                "planner must return PlanOutput {decision: propose, plan_id} or {decision: none}",
-            )?;
-            let plan_id = match &plan {
-                PlanOutput::None => {
-                    if self.is_software() && baseline.change_request_id.is_some() {
-                        anyhow::bail!("planner returned no work despite the current reconciled Change Request");
-                    }
-                    self.lifecycle
-                        .complete_cycle("no_actionable_work", None)
-                        .await?;
-                    return Ok(
-                        if self.lifecycle.journal.software_work.blocked().is_empty() {
-                            OptimizationStopReason::NoActionableWork
-                        } else {
-                            OptimizationStopReason::NeedsIntervention
-                        },
-                    );
-                }
-                PlanOutput::Propose { plan_id, .. } if !plan_id.trim().is_empty() => {
-                    plan_id.clone()
-                }
-                _ => anyhow::bail!("planner proposed an empty Plan identity"),
-            };
-            if !plan_id
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-            {
-                anyhow::bail!("Plan identity must contain only ASCII letters, numbers, '-' or '_'");
-            }
-            self.lifecycle.journal.plan_id = Some(plan_id.clone());
-            let cr_id = if self.is_software() {
-                let PlanOutput::Propose {
-                    change_request_id, ..
-                } = &plan
-                else {
-                    unreachable!()
-                };
-                if change_request_id != &baseline.change_request_id {
-                    anyhow::bail!("planner Change Request does not match the current grade/reconciliation output");
-                }
-                let cr = change_request_id.as_deref().filter(|id| !id.trim().is_empty())
-                    .context("software-improvement requires an explicit reconciled Change Request identity")?;
-                self.failure_limit()?;
-                self.lifecycle
-                    .journal
-                    .software_work
-                    .prepare(self.lifecycle.store.as_ref(), cr, &plan_id)
-                    .await?;
-                Some(cr.to_owned())
-            } else {
-                None
-            };
+
+            self.lifecycle.phase(Phase::Working)?;
+            let mut proposal_trigger = self.triggers()?;
+            proposal_trigger["baseline"] = serde_json::to_value(&baseline.combined)?;
+            let (value, _) = self.step("propose", proposal_trigger).await?;
+            let proposal: ProposalOutput = serde_json::from_value(value)
+                .context("propose must return a typed ProposalOutput decision")?;
+            self.validate_proposal(&proposal, &baseline.invocations)?;
+            self.lifecycle.journal.proposal = Some(proposal.clone());
             self.lifecycle.save()?;
-            // A separate, durable work claim prevents the same logical Plan
-            // being executed by a later run or under a different context binding.
-            // Completed work markers are intentionally retained for deduplication.
-            let plan_claim = super::ownership::RunClaim::acquire(
-                &self
-                    .executor
-                    .state_dir
-                    .join("optimize/plan-claims")
-                    .join(&plan_id),
-                &self.binding.run_id,
-            )?;
-            let work_claim = if let Some(cr) = &cr_id {
-                let key = newton_core::workflow::state::compute_sha256_hex(cr.as_bytes());
-                Some(super::ownership::RunClaim::acquire(
-                    &self
-                        .executor
-                        .state_dir
-                        .join("optimize/work-claims")
-                        .join(key),
-                    &self.binding.run_id,
-                )?)
-            } else {
-                None
-            };
-            if cr_id.is_some() {
-                self.lifecycle
-                    .store
-                    .patch_plan(
-                        &plan_id,
-                        newton_types::PatchPlanBody {
-                            status: Some("running".into()),
-                            ..Default::default()
-                        },
-                    )
-                    .await
-                    .map_err(|e| anyhow!("persist running Plan: {}", e.message))?;
-            }
-            let mut trigger = self.triggers();
-            trigger["plan"] = serde_json::to_value(&plan)?;
-            trigger["plan_id"] = json!(plan_id);
-            let developed =
-                serde_json::from_value::<DevelopOutput>(self.step("develop", trigger).await?)
-                    .context("develop must return a candidate or an explicit reconciled failure")?;
-            let candidate = match (developed.candidate, developed.failure) {
-                (Some(candidate), None) => candidate,
-                (None, Some(failure)) => {
-                    let cr = cr_id.as_deref().context(
-                        "known-safe failed work requires the software-improvement strategy",
-                    )?;
-                    let limit = self.failure_limit()?;
-                    let quarantined = self
-                        .lifecycle
-                        .journal
-                        .software_work
-                        .fail(cr, &plan_id, failure, limit)?;
-                    self.lifecycle.save()?;
+            let candidate = match proposal.clone() {
+                ProposalOutput::None { reason } => {
                     self.lifecycle
-                        .journal
-                        .software_work
-                        .persist_failure(
-                            self.lifecycle.store.as_ref(),
-                            cr,
-                            &plan_id,
-                            self.lifecycle.journal.execution_id.clone(),
-                        )
-                        .await?;
+                        .complete_cycle(CycleStatus::NoActionableWork, vec![reason])?;
+                    return Ok(OptimizationStopReason::NoActionableWork);
+                }
+                ProposalOutput::Failed { failure, .. } => {
+                    self.record_safe_failure(&failure)?;
                     self.lifecycle
-                        .complete_cycle(
-                            if quarantined {
-                                "quarantined"
-                            } else {
-                                "retryable_failure"
-                            },
-                            None,
-                        )
-                        .await?;
-                    if let Some(claim) = work_claim {
-                        claim.release()?;
-                    }
-                    drop(plan_claim); // Retain the durable per-Plan no-replay marker.
-                    if once {
-                        return Ok(OptimizationStopReason::CycleComplete);
+                        .complete_cycle(CycleStatus::FailedSafely, vec![failure.reason])?;
+                    if let Some(reason) = self.post_decision_stop(once)? {
+                        return Ok(reason);
                     }
                     continue;
                 }
-                _ => {
-                    anyhow::bail!("develop must return exactly one candidate or reconciled failure")
+                ProposalOutput::Candidate { candidate, .. } => candidate,
+                ProposalOutput::Execute { .. } => {
+                    let mut execution_trigger = self.triggers()?;
+                    execution_trigger["proposal"] = serde_json::to_value(&proposal)?;
+                    let (value, execution_id) = self.step("execute", execution_trigger).await?;
+                    self.lifecycle.journal.execution_id = Some(execution_id);
+                    let output: ExecutionOutput = serde_json::from_value(value)
+                        .context("execute must return a typed ExecutionOutput")?;
+                    self.lifecycle.journal.execution_output = Some(output.clone());
+                    self.lifecycle.save()?;
+                    match output {
+                        ExecutionOutput::Candidate { candidate } => candidate,
+                        ExecutionOutput::Failed { failure } => {
+                            self.record_safe_failure(&failure)?;
+                            self.lifecycle
+                                .complete_cycle(CycleStatus::FailedSafely, vec![failure.reason])?;
+                            if let Some(reason) = self.post_decision_stop(once)? {
+                                return Ok(reason);
+                            }
+                            continue;
+                        }
+                    }
                 }
             };
-            if candidate.id != format!("{}-{}", self.binding.run_id, self.lifecycle.journal.cycle)
-                || candidate.created_under_revision != self.binding.requirements.revision
-            {
-                anyhow::bail!("develop returned a Candidate belonging to another cycle/revision");
-            }
-            self.lifecycle.phase(Phase::Evaluating).await?;
-            let mut trigger = self.triggers();
+            self.validate_candidate(&candidate)?;
+            self.lifecycle.phase(Phase::Evaluating)?;
+            let mut trigger = self.triggers()?;
             trigger["stage"] = json!("candidate");
             trigger["candidate"] = serde_json::to_value(&candidate)?;
-            let evaluated = self.grade(trigger).await?;
-            if evaluated.candidate != candidate {
-                anyhow::bail!("grade replaced the candidate identity");
+            let evaluated = self.evaluate(trigger).await?;
+            if evaluated.combined.candidate != candidate {
+                anyhow::bail!("evaluate replaced the candidate identity");
             }
-            let evaluation = evaluated.evaluation;
-            self.lifecycle.journal.open_findings = evaluated.open_findings;
-            self.validate_cycle(&evaluation)?;
+            self.validate_cycle(&evaluated.combined.evaluation)?;
             self.lifecycle.journal.candidate = Some(serde_json::to_value(&candidate)?);
-            self.lifecycle.journal.evidence = Some(serde_json::to_value(&evaluation)?);
-            self.lifecycle.phase(Phase::Evaluated).await?;
-            self.accept_evaluated(candidate, evaluation).await?;
-            self.finish_software_candidate().await?;
-            if let Some(claim) = work_claim {
-                claim.release()?;
-            }
-            if let Some(reason) = self.lifecycle.journal.threshold_history.stop {
+            self.lifecycle.journal.candidate_evaluations = evaluated.invocations;
+            self.lifecycle.journal.evidence =
+                Some(serde_json::to_value(&evaluated.combined.evaluation)?);
+            self.lifecycle.phase(Phase::Evaluated)?;
+            self.decide_current_candidate()?;
+            if let Some(reason) = self.post_decision_stop(once)? {
                 return Ok(reason);
-            }
-            let completion = self
-                .outcome(OptimizationStopReason::ResourceLimit, Vec::new())?
-                .completion;
-            if completion.status == CheckStatus::Satisfied {
-                return Ok(OptimizationStopReason::Completed);
-            }
-            if once {
-                return Ok(OptimizationStopReason::CycleComplete);
             }
             tokio::time::sleep(std::time::Duration::from_secs(
                 poll_seconds.min(self.remaining_seconds()),
@@ -681,85 +451,331 @@ impl NativeDriver {
         }
     }
 
-    async fn finish_software_candidate(&mut self) -> Result<()> {
-        if !self.is_software() {
-            return Ok(());
+    fn begin_cycle(&mut self) -> Result<()> {
+        self.lifecycle.journal.cycle += 1;
+        self.lifecycle.journal.cycle_started_at = Some(chrono::Utc::now().to_rfc3339());
+        self.lifecycle.journal.active_dispatch = None;
+        self.lifecycle.journal.candidate = None;
+        self.lifecycle.journal.proposal = None;
+        self.lifecycle.journal.execution_output = None;
+        self.lifecycle.journal.baseline_evaluations.clear();
+        self.lifecycle.journal.candidate_evaluations.clear();
+        self.lifecycle.journal.decision = None;
+        self.lifecycle.journal.execution_id = None;
+        self.lifecycle.journal.evidence = None;
+        self.lifecycle.phase(Phase::Evaluating)
+    }
+
+    fn qualify_baseline(&mut self, baseline: &EvaluationOutput) -> Result<()> {
+        if self.lifecycle.journal.threshold_baselines.is_empty() {
+            if let ObjectiveMode::Thresholds { objectives } = self.requirements().objective.clone()
+            {
+                for threshold in &objectives {
+                    if let Some(value) =
+                        measurement_value(&baseline.evaluation, &threshold.objective.id)
+                    {
+                        self.lifecycle
+                            .journal
+                            .threshold_baselines
+                            .insert(threshold.objective.id.clone(), value);
+                    }
+                }
+            }
         }
-        let cr = self
+        let qualified = newton_core::optimization::evaluate_candidate(
+            &self.binding.run_id,
+            &self.binding.requirements,
+            &baseline.candidate,
+            &baseline.evaluation,
+            None,
+        )?
+        .accepted_result;
+        let retained: Option<AcceptedResult> = self
             .lifecycle
             .journal
-            .change_request_id
-            .as_ref()
-            .context("selected Change Request missing")?
-            .clone();
-        let plan = self
-            .lifecycle
-            .journal
-            .plan_id
-            .as_ref()
-            .context("selected Plan missing")?
-            .clone();
-        let accepted = self
+            .retained
+            .clone()
+            .map(serde_json::from_value)
+            .transpose()?;
+        if let Some(retained) = retained {
+            let same = retained.candidate.id == baseline.candidate.id
+                && retained.candidate.artifact_id == baseline.candidate.artifact_id
+                && retained.candidate.base_artifact_id == baseline.candidate.base_artifact_id;
+            if !same {
+                anyhow::bail!(
+                    "baseline evaluator returned a different state than the retained result"
+                );
+            }
+            self.lifecycle.journal.accepted = qualified
+                .map(|mut result| {
+                    result.candidate = retained.candidate;
+                    serde_json::to_value(result)
+                })
+                .transpose()?;
+        } else if let Some(result) = qualified {
+            let value = serde_json::to_value(result)?;
+            self.lifecycle.journal.accepted = Some(value.clone());
+            self.lifecycle.journal.retained = Some(value);
+        }
+        Ok(())
+    }
+
+    fn decide_current_candidate(&mut self) -> Result<()> {
+        let candidate: Candidate = serde_json::from_value(
+            self.lifecycle
+                .journal
+                .candidate
+                .clone()
+                .context("evaluated phase requires candidate")?,
+        )?;
+        let evaluation: CandidateEvaluation = serde_json::from_value(
+            self.lifecycle
+                .journal
+                .evidence
+                .clone()
+                .context("evaluated phase requires evidence")?,
+        )?;
+        let incumbent: Option<AcceptedResult> = self
             .lifecycle
             .journal
             .accepted
-            .as_ref()
-            .is_some_and(|result| {
-                self.lifecycle
-                    .journal
-                    .candidate
-                    .as_ref()
-                    .is_some_and(|candidate| result["candidate"]["id"] == candidate["id"])
-            });
-        if !accepted {
-            let evaluation = self
-                .lifecycle
-                .journal
-                .evidence
-                .as_ref()
-                .and_then(|evidence| evidence["id"].as_str())
-                .context("rejected software candidate requires evaluated evidence")?
-                .to_owned();
-            let limit = self.failure_limit()?;
-            self.lifecycle.journal.software_work.reject_candidate(
-                &cr,
-                &plan,
+            .clone()
+            .map(serde_json::from_value)
+            .transpose()?;
+        let retained_exists = self.lifecycle.journal.retained.is_some();
+        let decision = if retained_exists && incumbent.is_none() {
+            CandidateDecision {
+                candidate_id: candidate.id.clone(),
+                requirements_revision: self.binding.requirements.revision,
+                disposition: CandidateDisposition::Inconclusive,
+                comparisons: BTreeMap::new(),
+                accepted_result: None,
+                reasons: vec!["retained incumbent lacks comparable current evidence; candidate cannot receive initial qualification".into()],
+            }
+        } else {
+            newton_core::optimization::evaluate_candidate(
+                &self.binding.run_id,
+                &self.binding.requirements,
+                &candidate,
                 &evaluation,
-                limit,
-            )?;
-            self.lifecycle.save()?;
-            return self
+                incumbent.as_ref(),
+            )?
+        };
+        let improved = decision.accepted_result.is_some();
+        if let Some(accepted) = &decision.accepted_result {
+            let value = serde_json::to_value(accepted)?;
+            if let Some(previous) = self.lifecycle.journal.retained.replace(value.clone()) {
+                self.lifecycle.journal.accepted_history.push(previous);
+            }
+            self.lifecycle.journal.accepted = Some(value);
+            self.lifecycle.journal.consecutive_no_improvement = 0;
+        } else {
+            self.lifecycle.journal.consecutive_no_improvement = self
                 .lifecycle
                 .journal
-                .software_work
-                .persist_failure(
-                    self.lifecycle.store.as_ref(),
-                    &cr,
-                    &plan,
-                    self.lifecycle.journal.execution_id.clone(),
-                )
-                .await;
+                .consecutive_no_improvement
+                .checked_add(1)
+                .context("stagnation counter overflow")?;
         }
-        self.lifecycle
-            .store
-            .patch_plan(
-                &plan,
-                newton_types::PatchPlanBody {
-                    status: Some("complete".into()),
-                    execution_id: self.lifecycle.journal.execution_id.clone(),
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(|e| anyhow!("persist completed Plan: {}", e.message))?;
-        self.lifecycle
+        self.lifecycle.journal.decision = Some(decision.clone());
+        // Acceptance is checkpointed before publishing the Cycle and evaluating stop guards.
+        self.lifecycle.save()?;
+        let status = if self.threshold_regressed()? {
+            CycleStatus::ThresholdStop
+        } else if improved {
+            CycleStatus::Accepted
+        } else {
+            match decision.disposition {
+                CandidateDisposition::Rejected => CycleStatus::Rejected,
+                _ => CycleStatus::Inconclusive,
+            }
+        };
+        self.lifecycle.complete_cycle(status, decision.reasons)
+    }
+
+    fn record_safe_failure(&mut self, failure: &AttemptFailure) -> Result<()> {
+        if failure.reason.trim().is_empty()
+            || failure.evidence.is_empty()
+            || failure.evidence.iter().any(|item| item.trim().is_empty())
+        {
+            anyhow::bail!("safe attempt failure requires a reason and recovery evidence");
+        }
+        self.lifecycle.journal.consecutive_no_improvement = self
+            .lifecycle
             .journal
-            .software_work
-            .work
-            .get_mut(&cr)
-            .context("selected work missing")?
-            .completed = true;
+            .consecutive_no_improvement
+            .checked_add(1)
+            .context("stagnation counter overflow")?;
         self.lifecycle.save()
+    }
+
+    fn post_decision_stop(&self, once: bool) -> Result<Option<OptimizationStopReason>> {
+        if self.threshold_regressed()? {
+            return Ok(Some(OptimizationStopReason::Regression));
+        }
+        if self.current_completion()?.status == CheckStatus::Satisfied {
+            return Ok(Some(OptimizationStopReason::Completed));
+        }
+        let threshold_limit = match &self.requirements().objective {
+            ObjectiveMode::Thresholds { objectives } => objectives
+                .iter()
+                .map(|objective| objective.no_progress_cycles)
+                .min(),
+            ObjectiveMode::Primary { .. } => None,
+        };
+        let stagnation_limit = threshold_limit
+            .map(|limit| limit.min(self.requirements().stagnation_cycles))
+            .unwrap_or(self.requirements().stagnation_cycles);
+        if self.lifecycle.journal.consecutive_no_improvement >= stagnation_limit {
+            return Ok(Some(OptimizationStopReason::NoProgress));
+        }
+        if once {
+            return Ok(Some(OptimizationStopReason::CycleComplete));
+        }
+        Ok(None)
+    }
+
+    fn threshold_regressed(&self) -> Result<bool> {
+        let ObjectiveMode::Thresholds { objectives } = &self.requirements().objective else {
+            return Ok(false);
+        };
+        let Some(evidence) = self.lifecycle.journal.evidence.as_ref() else {
+            return Ok(false);
+        };
+        let evaluation: CandidateEvaluation = serde_json::from_value(evidence.clone())?;
+        for threshold in objectives {
+            let Some(baseline) = self
+                .lifecycle
+                .journal
+                .threshold_baselines
+                .get(&threshold.objective.id)
+            else {
+                continue;
+            };
+            if let Some(value) = measurement_value(&evaluation, &threshold.objective.id) {
+                if baseline - value > threshold.regression_delta {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    fn current_completion(&self) -> Result<CompletionAssessment> {
+        let accepted: Option<AcceptedResult> = self
+            .lifecycle
+            .journal
+            .accepted
+            .clone()
+            .map(serde_json::from_value)
+            .transpose()?;
+        Ok(newton_core::optimization::assess_completion(
+            &self.binding.run_id,
+            &self.binding.requirements,
+            accepted.as_ref(),
+        ))
+    }
+
+    fn validate_candidate(&self, candidate: &Candidate) -> Result<()> {
+        if candidate.id.trim().is_empty()
+            || candidate.artifact_id.trim().is_empty()
+            || candidate.base_artifact_id.trim().is_empty()
+            || candidate.created_under_revision != self.binding.requirements.revision
+        {
+            anyhow::bail!("proposal returned an invalid Candidate identity or revision");
+        }
+        Ok(())
+    }
+
+    fn validate_proposal(
+        &self,
+        proposal: &ProposalOutput,
+        baseline: &[EvaluationOutput],
+    ) -> Result<()> {
+        let selected = match proposal {
+            ProposalOutput::Candidate {
+                proposal_id,
+                rationale,
+                selected_observations,
+                ..
+            }
+            | ProposalOutput::Execute {
+                proposal_id,
+                rationale,
+                selected_observations,
+                ..
+            } => {
+                anyhow::ensure!(
+                    !proposal_id.trim().is_empty() && !rationale.trim().is_empty(),
+                    "candidate/execute proposal requires identity and rationale"
+                );
+                selected_observations
+            }
+            ProposalOutput::None { reason } => {
+                anyhow::ensure!(
+                    !reason.trim().is_empty(),
+                    "no-action proposal requires a reason"
+                );
+                return Ok(());
+            }
+            ProposalOutput::Failed {
+                proposal_id,
+                failure,
+            } => {
+                anyhow::ensure!(
+                    !proposal_id.trim().is_empty()
+                        && !failure.reason.trim().is_empty()
+                        && !failure.evidence.is_empty(),
+                    "failed proposal requires identity, reason and evidence"
+                );
+                return Ok(());
+            }
+        };
+        match self.binding.definition.strategy {
+            OptimizationStrategy::MeasurementDriven => {
+                anyhow::ensure!(
+                    selected.is_empty(),
+                    "measurement-driven proposals cannot select observations"
+                );
+            }
+            OptimizationStrategy::ObservationDriven { max_suggestions } => {
+                anyhow::ensure!(
+                    selected.len() <= max_suggestions as usize,
+                    "proposal selected {} observations; maximum is {max_suggestions}",
+                    selected.len()
+                );
+                let available = baseline
+                    .iter()
+                    .filter_map(|output| output.assessment.as_ref())
+                    .flat_map(|assessment| {
+                        assessment
+                            .observations
+                            .iter()
+                            .map(move |observation| (assessment.id.clone(), observation.id.clone()))
+                    })
+                    .collect::<BTreeSet<_>>();
+                let mut unique = BTreeSet::new();
+                for reference in selected {
+                    anyhow::ensure!(
+                        !reference.rationale.trim().is_empty(),
+                        "selected observation requires rationale"
+                    );
+                    let identity = (
+                        reference.assessment_id.clone(),
+                        reference.observation_id.clone(),
+                    );
+                    anyhow::ensure!(
+                        available.contains(&identity),
+                        "proposal selected an observation outside the current assessment"
+                    );
+                    anyhow::ensure!(
+                        unique.insert(identity),
+                        "proposal selected an observation twice"
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
     fn validate_cycle(&self, evidence: &CandidateEvaluation) -> Result<()> {
@@ -769,191 +785,53 @@ impl NativeDriver {
         Ok(())
     }
 
-    async fn grade(&mut self, triggers: Value) -> Result<GradeOutput> {
+    async fn evaluate(&mut self, triggers: Value) -> Result<Evaluated> {
         let repeats = match self.requirements().comparison {
             ComparisonPolicy::Exact => 1,
             ComparisonPolicy::Repeated { samples, .. } => samples,
         };
-        let mut combined: Option<GradeOutput> = None;
+        let mut invocations = Vec::new();
+        let mut combined: Option<EvaluationOutput> = None;
         for sample in 0..repeats {
             let mut input = triggers.clone();
             input["sample_index"] = json!(sample);
-            let output: GradeOutput = serde_json::from_value(self.step("grade", input).await?)
-                .context(
-                    "grade must return GradeOutput {candidate, evaluation, change_request_id?}",
-                )?;
+            let (value, _) = self.step("evaluate", input).await?;
+            let output: EvaluationOutput = serde_json::from_value(value).context(
+                "evaluate must return EvaluationOutput {candidate, evaluation, assessment?}",
+            )?;
             self.validate_cycle(&output.evaluation)?;
             if output.evaluation.run_id != self.binding.run_id
                 || output.evaluation.requirements_revision != self.binding.requirements.revision
             {
-                anyhow::bail!("grade evidence belongs to a different run or requirements revision");
-            }
-            if self.is_software() {
-                if let ObjectiveMode::Thresholds { objectives } = &self.requirements().objective {
-                    let counts = output.open_findings.as_ref().context("software-improvement threshold grading requires per-objective open_findings counts")?;
-                    if counts.len() != objectives.len()
-                        || objectives
-                            .iter()
-                            .any(|objective| !counts.contains_key(&objective.objective.id))
-                    {
-                        anyhow::bail!("software-improvement threshold grading requires complete per-objective open_findings counts");
-                    }
-                }
+                anyhow::bail!(
+                    "evaluation evidence belongs to a different run or requirements revision"
+                );
             }
             for measurement in output.evaluation.measurements.values() {
                 match measurement {
                     ObjectiveMeasurement::Produced { samples, .. } if samples.len() == 1 => {}
-                    ObjectiveMeasurement::Error { message } => anyhow::bail!("evaluator failed: {message}"),
+                    ObjectiveMeasurement::Error { .. } => {}
                     _ => anyhow::bail!("each evaluator invocation must emit exactly one sample; the driver owns repeated evaluation"),
                 }
             }
+            validate_assessment(output.assessment.as_ref())?;
+            invocations.push(output.clone());
             if let Some(first) = combined.as_mut() {
-                if first.candidate != output.candidate
-                    || first.change_request_id != output.change_request_id
-                    || first.open_findings != output.open_findings
-                    || first.evaluation.evaluator_revisions != output.evaluation.evaluator_revisions
-                    || first.evaluation.artifact_id != output.evaluation.artifact_id
-                    || first.evaluation.base_artifact_id != output.evaluation.base_artifact_id
-                    || first.evaluation.candidate_id != output.evaluation.candidate_id
-                    || first
-                        .evaluation
-                        .measurements
-                        .keys()
-                        .ne(output.evaluation.measurements.keys())
-                {
-                    anyhow::bail!("repeated evaluator invocations changed candidate, objective or evaluator identity");
-                }
-                for (id, value) in output.evaluation.measurements {
-                    match (first.evaluation.measurements.get_mut(&id), value) {
-                        (
-                            Some(ObjectiveMeasurement::Produced {
-                                measurement,
-                                samples,
-                            }),
-                            ObjectiveMeasurement::Produced {
-                                measurement: kind,
-                                samples: next,
-                            },
-                        ) if *measurement == kind => samples.extend(next),
-                        _ => anyhow::bail!("repeated measurement changed units or kind"),
-                    }
-                }
-                merge_checks(
-                    &mut first.evaluation.constraints,
-                    output.evaluation.constraints,
-                )?;
-                merge_checks(
-                    &mut first.evaluation.completion_checks,
-                    output.evaluation.completion_checks,
-                )?;
+                merge_evaluation(first, output)?;
             } else {
                 combined = Some(output);
             }
         }
-        combined.context("no evaluator invocation completed")
-    }
-
-    async fn accept_evaluated(
-        &mut self,
-        candidate: Candidate,
-        mut evaluation: CandidateEvaluation,
-    ) -> Result<()> {
-        while let Some(activation) =
-            super::control::activate_pending_owned(&mut self.lifecycle, &self.executor.state_dir)
-                .await?
-        {
-            self.binding = activation.binding;
-            self.regrade_incumbent(activation.incumbent).await?;
-            let mut trigger = self.triggers();
-            trigger["stage"] = json!("candidate");
-            trigger["candidate_id"] = json!(candidate.id);
-            trigger["candidate"] = serde_json::to_value(&candidate)?;
-            let refreshed = self.grade(trigger).await?;
-            if refreshed.candidate != candidate {
-                anyhow::bail!("requirements regrade replaced the evaluated candidate identity");
-            }
-            evaluation = refreshed.evaluation;
-            self.lifecycle.journal.open_findings = refreshed.open_findings;
-            self.lifecycle.journal.evidence = Some(serde_json::to_value(&evaluation)?);
-            self.lifecycle.phase(Phase::Evaluated).await?;
-        }
-        let incumbent: Option<AcceptedResult> = self
-            .lifecycle
-            .journal
-            .accepted
-            .clone()
-            .map(serde_json::from_value)
-            .transpose()?;
-        let decision = newton_core::optimization::evaluate_candidate(
-            &self.binding.run_id,
-            &self.binding.requirements,
-            &candidate,
-            &evaluation,
-            incumbent.as_ref(),
-        )?;
-        if self
-            .lifecycle
-            .journal
-            .threshold_history
-            .observe(
-                &self.binding.requirements,
-                &evaluation,
-                false,
-                self.lifecycle.journal.open_findings.as_ref(),
-            )?
-            .is_some()
-        {
-            self.lifecycle
-                .complete_cycle("threshold_stop", None)
-                .await?;
-            return Ok(());
-        }
-        if let Some(accepted) = decision.accepted_result {
-            self.lifecycle.journal.accepted = Some(serde_json::to_value(accepted)?);
-            self.lifecycle.complete_cycle("accepted", None).await?;
-        } else {
-            self.lifecycle.complete_cycle("rejected", None).await?;
-        }
-        Ok(())
-    }
-
-    async fn regrade_incumbent(&mut self, incumbent: Option<AcceptedResult>) -> Result<()> {
-        let Some(previous) = incumbent else {
-            return Ok(());
-        };
-        let mut trigger = self.triggers();
-        trigger["stage"] = json!("candidate");
-        trigger["evaluation_purpose"] = json!("incumbent_revalidation");
-        trigger["candidate_id"] = json!(previous.candidate.id);
-        trigger["candidate"] = serde_json::to_value(&previous.candidate)?;
-        let refreshed = self.grade(trigger).await?;
-        if refreshed.candidate != previous.candidate {
-            anyhow::bail!("requirements regrade replaced the accepted incumbent identity");
-        }
-        let qualification = newton_core::optimization::evaluate_candidate(
-            &self.binding.run_id,
-            &self.binding.requirements,
-            &previous.candidate,
-            &refreshed.evaluation,
-            None,
-        )?;
-        self.lifecycle.journal.threshold_history.observe(
-            &self.binding.requirements,
-            &refreshed.evaluation,
-            true,
-            refreshed.open_findings.as_ref(),
-        )?;
-        self.lifecycle.journal.accepted = qualification
-            .accepted_result
-            .map(serde_json::to_value)
-            .transpose()?;
-        self.lifecycle.save()
+        Ok(Evaluated {
+            combined: combined.context("no evaluator invocation completed")?,
+            invocations,
+        })
     }
 
     fn outcome(
         &self,
         stop_reason: OptimizationStopReason,
-        mut diagnostics: Vec<String>,
+        diagnostics: Vec<String>,
     ) -> Result<OptimizationOutcome> {
         let accepted_result: Option<AcceptedResult> = self
             .lifecycle
@@ -962,8 +840,14 @@ impl NativeDriver {
             .clone()
             .map(serde_json::from_value)
             .transpose()?;
-        diagnostics.extend(self.lifecycle.journal.threshold_history.diagnostics.clone());
-        Ok(newton_core::optimization::build_outcome(
+        let retained_result: Option<AcceptedResult> = self
+            .lifecycle
+            .journal
+            .retained
+            .clone()
+            .map(serde_json::from_value)
+            .transpose()?;
+        let mut outcome = newton_core::optimization::build_outcome(
             &self.binding.run_id,
             &self.binding.requirements,
             accepted_result.as_ref(),
@@ -976,7 +860,7 @@ impl NativeDriver {
                     .iter()
                     .filter_map(|result| result["candidate"]["id"].as_str().map(str::to_owned))
                     .collect(),
-                blocked_work: self.lifecycle.journal.software_work.blocked(),
+                blocked_work: Vec::new(),
                 usage: ResourceUsage {
                     elapsed_seconds: self.elapsed(),
                     cycles: self.lifecycle.journal.cycle,
@@ -985,58 +869,103 @@ impl NativeDriver {
                 },
                 diagnostics,
             },
-        )?)
+        )?;
+        outcome.retained_result = retained_result;
+        Ok(outcome)
     }
 }
 
-fn refresh_incumbent(
-    journal: &mut Journal,
-    active: &RequirementsRevision,
-    qualified: Option<AcceptedResult>,
-    baseline: &Candidate,
-) -> Result<()> {
-    let previous: Option<AcceptedResult> = journal
-        .accepted
-        .clone()
-        .map(serde_json::from_value)
-        .transpose()?;
-    let Some(previous) = previous else {
-        journal.accepted = qualified.map(serde_json::to_value).transpose()?;
+fn validate_assessment(assessment: Option<&AssessmentDetails>) -> Result<()> {
+    let Some(assessment) = assessment else {
         return Ok(());
     };
-    let same_artifact = previous.candidate.id == baseline.id
-        && previous.candidate.artifact_id == baseline.artifact_id
-        && previous.candidate.base_artifact_id == baseline.base_artifact_id;
-    let current = newton_core::optimization::evaluate_candidate(
-        &journal.run_id,
-        active,
-        &previous.candidate,
-        &previous.evaluation,
-        None,
-    )
-    .is_ok_and(|decision| decision.accepted_result.is_some());
-    if same_artifact || !current {
-        journal
-            .accepted_history
-            .push(serde_json::to_value(&previous)?);
-        journal.accepted = if same_artifact {
-            qualified
-                .map(|mut result| {
-                    result.candidate = previous.candidate;
-                    serde_json::to_value(result)
-                })
-                .transpose()?
-        } else {
-            // An unrelated baseline cannot silently replace a retained artifact.
-            None
-        };
+    anyhow::ensure!(
+        !assessment.id.trim().is_empty(),
+        "assessment identity must not be empty"
+    );
+    let mut ids = BTreeSet::new();
+    for observation in &assessment.observations {
+        anyhow::ensure!(
+            !observation.id.trim().is_empty()
+                && !observation.title.trim().is_empty()
+                && !observation.rationale.trim().is_empty()
+                && !observation.suggested_action.trim().is_empty(),
+            "assessment observations require identity, title, rationale and suggested action"
+        );
+        anyhow::ensure!(
+            ids.insert(&observation.id),
+            "duplicate observation identity"
+        );
+        if let Some(resolution) = &observation.resolution {
+            anyhow::ensure!(
+                resolution.status != ObservationResolutionStatus::Resolved
+                    || !resolution.evidence.is_empty(),
+                "resolved observations require evaluator evidence"
+            );
+        }
+    }
+    if let Some(coverage) = &assessment.coverage {
+        anyhow::ensure!(
+            !coverage.scope.trim().is_empty(),
+            "coverage scope must not be empty"
+        );
+        anyhow::ensure!(
+            !coverage.complete || !coverage.evidence.is_empty(),
+            "complete coverage requires evidence"
+        );
     }
     Ok(())
 }
 
+fn merge_evaluation(first: &mut EvaluationOutput, next: EvaluationOutput) -> Result<()> {
+    if first.candidate != next.candidate
+        || first.evaluation.evaluator_revisions != next.evaluation.evaluator_revisions
+        || first.evaluation.artifact_id != next.evaluation.artifact_id
+        || first.evaluation.base_artifact_id != next.evaluation.base_artifact_id
+        || first.evaluation.candidate_id != next.evaluation.candidate_id
+        || first
+            .evaluation
+            .measurements
+            .keys()
+            .ne(next.evaluation.measurements.keys())
+    {
+        anyhow::bail!(
+            "repeated evaluator invocations changed candidate, objective or evaluator identity"
+        );
+    }
+    for (id, value) in next.evaluation.measurements {
+        match (first.evaluation.measurements.get_mut(&id), value) {
+            (
+                Some(ObjectiveMeasurement::Produced {
+                    measurement,
+                    samples,
+                }),
+                ObjectiveMeasurement::Produced {
+                    measurement: kind,
+                    samples: next,
+                },
+            ) if *measurement == kind => samples.extend(next),
+            (
+                Some(ObjectiveMeasurement::Error { message }),
+                ObjectiveMeasurement::Error { message: next },
+            ) if *message == next => {}
+            _ => anyhow::bail!("repeated measurement changed units, kind or failure"),
+        }
+    }
+    merge_checks(
+        &mut first.evaluation.constraints,
+        next.evaluation.constraints,
+    )?;
+    merge_checks(
+        &mut first.evaluation.completion_checks,
+        next.evaluation.completion_checks,
+    )?;
+    Ok(())
+}
+
 fn merge_checks(
-    first: &mut std::collections::BTreeMap<String, CheckEvidence>,
-    next: std::collections::BTreeMap<String, CheckEvidence>,
+    first: &mut BTreeMap<String, CheckEvidence>,
+    next: BTreeMap<String, CheckEvidence>,
 ) -> Result<()> {
     if first.keys().ne(next.keys()) {
         anyhow::bail!("repeated evaluation omitted or changed checks");
@@ -1057,9 +986,15 @@ fn merge_checks(
 }
 
 fn resolve_reference(root: &Path, reference: &str) -> Result<PathBuf> {
-    let path = root
-        .join(reference)
+    root.join(reference)
         .canonicalize()
-        .with_context(|| format!("resolve optimization workflow {reference}"))?;
-    Ok(path)
+        .with_context(|| format!("resolve optimization workflow {reference}"))
+}
+
+fn measurement_value(evaluation: &CandidateEvaluation, objective: &str) -> Option<f64> {
+    let ObjectiveMeasurement::Produced { samples, .. } = evaluation.measurements.get(objective)?
+    else {
+        return None;
+    };
+    (!samples.is_empty()).then(|| samples.iter().sum::<f64>() / samples.len() as f64)
 }

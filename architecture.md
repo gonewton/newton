@@ -141,11 +141,28 @@ Goal gates, terminal tasks, and explicit completion policy produce deterministic
 
 ### Optimize driver / optimization loop
 
-The `optimize` command (renamed from `batch`, ADR 0003; `crates/cli/src/cli/commands/optimize.rs`) drains the **Plan** queue under `.newton/plan/<project_id>/todo/`, running the configured workflow per Plan.
+`newton optimize` binds a versioned Optimization Definition and runs the
+domain-neutral evaluate → propose → optional execute → evaluate → decide cycle.
+A proposal can return a Candidate directly, so observation-based planning and a
+separate implementation phase are strategy choices. Candidates can be parameter
+sets or versioned artifacts, Objectives can minimize or maximize native numeric
+measurements, and execution-resource ownership and delivery belong to adapters.
 
-The **full closed loop** — `grade → reconcile → change-request → plan → develop → re-grade` — is driven by `.newton/scripts/optimize.sh` (interim; the in-process `newton optimize` is spec 073). It composes the grading operators and the board-stripped `grading.yaml`/`planner.yaml`/`develop.yaml` workflows, evaluates break conditions over the **Trajectory**, and mirrors `OptimizeRun`/`OptimizeCycle` state into the store via the local CLI.
+[ADR 0016](docs/adr/0016-optimization-history-as-json.md) makes per-run JSON
+history authoritative. `run.json` records the immutable binding, `current.json`
+is a small recovery checkpoint, `cycles/*.json` are immutable commit records,
+and `outcome.json`/`report.json` present the final result. Findings and Change
+Requests remain optional platform/workflow concerns. The standard optimizer does
+not open SQLite; the broader SQLite-backed catalog/API remains separate.
 
-The durable spine — `Finding → Change Request → Plan → Execution` — lives in the store (ADR 0010). Operators: `GraderCommandOperator` (runs a command-Grader, persists its Assessment), `ReconcileOperator` (Observations → Findings), `ChangeRequestOperator` (Findings → Change Request). A failed Plan quarantines its Findings as `blocked` and the loop continues (ADR 0012).
+[ADR 0017](docs/adr/0017-domain-neutral-optimization.md) defines the generic
+contract. Observation-driven strategies select assessment-local suggestions;
+measurement-driven strategies need no observations, Plan, Git, or execute role.
+Coding and non-coding simulator scenarios use the same binary.
+
+The [optimization contract](docs/optimization-contract.md) specifies the wire
+types, recovery rules, and reuse of the Pi real-agent harness for Docker/gateway
+E2E validation. The design draft remains historical context.
 
 ### HTTP serve API
 

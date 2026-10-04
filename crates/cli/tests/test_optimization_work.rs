@@ -1,9 +1,26 @@
-//! Software-strategy recovery exercised through actual YAML and CLI/store APIs.
+//! Generic optimizer behavior through the public CLI and production driver.
+
 #[path = "support/mod.rs"]
 mod support;
 
-use serde_json::{json, Value};
-use std::{fs, path::Path};
+use serde_json::Value;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+fn setup_scheduling(root: &Path) {
+    fs::create_dir_all(root.join(".newton/configs")).unwrap();
+    let fixtures = support::fixture_path("scheduling");
+    for name in ["definition.yaml", "evaluate.yaml", "propose.yaml"] {
+        fs::copy(fixtures.join(name), root.join(name)).unwrap();
+    }
+    fs::write(
+        root.join(".newton/configs/demo.conf"),
+        "definition_file=definition.yaml\n",
+    )
+    .unwrap();
+}
 
 fn command(root: &Path) -> assert_cmd::Command {
     let mut command = support::newton();
@@ -14,366 +31,154 @@ fn command(root: &Path) -> assert_cmd::Command {
     command
 }
 
-fn data(root: &Path, verb: &str, resource: &str, id: Option<&str>, body: Option<Value>) -> Value {
-    let mut cmd = command(root);
-    cmd.args(["data", verb, resource]);
-    if let Some(id) = id {
-        cmd.arg(id);
-    }
-    if let Some(body) = body {
-        cmd.args(["--body", &body.to_string()]);
-    }
-    let output = cmd.assert().success().get_output().stdout.clone();
-    serde_json::from_slice(&output).unwrap()
+fn run_directory(root: &Path) -> PathBuf {
+    fs::read_dir(root.join(".newton/state/optimize"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.join("run.json").is_file())
+        .unwrap()
 }
 
-fn setup(root: &Path) {
-    fs::create_dir_all(root.join(".newton/configs")).unwrap();
-    fs::create_dir_all(root.join(".newton/state")).unwrap();
-    let fixtures = support::fixture_path("optimization");
-    for (source, target) in [
-        ("grade.yaml", "grade.yaml"),
-        ("software-plan.yaml", "plan.yaml"),
-        ("software-develop.yaml", "develop.yaml"),
-    ] {
-        fs::copy(fixtures.join(source), root.join(target)).unwrap();
-    }
-    let mut definition: serde_yaml::Value =
-        serde_yaml::from_str(&fs::read_to_string(fixtures.join("definition.yaml")).unwrap())
-            .unwrap();
-    definition["strategy"] = "software-improvement".into();
-    definition["workflows"]
-        .as_mapping_mut()
-        .unwrap()
-        .remove(serde_yaml::Value::from("promote"));
-    definition["requirements"]["resource_limits"]["max_cycles"] = 6.into();
-    definition["requirements"]["resource_limits"]["max_work"] = 20.into();
-    fs::write(
-        root.join("definition.yaml"),
-        serde_yaml::to_string(&definition).unwrap(),
-    )
-    .unwrap();
-    let mut grade: serde_yaml::Value =
-        serde_yaml::from_str(&fs::read_to_string(root.join("grade.yaml")).unwrap()).unwrap();
-    grade["workflow"]["settings"]["io"]["result_map"]["change_request_id"] =
-        "$expr: if triggers.blocked_work_count > 0 { \"cr-good\" } else { \"cr-bad\" }".into();
-    fs::write(
-        root.join("grade.yaml"),
-        serde_yaml::to_string(&grade).unwrap(),
-    )
-    .unwrap();
-    fs::write(
-        root.join(".newton/configs/demo.conf"),
-        "definition_file=definition.yaml\nparameter.max_failed_attempts=2\n",
-    )
-    .unwrap();
-    for suffix in ["bad", "good"] {
-        data(
-            root,
-            "post",
-            "finding",
-            None,
-            Some(
-                json!({"id":format!("finding-{suffix}"),"source":"fixture","module":"fixture-scope","dimension":"size","fingerprint":suffix,"title":suffix,"whyItMatters":"fixture","recommendedAction":"fixture","severity":"medium","risk":"low","status":"approved_for_planning"}),
-            ),
-        );
-        data(
-            root,
-            "post",
-            "change-request",
-            None,
-            Some(
-                json!({"id":format!("cr-{suffix}"),"title":suffix,"findingIds":[format!("finding-{suffix}")]}),
-            ),
-        );
-    }
-    for cycle in 1..=3 {
-        data(
-            root,
-            "post",
-            "plan",
-            None,
-            Some(
-                json!({"id":format!("plan-{cycle}"),"title":"fixture","linkedChangeRequestId":if cycle < 3 {"cr-bad"} else {"cr-good"},"status":"ready","confidence":100,"risk":"low"}),
-            ),
-        );
-    }
-}
-
-fn journal(root: &Path) -> Value {
-    let path = fs::read_dir(root.join(".newton/state/optimize"))
-        .unwrap()
-        .map(|entry| entry.unwrap().path().join("journal.json"))
-        .find(|path| path.is_file())
-        .unwrap();
+fn read(path: impl AsRef<Path>) -> Value {
     serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
 }
 
 #[test]
-fn fresh_plans_share_cr_retry_budget_quarantine_findings_and_continue_unrelated_work() {
-    let dir = tempfile::tempdir().unwrap();
-    setup(dir.path());
-    command(dir.path())
+fn measurement_only_search_completes_two_cycles_without_git_plan_execute_or_sqlite() {
+    let directory = tempfile::tempdir().unwrap();
+    setup_scheduling(directory.path());
+    command(directory.path())
         .args(["optimize", "demo", "--poll-interval", "1"])
         .assert()
         .success();
-    let journal = journal(dir.path());
-    assert_eq!(journal["outcome"]["stop_reason"], "completed");
-    assert_eq!(journal["outcome"]["blocked_work"], json!(["cr-bad"]));
-    assert_eq!(journal["outcome"]["usage"]["cycles"], 3);
-    let finding = data(dir.path(), "get", "finding", Some("finding-bad"), None);
-    assert_eq!(finding["status"], "blocked");
-    assert_eq!(finding["blockedByPlanId"], "plan-2");
-    for cycle in 1..=2 {
-        let plan = data(
-            dir.path(),
-            "get",
-            "plan",
-            Some(&format!("plan-{cycle}")),
-            None,
-        );
-        assert_eq!(plan["status"], "failed");
-        assert_eq!(plan["attempts"], cycle);
-        assert!(plan["executionId"].is_string());
-    }
-    let cycles = command(dir.path())
-        .args([
-            "data",
-            "get",
-            "optimize-cycles",
-            "--run-id",
-            journal["run_id"].as_str().unwrap(),
-        ])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let cycles: Value = serde_json::from_slice(&cycles).unwrap();
-    assert_eq!(cycles[0]["changeRequestId"], "cr-bad");
-    assert_eq!(cycles[1]["planId"], "plan-2");
-    assert_eq!(cycles[2]["changeRequestId"], "cr-good");
-}
 
-#[test]
-fn rejected_candidates_retry_the_unresolved_cr_and_quarantine_at_the_shared_cap() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-    setup(root);
-    fs::copy(
-        support::fixture_path("optimization/develop.yaml"),
-        root.join("develop.yaml"),
-    )
-    .unwrap();
-    let path = root.join("grade.yaml");
-    let mut grade: serde_yaml::Value =
-        serde_yaml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    grade["workflow"]["tasks"][0]["params"]["patch"]["evaluation"]["constraints"]["behavior"]["status"] = serde_yaml::to_value(json!({"$expr":"if triggers.stage == \"candidate\" && triggers.change_request_id == \"cr-bad\" { \"violated\" } else { \"satisfied\" }"})).unwrap();
-    fs::write(path, serde_yaml::to_string(&grade).unwrap()).unwrap();
-    command(root)
-        .args(["optimize", "demo", "--poll-interval", "1"])
-        .assert()
-        .success();
-    let result = journal(root);
-    assert_eq!(result["outcome"]["stop_reason"], "completed");
-    assert_eq!(result["outcome"]["blocked_work"], json!(["cr-bad"]));
-    assert_eq!(result["outcome"]["usage"]["cycles"], 3);
+    let run = run_directory(directory.path());
+    let outcome = read(run.join("outcome.json"));
+    assert_eq!(outcome["stop_reason"], "completed");
+    assert_eq!(outcome["usage"]["cycles"], 2);
     assert_eq!(
-        result["software_work"]["work"]["cr-bad"]["completed"],
-        false
+        outcome["accepted_result"]["candidate"]["artifact_id"],
+        "schedule:4"
     );
-    assert_eq!(result["software_work"]["work"]["cr-bad"]["failures"], 2);
+    assert!(run.join("cycles/0001.json").is_file());
+    assert!(run.join("cycles/0002.json").is_file());
+    let report = read(run.join("report.json"));
     assert_eq!(
-        result["software_work"]["work"]["cr-good"]["completed"],
-        true
+        report["before"][0]["candidate"]["artifact_id"],
+        "schedule:10"
     );
-    assert_eq!(
-        data(root, "get", "finding", Some("finding-bad"), None)["status"],
-        "blocked"
-    );
-    for cycle in 1..=2 {
-        let plan = data(root, "get", "plan", Some(&format!("plan-{cycle}")), None);
-        assert_eq!(plan["status"], "failed");
-        assert_eq!(plan["attempts"], cycle);
-    }
-}
-
-fn threshold_setup(root: &Path, regress: bool) {
-    setup(root);
-    fs::copy(
-        support::fixture_path("optimization/develop.yaml"),
-        root.join("develop.yaml"),
-    )
-    .unwrap();
-    let mut definition: serde_yaml::Value =
-        serde_yaml::from_str(&fs::read_to_string(root.join("definition.yaml")).unwrap()).unwrap();
-    definition["strategy"] = "direct-search".into();
-    definition["requirements"]["completion"] = serde_yaml::from_str("[{kind: objective_target, objective: quality, target: 95}, {kind: objective_target, objective: security, target: 95}]").unwrap();
-    definition["requirements"]["objective"] = serde_yaml::from_str("mode: thresholds\nobjectives:\n  - objective: {id: quality, evaluator: fixture, measurement: {kind: grade, dimension: quality}}\n    target: 95\n    regression_delta: 5\n    no_progress_cycles: 2\n  - objective: {id: security, evaluator: fixture, measurement: {kind: grade, dimension: security}}\n    target: 95\n    regression_delta: 5\n    no_progress_cycles: 2\n").unwrap();
-    fs::write(
-        root.join("definition.yaml"),
-        serde_yaml::to_string(&definition).unwrap(),
-    )
-    .unwrap();
-    let mut grade: serde_yaml::Value =
-        serde_yaml::from_str(&fs::read_to_string(root.join("grade.yaml")).unwrap()).unwrap();
-    grade["workflow"]["tasks"][0]["params"]["patch"]["evaluation"]["measurements"] = serde_yaml::from_str("quality: {status: produced, measurement: {kind: grade, dimension: quality}, samples: [80]}\nsecurity: {status: produced, measurement: {kind: grade, dimension: security}, samples: [60]}").unwrap();
-    if regress {
-        grade["workflow"]["tasks"][0]["params"]["patch"]["evaluation"]["measurements"]
-            ["security"]["samples"] = serde_yaml::from_str(
-            "{$expr: 'if triggers.stage == \"baseline\" { [60.0] } else { [40.0] }'}",
-        )
-        .unwrap();
-    }
-    fs::write(
-        root.join("grade.yaml"),
-        serde_yaml::to_string(&grade).unwrap(),
-    )
-    .unwrap();
-}
-
-#[test]
-fn threshold_regression_in_one_objective_stops_before_acceptance() {
-    let dir = tempfile::tempdir().unwrap();
-    threshold_setup(dir.path(), true);
-    command(dir.path())
-        .args(["optimize", "demo", "--poll-interval", "1"])
-        .assert()
-        .success();
-    let result = journal(dir.path());
-    assert_eq!(result["outcome"]["stop_reason"], "regression");
-    assert_eq!(result["outcome"]["usage"]["cycles"], 1);
-    assert_eq!(
-        result["outcome"]["accepted_result"]["candidate"]["artifact_id"],
-        "original"
-    );
-}
-
-#[test]
-fn per_objective_no_progress_stops_at_its_durable_cycle_limit() {
-    let dir = tempfile::tempdir().unwrap();
-    threshold_setup(dir.path(), false);
-    command(dir.path())
-        .args(["optimize", "demo", "--poll-interval", "1"])
-        .assert()
-        .success();
-    let result = journal(dir.path());
-    assert_eq!(result["outcome"]["stop_reason"], "no_progress");
-    assert_eq!(result["outcome"]["usage"]["cycles"], 2);
-    assert_ne!(result["outcome"]["completion"]["status"], "satisfied");
-}
-
-fn replace_plan_output(root: &Path, output: &str) {
-    let path = root.join("plan.yaml");
-    let mut document: serde_yaml::Value =
-        serde_yaml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    document["workflow"]["settings"]["io"]["result_map"] = serde_yaml::from_str(output).unwrap();
-    fs::write(path, serde_yaml::to_string(&document).unwrap()).unwrap();
-}
-
-#[test]
-fn planner_cannot_discard_or_substitute_the_current_change_request() {
-    for output in [
-        "decision: none",
-        "decision: propose\nplan_id: plan-1\nchange_request_id: cr-good",
-        "decision: invalid",
-    ] {
-        let dir = tempfile::tempdir().unwrap();
-        setup(dir.path());
-        replace_plan_output(dir.path(), output);
-        command(dir.path())
-            .args(["optimize", "demo", "--once"])
-            .assert()
-            .failure();
-        let result = journal(dir.path());
-        assert_eq!(result["outcome"]["stop_reason"], "operational_failure");
-        assert_eq!(result["change_request_id"], "cr-bad");
-        assert!(result["execution_id"].is_null());
+    assert_eq!(report["after"]["candidate"]["artifact_id"], "schedule:4");
+    assert_eq!(report["cycles"].as_array().unwrap().len(), 2);
+    assert!(!directory
+        .path()
+        .join(".newton/state/backend.sqlite")
+        .exists());
+    for cycle in ["0001.json", "0002.json"] {
+        let record = read(run.join("cycles").join(cycle));
+        assert_eq!(record["status"], "accepted");
+        assert!(record["proposal"]["plan"].is_null());
+        assert!(record["execution"].is_null());
+        assert!(record["baseline_evaluations"][0]["assessment"].is_null());
     }
 }
 
 #[test]
-fn malformed_reconciliation_fails_without_mutating_findings() {
-    let dir = tempfile::tempdir().unwrap();
-    setup(dir.path());
-    fs::copy(
-        support::fixture_path("optimization/malformed-reconciliation.yaml"),
-        dir.path().join("plan.yaml"),
-    )
-    .unwrap();
-    fs::write(dir.path().join(".newton/configs/demo.conf"), "definition_file=definition.yaml\noptimize_allowed_actions=agent,command,network,commit,draft_pull_request,publish,merge,deploy\n").unwrap();
-    command(dir.path())
+fn published_cycle_advances_an_older_checkpoint_without_replaying_it() {
+    let directory = tempfile::tempdir().unwrap();
+    setup_scheduling(directory.path());
+    command(directory.path())
         .args(["optimize", "demo", "--once"])
         .assert()
-        .failure();
-    let result = journal(dir.path());
-    assert_eq!(result["outcome"]["stop_reason"], "operational_failure");
-    let all = data(dir.path(), "get", "findings", None, None);
-    assert_eq!(all.as_array().unwrap().len(), 2);
-    assert!(all
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|finding| finding["status"] == "approved_for_planning"));
-    assert!(result["outcome"]["diagnostics"]
-        .to_string()
-        .contains("task reconcile failed"));
+        .success();
+    let run = run_directory(directory.path());
+    let first = fs::read(run.join("cycles/0001.json")).unwrap();
+    let mut current = read(run.join("current.json"));
+    let run_id = current["run_id"].as_str().unwrap().to_owned();
+    current["phase"] = serde_json::json!("evaluating");
+    current["outcome"] = Value::Null;
+    fs::write(
+        run.join("current.json"),
+        serde_json::to_vec_pretty(&current).unwrap(),
+    )
+    .unwrap();
+
+    command(directory.path())
+        .args(["optimize", "demo", "--resume", &run_id, "--once"])
+        .assert()
+        .success();
+
+    assert_eq!(fs::read(run.join("cycles/0001.json")).unwrap(), first);
+    assert!(run.join("cycles/0002.json").is_file());
 }
 
 #[test]
-fn software_threshold_finding_progress_prevents_false_no_progress() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-    threshold_setup(root, false);
-    let mut definition: serde_yaml::Value =
-        serde_yaml::from_str(&fs::read_to_string(root.join("definition.yaml")).unwrap()).unwrap();
-    definition["strategy"] = "software-improvement".into();
-    definition["requirements"]["resource_limits"]["max_cycles"] = 2.into();
-    for objective in definition["requirements"]["objective"]["objectives"]
-        .as_sequence_mut()
-        .unwrap()
-    {
-        objective["no_progress_cycles"] = 1.into();
-    }
-    fs::write(
-        root.join("definition.yaml"),
-        serde_yaml::to_string(&definition).unwrap(),
-    )
-    .unwrap();
-    replace_plan_output(root, "decision: propose\nplan_id: '$expr: if triggers.cycle == 1 { \"plan-1\" } else { \"plan-3\" }'\nchange_request_id: '$expr: triggers.change_request_id'");
-    let mut grade: serde_yaml::Value =
-        serde_yaml::from_str(&fs::read_to_string(root.join("grade.yaml")).unwrap()).unwrap();
-    grade["workflow"]["settings"]["io"]["result_map"]["change_request_id"] =
-        "$expr: if triggers.cycle == 1 { \"cr-bad\" } else { \"cr-good\" }".into();
-    grade["workflow"]["settings"]["io"]["result_map"]["open_findings"] = "$expr: if triggers.stage == \"baseline\" { #{quality: 5, security: 5} } else if triggers.cycle == 1 { #{quality: 4, security: 4} } else { #{quality: 3, security: 3} }".into();
-    fs::write(
-        root.join("grade.yaml"),
-        serde_yaml::to_string(&grade).unwrap(),
-    )
-    .unwrap();
-    command(root)
-        .args(["optimize", "demo", "--poll-interval", "1"])
+fn malformed_immutable_cycle_fails_closed_instead_of_disappearing_from_history() {
+    let directory = tempfile::tempdir().unwrap();
+    setup_scheduling(directory.path());
+    command(directory.path())
+        .args(["optimize", "demo", "--once"])
         .assert()
         .success();
-    let result = journal(root);
-    assert_eq!(result["outcome"]["stop_reason"], "resource_limit");
-    assert_eq!(result["outcome"]["usage"]["cycles"], 2);
+    let run = run_directory(directory.path());
+    let run_id = read(run.join("current.json"))["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    fs::write(run.join("cycles/0001.json"), "{malformed").unwrap();
+
+    command(directory.path())
+        .args(["optimize", "demo", "--resume", &run_id, "--once"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("cycles/0001.json"));
+    assert_eq!(
+        read(run.join("current.json"))["requires_reconciliation"],
+        true
+    );
 }
 
 #[test]
-fn regression_uses_the_current_cycle_baseline_after_prior_improvement() {
-    let dir = tempfile::tempdir().unwrap();
-    threshold_setup(dir.path(), false);
-    let path = dir.path().join("grade.yaml");
-    let mut grade: serde_yaml::Value =
-        serde_yaml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    grade["workflow"]["tasks"][0]["params"]["patch"]["evaluation"]["measurements"]["security"]["samples"] = serde_yaml::from_str("{$expr: 'if triggers.cycle == 1 { if triggers.stage == \"baseline\" { [60.0] } else { [90.0] } } else { if triggers.stage == \"baseline\" { [90.0] } else { [84.0] } }'}").unwrap();
-    fs::write(path, serde_yaml::to_string(&grade).unwrap()).unwrap();
-    command(dir.path())
-        .args(["optimize", "demo", "--poll-interval", "1"])
+fn one_cycle_can_be_resumed_without_rewriting_published_history() {
+    let directory = tempfile::tempdir().unwrap();
+    setup_scheduling(directory.path());
+    command(directory.path())
+        .args(["optimize", "demo", "--once"])
         .assert()
         .success();
-    let result = journal(dir.path());
-    assert_eq!(result["outcome"]["stop_reason"], "regression");
-    assert_eq!(result["outcome"]["usage"]["cycles"], 2);
+    let run = run_directory(directory.path());
+    let first = fs::read(run.join("cycles/0001.json")).unwrap();
+    let current = read(run.join("current.json"));
+    let run_id = current["run_id"].as_str().unwrap();
+
+    command(directory.path())
+        .args(["optimize", "demo", "--resume", run_id, "--once"])
+        .assert()
+        .success();
+
+    assert_eq!(fs::read(run.join("cycles/0001.json")).unwrap(), first);
+    assert!(run.join("cycles/0002.json").is_file());
+    assert_eq!(read(run.join("outcome.json"))["stop_reason"], "completed");
+}
+
+#[test]
+fn pre_generic_journal_has_an_explicit_non_migration_error() {
+    let directory = tempfile::tempdir().unwrap();
+    let run_id = "00000000-0000-4000-8000-000000000001";
+    fs::create_dir_all(directory.path().join(".newton/state/optimize").join(run_id)).unwrap();
+    fs::write(
+        directory
+            .path()
+            .join(".newton/state/optimize")
+            .join(run_id)
+            .join("journal.json"),
+        "{}",
+    )
+    .unwrap();
+    command(directory.path())
+        .args(["optimize", "demo", "--resume", run_id])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "pre-generic journal/SQLite format",
+        ));
 }

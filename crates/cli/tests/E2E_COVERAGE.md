@@ -59,16 +59,24 @@ read-only inspect/impact planner operations.
 | checkpoint clean | --older-than | integ_checkpoint_clean_older_than | integration |
 | artifact clean | --older-than | integ_artifact_clean_removes_old | integration |
 | init |  | integ_init_creates_workspace | integration |
-| optimize | --definition <file> --once | native_once_grades_before_plan_and_acceptance | integration |
-| optimize | software-improvement recovery | fresh_plans_share_cr_retry_budget_quarantine_findings_and_continue_unrelated_work | integration |
-| optimize | planner substitutes current change request | planner_cannot_discard_or_substitute_the_current_change_request | integration |
-| optimize | malformed reconciliation | malformed_reconciliation_fails_without_mutating_findings | integration |
-| optimize | threshold regression guard | threshold_regression_in_one_objective_stops_before_acceptance | integration |
-| optimize | threshold no-progress guard | per_objective_no_progress_stops_at_its_durable_cycle_limit | integration |
-| optimize | software finding progress guard | software_threshold_finding_progress_prevents_false_no_progress | integration |
-| optimize | workflows.promote (lying output) | lying_promotion_workflow_is_rejected_before_run_creation | integration |
-| optimize | workflows.promote (side effect) | mutating_promotion_workflow_is_rejected_without_dispatch | integration |
-| optimize | transient snapshot swap | transient_snapshot_swap_cannot_forge_evaluator_execution | integration |
+| optimize | measurement-driven multi-cycle | public_cli_records_before_after_decision_and_best_result | integration |
+| optimize | no Git/Plan/execute/SQLite | measurement_only_search_completes_two_cycles_without_git_plan_execute_or_sqlite | integration |
+| optimize | --once / --resume | one_cycle_can_be_resumed_without_rewriting_published_history | integration |
+| optimize | published Cycle recovery | published_cycle_advances_an_older_checkpoint_without_replaying_it | integration |
+| optimize | malformed immutable Cycle | malformed_immutable_cycle_fails_closed_instead_of_disappearing_from_history | integration |
+| optimize | requirements revision | requirements_revision_requalifies_retained_state_before_new_acceptance | integration |
+| optimize | candidate check violated | violated_candidate_preserves_the_incumbent_and_records_rejection | integration |
+| optimize | candidate check unknown | unavailable_required_check_is_inconclusive_and_preserves_the_incumbent | integration |
+| optimize | observation-driven K | observation_driven_k_is_validated_against_current_assessment | integration |
+| optimize | optional execute | optional_execute_workflow_is_used_only_for_execute_proposals | integration |
+| optimize | safe failure/stagnation | known_safe_failure_is_history_and_stagnation_not_operational_failure | integration |
+| optimize | evaluator resource limit | evaluation_limit_stops_safely_and_retains_the_qualified_baseline | integration |
+| optimize | threshold regression | threshold_regression_has_an_explicit_cycle_and_stop_status | integration |
+| optimize | no actionable work | no_actionable_work_returns_the_retained_baseline_below_target | integration |
+| optimize | workflows.promote | domain_specific_promotion_role_is_rejected_before_run_creation | integration |
+| optimize | role retry metering | unmetered_role_retries_are_rejected_before_run_creation | integration |
+| optimize | built-in definition v2 | builtin_template_installs_a_valid_version_two_generic_definition | integration |
+| optimize | pre-version-2 resume | pre_generic_journal_has_an_explicit_non_migration_error | integration |
 | doctor |  | integ_doctor_command | integration |
 | config show |  | integ_config_show | integration |
 | completion | bash | integ_completion_bash | integration |

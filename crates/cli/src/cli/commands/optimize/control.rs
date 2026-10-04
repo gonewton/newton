@@ -1,15 +1,15 @@
 //! Local, serialized requirements control. An inbox is not an active revision.
 
 use super::{
-    lifecycle::{Journal, Lifecycle, Phase},
+    lifecycle::{Journal, Phase},
     ownership::RunClaim,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use newton_core::optimization::{
     acknowledge_revision, propose_revision, EnforcementCapabilities, RequirementsUpdateAuthority,
     RevisionActivation, RevisionBoundary,
 };
-use newton_types::{optimization::*, BackendStore, PatchOptimizeRunBody};
+use newton_types::optimization::*;
 use std::{fs, io::Write, path::Path};
 
 pub(super) async fn apply_update(
@@ -71,7 +71,7 @@ pub(super) async fn apply_update(
         &Path::new(&binding.context.root).join(".newton/optimize/claim"), &journal.run_id,
     ).context("requirements request remains Pending; no update is active while a live or different owner holds the context")?;
     // Ownership serializes the read/modify/write with every running driver.
-    *journal = serde_json::from_slice(&fs::read(directory.join("journal.json"))?)?;
+    *journal = serde_json::from_slice(&fs::read(directory.join("current.json"))?)?;
     let mut binding: BoundOptimizationDefinition = serde_json::from_value(journal.binding.clone())?;
     let pending: RequirementsRevision = serde_json::from_slice(&fs::read(&inbox)?)?;
     let safe = !journal.requires_reconciliation
@@ -114,6 +114,10 @@ pub(super) async fn apply_update(
             .retain(|r| r.status != RequirementsRevisionStatus::Pending);
         journal.revisions.push(activation.superseded);
         journal.revisions.push(activation.active.clone());
+        if let Some(prior) = journal.accepted.take() {
+            journal.retained = Some(prior.clone());
+            journal.accepted_history.push(prior);
+        }
         binding.requirements = activation.active;
         journal.binding = serde_json::to_value(&binding)?;
         journal.outcome = None;
@@ -122,24 +126,13 @@ pub(super) async fn apply_update(
         }
     }
     newton_core::fs_util::atomic_write(
-        &directory.join("journal.json"),
+        &directory.join("current.json"),
         &serde_json::to_vec_pretty(journal)?,
     )?;
-    let store = newton_backend::SqliteBackendStore::new(
-        &crate::cli::workspace_paths::state_backend_sqlite_url(state_dir),
-    )
-    .await
-    .map_err(|e| anyhow!("open optimization store: {}", e.message))?;
-    store
-        .patch_optimize_run(
-            &journal.run_id,
-            PatchOptimizeRunBody {
-                outcome_reason: Some(serde_json::to_value(&*journal)?),
-                ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| anyhow!("persist requirements revision: {}", e.message))?;
+    if safe && journal.phase == Phase::CycleComplete {
+        remove_if_present(&directory.join("outcome.json"))?;
+        remove_if_present(&directory.join("report.json"))?;
+    }
     if safe {
         fs::remove_file(inbox)?;
         claim.release()?;
@@ -152,83 +145,12 @@ pub(super) async fn apply_update(
     Ok(safe)
 }
 
-/// The current driver already owns the context. Call only after a completed
-/// evaluation, never while an agent/command/child workflow remains in flight.
-/// Activation moves back to Evaluating: old evidence cannot authorize acceptance.
-pub(super) struct OwnedActivation {
-    pub binding: BoundOptimizationDefinition,
-    pub incumbent: Option<AcceptedResult>,
-}
-
-pub(super) async fn activate_pending_owned(
-    lifecycle: &mut Lifecycle,
-    state_dir: &Path,
-) -> Result<Option<OwnedActivation>> {
-    let directory = state_dir.join("optimize").join(&lifecycle.journal.run_id);
-    let inbox = directory.join("requirements-pending.json");
-    let bytes = match fs::read(&inbox) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error.into()),
-    };
-    if lifecycle.journal.requires_reconciliation || lifecycle.journal.phase != Phase::Evaluated {
-        anyhow::bail!("Pending update cannot activate before affected work has completed");
+fn remove_if_present(path: &Path) -> std::io::Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
     }
-    let mut binding: BoundOptimizationDefinition =
-        serde_json::from_value(lifecycle.journal.binding.clone())?;
-    let pending = serde_json::from_slice::<RequirementsRevision>(&bytes);
-    let activation = pending
-        .as_ref()
-        .map_err(|error| anyhow!("invalid Pending request: {error}"))
-        .and_then(|pending| {
-            validate_pending(&lifecycle.journal, &binding, pending)?;
-            acknowledge_pending(&lifecycle.journal, &binding, pending)
-        });
-    let activation = match activation {
-        Ok(activation) => activation,
-        Err(error) => {
-            let request = serde_json::from_slice(&bytes)
-                .unwrap_or_else(|_| serde_json::json!(String::from_utf8_lossy(&bytes)));
-            record_rejection(&directory, &request, &error.to_string())?;
-            if let Ok(pending) = pending {
-                if let Ok(rejected) =
-                    newton_core::optimization::reject_revision(&pending, error.to_string())
-                {
-                    lifecycle.journal.revisions.push(rejected);
-                }
-            }
-            lifecycle.phase(Phase::Evaluated).await?;
-            fs::remove_file(inbox)?;
-            eprintln!(
-                "Pending requirements update rejected; current revision remains Active: {error}"
-            );
-            return Ok(None);
-        }
-    };
-    let incumbent = lifecycle
-        .journal
-        .accepted
-        .clone()
-        .map(serde_json::from_value)
-        .transpose()?;
-    if let Some(prior) = lifecycle.journal.accepted.take() {
-        lifecycle.journal.accepted_history.push(prior);
-    }
-    lifecycle
-        .journal
-        .revisions
-        .retain(|revision| revision.status != RequirementsRevisionStatus::Pending);
-    lifecycle.journal.revisions.push(activation.superseded);
-    lifecycle.journal.revisions.push(activation.active.clone());
-    binding.requirements = activation.active;
-    lifecycle.journal.binding = serde_json::to_value(&binding)?;
-    lifecycle.journal.outcome = None;
-    // Journal, shared backend and observer event precede inbox removal and ack.
-    // If persistence fails, external effects remain uncertain; never accept.
-    lifecycle.phase(Phase::Evaluating).await?;
-    fs::remove_file(inbox)?;
-    println!("requirements revision {} is Active after completed work; candidate evidence must be regraded", binding.requirements.revision);
-    Ok(Some(OwnedActivation { binding, incumbent }))
 }
 
 fn validate_pending(
@@ -236,7 +158,7 @@ fn validate_pending(
     binding: &BoundOptimizationDefinition,
     pending: &RequirementsRevision,
 ) -> Result<()> {
-    super::workflow::grade_reference(&pending.requirements)?;
+    super::workflow::evaluator_reference(&pending.requirements)?;
     // Revalidate the inbox against current CAS, immutable authority ceiling and
     // capabilities. The serialized request cannot grant authority to itself.
     let authority = RequirementsUpdateAuthority {

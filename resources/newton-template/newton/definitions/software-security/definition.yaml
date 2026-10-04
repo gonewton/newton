@@ -1,12 +1,11 @@
-schema_version: 1
+schema_version: 2
 id: software-security
 revision: rust-cargo-audit-v1
-strategy: direct-search
+strategy: {kind: measurement_driven}
 assets: [security.py]
 workflows:
-  grade: grade.yaml
-  plan: plan.yaml
-  develop: develop.yaml
+  propose: plan.yaml
+  execute: develop.yaml
 defaults:
   agent: {kind: literal, value: pi}
   model: {kind: literal, value: ''}
@@ -31,3 +30,4 @@ requirements:
   resource_limits: {elapsed_seconds: 3600, max_cycles: 3, max_work: 9, max_evaluations: 6}
   completion:
     - {kind: objective_target, objective: vulnerabilities, target: 0}
+  stagnation_cycles: 3

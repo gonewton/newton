@@ -101,7 +101,7 @@ def main():
             return
         state = root / ".newton" / "state"
         new_runs = {
-            path.parent.name for path in (state / "optimize").glob("*/journal.json")
+            path.parent.name for path in (state / "optimize").glob("*/current.json")
         } - previous_runs
         reported_run = report.get("outcome", {}).get("run_id")
         if reported_run:
@@ -113,7 +113,7 @@ def main():
         records = []
         report["run_evidence"] = []
         for run_id in sorted(new_runs):
-            journal_path = state / "optimize" / run_id / "journal.json"
+            journal_path = state / "optimize" / run_id / "current.json"
             try:
                 journal = read_object(journal_path)
                 report["run_evidence"].append(
@@ -124,12 +124,13 @@ def main():
                         "requires_reconciliation": journal.get(
                             "requires_reconciliation"
                         ),
-                        "journal_path": str(journal_path),
+                        "checkpoint_path": str(journal_path),
+                        "report_path": str(journal_path.with_name("report.json")),
                     }
                 )
             except (OSError, ValueError):
                 report["run_evidence"].append(
-                    {"run_id": run_id, "journal_error": "unreadable journal"}
+                    {"run_id": run_id, "checkpoint_error": "unreadable current.json"}
                 )
             records.extend(
                 collect_agent_evidence(
@@ -226,7 +227,7 @@ def main():
         invoke("preflight", "--preflight")
         previous_runs = {
             path.parent.name
-            for path in (root / ".newton" / "state" / "optimize").glob("*/journal.json")
+            for path in (root / ".newton" / "state" / "optimize").glob("*/current.json")
         }
         attempted = True
         output = invoke("once", "--once")

@@ -82,6 +82,12 @@ so they pass through every stream's `instance_id` filter unconditionally.
 Clients re-fetch the authoritative record from the matching REST endpoint on
 receipt (e.g. `GET /findings/{id}`, `GET /change-requests/{id}`).
 
+For generic local optimization, `optimize_run_update` is an invalidation hint for
+the versioned files under `.newton/state/optimize/<run-id>/`. Embedded consumers
+use `OptimizeRunObservationSource` to read a coherent `run.json`, `current.json`,
+immutable Cycle set, and optional outcome. The SQLite-backed optimize-run REST
+records are an optional, separate projection and are not populated automatically.
+
 ---
 
 ## Filter Query Parameters

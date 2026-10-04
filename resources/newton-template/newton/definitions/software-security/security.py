@@ -387,7 +387,7 @@ def main(role, input_path):
         )
         return
 
-    if role != "grade":
+    if role != "evaluate":
         raise RuntimeError(f"unsupported adapter role: {role}")
     if request["stage"] == "baseline":
         candidate = (

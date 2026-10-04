@@ -1,6 +1,6 @@
 # Newton
 
-**Newton** is a workflow-first CLI for deterministic automation and orchestration — **and an autonomous optimizer**. You define steps in YAML (shell commands, agents, human approvals, branching, nested workflows), and Newton runs them with explicit completion rules, checkpoints, and artifacts. On top of that, Newton drives an **optimization loop** that grades a project and improves it toward a target Grade. It fits agent-assisted coding, release checklists, and self-improving optimization loops where you want a defined graph instead of ad hoc scripts.
+**Newton** is a workflow-first CLI for deterministic automation and orchestration — **and an autonomous optimizer**. You define steps in YAML (shell commands, agents, human approvals, branching, nested workflows), and Newton runs them with explicit completion rules, checkpoints, and artifacts. On top of that, Newton repeatedly evaluates identifiable candidate states, proposes improvements, and retains measured progress toward a declared Objective. Grades, numeric simulation outputs, documentation quality, and software quality are all supported through definitions and workflows.
 
 Version: **0.5.127** · Repository: [github.com/gonewton/newton](https://github.com/gonewton/newton)
 
@@ -25,7 +25,7 @@ Verify: `newton --version` and `newton --help`.
 ## Prerequisites
 
 - The **Newton CLI** (installed above).
-- **Optional**: Git for version control, hooks, and the optimization loop's local-merge delivery.
+- **Optional**: Git for workflows that optimize repositories. The optimizer itself does not require Git.
 
 `newton init .` scaffolds a workspace and installs the default template via the bundled **aikit-sdk** (statically linked). You do **not** need the `aikit` binary on your `PATH` for init.
 
@@ -105,31 +105,32 @@ limits, completion criteria, and workflow roles. It can use a numeric objective
 with units (for example, bytes or verified vulnerabilities) or a Grade.
 
 ```
-baseline grade ─→ plan ─→ candidate develop ─→ candidate grade ─→ accept
-                                                               │
-                                                     constraints + comparison
+baseline evaluate → propose → [execute] → candidate evaluate → decide
+        ↑                                                    │
+        └──────────────── retained accepted candidate ───────┘
 ```
 
-The software-improvement strategy may use the durable `Finding → Change Request
-→ Plan → Execution` spine, but unrelated strategies do not have to. A candidate
-is accepted only after its exact evaluated artifact qualifies under the active
-requirements. A passing development test alone is not acceptance. The generic
-host rejects `workflows.promote`: it cannot inspect an arbitrary target or
-atomically compare-and-swap that target from the evaluated base. Use a
-target-specific external promotion boundary for a retained qualified candidate.
+`execute` is optional because a proposal may directly return a candidate, such
+as a new parameter set. Observation-driven definitions can select up to K
+suggestions from the current assessment (default five). Measurement-driven
+definitions need no observations, Findings, Plan, Git repository, or database.
+A candidate is accepted only after its exact state improves in the Objective's
+declared direction and all constraints pass. Delivery remains a workflow or
+adapter concern, so the generic host rejects `workflows.promote`.
 
 ```bash
 # Definition path can also be definition_file in .newton/configs/<id>.conf.
-newton optimize my-project --definition .newton/definitions/my-security.yaml --once
+newton optimize my-project --definition .newton/definitions/my-objective.yaml --once
 # Inspect a finished run or continue only from a known safe durable phase.
 newton optimize my-project --resume <RUN_ID>
 ```
 
-The definition roles `grade`, `plan`, and `develop` are required for the native
-software strategy. Each role emits a validated result envelope. See [the
-optimization contract](docs/optimization-contract.md) for a
-definition example, permission boundaries, requirements revisions, and recovery
-semantics.
+The definition identifies an evaluator workflow and requires a `propose` role;
+`execute` is needed only for proposals that request execution. Each role emits a
+validated typed result. Completed cycles and reports are inspectable JSON under
+`.newton/state/optimize/<RUN_ID>/`; no SQLite database is required. See [the
+optimization contract](docs/optimization-contract.md) for schemas, stopping,
+permissions, requirements revisions, and recovery semantics.
 
 ### HTTP serve API
 
@@ -241,8 +242,8 @@ workspace/
 │   ├── grader/          # Command-Graders: <name>/generate.sh (prints an Assessment)
 │   ├── configs/         # Project bindings and integration config (*.conf)
 │   ├── definitions/     # Versioned Optimization Definition YAML
-│   ├── optimize/        # Durable run journals and local ownership markers
-│   ├── state/           # Workflow run records
+│   ├── optimize/        # Local ownership markers
+│   ├── state/           # Workflow records and optimize/<run-id> JSON history
 │   ├── checkpoints/     # Resume checkpoints
 │   ├── artifacts/       # Generated artifacts
 │   └── logs/            # newton.log

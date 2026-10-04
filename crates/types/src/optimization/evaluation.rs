@@ -12,7 +12,7 @@ pub struct Candidate {
     pub artifact_id: String,
     /// Accepted/integration base against which the candidate was produced.
     pub base_artifact_id: String,
-    /// Requirements active when development began; evaluation may use a newer revision.
+    /// Requirements active when candidate derivation began; evaluation may use a newer revision.
     pub created_under_revision: u64,
 }
 
@@ -93,7 +93,7 @@ pub struct CandidateEvaluation {
 pub struct AcceptedResult {
     /// Stable artifact identity; the host must preserve it during exploration.
     pub candidate: Candidate,
-    /// Successful qualifying evidence, not merely development/test success.
+    /// Successful qualifying evidence, not merely execution/test success.
     pub evaluation: CandidateEvaluation,
 }
 
@@ -213,6 +213,8 @@ pub struct OptimizationOutcome {
     pub completion: CompletionAssessment,
     /// Best retained result only if it still qualifies under current requirements.
     pub accepted_result: Option<AcceptedResult>,
+    /// Best retained artifact even when current evidence is stale or unavailable.
+    pub retained_result: Option<AcceptedResult>,
     /// True when no currently qualifying result exists, not a feasibility claim.
     pub no_acceptable_result_found: bool,
     /// Retained identities whose evidence is not current; never silently rolled back.
