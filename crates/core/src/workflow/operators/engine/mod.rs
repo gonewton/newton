@@ -97,7 +97,7 @@ impl AikitEngineManager {
 
     /// Execute an AI engine via aikit-sdk and return SDK event records alongside the run result.
     ///
-    /// Delegates to `aikit_sdk::run_agent_events`, collecting each `aikit_sdk::AgentEvent`
+    /// Delegates to the cancellable SDK runner, collecting each `aikit_sdk::AgentEvent`
     /// via the event callback. Returns the full event vec plus an inner `Result` wrapping
     /// the `RunResult` or the mapped SDK error.
     ///
