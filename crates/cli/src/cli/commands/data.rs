@@ -731,7 +731,8 @@ mod cli_exit_path_tests {
             json: false,
             dry_run: false,
             workspace: Some(ws.path().to_path_buf()),
-            state_dir: None,
+            // Isolate catalog fixtures from tests that mutate NEWTON_STATE_DIR.
+            state_dir: Some(ws.path().join(".newton/state")),
             run_id: None,
             kpi_id: None,
             scope: None,
@@ -750,7 +751,7 @@ mod cli_exit_path_tests {
     }
 
     async fn seed_eval_run(ws: &TempDir, run_id: &str) {
-        let state_dir = crate::cli::workspace_paths::resolve_state_dir(ws.path(), None);
+        let state_dir = ws.path().join(".newton/state");
         let workspace_paths = WorkspacePaths::with_state_dir(ws.path().to_path_buf(), state_dir);
         let db_url = workspace_paths.backend_sqlite_url();
         let store = newton_backend::SqliteBackendStore::new(&db_url)
@@ -1021,7 +1022,8 @@ mod p12_data_matrix_tests {
             json: false,
             dry_run: false,
             workspace: Some(ws.path().to_path_buf()),
-            state_dir: None,
+            // Isolate catalog fixtures from tests that mutate NEWTON_STATE_DIR.
+            state_dir: Some(ws.path().join(".newton/state")),
             run_id: None,
             kpi_id: None,
             scope: None,
@@ -1033,7 +1035,7 @@ mod p12_data_matrix_tests {
     }
 
     async fn open_store(ws: &TempDir) -> newton_backend::SqliteBackendStore {
-        let state_dir = crate::cli::workspace_paths::resolve_state_dir(ws.path(), None);
+        let state_dir = ws.path().join(".newton/state");
         let workspace_paths = WorkspacePaths::with_state_dir(ws.path().to_path_buf(), state_dir);
         let db_url = workspace_paths.backend_sqlite_url();
         newton_backend::SqliteBackendStore::new(&db_url)

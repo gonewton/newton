@@ -80,6 +80,16 @@ pub struct AikitEngineManager {
     pub workspace_root: PathBuf,
 }
 
+// Dropping a Tokio blocking-task future does not stop its subprocess. Tie the
+// SDK cancellation handle to the caller future, including outer workflow limits.
+struct CancelSdkRunOnDrop(aikit_sdk::runner::RunCancelHandle);
+
+impl Drop for CancelSdkRunOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
 impl AikitEngineManager {
     pub fn new(workspace_root: PathBuf) -> Result<Self, AppError> {
         Ok(Self { workspace_root })
@@ -87,7 +97,7 @@ impl AikitEngineManager {
 
     /// Execute an AI engine via aikit-sdk and return SDK event records alongside the run result.
     ///
-    /// Delegates to `aikit_sdk::run_agent_events`, collecting each `aikit_sdk::AgentEvent`
+    /// Delegates to the cancellable SDK runner, collecting each `aikit_sdk::AgentEvent`
     /// via the event callback. Returns the full event vec plus an inner `Result` wrapping
     /// the `RunResult` or the mapped SDK error.
     ///
@@ -136,16 +146,19 @@ impl AikitEngineManager {
             options = options.with_model(m);
         }
 
+        let cancellation = aikit_sdk::runner::RunCancelHandle::new();
+        let _cancel_on_drop = CancelSdkRunOnDrop(cancellation.clone());
         let prompt_owned = prompt.to_string();
         let engine_name_owned = engine_name.to_string();
 
         let (events, run_result) = tokio::task::spawn_blocking(
             move || -> (Vec<aikit_sdk::AgentEvent>, Result<aikit_sdk::RunResult, AppError>) {
                 let mut events: Vec<aikit_sdk::AgentEvent> = Vec::new();
-                let result = aikit_sdk::run_agent_events(
+                let result = aikit_sdk::runner::run_agent_events_cancellable(
                     &engine_name_owned,
                     &prompt_owned,
                     options,
+                    &cancellation,
                     |event| {
                         events.push(event);
                     },

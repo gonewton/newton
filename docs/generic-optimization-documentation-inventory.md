@@ -9,8 +9,8 @@
 | ADRs | `docs/adr/0016-*`, `0017-*` | Retained and marked implemented; historical alternatives preserved. |
 | Migration/release guidance | `docs/generic-optimization-migration.md` | Added explicit breaking changes and old-run policy. |
 | Review closure | `docs/generic-optimization-review-resolution.md`, `docs/generic-optimization-implementation-review.md` | Separates the historical spec review from the later implementation review; maps defects to fixes and tests. |
-| Testing and real agent | `docs/testing-generic-optimization.md` | Added deterministic, same-binary, Pi, Docker, gateway-evidence, and diagnostic guidance. |
-| Delivery validation | `docs/generic-optimization-validation.md` | Preserves initial delivery results and records the full-suite, Docker and isolated-skill follow-up, with live inference still explicitly unexercised. |
+| Testing and real agent | `docs/testing-generic-optimization.md` | Added deterministic, same-binary, Pi, Docker, gateway-evidence, cancellation diagnostics and the reproducible three-trial recipe. |
+| Delivery validation | `docs/generic-optimization-validation.md` | Preserves initial delivery results and records the full-suite, Docker and isolated-skill follow-up, with subsequent real inference results and failed-attempt limitations recorded separately. |
 | Realtime and serve | `docs/realtime.md`, Newton serve skill reference | Clarified events are invalidation hints and generic local history is file-backed; SQLite API is optional/separate. |
 | Generated schemas | `newton_core::optimization::schema` | Added schemas for workflow outputs, Cycle history, and report; compiled in tests. |
 | Canonical Newton skill | `skill/newton/` | Updated generic authoring guidance and references. |

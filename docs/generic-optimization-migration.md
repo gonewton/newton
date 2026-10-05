@@ -59,3 +59,13 @@ newton optimize <project> --definition definition.yaml --once
 
 Check `.newton/state/optimize/<run-id>/report.json` and validate the candidate,
 measurements, constraints, stop reason, and domain-specific delivery result.
+
+## Agent and validation stability corrections
+
+Agent runs now fail with `WFG-AGENT-012` when their final SDK verdict reports an
+error/aborted turn or the process exits unsuccessfully. Provider errors that used
+to look successful can therefore stop dependent workflow tasks. Outer workflow
+deadlines also terminate the SDK process group. These corrections do not change
+Definition v2 or JSON history schemas; inspect existing incomplete runs and any
+external effects before resuming. See the [validation record](generic-optimization-validation.md)
+and [test recipe](testing-generic-optimization.md).

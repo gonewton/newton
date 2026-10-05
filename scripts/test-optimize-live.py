@@ -5,8 +5,8 @@ Usage: python3 scripts/test-optimize-live.py WORKSPACE PROJECT [NEWTON_BINARY]
        [--route {local-gateway,configured-provider,unverified}]
        [--pi-models-file PATH]
 
-Supply an explicitly authorized disposable Rust repository with a remediable
-Cargo.lock finding and the shipped software-security definition. A local-gateway
+Supply an explicitly authorized disposable Git repository with a remediable
+finding and a definition that returns immutable Git candidates. A local-gateway
 trial requires Pi's existing active models.json and an exact provider/model on
 a private endpoint. No configuration or credentials are changed. The harness
 preserves every command result and never retries a failed trial.
@@ -56,6 +56,7 @@ def parse_args():
     parser.add_argument("newton_binary", nargs="?", default="newton")
     parser.add_argument("--evidence-dir", type=Path)
     parser.add_argument("--expected-model")
+    parser.add_argument("--full-loop", action="store_true", help="run to the definition stopping condition instead of --once")
     parser.add_argument(
         "--pi-models-file",
         type=Path,
@@ -140,7 +141,7 @@ def main():
                 )
             records.extend(
                 collect_agent_evidence(
-                    state, state / "artifacts", run_id, artifacts, context_root=root
+                    state, None, run_id, artifacts, context_root=root
                 )
             )
         report["agent_evidence"] = records
@@ -206,11 +207,10 @@ def main():
             }
         )
         if (
-            inspection["definition_id"] != "software-security"
-            or parameters.get("agent") != "pi"
+            parameters.get("agent") != "pi"
         ):
             raise RuntimeError(
-                "this gate requires the shipped software-security definition and parameter.agent=pi"
+                "this Git candidate gate requires parameter.agent=pi"
             )
         if args.expected_model and parameters.get("model") != args.expected_model:
             raise RuntimeError(
@@ -240,7 +240,7 @@ def main():
             for path in (state / "optimize").glob("*/current.json")
         }
         attempted = True
-        output = invoke("once", "--once")
+        output = invoke("once", *([] if getattr(args, "full_loop", False) else ["--once"]))
         outcome = next(
             value
             for value in objects(output)
@@ -294,7 +294,7 @@ def main():
         save_report()
         print(f"Real Pi/aikit candidate accepted; evidence: {report_path}")
         print(
-            "This demonstrates the declared dependency-audit workflow, "
+            "This demonstrates the configured optimization workflow, "
             "not comprehensive security, compliance, or proof of the gateway's upstream model placement."
         )
     except Exception as error:

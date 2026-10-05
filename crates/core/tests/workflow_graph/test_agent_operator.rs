@@ -589,3 +589,140 @@ workflow:
         assert!(!value.is_empty(), "context[{key}] is empty");
     }
 }
+
+/// Pi can exit zero after an inference failure. The workflow must not snapshot
+/// such a task as successful or run its dependent mutation.
+#[cfg(unix)]
+#[tokio::test]
+#[serial(path_env_agent)]
+async fn pi_provider_error_with_zero_exit_blocks_downstream_task() {
+    for (reason, message, exit_code) in [
+        ("error", "401 unauthorized", 0),
+        ("error", "400 unsupported parameter", 0),
+        ("aborted", "cancelled", 0),
+        ("stop", "", 1),
+    ] {
+        let workspace = TempDir::new().unwrap();
+        let stub = write_agent_stub(
+            &workspace,
+            &format!(
+                "echo '{}'\nexit {exit_code}\n",
+                serde_json::json!({"type":"turn_end","message":{"role":"assistant","content":[],"stopReason":reason,"errorMessage":message}})
+            ),
+        );
+        fs::rename(stub, workspace.path().join("pi")).unwrap();
+        let _path = PathGuard::prepend(workspace.path());
+        let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: enrich_spec
+    max_time_seconds: 30
+    continue_on_error: false
+  tasks:
+    - id: enrich_spec
+      operator: AgentOperator
+      params:
+        engine: pi
+        prompt: failure-check
+      transitions:
+        - to: snapshot
+    - id: snapshot
+      operator: AgentOperator
+      params:
+        engine: command
+        engine_command: ["touch", "SHOULD_NOT_EXIST"]
+      terminal: success
+"#;
+        run_workflow_yaml(&workspace, workflow)
+            .await
+            .expect_err("provider error must fail the workflow");
+        assert_eq!(read_enrich_error_code(&workspace), "WFG-AGENT-012");
+        assert!(!workspace.path().join("SHOULD_NOT_EXIST").exists());
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[serial(path_env_agent)]
+async fn pi_recovered_turn_uses_final_terminal_outcome() {
+    let workspace = TempDir::new().unwrap();
+    let stub = write_agent_stub(
+        &workspace,
+        r#"
+echo '{"type":"turn_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"transient failure"}}'
+echo '{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"Recovered successfully"}],"stopReason":"stop"}}'
+exit 0
+"#,
+    );
+    fs::rename(stub, workspace.path().join("pi")).unwrap();
+    let _path = PathGuard::prepend(workspace.path());
+    let summary = run_workflow_yaml(
+        &workspace,
+        r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: enrich_spec
+    max_time_seconds: 30
+  tasks:
+    - id: enrich_spec
+      operator: AgentOperator
+      params:
+        engine: pi
+        prompt: recovery-check
+      terminal: success
+"#,
+    )
+    .await
+    .expect("recovered terminal outcome must succeed");
+    assert!(summary.completed_tasks["enrich_spec"].error_code.is_none());
+}
+
+/// Cancelling the workflow must also cancel the blocking SDK subprocess.
+#[cfg(unix)]
+#[tokio::test]
+#[serial(path_env_agent)]
+async fn workflow_deadline_terminates_pi_process() {
+    let workspace = TempDir::new().unwrap();
+    let stub = write_agent_stub(&workspace, "echo $$ > agent.pid\nsleep 60\n");
+    fs::rename(stub, workspace.path().join("pi")).unwrap();
+    let _path = PathGuard::prepend(workspace.path());
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: enrich_spec
+    max_time_seconds: 60
+  tasks:
+    - id: enrich_spec
+      operator: AgentOperator
+      params:
+        engine: pi
+        prompt: deadline-check
+      terminal: success
+"#;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        run_workflow_yaml(&workspace, workflow),
+    )
+    .await
+    .expect_err("outer workflow deadline must cancel execution");
+    let pid = fs::read_to_string(workspace.path().join("agent.pid")).expect("agent started");
+    let alive = std::process::Command::new("kill")
+        .args(["-0", pid.trim()])
+        .output()
+        .unwrap()
+        .status
+        .success();
+    // Always clean up the negative control, even when the assertion fails.
+    if alive {
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", "--", &format!("-{}", pid.trim())])
+            .output();
+    }
+    assert!(!alive, "Pi outlived the workflow deadline");
+}

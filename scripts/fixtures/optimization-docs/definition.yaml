@@ -1,0 +1,84 @@
+{
+  "schema_version": 2,
+  "id": "documentation-trial",
+  "revision": "link-trial-v2",
+  "strategy": {
+    "kind": "measurement_driven"
+  },
+  "assets": [
+    "adapter.py"
+  ],
+  "workflows": {
+    "propose": "propose.yaml",
+    "execute": "execute.yaml"
+  },
+  "defaults": {
+    "agent": {
+      "kind": "literal",
+      "value": "pi"
+    },
+    "model": {
+      "kind": "literal",
+      "value": ""
+    },
+    "initial_commit": {
+      "kind": "literal",
+      "value": ""
+    }
+  },
+  "requirements": {
+    "objective": {
+      "mode": "primary",
+      "objective": {
+        "id": "documentation_defects",
+        "evaluator": "doc-checks",
+        "measurement": {
+          "kind": "numeric",
+          "unit": "documented_defects",
+          "direction": "minimize"
+        }
+      }
+    },
+    "evaluators": {
+      "doc-checks": {
+        "workflow": "evaluate.yaml",
+        "revision": "link-trial-v2"
+      }
+    },
+    "comparison": {
+      "kind": "exact"
+    },
+    "acceptance_constraints": [
+      {
+        "id": "docs_only",
+        "evaluator": "doc-checks"
+      },
+      {
+        "id": "content_preserved",
+        "evaluator": "doc-checks"
+      },
+      {
+        "id": "skills_synced",
+        "evaluator": "doc-checks"
+      }
+    ],
+    "execution_restrictions": {
+      "denied_actions": [],
+      "protected_paths": []
+    },
+    "resource_limits": {
+      "elapsed_seconds": 1800,
+      "max_cycles": 3,
+      "max_work": 12,
+      "max_evaluations": 8
+    },
+    "completion": [
+      {
+        "kind": "objective_target",
+        "objective": "documentation_defects",
+        "target": 0
+      }
+    ],
+    "stagnation_cycles": 2
+  }
+}
