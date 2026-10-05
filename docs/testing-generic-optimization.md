@@ -92,7 +92,7 @@ export NEWTON_LIVE_MODEL=provider/model
 scripts/test-optimize-stability.sh /path/to/new-evidence-directory
 ```
 
-The fixture has three broken documentation links, selects one finding per cycle,
+The fixture has three broken documentation links, selects up to five findings per cycle,
 and runs an embedded scheduling example using the same Newton binary. The
 criterion is a fixed defect count, not a semantic writing-quality score. Newton's
 core remains domain-neutral; Git, Markdown and the fixture's checks belong to its
@@ -126,3 +126,6 @@ terminal error/aborted turn, even if the process exits zero. The events artifact
 is retained and downstream workflow tasks do not run. A failed earlier turn that
 recovers before the final turn is judged by the final terminal outcome. Existing
 quota and timeout codes retain their meanings.
+
+Outer workflow cancellation also cancels the SDK process group. This prevents an
+agent from continuing after the optimizer records its elapsed-time limit.

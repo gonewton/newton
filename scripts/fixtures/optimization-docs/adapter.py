@@ -217,7 +217,7 @@ def main(role, input_path):
 
     if role == "propose":
         findings, _ = assess(root, base, git)
-        chosen = findings[:1]
+        chosen = findings[:5]
         if not chosen:
             output(
                 {
@@ -230,7 +230,7 @@ def main(role, input_path):
             {
                 "decision": "execute",
                 "proposal_id": req["candidate_id"] + "-docs",
-                "rationale": "Repair one independently detected documentation defect",
+                "rationale": "Repair up to five independently detected documentation defects",
                 "attempt": {
                     "findings": chosen,
                     "rejected_attempts": rejection_feedback(req),
@@ -244,7 +244,14 @@ def main(role, input_path):
         git("worktree", "add", "--detach", str(worktree), base)
         findings = req["proposal"]["attempt"]["findings"]
         prompt = (
-            """Refactor Newton user documentation for correctness, clarity and practical onboarding. Work only in this detached worktree. Allowed changes: README.md, docs/**/*.md, skill/newton/**/*.md and matching .agents/skills/newton/**/*.md. Read implementation and contract files to verify claims, but do not change source, evaluator, configuration, Git refs, other worktrees, or external systems. No publishing or network needed except model inference. Do not manufacture license terms or missing ADR history. Keep both skill copies identical. Preserve useful explanations; do not game checks by deleting documentation or adding meaningless keywords. Address only the selected finding below, one this cycle. You may improve related prose while fixing them. Leave edits uncommitted for the adapter to snapshot. Record checks performed in your final response. The evaluator is a fixed defect checker, not a semantic quality score. Selected findings:\n"""
+            """Repair the selected broken Markdown links in this small documentation fixture.
+Work only in this detached worktree and leave edits uncommitted. Read README.md
+and list docs/ to identify existing destinations. Change only the selected links;
+preserve their useful labels and surrounding prose. Do not scan .newton/, inspect
+implementation files, or run the scheduling example: an independent evaluator
+runs that example after your changes. Verify repaired local destinations exist,
+then finish with a short summary. Do not alter Git refs, evaluator/configuration,
+other worktrees or external systems. Selected findings:\n"""
             + json.dumps(findings, indent=2)
         )
         prompt += (

@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "id": "documentation-trial",
-  "revision": "link-trial-v1",
+  "revision": "link-trial-v2",
   "strategy": {
     "kind": "measurement_driven"
   },
@@ -42,7 +42,7 @@
     "evaluators": {
       "doc-checks": {
         "workflow": "evaluate.yaml",
-        "revision": "link-trial-v1"
+        "revision": "link-trial-v2"
       }
     },
     "comparison": {
@@ -67,7 +67,7 @@
       "protected_paths": []
     },
     "resource_limits": {
-      "elapsed_seconds": 900,
+      "elapsed_seconds": 1800,
       "max_cycles": 3,
       "max_work": 12,
       "max_evaluations": 8

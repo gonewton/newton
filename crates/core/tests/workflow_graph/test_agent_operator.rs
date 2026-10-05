@@ -680,3 +680,49 @@ workflow:
     .expect("recovered terminal outcome must succeed");
     assert!(summary.completed_tasks["enrich_spec"].error_code.is_none());
 }
+
+/// Cancelling the workflow must also cancel the blocking SDK subprocess.
+#[cfg(unix)]
+#[tokio::test]
+#[serial(path_env_agent)]
+async fn workflow_deadline_terminates_pi_process() {
+    let workspace = TempDir::new().unwrap();
+    let stub = write_agent_stub(&workspace, "echo $$ > agent.pid\nsleep 60\n");
+    fs::rename(stub, workspace.path().join("pi")).unwrap();
+    let _path = PathGuard::prepend(workspace.path());
+    let workflow = r#"
+version: "2.0"
+mode: workflow_graph
+workflow:
+  settings:
+    entry_task: enrich_spec
+    max_time_seconds: 60
+  tasks:
+    - id: enrich_spec
+      operator: AgentOperator
+      params:
+        engine: pi
+        prompt: deadline-check
+      terminal: success
+"#;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        run_workflow_yaml(&workspace, workflow),
+    )
+    .await
+    .expect_err("outer workflow deadline must cancel execution");
+    let pid = fs::read_to_string(workspace.path().join("agent.pid")).expect("agent started");
+    let alive = std::process::Command::new("kill")
+        .args(["-0", pid.trim()])
+        .output()
+        .unwrap()
+        .status
+        .success();
+    // Always clean up the negative control, even when the assertion fails.
+    if alive {
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", "--", &format!("-{}", pid.trim())])
+            .output();
+    }
+    assert!(!alive, "Pi outlived the workflow deadline");
+}

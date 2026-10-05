@@ -84,4 +84,3 @@ workflow:
       operator: NoOpOperator
       terminal: success
 ```
-

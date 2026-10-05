@@ -159,3 +159,7 @@ See `docs/testing-generic-optimization.md` for commands and evidence limits.
 inspect its events artifact before retrying. A zero process exit alone does not
 mean inference succeeded. Keep nested Newton evaluators on their own state
 folder, and feed rejected-attempt diagnostics into later proposals.
+
+Workflow deadlines cancel the SDK process group, so a timed-out optimization does
+not leave its agent running. Cancellation does not roll back external effects;
+inspect the retained outcome and candidate workspace before resuming.
