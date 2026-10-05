@@ -63,7 +63,7 @@ before changing public interfaces. Use the highest existing test seam, the publi
 - [x] Specification behaviors implemented and review findings dispositioned with evidence.
 - [x] Generic loop works without mandatory SQLite, Findings, Plans, or Git.
 - [x] JSON history, interruption recovery, qualification and stopping behaviors tested.
-- [ ] Coding real-agent scenario exercised in Docker; deterministic non-coding scenario passes with the same binary.
+- [x] Coding real-agent scenario exercised in Docker; deterministic non-coding scenario passes with the same binary. See the 2026-10-05 validation record: three fresh link-repair trials; live multi-cycle convergence is not claimed.
 - [x] Pi harness and route-evidence status report missing configuration as not exercised rather than success.
 - [x] Documentation inventory lists affected surfaces and dispositions.
 - [x] Canonical skill teaches both strategies; controlled copies are synchronized.
