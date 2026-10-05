@@ -1,0 +1,58 @@
+{
+  "version": "2.0",
+  "mode": "workflow_graph",
+  "workflow": {
+    "settings": {
+      "entry_task": "invoke",
+      "io": {
+        "result_map": {
+          "decision": "$expr: tasks.result.output.metadata.decision",
+          "proposal_id": "$expr: tasks.result.output.metadata.proposal_id",
+          "rationale": "$expr: tasks.result.output.metadata.rationale",
+          "attempt": "$expr: tasks.result.output.metadata.attempt",
+          "selected_observations": "$expr: tasks.result.output.metadata.selected_observations",
+          "plan": "$expr: tasks.result.output.metadata.plan"
+        }
+      }
+    },
+    "tasks": [
+      {
+        "id": "invoke",
+        "operator": "AgentOperator",
+        "params": {
+          "engine": "command",
+          "signals": {
+            "completed": "^NEWTON_HELPER_COMPLETED$"
+          },
+          "require_signal": true,
+          "engine_command": [
+            "python3",
+            "-c",
+            {
+              "$expr": "triggers.assets[\"adapter.py\"]"
+            },
+            "propose",
+            {
+              "$expr": "triggers.input_file"
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "to": "result"
+          }
+        ]
+      },
+      {
+        "id": "result",
+        "operator": "ReadControlFileOperator",
+        "params": {
+          "path": {
+            "$expr": "triggers.result_file"
+          }
+        },
+        "terminal": "success"
+      }
+    ]
+  }
+}

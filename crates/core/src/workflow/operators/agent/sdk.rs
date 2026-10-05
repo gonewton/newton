@@ -151,6 +151,7 @@ pub(super) async fn execute_sdk_engine(
         let mut iter_stdout_capture_warning: Option<String> = None;
         let mut iter_stderr_capture_warning: Option<String> = None;
 
+        let mut terminal_failed = false;
         for event in &events {
             let event_json = serde_json::to_string(event).map_err(|e| {
                 sdk_io_error(format!("failed to serialize event to NDJSON artifact: {e}"))
@@ -163,6 +164,17 @@ pub(super) async fn execute_sdk_engine(
                 })?;
 
             match &event.payload {
+                aikit_sdk::AgentEventPayload::Terminal {
+                    outcome, reason, ..
+                } => {
+                    terminal_failed = *outcome == aikit_sdk::TerminalOutcome::Error
+                        || reason.as_deref() == Some("aborted");
+                    continue;
+                }
+                aikit_sdk::AgentEventPayload::ToolUse { .. }
+                | aikit_sdk::AgentEventPayload::ToolResult { .. }
+                | aikit_sdk::AgentEventPayload::Result { .. }
+                | aikit_sdk::AgentEventPayload::SessionStarted { .. } => continue,
                 aikit_sdk::AgentEventPayload::TokenUsageLine { usage, .. } => {
                     fallback_token_usage = serde_json::to_value(usage).ok();
                     continue;
@@ -267,6 +279,11 @@ pub(super) async fn execute_sdk_engine(
                         stderr_bytes = new_bytes;
                         iter_stderr_capture_warning = warning;
                     }
+                    aikit_sdk::AgentEventPayload::Terminal { .. }
+                    | aikit_sdk::AgentEventPayload::ToolUse { .. }
+                    | aikit_sdk::AgentEventPayload::ToolResult { .. }
+                    | aikit_sdk::AgentEventPayload::Result { .. }
+                    | aikit_sdk::AgentEventPayload::SessionStarted { .. } => {}
                     aikit_sdk::AgentEventPayload::RawBytes(_) => {}
                     aikit_sdk::AgentEventPayload::StreamMessage(_) => {}
                     aikit_sdk::AgentEventPayload::TokenUsageLine { .. } => {}
@@ -321,6 +338,18 @@ pub(super) async fn execute_sdk_engine(
                 stderr_path,
                 &stderr_rel,
             ));
+        }
+
+        // A provider can fail while its CLI exits zero (notably Pi). Use
+        // the last terminal verdict: an earlier failed turn may recover.
+        if !iter_run_result.status.success() || terminal_failed {
+            let mut error = AppError::new(
+                ErrorCategory::ToolExecutionError,
+                "agent reported an unsuccessful run; inspect the SDK events artifact",
+            )
+            .with_code("WFG-AGENT-012");
+            error.add_context("events_artifact", &events_artifact_rel);
+            return Err(error);
         }
 
         if let Some(ref usage) = iter_run_result.token_usage {

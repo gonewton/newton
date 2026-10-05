@@ -187,7 +187,7 @@ Do not force-push to `main`. Avoid amending published commits unless you own the
 | `cargo clippy --all-targets --all-features` | Lint (warnings denied via `RUSTFLAGS=-D warnings`) |
 | `cargo build --workspace --release` | Release build |
 | `cargo test --workspace --all-features` | Tests |
-| `python3 -B scripts/test_optimize_live_evidence.py` | Deterministic negative controls for the opt-in Pi/live-gateway evidence gate |
+| `python3 -B -m unittest discover -s scripts -p 'test_optim*.py'` | Deterministic negative controls for the opt-in Pi/live-gateway evidence gate |
 | `cargo tree -p newton-core` | No CLI/TUI deps in core |
 | Security audit job | `cargo audit` with documented ignores |
 | Coverage job | `cargo llvm-cov` with 50% line threshold |
@@ -248,3 +248,6 @@ Full component breakdown and data flow: [architecture.md](architecture.md#ailoop
 ## Questions
 
 Open a GitHub issue or discussion on [github.com/gonewton/newton](https://github.com/gonewton/newton) for bugs, features, or design questions.
+
+Real-agent stability checks and the three-run Docker recipe are documented in
+[Testing generic optimization](docs/testing-generic-optimization.md).

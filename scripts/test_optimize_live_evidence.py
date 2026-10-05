@@ -76,7 +76,7 @@ class LiveGateTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.state = self.root / ".newton" / "state"
-        self.artifacts = self.state / "artifacts"
+        self.artifacts = self.root / ".newton" / "artifacts"
         self.evidence = self.root / "evidence"
         self.run_id = "trial-run"
         self.model = "fixture/fixture-model"
@@ -201,6 +201,29 @@ class LiveGateTests(unittest.TestCase):
             "PRIVATE_PAYLOAD", Path(trace["retained_redacted_trace"]).read_text()
         )
 
+    def test_terminal_error_cannot_be_hidden_by_final_text(self):
+        stream = events()
+        stream.insert(-1, {"agent_key": "pi", "stream": "stdout", "payload": {"terminal": {"outcome": "error", "reason": "error"}}})
+        for seq, event in enumerate(stream, 1):
+            event["seq"] = seq
+        self.fixture(trace_events=stream)
+        with self.assertRaises(RuntimeError):
+            self.verify()
+
+    def test_configured_artifact_storage_is_independent_of_state_location(self):
+        self.artifacts = self.root / "custom-artifacts"
+        self.trace = self.artifacts / "workflows" / self.workflow_id / "task/remediate/1/events.ndjson"
+        self.fixture()
+        self.definition["workflow"]["settings"] = {"artifact_storage": {"base_path": "custom-artifacts"}}
+        self.save_workflow()
+        records = collect_agent_evidence(self.state, None, self.run_id, context_root=self.root)
+        self.assertEqual(require_pi_execution(records, self.outcome, self.model)["task_id"], "remediate")
+
+    def test_retained_candidate_can_be_evaluated_in_a_later_cycle(self):
+        self.fixture()
+        self.outcome["accepted_result"]["evaluation"]["cycle"] = 3
+        self.assertEqual(self.verify()["task_id"], "remediate")
+
     def test_command_engine_with_pi_labels_and_even_planted_trace_fails(self):
         for trace_events in (None, events()):
             with self.subTest(planted_trace=trace_events is not None):
@@ -226,7 +249,7 @@ class LiveGateTests(unittest.TestCase):
                 if mutation == "run":
                     self.execution["trigger_payload"] = {"run_id": "unrelated"}
                 elif mutation == "cycle":
-                    self.outcome["accepted_result"]["evaluation"]["cycle"] = 2
+                    self.outcome["accepted_result"]["evaluation"]["cycle"] = 0
                 elif mutation == "candidate":
                     self.completion["result"]["candidate"] = {
                         **self.candidate,
@@ -278,7 +301,7 @@ class LiveGateTests(unittest.TestCase):
     def run_harness(self, mode, route="configured-provider", relocated=False):
         if relocated:
             self.state = self.root / "custom" / "deep" / "run-state"
-            self.artifacts = self.state / "artifacts"
+            self.artifacts = self.root / ".newton" / "artifacts"
             self.workflow = self.state / "workflows" / self.workflow_id
             self.trace = self.artifacts / "workflows" / self.workflow_id / "task" / "remediate" / "1" / "events.ndjson"
         if mode == "stale-run":

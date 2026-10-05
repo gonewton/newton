@@ -25,7 +25,15 @@ if [[ ! -f "$pi_agent_dir/models.json" ]]; then
   exit 3
 fi
 
-docker build -f "$repo_root/scripts/Dockerfile.optimize-live" -t "$image" "$repo_root"
+if [[ "${NEWTON_LIVE_SKIP_BUILD:-0}" != 1 ]]; then
+  docker build --network host -f "$repo_root/scripts/Dockerfile.optimize-live" -t "$image" "$repo_root"
+fi
+if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+  docker_environment+=(--env OPENAI_API_KEY)
+fi
+if [[ -n "${NEWTON_LIVE_GATEWAY_HOST:-}" ]]; then
+  docker_environment+=(--add-host "${NEWTON_LIVE_GATEWAY_HOST}:${NEWTON_LIVE_GATEWAY_IP:?set gateway IP}")
+fi
 
 docker run --rm --network host \
   --user "$(id -u):$(id -g)" \

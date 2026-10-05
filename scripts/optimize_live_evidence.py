@@ -32,6 +32,7 @@ def summarize_trace(path, retained_path=None):
     keys, calls, completed = set(), set(), set()
     previous = -1
     last_kind = None
+    terminal_failed = False
     retained = []
     complete_read = True
     try:
@@ -91,6 +92,9 @@ def summarize_trace(path, retained_path=None):
                     }
                     summary["token_usage"].append(usage)
                     item["token_usage"] = usage
+                elif kind == "terminal":
+                    terminal_failed = value.get("outcome") == "error" or value.get("reason") == "aborted"
+                    item["outcome"] = value.get("outcome")
                 elif kind == "quota_exceeded":
                     summary["issues"].append("SDK reported quota failure")
                 retained.append(item)
@@ -106,6 +110,7 @@ def summarize_trace(path, retained_path=None):
     )
     summary["verified_pi_activity"] = bool(
         not summary["issues"]
+        and not terminal_failed
         and keys == {"pi"}
         and completed
         and summary["assistant_final"]
@@ -169,9 +174,13 @@ def collect_agent_evidence(state_dir, artifact_dir, run_id, evidence_dir=None, c
             for task in definition.get("workflow", {}).get("tasks", [])
             if "id" in task
         }
+        configured = definition.get("workflow", {}).get("settings", {}).get(
+            "artifact_storage", {}
+        ).get("base_path", ".newton/artifacts")
+        workflow_artifacts = artifact_dir or (workspace / configured)
         traces = {
             path.resolve(): path
-            for path in (artifact_dir / "workflows" / workflow.name).glob(
+            for path in (workflow_artifacts / "workflows" / workflow.name).glob(
                 "task/*/*/events.ndjson"
             )
         }
@@ -192,7 +201,7 @@ def collect_agent_evidence(state_dir, artifact_dir, run_id, evidence_dir=None, c
                 else {}
             )
             trace_path = (
-                artifact_dir
+                workflow_artifacts
                 / "workflows"
                 / workflow.name
                 / "task"
@@ -271,7 +280,9 @@ def require_pi_execution(records, outcome, expected_model):
             or not candidate
             or workflow["candidate"] != candidate
             or workflow["candidate_id"] != candidate["id"]
-            or workflow["cycle"] != evaluation.get("cycle")
+            or type(workflow.get("cycle")) is not int
+            or type(evaluation.get("cycle")) is not int
+            or not 1 <= workflow["cycle"] <= evaluation["cycle"]
         ):
             continue
         for task in workflow["tasks"]:
